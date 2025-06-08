@@ -19,15 +19,15 @@ struct MainTabView: View {
                 LeaderboardView(userManager: userManager)
             }
             .tabItem {
-                Label("Leaderboard", systemImage: "list.number")
+                Label("Friends", systemImage: "person.2.fill")
             }
             
-            NavigationStack {
-                BadgesView(userManager: userManager)
-            }
-            .tabItem {
-                Label("Badges", systemImage: "trophy.fill")
-            }
+            // NavigationStack {
+            //     BadgesView(userManager: userManager)
+            // }
+            // .tabItem {
+            //     Label("Badges", systemImage: "trophy.fill")
+            // }
             
             NavigationStack {
                 ProfileView(userManager: userManager)
@@ -112,7 +112,7 @@ struct ProfileView: View {
                     
                     Divider()
                     
-                    StatItem(title: "Badges Earned", value: "\(userManager.currentUser.badges.count)", icon: "star.fill", iconColor: .purple)
+                    // StatItem(title: "Badges Earned", value: "\(userManager.currentUser.badges.count)", icon: "star.fill", iconColor: .purple)
                 }
             }
             .padding()

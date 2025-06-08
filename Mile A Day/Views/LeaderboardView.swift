@@ -31,7 +31,7 @@ struct LeaderboardView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .animation(.easeInOut, value: selectedTab)
         }
-        .navigationTitle("Leaderboard")
+        .navigationTitle("Friends")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
