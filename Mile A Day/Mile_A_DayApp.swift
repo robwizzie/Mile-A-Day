@@ -11,7 +11,7 @@ import SwiftUI
 struct Mile_A_DayApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainTabView()
         }
     }
 }
