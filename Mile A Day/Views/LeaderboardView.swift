@@ -2,9 +2,12 @@ import SwiftUI
 
 struct LeaderboardView: View {
     @ObservedObject var userManager: UserManager
+    @ObservedObject var healthManager: HealthKitManager
     @State private var selectedTab = 0
+    @State private var showWorkoutDetail = false
+    @State private var selectedUser: User?
     
-    private let tabs = ["Streak", "Total Miles", "Personal Record"]
+    private let tabs = ["Streak", "Total Miles", "Fastest Pace", "Most in Day"]
     
     var body: some View {
         VStack(spacing: 0) {
@@ -19,14 +22,17 @@ struct LeaderboardView: View {
             
             // Leaderboard content
             TabView(selection: $selectedTab) {
-                LeaderboardList(users: userManager.getLeaderboardByStreak(), valueType: .streak)
+                LeaderboardList(users: userManager.getLeaderboardByStreak(), valueType: .streak, healthManager: healthManager)
                     .tag(0)
                 
-                LeaderboardList(users: userManager.getLeaderboardByTotalMiles(), valueType: .totalMiles)
+                LeaderboardList(users: userManager.getLeaderboardByTotalMiles(), valueType: .totalMiles, healthManager: healthManager)
                     .tag(1)
                 
-                LeaderboardList(users: userManager.getLeaderboardByPersonalRecord(), valueType: .personalRecord)
+                LeaderboardList(users: userManager.getLeaderboardByPersonalRecord(), valueType: .fastestPace, healthManager: healthManager)
                     .tag(2)
+                    
+                LeaderboardList(users: userManager.getLeaderboardByMostMilesInDay(), valueType: .mostMilesInDay, healthManager: healthManager)
+                    .tag(3)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .animation(.easeInOut, value: selectedTab)
@@ -37,7 +43,7 @@ struct LeaderboardView: View {
 }
 
 enum LeaderboardValueType {
-    case streak, totalMiles, personalRecord
+    case streak, totalMiles, fastestPace, mostMilesInDay
     
     func getValue(from user: User) -> String {
         switch self {
@@ -45,8 +51,17 @@ enum LeaderboardValueType {
             return "\(user.streak) \(user.streak == 1 ? "day" : "days")"
         case .totalMiles:
             return user.totalMiles.milesFormatted
-        case .personalRecord:
-            return user.personalRecord.milesFormatted
+        case .fastestPace:
+            if user.fastestMilePace > 0 {
+                let totalSeconds = Int(user.fastestMilePace * 60)
+                let minutes = totalSeconds / 60
+                let seconds = totalSeconds % 60
+                return String(format: "%d:%02d /mi", minutes, seconds)
+            } else {
+                return "N/A"
+            }
+        case .mostMilesInDay:
+            return user.mostMilesInOneDay.milesFormatted
         }
     }
     
@@ -56,8 +71,10 @@ enum LeaderboardValueType {
             return "flame.fill"
         case .totalMiles:
             return "map.fill"
-        case .personalRecord:
-            return "trophy.fill"
+        case .fastestPace:
+            return "hare.fill"
+        case .mostMilesInDay:
+            return "calendar.badge.clock"
         }
     }
     
@@ -67,8 +84,10 @@ enum LeaderboardValueType {
             return .orange
         case .totalMiles:
             return .blue
-        case .personalRecord:
-            return .yellow
+        case .fastestPace:
+            return .green
+        case .mostMilesInDay:
+            return .purple
         }
     }
 }
@@ -76,21 +95,44 @@ enum LeaderboardValueType {
 struct LeaderboardList: View {
     let users: [User]
     let valueType: LeaderboardValueType
+    @ObservedObject var healthManager: HealthKitManager
+    @State private var selectedUser: User?
+    @State private var showDetail = false
     
     var body: some View {
         List {
             ForEach(Array(users.enumerated()), id: \.element.id) { index, user in
-                LeaderboardRow(
-                    rank: index + 1,
-                    user: user,
-                    value: valueType.getValue(from: user),
-                    icon: valueType.icon,
-                    iconColor: valueType.color,
-                    isCurrentUser: user.name == "You"
-                )
+                Button {
+                    if valueType == .mostMilesInDay || valueType == .fastestPace {
+                        selectedUser = user
+                        showDetail = true
+                    }
+                } label: {
+                    LeaderboardRow(
+                        rank: index + 1,
+                        user: user,
+                        value: valueType.getValue(from: user),
+                        icon: valueType.icon,
+                        iconColor: valueType.color,
+                        isCurrentUser: user.name == "You"
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
             }
         }
         .listStyle(.plain)
+        .sheet(isPresented: $showDetail, content: {
+            if let user = selectedUser {
+                switch valueType {
+                case .fastestPace:
+                    FastestPaceDetailView(pace: user.fastestMilePace)
+                case .mostMilesInDay:
+                    MostMilesDetailView(miles: user.mostMilesInOneDay, healthManager: healthManager)
+                default:
+                    EmptyView()
+                }
+            }
+        })
     }
 }
 
@@ -165,6 +207,6 @@ struct LeaderboardRow: View {
 
 #Preview {
     NavigationStack {
-        LeaderboardView(userManager: UserManager())
+        LeaderboardView(userManager: UserManager(), healthManager: HealthKitManager())
     }
 } 

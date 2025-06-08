@@ -29,7 +29,7 @@ struct DashboardView: View {
                     )
                     
                     // Stats grid
-                    StatsGridView(user: userManager.currentUser)
+                    StatsGridView(user: userManager.currentUser, healthManager: healthManager)
                     
                     // Recent workouts
                     RecentWorkoutsView(workouts: healthManager.recentWorkouts)
@@ -77,8 +77,14 @@ struct DashboardView: View {
                    newValue >= userManager.currentUser.goalMiles {
                     showConfetti = true
                     
-                    // Update user stats
-                    userManager.completeRun(miles: newValue)
+                    // Update user stats with comprehensive HealthKit data
+                    userManager.updateUserWithHealthKitData(
+                        retroactiveStreak: healthManager.retroactiveStreak,
+                        currentMiles: newValue,
+                        totalMiles: healthManager.totalLifetimeMiles,
+                        fastestPace: healthManager.fastestMilePace, 
+                        mostMilesInDay: healthManager.mostMilesInOneDay
+                    )
                     
                     // Send a notification
                     notificationManager.scheduleCompletionCongratulationsNotification()
@@ -127,13 +133,25 @@ struct DashboardView: View {
     }
     
     private func fetchHealthData() {
-        healthManager.fetchTodaysDistance()
-        healthManager.fetchRecentWorkouts()
+        // Fetch all data from HealthKit
+        healthManager.fetchAllWorkoutData()
         
-        // If the user has completed a run today, update their streak
-        if healthManager.hasCompletedMileToday() &&
-           !userManager.currentUser.isStreakActiveToday {
-            userManager.completeRun(miles: healthManager.todaysDistance)
+        // Use a slight delay to ensure all async HealthKit queries complete
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            // Sync user data with HealthKit data
+            userManager.updateUserWithHealthKitData(
+                retroactiveStreak: healthManager.retroactiveStreak,
+                currentMiles: healthManager.todaysDistance,
+                totalMiles: healthManager.totalLifetimeMiles,
+                fastestPace: healthManager.fastestMilePace,
+                mostMilesInDay: healthManager.mostMilesInOneDay
+            )
+            
+            // Legacy streak update for compatibility
+            if healthManager.hasCompletedMileToday() &&
+               !userManager.currentUser.isStreakActiveToday {
+                userManager.completeRun(miles: healthManager.todaysDistance)
+            }
         }
     }
 }
@@ -259,6 +277,19 @@ struct ProgressBar: View {
 // Stats Grid Component
 struct StatsGridView: View {
     let user: User
+    let healthManager: HealthKitManager
+    @State private var showFastestPaceDetail = false
+    @State private var showMostMilesDetail = false
+    
+    var formattedFastestPace: String {
+        if user.fastestMilePace > 0 {
+            let totalSeconds = Int(user.fastestMilePace * 60)
+            let minutes = totalSeconds / 60
+            let seconds = totalSeconds % 60
+            return String(format: "%d:%02d /mi", minutes, seconds)
+        }
+        return "Not yet recorded"
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -267,11 +298,32 @@ struct StatsGridView: View {
             
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 15) {
                 StatCard(title: "Total Miles", value: user.totalMiles.milesFormatted, icon: "map.fill")
-                StatCard(title: "Personal Record", value: user.personalRecord.milesFormatted, icon: "trophy.fill")
+                
+                Button {
+                    showFastestPaceDetail = true
+                } label: {
+                    StatCard(title: "Fastest Mile", value: formattedFastestPace, icon: "hare.fill")
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                Button {
+                    showMostMilesDetail = true
+                } label: {
+                    StatCard(title: "Most in One Day", value: user.mostMilesInOneDay.milesFormatted, icon: "calendar.badge.clock")
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                StatCard(title: "Daily Goal", value: user.goalMiles.milesFormatted, icon: "target")
             }
         }
         .padding()
         .cardStyle()
+        .sheet(isPresented: $showFastestPaceDetail) {
+            FastestPaceDetailView(pace: user.fastestMilePace)
+        }
+        .sheet(isPresented: $showMostMilesDetail) {
+            MostMilesDetailView(miles: user.mostMilesInOneDay, healthManager: healthManager)
+        }
     }
 }
 
@@ -305,6 +357,8 @@ struct StatCard: View {
 // Recent Workouts Component
 struct RecentWorkoutsView: View {
     let workouts: [HKWorkout]
+    @State private var selectedWorkout: HKWorkout?
+    @State private var showDetail = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -317,12 +371,23 @@ struct RecentWorkoutsView: View {
                     .padding(.vertical)
             } else {
                 ForEach(workouts, id: \.uuid) { workout in
-                    WorkoutRow(workout: workout)
+                    Button {
+                        selectedWorkout = workout
+                        showDetail = true
+                    } label: {
+                        WorkoutRow(workout: workout)
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
             }
         }
         .padding()
         .cardStyle()
+        .sheet(isPresented: $showDetail) {
+            if let workout = selectedWorkout {
+                WorkoutDetailView(workout: workout)
+            }
+        }
     }
 }
 
@@ -330,10 +395,21 @@ struct RecentWorkoutsView: View {
 struct WorkoutRow: View {
     let workout: HKWorkout
     
+    var workoutTypeText: String {
+        switch workout.workoutActivityType {
+        case .running:
+            return "Run"
+        case .walking:
+            return "Walk"
+        default:
+            return "Workout"
+        }
+    }
+    
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
-                Text("Run")
+                Text(workoutTypeText)
                     .font(.headline)
                 Text(workout.formattedDate)
                     .font(.caption)
@@ -353,6 +429,156 @@ struct WorkoutRow: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 5)
+    }
+}
+
+// Workout Detail View
+struct WorkoutDetailView: View {
+    let workout: HKWorkout
+    @Environment(\.dismiss) private var dismiss
+    @State private var calories: Double?
+    
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 30) {
+                    // Top banner
+                    VStack(spacing: 10) {
+                        Text(workout.workoutActivityType == .running ? "Run" : "Walk")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        
+                        Text(workout.formattedDate)
+                            .font(.title)
+                            .fontWeight(.bold)
+                        
+                        Text(workout.formattedDistance)
+                            .font(.system(size: 48, weight: .bold, design: .rounded))
+                            .foregroundColor(.blue)
+                            .padding(.top, 5)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(15)
+                    
+                    // Stats grid
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
+                        StatBox(title: "Duration", value: workout.formattedDuration, icon: "clock.fill", color: .orange)
+                        StatBox(title: "Pace", value: workout.pace, icon: "hare.fill", color: .green)
+                        if let calories = calories {
+                            StatBox(title: "Calories Burned", value: "\(Int(calories)) calories", icon: "flame.fill", color: .red)
+                        }
+                        StatBox(title: "Type", value: workout.workoutActivityType == .running ? "Running" : "Walking", icon: "figure.run", color: .purple)
+                    }
+                    .padding()
+                    
+                    // Additional details
+                    VStack(alignment: .leading, spacing: 15) {
+                        Text("Workout Details")
+                            .font(.headline)
+                        
+                        DetailRow(title: "Start Time", value: workout.startDate.formattedTime)
+                        DetailRow(title: "End Time", value: workout.endDate.formattedTime)
+                        DetailRow(title: "Total Time", value: workout.formattedDuration)
+                        DetailRow(title: "Distance", value: workout.formattedDistance)
+                        DetailRow(title: "Average Pace", value: workout.pace)
+                        if let calories = calories {
+                            DetailRow(title: "Calories Burned", value: "\(Int(calories)) calories")
+                        }
+                    }
+                    .padding()
+                    .background(Color(.systemBackground))
+                    .cornerRadius(12)
+                    .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
+                }
+                .padding()
+            }
+            .navigationTitle("Workout Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+            .task {
+                await fetchCalories()
+            }
+        }
+    }
+    
+    private func fetchCalories() async {
+        let healthStore = HKHealthStore()
+        let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!
+        
+        let predicate = HKQuery.predicateForSamples(
+            withStart: workout.startDate,
+            end: workout.endDate,
+            options: .strictStartDate
+        )
+        
+        let query = HKStatisticsQuery(
+            quantityType: energyType,
+            quantitySamplePredicate: predicate,
+            options: .cumulativeSum
+        ) { _, result, error in
+            guard let result = result,
+                  let sum = result.sumQuantity() else {
+                return
+            }
+            
+            let calories = sum.doubleValue(for: HKUnit.kilocalorie())
+            DispatchQueue.main.async {
+                self.calories = calories
+            }
+        }
+        
+        healthStore.execute(query)
+    }
+}
+
+struct StatBox: View {
+    let title: String
+    let value: String
+    let icon: String
+    let color: Color
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundColor(color)
+            
+            Text(value)
+                .font(.headline)
+                .fontWeight(.bold)
+            
+            Text(title)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
+    }
+}
+
+struct DetailRow: View {
+    let title: String
+    let value: String
+    
+    var body: some View {
+        HStack {
+            Text(title)
+                .foregroundColor(.secondary)
+            Spacer()
+            Text(value)
+                .fontWeight(.medium)
+        }
     }
 }
 

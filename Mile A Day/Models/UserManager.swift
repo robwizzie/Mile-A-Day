@@ -26,9 +26,9 @@ class UserManager: ObservableObject {
         } else {
             // Sample friends for development
             self.friends = [
-                User(name: "Alex", streak: 12, totalMiles: 45.2, personalRecord: 3.5),
-                User(name: "Taylor", streak: 30, totalMiles: 120.7, personalRecord: 6.2),
-                User(name: "Jordan", streak: 5, totalMiles: 18.1, personalRecord: 2.8)
+                User(name: "Alex", streak: 12, totalMiles: 45.2, fastestMilePace: 8.5*60, mostMilesInOneDay: 3.5),
+                User(name: "Taylor", streak: 30, totalMiles: 120.7, fastestMilePace: 7.2*60, mostMilesInOneDay: 6.2),
+                User(name: "Jordan", streak: 5, totalMiles: 18.1, fastestMilePace: 9.3*60, mostMilesInOneDay: 2.8)
             ]
         }
     }
@@ -44,7 +44,25 @@ class UserManager: ObservableObject {
         }
     }
     
-    // Update user streak with new run
+    // Update user stats from HealthKit data
+    func updateUserWithHealthKitData(
+        retroactiveStreak: Int,
+        currentMiles: Double,
+        totalMiles: Double,
+        fastestPace: TimeInterval,
+        mostMilesInDay: Double
+    ) {
+        currentUser.updateFromHealthKit(
+            streak: retroactiveStreak,
+            miles: currentMiles,
+            totalMiles: totalMiles,
+            fastestPace: fastestPace,
+            mostMilesInDay: mostMilesInDay
+        )
+        saveUserData()
+    }
+    
+    // Legacy method for backward compatibility
     func completeRun(miles: Double) {
         currentUser.updateStreak(miles: miles)
         saveUserData()
@@ -59,19 +77,36 @@ class UserManager: ObservableObject {
     // Get users sorted by streak (for leaderboard)
     func getLeaderboardByStreak() -> [User] {
         let allUsers = [currentUser] + friends
-        return allUsers.sorted { $0.streak > $1.streak }
+        return allUsers.sorted(by: { userA, userB in
+            return userA.streak > userB.streak
+        })
     }
     
     // Get users sorted by total miles (for leaderboard)
     func getLeaderboardByTotalMiles() -> [User] {
         let allUsers = [currentUser] + friends
-        return allUsers.sorted { $0.totalMiles > $1.totalMiles }
+        return allUsers.sorted(by: { userA, userB in
+            return userA.totalMiles > userB.totalMiles
+        })
     }
     
-    // Get users sorted by personal record (for leaderboard)
+    // Get users sorted by fastest mile pace (for leaderboard)
     func getLeaderboardByPersonalRecord() -> [User] {
         let allUsers = [currentUser] + friends
-        return allUsers.sorted { $0.personalRecord > $1.personalRecord }
+        return allUsers.sorted(by: { userA, userB in
+            // For pace, lower is better, and a zero pace should be ranked last
+            if userA.fastestMilePace == 0 { return false }
+            if userB.fastestMilePace == 0 { return true }
+            return userA.fastestMilePace < userB.fastestMilePace
+        })
+    }
+    
+    // Get users sorted by most miles in one day (for leaderboard)
+    func getLeaderboardByMostMilesInDay() -> [User] {
+        let allUsers = [currentUser] + friends
+        return allUsers.sorted(by: { userA, userB in
+            return userA.mostMilesInOneDay > userB.mostMilesInOneDay
+        })
     }
     
     // Mark new badges as viewed

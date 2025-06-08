@@ -6,7 +6,8 @@ struct User: Identifiable, Codable {
     var name: String
     var streak: Int = 0
     var totalMiles: Double = 0.0
-    var personalRecord: Double = 0.0
+    var fastestMilePace: TimeInterval = 0.0  // Minutes per mile (fastest pace)
+    var mostMilesInOneDay: Double = 0.0      // Most miles run in a single day
     var lastCompletionDate: Date?
     var goalMiles: Double = 1.0
     var badges: [Badge] = []
@@ -28,13 +29,42 @@ struct User: Identifiable, Codable {
         return hour >= 18
     }
     
-    // Update streak when a new run is completed
-    mutating func updateStreak(miles: Double, date: Date = Date()) {
-        // Check if this is a personal record
-        if miles > personalRecord {
-            personalRecord = miles
+    // Update user data from HealthKit
+    mutating func updateFromHealthKit(
+        streak: Int,
+        miles: Double,
+        totalMiles: Double,
+        fastestPace: TimeInterval,
+        mostMilesInDay: Double,
+        date: Date = Date()
+    ) {
+        // Update streak (use retroactive streak from HealthKit)
+        self.streak = streak
+        
+        // Update total miles from HealthKit
+        self.totalMiles = totalMiles
+        
+        // Update fastest mile pace
+        if fastestPace > 0 && (self.fastestMilePace == 0 || fastestPace < self.fastestMilePace) {
+            self.fastestMilePace = fastestPace
         }
         
+        // Update most miles in one day
+        if mostMilesInDay > self.mostMilesInOneDay {
+            self.mostMilesInOneDay = mostMilesInDay
+        }
+        
+        // Update completion date
+        if Calendar.current.isDateInToday(date) {
+            lastCompletionDate = date
+        }
+        
+        // Check for milestone badges
+        checkForMilestoneBadges()
+    }
+    
+    // Legacy method for backward compatibility - now just updates daily stats
+    mutating func updateStreak(miles: Double, date: Date = Date()) {
         // Add to total miles
         totalMiles += miles
         
@@ -44,26 +74,14 @@ struct User: Identifiable, Codable {
             return
         }
         
-        // Check if this is the next day from the last completion
-        if let lastDate = lastCompletionDate {
-            let isYesterday = Calendar.current.isDate(lastDate, inSameDayAs: 
-                                                     Calendar.current.date(byAdding: .day, value: -1, to: date) ?? date)
-            if isYesterday {
-                // Continue the streak
-                streak += 1
-            } else {
-                // Streak broken, reset to 1
-                streak = 1
-            }
-        } else {
-            // First completion
-            streak = 1
+        // Check if the distance is enough to maintain streak (with 0.05 mile offset)
+        if miles >= 0.95 {
+            // Update completion date
+            lastCompletionDate = date
+            
+            // We'll let the HealthKit retroactive streak calculation
+            // handle the actual streak count
         }
-        
-        lastCompletionDate = date
-        
-        // Check for milestone badges
-        checkForMilestoneBadges()
     }
     
     // Award badges based on milestones
