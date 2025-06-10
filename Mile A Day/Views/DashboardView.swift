@@ -18,7 +18,8 @@ struct DashboardView: View {
                     // Streak card
                     StreakCard(streak: userManager.currentUser.streak, 
                               isActiveToday: userManager.currentUser.isStreakActiveToday,
-                              isAtRisk: userManager.currentUser.isStreakAtRisk)
+                              isAtRisk: userManager.currentUser.isStreakAtRisk,
+                              user: userManager.currentUser)
                     
                     // Today's progress
                     TodayProgressCard(
@@ -163,6 +164,7 @@ struct StreakCard: View {
     let streak: Int
     let isActiveToday: Bool
     let isAtRisk: Bool
+    let user: User
     
     var body: some View {
         VStack(spacing: 15) {
@@ -186,11 +188,20 @@ struct StreakCard: View {
                 Image(systemName: isActiveToday ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                     .foregroundColor(isActiveToday ? .green : isAtRisk ? .red : .orange)
                 
-                Text(isActiveToday ? 
-                     "Completed Today!" : 
-                     isAtRisk ? "Streak at risk! Complete a mile today!" : "Complete a mile to continue your streak!")
-                    .font(.caption)
-                    .foregroundColor(isActiveToday ? .green : isAtRisk ? .red : .orange)
+                if isActiveToday {
+                    Text("Completed Today!")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                } else {
+                    VStack(alignment: .leading) {
+                        Text(isAtRisk ? "Streak at risk!" : "Keep your streak alive!")
+                            .font(.caption)
+                            .foregroundColor(isAtRisk ? .red : .orange)
+                        Text(user.formattedTimeUntilReset)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
         }
         .padding()

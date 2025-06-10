@@ -20,13 +20,47 @@ struct User: Identifiable, Codable {
     
     // Check if the streak is at risk (not completed today and it's past a certain time)
     var isStreakAtRisk: Bool {
-        guard let lastCompletion = lastCompletionDate,
-              !Calendar.current.isDateInToday(lastCompletion) else { return false }
+        // If already completed today, streak is not at risk
+        if isStreakActiveToday { return false }
         
-        // If it's past 6pm and you haven't completed your run yet, streak is at risk
+        // Get current time
         let now = Date()
         let hour = Calendar.current.component(.hour, from: now)
+        
+        // Streak is at risk if it's past 6pm
         return hour >= 18
+    }
+    
+    // Get time remaining until streak reset (returns nil if streak is already completed today)
+    var timeUntilStreakReset: TimeInterval? {
+        // If already completed today, return nil
+        if isStreakActiveToday { return nil }
+        
+        let calendar = Calendar.current
+        let now = Date()
+        
+        // Get end of today
+        guard let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: now) else {
+            return nil
+        }
+        
+        return endOfDay.timeIntervalSince(now)
+    }
+    
+    // Format time remaining until streak reset
+    var formattedTimeUntilReset: String {
+        guard let timeRemaining = timeUntilStreakReset else {
+            return "Completed for today!"
+        }
+        
+        let hours = Int(timeRemaining) / 3600
+        let minutes = Int(timeRemaining) % 3600 / 60
+        
+        if hours > 0 {
+            return "\(hours)h \(minutes)m remaining"
+        } else {
+            return "\(minutes)m remaining"
+        }
     }
     
     // Update user data from HealthKit
@@ -54,9 +88,13 @@ struct User: Identifiable, Codable {
             self.mostMilesInOneDay = mostMilesInDay
         }
         
-        // Update completion date
-        if Calendar.current.isDateInToday(date) {
+        // Only update completion date if we've completed a mile today
+        if miles >= 0.95 && Calendar.current.isDateInToday(date) {
             lastCompletionDate = date
+        } else if Calendar.current.isDateInToday(date) {
+            // If it's today but we haven't completed a mile, clear the completion date
+            // This ensures isStreakActiveToday returns false
+            lastCompletionDate = nil
         }
         
         // Check for milestone badges
@@ -78,9 +116,6 @@ struct User: Identifiable, Codable {
         if miles >= 0.95 {
             // Update completion date
             lastCompletionDate = date
-            
-            // We'll let the HealthKit retroactive streak calculation
-            // handle the actual streak count
         }
     }
     

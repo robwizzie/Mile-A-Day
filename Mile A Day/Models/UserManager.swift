@@ -57,7 +57,8 @@ class UserManager: ObservableObject {
             miles: currentMiles,
             totalMiles: totalMiles,
             fastestPace: fastestPace,
-            mostMilesInDay: mostMilesInDay
+            mostMilesInDay: mostMilesInDay,
+            date: Date()
         )
         saveUserData()
     }

@@ -249,6 +249,7 @@ class HealthKitManager: ObservableObject {
     private func calculateRetroactiveStreak(workoutsByDay: [Date: [HKWorkout]]) -> Int {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
         
         // Get all days with qualifying workouts (at least 0.95 miles)
         let daysWithQualifyingWorkouts = workoutsByDay.filter { (date, workouts) in
@@ -265,13 +266,20 @@ class HealthKitManager: ObservableObject {
         
         // Calculate current streak
         var currentStreak = 0
-        var checkDate = today
+        var checkDate = yesterday // Start checking from yesterday
         
+        // If we have completed today, include it in the streak
+        if daysWithQualifyingWorkouts.contains(today) {
+            currentStreak += 1
+        }
+        
+        // Check previous days
         while true {
             if daysWithQualifyingWorkouts.contains(checkDate) {
                 currentStreak += 1
                 checkDate = calendar.date(byAdding: .day, value: -1, to: checkDate)!
             } else {
+                // Break if we find a day without a qualifying workout
                 break
             }
         }
