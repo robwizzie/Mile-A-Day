@@ -167,45 +167,82 @@ struct StreakCard: View {
     let user: User
     
     var body: some View {
-        VStack(spacing: 15) {
+        VStack(spacing: 20) {
+            // Header
             HStack {
                 Image(systemName: "flame.fill")
-                    .foregroundColor(.orange)
+                    .font(.title2)
+                    .foregroundStyle(.orange.gradient)
                 Text("Current Streak")
-                    .font(.headline)
+                    .font(.title3.bold())
                 Spacer()
+                
+                // Streak Badge
+                Text("\(streak)")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .frame(minWidth: 44)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(isAtRisk ? Color.red.gradient : Color.orange.gradient)
+                    )
             }
             
-            Text("\(streak)")
-                .font(.system(size: 50, weight: .bold, design: .rounded))
-                .foregroundColor(isAtRisk ? .red : .primary)
-            
-            Text("\(streak == 1 ? "Day" : "Days")")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            
-            HStack {
-                Image(systemName: isActiveToday ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    .foregroundColor(isActiveToday ? .green : isAtRisk ? .red : .orange)
-                
-                if isActiveToday {
-                    Text("Completed Today!")
-                        .font(.caption)
-                        .foregroundColor(.green)
-                } else {
-                    VStack(alignment: .leading) {
-                        Text(isAtRisk ? "Streak at risk!" : "Keep your streak alive!")
-                            .font(.caption)
+            // Status Section
+            VStack(spacing: 12) {
+                // Status Icon and Message
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(isActiveToday ? Color.green : isAtRisk ? Color.red : Color.orange)
+                        .frame(width: 8, height: 8)
+                    
+                    if isActiveToday {
+                        Text("Mile Completed Today!")
+                            .font(.subheadline.bold())
+                            .foregroundColor(.green)
+                    } else {
+                        Text(isAtRisk ? "Streak at Risk!" : "Keep Your Streak Alive!")
+                            .font(.subheadline.bold())
                             .foregroundColor(isAtRisk ? .red : .orange)
-                        Text(user.formattedTimeUntilReset)
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
                     }
+                    
+                    Spacer()
                 }
+                
+                // Time Remaining (if not completed)
+                if !isActiveToday {
+                    HStack {
+                        Image(systemName: "clock")
+                            .foregroundColor(.secondary)
+                        Text(user.formattedTimeUntilReset)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 20)
+                }
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(.systemGray6))
+            )
+            
+            // Motivational Message
+            if !isActiveToday {
+                Text(isAtRisk ? "Complete your mile soon to keep your \(streak)-day streak!" : "You're on a roll! Keep up the great work!")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
             }
         }
         .padding()
-        .cardStyle()
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
     }
 }
 
