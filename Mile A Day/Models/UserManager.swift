@@ -20,7 +20,8 @@ class UserManager: ObservableObject {
         }
         
         // Initialize widget data store with current values
-        WidgetDataStore.save(todayMiles: 0, goal: currentUser.goalMiles)
+        let currentMiles = WidgetDataStore.load().miles
+        WidgetDataStore.save(todayMiles: currentMiles, goal: currentUser.goalMiles)
         WidgetDataStore.save(streak: currentUser.streak)
         
         // Load friends

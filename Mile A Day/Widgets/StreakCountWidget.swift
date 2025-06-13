@@ -59,16 +59,21 @@ struct CircularStreakView: View {
     let streak: Int
     
     var body: some View {
+        let streakCompleted = WidgetDataStore.load().streakCompleted
+        
         ZStack {
+            // Outer circle - filled orange when complete
             Circle()
-                .stroke(Color.secondary.opacity(0.3), lineWidth: 4)
+                .fill(streakCompleted ? Color.orange : Color.clear)
+                .stroke(Color.secondary.opacity(0.3), lineWidth: 2)
             
             VStack(spacing: 1) {
                 Image(systemName: "flame.fill")
                     .font(.system(size: 12))
-                    .foregroundStyle(.orange.gradient)
+                    .foregroundColor(streakCompleted ? .white : .orange)
                 Text("\(streak)")
                     .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundColor(streakCompleted ? .white : .primary)
             }
         }
     }
@@ -117,10 +122,20 @@ struct HomeScreenStreakView: View {
     let streak: Int
     
     var body: some View {
+        let streakCompleted = WidgetDataStore.load().streakCompleted
+        
         VStack(spacing: 8) {
-            Image(systemName: "flame.fill")
-                .font(.system(size: 24))
-                .foregroundStyle(.orange.gradient)
+            ZStack {
+                // Outer circle - filled orange when complete
+                Circle()
+                    .fill(streakCompleted ? Color.orange : Color.clear)
+                    .stroke(Color.secondary.opacity(0.3), lineWidth: 2)
+                    .frame(width: 50, height: 50)
+                
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(streakCompleted ? .white : .orange)
+            }
             
             Text("\(streak)")
                 .font(.system(size: 36, weight: .bold, design: .rounded))

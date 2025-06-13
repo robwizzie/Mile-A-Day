@@ -4,7 +4,7 @@ import HealthKit
 struct DashboardView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
-    @EnvironmentObject var notificationManager: NotificationManager
+    @EnvironmentObject var notificationService: MADNotificationService
     
     @State private var showConfetti = false
     @State private var showGoalSheet = false
@@ -88,7 +88,7 @@ struct DashboardView: View {
                     )
                     
                     // Send a notification
-                    notificationManager.scheduleCompletionCongratulationsNotification()
+                    notificationService.sendMileCompletedNotification()
                 }
             }
         }

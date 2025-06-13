@@ -12,15 +12,21 @@ struct WidgetDataStore {
         print("[WidgetDataStore] Saving - Miles: \(todayMiles), Goal: \(goal)")
         defaults.set(todayMiles, forKey: milesKey)
         defaults.set(goal, forKey: goalKey)
+        // Determine if streak is completed (miles >= goal)
+        defaults.set(todayMiles >= goal, forKey: "streak_completed_today")
         WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
     }
 
-    static func load() -> (miles: Double, goal: Double) {
-        let defaults = UserDefaults(suiteName: suiteName)
-        let miles = defaults?.double(forKey: milesKey) ?? 0
-        let goal = defaults?.double(forKey: goalKey) ?? 1
-        print("[WidgetDataStore] Loading - Miles: \(miles), Goal: \(goal)")
-        return (miles, goal)
+    static func load() -> (miles: Double, goal: Double, streakCompleted: Bool) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            print("[WidgetDataStore] Failed to access App Group UserDefaults")
+            return (0, 1, false)
+        }
+        let miles = defaults.double(forKey: milesKey)
+        let goal = defaults.double(forKey: goalKey) == 0 ? 1 : defaults.double(forKey: goalKey)
+        let streakCompleted = defaults.bool(forKey: "streak_completed_today")
+        print("[WidgetDataStore] Loading - Miles: \(miles), Goal: \(goal), Completed: \(streakCompleted)")
+        return (miles, goal, streakCompleted)
     }
 
     // MARK: - Streak helpers
@@ -31,7 +37,10 @@ struct WidgetDataStore {
     }
 
     static func loadStreak() -> Int {
-        let defaults = UserDefaults(suiteName: suiteName)
-        return defaults?.integer(forKey: streakKey) ?? 0
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            print("[WidgetDataStore] Failed to access App Group UserDefaults for streak")
+            return 0
+        }
+        return defaults.integer(forKey: streakKey)
     }
 } 

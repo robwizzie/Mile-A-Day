@@ -5,23 +5,24 @@ struct TodayProgressEntry: TimelineEntry {
     let date: Date
     let milesCompleted: Double
     let goal: Double
+    let streakCompleted: Bool
 }
 
 struct TodayProgressProvider: TimelineProvider {
     func placeholder(in context: Context) -> TodayProgressEntry {
-        TodayProgressEntry(date: Date(), milesCompleted: 0.5, goal: 1.0)
+        TodayProgressEntry(date: Date(), milesCompleted: 0.5, goal: 1.0, streakCompleted: false)
     }
 
     func getSnapshot(in context: Context, completion: @escaping (TodayProgressEntry) -> Void) {
         let data = WidgetDataStore.load()
         print("[Widget] Snapshot - Miles: \(data.miles), Goal: \(data.goal)")
-        completion(TodayProgressEntry(date: Date(), milesCompleted: data.miles, goal: data.goal))
+        completion(TodayProgressEntry(date: Date(), milesCompleted: data.miles, goal: data.goal, streakCompleted: data.streakCompleted))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<TodayProgressEntry>) -> Void) {
         let data = WidgetDataStore.load()
         print("[Widget] Timeline - Miles: \(data.miles), Goal: \(data.goal)")
-        let entry = TodayProgressEntry(date: Date(), milesCompleted: data.miles, goal: data.goal)
+        let entry = TodayProgressEntry(date: Date(), milesCompleted: data.miles, goal: data.goal, streakCompleted: data.streakCompleted)
         // Update every 15 minutes to reflect changes quickly, WidgetCenter.reload is also triggered on save
         let nextRefresh = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date().addingTimeInterval(900)
         let timeline = Timeline(entries: [entry], policy: .after(nextRefresh))
@@ -34,7 +35,7 @@ struct TodayProgressWidgetEntryView: View {
 
     var progress: Double {
         guard entry.goal > 0 else { return 0 }
-        return min(entry.milesCompleted / entry.goal, 1)
+        return entry.milesCompleted / entry.goal
     }
 
     var body: some View {
@@ -42,16 +43,16 @@ struct TodayProgressWidgetEntryView: View {
             if #available(iOS 16.0, *) {
                 switch widgetFamily {
                 case .accessoryCircular:
-                    CircularProgressView(progress: progress, milesCompleted: entry.milesCompleted, goal: entry.goal)
+                    CircularProgressView(progress: progress, milesCompleted: entry.milesCompleted, goal: entry.goal, streakCompleted: entry.streakCompleted)
                 case .accessoryRectangular:
-                    RectangularProgressView(progress: progress, milesCompleted: entry.milesCompleted, goal: entry.goal)
+                    RectangularProgressView(progress: progress, milesCompleted: entry.milesCompleted, goal: entry.goal, streakCompleted: entry.streakCompleted)
                 case .accessoryInline:
-                    InlineProgressView(milesCompleted: entry.milesCompleted, goal: entry.goal)
+                    InlineProgressView(milesCompleted: entry.milesCompleted, goal: entry.goal, streakCompleted: entry.streakCompleted)
                 default:
-                    HomeScreenProgressView(progress: progress, milesCompleted: entry.milesCompleted, goal: entry.goal)
+                    HomeScreenProgressView(progress: progress, milesCompleted: entry.milesCompleted, goal: entry.goal, streakCompleted: entry.streakCompleted)
                 }
             } else {
-                HomeScreenProgressView(progress: progress, milesCompleted: entry.milesCompleted, goal: entry.goal)
+                HomeScreenProgressView(progress: progress, milesCompleted: entry.milesCompleted, goal: entry.goal, streakCompleted: entry.streakCompleted)
             }
         }
     }
@@ -66,22 +67,29 @@ struct CircularProgressView: View {
     let progress: Double
     let milesCompleted: Double
     let goal: Double
+    let streakCompleted: Bool
     
     var body: some View {
         ZStack {
+            // Outer circle - filled orange when complete
             Circle()
-                .stroke(Color.secondary.opacity(0.3), lineWidth: 4)
+                .fill(streakCompleted ? Color.orange : Color.clear)
+                .stroke(Color.secondary.opacity(0.3), lineWidth: 2)
+            
+            // Progress circle
             Circle()
-                .trim(from: 0, to: progress)
-                .stroke(progress >= 1.0 ? Color.green : Color("appPrimary"), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                .trim(from: 0, to: min(progress, 1.0))
+                .stroke(streakCompleted ? Color.green : Color("appPrimary"), style: StrokeStyle(lineWidth: 4, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+                .scaleEffect(0.8)
             
             VStack(spacing: 1) {
-                Text(String(format: "%.1f", milesCompleted))
+                Text(String(format: "%.2f", milesCompleted))
                     .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(streakCompleted ? .white : .primary)
                 Text("mi")
                     .font(.system(size: 8, weight: .medium))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(streakCompleted ? .white.opacity(0.8) : .secondary)
             }
         }
     }
@@ -92,6 +100,7 @@ struct RectangularProgressView: View {
     let progress: Double
     let milesCompleted: Double
     let goal: Double
+    let streakCompleted: Bool
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -102,7 +111,7 @@ struct RectangularProgressView: View {
                     .font(.caption)
                     .fontWeight(.medium)
                 Spacer()
-                Text(String(format: "%.1f/%.1f", milesCompleted, goal))
+                Text(String(format: "%.2f/%.1f", milesCompleted, goal))
                     .font(.caption)
                     .fontWeight(.bold)
             }
@@ -114,9 +123,10 @@ struct RectangularProgressView: View {
                         .frame(height: 4)
                     
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(progress >= 1.0 ? Color.green : Color("appPrimary"))
-                        .frame(width: min(CGFloat(progress) * geometry.size.width, geometry.size.width), height: 4)
+                        .fill(streakCompleted ? Color.green : Color("appPrimary"))
+                        .frame(width: CGFloat(progress) * geometry.size.width, height: 4)
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 2))
             }
             .frame(height: 4)
         }
@@ -127,11 +137,12 @@ struct RectangularProgressView: View {
 struct InlineProgressView: View {
     let milesCompleted: Double
     let goal: Double
+    let streakCompleted: Bool
     
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "figure.run")
-            Text(String(format: "%.1f/%.1f mi", milesCompleted, goal))
+            Text(String(format: "%.2f/%.1f mi", milesCompleted, goal))
                 .fontWeight(.medium)
         }
     }
@@ -143,6 +154,7 @@ struct HomeScreenProgressView: View {
     let progress: Double
     let milesCompleted: Double
     let goal: Double
+    let streakCompleted: Bool
     
     var body: some View {
         VStack(spacing: 12) {
@@ -164,16 +176,17 @@ struct HomeScreenProgressView: View {
                         .frame(height: 16)
                     
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(progress >= 1.0 ? Color.green : Color("appPrimary"))
-                        .frame(width: min(CGFloat(progress) * geometry.size.width, geometry.size.width), height: 16)
+                        .fill(streakCompleted ? Color.green : Color("appPrimary"))
+                        .frame(width: CGFloat(progress) * geometry.size.width, height: 16)
                         .animation(.easeInOut, value: progress)
                 }
+                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .frame(height: 16)
             
             // Distance Display
             HStack {
-                Text(String(format: "%.1f", milesCompleted))
+                Text(String(format: "%.2f", milesCompleted))
                     .font(.title2)
                     .fontWeight(.bold)
                 
@@ -186,12 +199,12 @@ struct HomeScreenProgressView: View {
             }
             
             // Status
-            if progress >= 1.0 {
+            if streakCompleted {
                 Label("Goal complete!", systemImage: "star.fill")
                     .foregroundColor(.green)
                     .font(.caption)
             } else {
-                Text(String(format: "%.1f mi to go", max(goal - milesCompleted, 0)))
+                Text(String(format: "%.2f mi to go", max(goal - milesCompleted, 0)))
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -217,5 +230,5 @@ struct TodayProgressWidget: Widget {
 #Preview(as: .systemSmall) {
     TodayProgressWidget()
 } timeline: {
-    TodayProgressEntry(date: .now, milesCompleted: 0.2, goal: 1.0)
+    TodayProgressEntry(date: .now, milesCompleted: 0.2, goal: 1.0, streakCompleted: false)
 } 
