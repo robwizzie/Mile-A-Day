@@ -19,6 +19,10 @@ class UserManager: ObservableObject {
             self.currentUser = User(name: "You")
         }
         
+        // Initialize widget data store with current values
+        WidgetDataStore.save(todayMiles: 0, goal: currentUser.goalMiles)
+        WidgetDataStore.save(streak: currentUser.streak)
+        
         // Load friends
         if let friendsData = userDefaults.data(forKey: friendsKey),
            let decodedFriends = try? JSONDecoder().decode([User].self, from: friendsData) {
@@ -42,6 +46,9 @@ class UserManager: ObservableObject {
         if let encoded = try? JSONEncoder().encode(friends) {
             userDefaults.set(encoded, forKey: friendsKey)
         }
+        
+        // Push streak to widget store
+        WidgetDataStore.save(streak: currentUser.streak)
     }
     
     // Update user stats from HealthKit data
@@ -73,6 +80,8 @@ class UserManager: ObservableObject {
     func setDailyGoal(miles: Double) {
         currentUser.goalMiles = miles
         saveUserData()
+        let currentMiles = WidgetDataStore.load().miles
+        WidgetDataStore.save(todayMiles: currentMiles, goal: miles)
     }
     
     // Get users sorted by streak (for leaderboard)

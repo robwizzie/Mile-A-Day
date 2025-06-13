@@ -1,16 +1,17 @@
 import SwiftUI
 import HealthKit
+import UserNotifications
 
 struct MainTabView: View {
     @StateObject private var healthManager = HealthKitManager()
     @StateObject private var userManager = UserManager()
-    @StateObject private var notificationManager = NotificationManager()
+    @StateObject private var notificationService = MADNotificationService.shared
     
     var body: some View {
         TabView {
             NavigationStack {
                 DashboardView(healthManager: healthManager, userManager: userManager)
-                    .environmentObject(notificationManager)
+                    .environmentObject(notificationService)
             }
             .tabItem {
                 Label("Dashboard", systemImage: "house.fill")
@@ -45,9 +46,16 @@ struct MainTabView: View {
                 }
             }
             
-            // Request notification permissions
-            notificationManager.requestPermission()
-            notificationManager.scheduleStreakReminderNotification()
+            // Request notification permissions and schedule 6PM reminder according to today's status
+            Task {
+                await notificationService.requestAuthorization()
+            }
+            notificationService.updateDailyReminder(completed: userManager.currentUser.isStreakActiveToday)
+            
+            // Debug: Force widget data update
+            print("[Debug] Forcing widget data update - Miles: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles), Streak: \(userManager.currentUser.streak)")
+            WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles)
+            WidgetDataStore.save(streak: userManager.currentUser.streak)
         }
     }
 }
@@ -155,6 +163,15 @@ struct ProfileView: View {
             .cornerRadius(15)
             .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
             
+            NavigationLink(destination: NotificationSettingsView()) {
+                Text("Notification Settings")
+                    .font(.headline)
+                    .foregroundColor(Color("appPrimary"))
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color("appSecondary").opacity(0.1))
+                    .cornerRadius(12)
+            }
             Spacer()
         }
         .padding()

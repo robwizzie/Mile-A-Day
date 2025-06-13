@@ -1,5 +1,6 @@
 import Foundation
 import HealthKit
+import WidgetKit
 
 class HealthKitManager: ObservableObject {
     let healthStore = HKHealthStore()
@@ -62,6 +63,9 @@ class HealthKitManager: ObservableObject {
             guard let self = self, let workouts = samples as? [HKWorkout], !workouts.isEmpty else {
                 DispatchQueue.main.async {
                     self?.todaysDistance = 0.0
+                    // Get current goal from widget store or default to 1.0
+                    let currentGoal = WidgetDataStore.load().goal
+                    WidgetDataStore.save(todayMiles: 0, goal: currentGoal > 0 ? currentGoal : 1.0)
                 }
                 return
             }
@@ -79,6 +83,9 @@ class HealthKitManager: ObservableObject {
             DispatchQueue.main.async {
                 self.todaysDistance = totalMiles
                 self.recentWorkouts = workouts
+                // Get current goal from widget store or default to 1.0
+                let currentGoal = WidgetDataStore.load().goal
+                WidgetDataStore.save(todayMiles: totalMiles, goal: currentGoal > 0 ? currentGoal : 1.0)
             }
         }
         

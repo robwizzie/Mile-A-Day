@@ -6,7 +6,20 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		B218EEE52DFCD67F00E19230 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B218EEE42DFCD67F00E19230 /* WidgetKit.framework */; };
+		B218EEE72DFCD67F00E19230 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B218EEE62DFCD67F00E19230 /* SwiftUI.framework */; };
+		B218EEF82DFCD68300E19230 /* MileADayWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B218EEE22DFCD67F00E19230 /* MileADayWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
+		B218EEF62DFCD68300E19230 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B22046132DF51E9A006ECF83 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B218EEE12DFCD67F00E19230;
+			remoteInfo = MileADayWidgetsExtension;
+		};
 		B22046292DF51EA9006ECF83 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = B22046132DF51E9A006ECF83 /* Project object */;
@@ -23,15 +36,72 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		B218EEFD2DFCD68300E19230 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B218EEF82DFCD68300E19230 /* MileADayWidgetsExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		B218EEE22DFCD67F00E19230 /* MileADayWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MileADayWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B218EEE42DFCD67F00E19230 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		B218EEE62DFCD67F00E19230 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		B218EF062DFCDECE00E19230 /* MileADayWidgetsExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MileADayWidgetsExtension.entitlements; sourceTree = "<group>"; };
 		B220461B2DF51E9A006ECF83 /* Mile A Day.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Mile A Day.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B22046282DF51EA9006ECF83 /* Mile A DayTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Mile A DayTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B22046322DF51EA9006ECF83 /* Mile A DayUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Mile A DayUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		B218EEF92DFCD68300E19230 /* Exceptions for "MileADayWidgets" folder in "MileADayWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = B218EEE12DFCD67F00E19230 /* MileADayWidgetsExtension */;
+		};
+		B218EF012DFCD6AF00E19230 /* Exceptions for "Mile A Day" folder in "MileADayWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Shared/WidgetDataStore.swift,
+				Widgets/StreakCountWidget.swift,
+				Widgets/TodayProgressWidget.swift,
+			);
+			target = B218EEE12DFCD67F00E19230 /* MileADayWidgetsExtension */;
+		};
+		B218EF022DFCD6B000E19230 /* Exceptions for "Mile A Day" folder in "Mile A Day" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Widgets/StreakCountWidget.swift,
+				Widgets/TodayProgressWidget.swift,
+			);
+			target = B220461A2DF51E9A006ECF83 /* Mile A Day */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		B218EEE82DFCD67F00E19230 /* MileADayWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				B218EEF92DFCD68300E19230 /* Exceptions for "MileADayWidgets" folder in "MileADayWidgetsExtension" target */,
+			);
+			path = MileADayWidgets;
+			sourceTree = "<group>";
+		};
 		B220461D2DF51E9A006ECF83 /* Mile A Day */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				B218EF022DFCD6B000E19230 /* Exceptions for "Mile A Day" folder in "Mile A Day" target */,
+				B218EF012DFCD6AF00E19230 /* Exceptions for "Mile A Day" folder in "MileADayWidgetsExtension" target */,
+			);
 			path = "Mile A Day";
 			sourceTree = "<group>";
 		};
@@ -48,6 +118,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		B218EEDF2DFCD67F00E19230 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B218EEE72DFCD67F00E19230 /* SwiftUI.framework in Frameworks */,
+				B218EEE52DFCD67F00E19230 /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B22046182DF51E9A006ECF83 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -72,12 +151,24 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		B218EEE32DFCD67F00E19230 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				B218EEE42DFCD67F00E19230 /* WidgetKit.framework */,
+				B218EEE62DFCD67F00E19230 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		B22046122DF51E9A006ECF83 = {
 			isa = PBXGroup;
 			children = (
+				B218EF062DFCDECE00E19230 /* MileADayWidgetsExtension.entitlements */,
 				B220461D2DF51E9A006ECF83 /* Mile A Day */,
 				B220462B2DF51EA9006ECF83 /* Mile A DayTests */,
 				B22046352DF51EA9006ECF83 /* Mile A DayUITests */,
+				B218EEE82DFCD67F00E19230 /* MileADayWidgets */,
+				B218EEE32DFCD67F00E19230 /* Frameworks */,
 				B220461C2DF51E9A006ECF83 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -88,6 +179,7 @@
 				B220461B2DF51E9A006ECF83 /* Mile A Day.app */,
 				B22046282DF51EA9006ECF83 /* Mile A DayTests.xctest */,
 				B22046322DF51EA9006ECF83 /* Mile A DayUITests.xctest */,
+				B218EEE22DFCD67F00E19230 /* MileADayWidgetsExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -95,6 +187,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		B218EEE12DFCD67F00E19230 /* MileADayWidgetsExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B218EEFA2DFCD68300E19230 /* Build configuration list for PBXNativeTarget "MileADayWidgetsExtension" */;
+			buildPhases = (
+				B218EEDE2DFCD67F00E19230 /* Sources */,
+				B218EEDF2DFCD67F00E19230 /* Frameworks */,
+				B218EEE02DFCD67F00E19230 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				B218EEE82DFCD67F00E19230 /* MileADayWidgets */,
+			);
+			name = MileADayWidgetsExtension;
+			packageProductDependencies = (
+			);
+			productName = MileADayWidgetsExtension;
+			productReference = B218EEE22DFCD67F00E19230 /* MileADayWidgetsExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		B220461A2DF51E9A006ECF83 /* Mile A Day */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = B220463C2DF51EA9006ECF83 /* Build configuration list for PBXNativeTarget "Mile A Day" */;
@@ -102,10 +216,12 @@
 				B22046172DF51E9A006ECF83 /* Sources */,
 				B22046182DF51E9A006ECF83 /* Frameworks */,
 				B22046192DF51E9A006ECF83 /* Resources */,
+				B218EEFD2DFCD68300E19230 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				B218EEF72DFCD68300E19230 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				B220461D2DF51E9A006ECF83 /* Mile A Day */,
@@ -173,6 +289,9 @@
 				LastSwiftUpdateCheck = 1640;
 				LastUpgradeCheck = 1640;
 				TargetAttributes = {
+					B218EEE12DFCD67F00E19230 = {
+						CreatedOnToolsVersion = 16.4;
+					};
 					B220461A2DF51E9A006ECF83 = {
 						CreatedOnToolsVersion = 16.4;
 					};
@@ -203,11 +322,19 @@
 				B220461A2DF51E9A006ECF83 /* Mile A Day */,
 				B22046272DF51EA9006ECF83 /* Mile A DayTests */,
 				B22046312DF51EA9006ECF83 /* Mile A DayUITests */,
+				B218EEE12DFCD67F00E19230 /* MileADayWidgetsExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		B218EEE02DFCD67F00E19230 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B22046192DF51E9A006ECF83 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -232,6 +359,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		B218EEDE2DFCD67F00E19230 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B22046172DF51E9A006ECF83 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -256,6 +390,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		B218EEF72DFCD68300E19230 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B218EEE12DFCD67F00E19230 /* MileADayWidgetsExtension */;
+			targetProxy = B218EEF62DFCD68300E19230 /* PBXContainerItemProxy */;
+		};
 		B220462A2DF51EA9006ECF83 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = B220461A2DF51E9A006ECF83 /* Mile A Day */;
@@ -269,6 +408,62 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		B218EEFB2DFCD68300E19230 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = MileADayWidgetsExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NS237SS5KD;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MileADayWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MileADayWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.MileADayWidgets";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B218EEFC2DFCD68300E19230 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = MileADayWidgetsExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NS237SS5KD;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MileADayWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = MileADayWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.MileADayWidgets";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		B220463A2DF51EA9006ECF83 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -523,6 +718,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		B218EEFA2DFCD68300E19230 /* Build configuration list for PBXNativeTarget "MileADayWidgetsExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B218EEFB2DFCD68300E19230 /* Debug */,
+				B218EEFC2DFCD68300E19230 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		B22046162DF51E9A006ECF83 /* Build configuration list for PBXProject "Mile A Day" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
