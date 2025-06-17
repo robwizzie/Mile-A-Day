@@ -1,0 +1,22 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Globals:
+    Function:
+        Runtime: nodejs22.x
+        Timeout: 30
+
+Resources:
+    UsersGet:
+        Type: AWS::Serverless::Function
+        Properties:
+            CodeUri: lambdas/mad-users-get/src/
+            Handler: index.handler
+            # Layers:
+            #   - !Ref MyLayer
+            Events:
+                Api:
+                    Type: Api
+                    Properties:
+                        Path: /users/{userId}
+                        Method: get
