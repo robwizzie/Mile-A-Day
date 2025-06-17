@@ -31,7 +31,26 @@ class HealthKitManager: ObservableObject {
         healthStore.requestAuthorization(toShare: nil, read: types) { success, error in
             DispatchQueue.main.async {
                 self.isAuthorized = success
+                
+                // Enable background delivery for workouts when authorized
+                if success {
+                    self.enableBackgroundDelivery()
+                }
+                
                 completion(success)
+            }
+        }
+    }
+    
+    // Enable background delivery for HealthKit data
+    private func enableBackgroundDelivery() {
+        let workoutType = HKObjectType.workoutType()
+        
+        healthStore.enableBackgroundDelivery(for: workoutType, frequency: .immediate) { success, error in
+            if success {
+                print("[HealthKit] Background delivery enabled for workouts")
+            } else {
+                print("[HealthKit] Failed to enable background delivery: \(error?.localizedDescription ?? "Unknown error")")
             }
         }
     }

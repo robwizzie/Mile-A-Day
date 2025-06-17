@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.mileaday.background-refresh</string>
+	</array>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Mile A Day needs access to your Health data to track your running distance and workouts.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Mile A Day needs access to your Health data to track your running distance and workouts.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>background-processing</string>
+		<string>background-fetch</string>
+		<string>background-app-refresh</string>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+</dict>
+</plist>
