@@ -14,6 +14,7 @@ final class MADBackgroundService: NSObject, ObservableObject {
     private let healthManager = HealthKitManager()
     private let userManager = UserManager()
     private let notificationService = MADNotificationService.shared
+    private let liveWorkoutManager = LiveWorkoutManager.shared
     
     // Background task identifier
     private static let backgroundTaskIdentifier = "com.mileaday.background-refresh"
@@ -59,13 +60,16 @@ final class MADBackgroundService: NSObject, ObservableObject {
         healthStore.enableBackgroundDelivery(for: workoutType, frequency: .immediate) { [weak self] success, error in
             if success {
                 print("[Background] HealthKit background delivery enabled")
-                self?.setupWorkoutObserver()
+                Task { @MainActor in
+                    self?.setupWorkoutObserver()
+                }
             } else {
                 print("[Background] Failed to enable HealthKit background delivery: \(error?.localizedDescription ?? "Unknown error")")
             }
         }
     }
     
+    @MainActor
     private func setupWorkoutObserver() {
         let workoutType = HKObjectType.workoutType()
         
@@ -194,31 +198,61 @@ final class MADBackgroundService: NSObject, ObservableObject {
     private func checkForMileCompletion() {
         let currentUser = userManager.currentUser
         let todaysDistance = healthManager.todaysDistance
+        let goalMiles = currentUser.goalMiles
         
         // Check if user just completed their goal
-        if todaysDistance >= currentUser.goalMiles && !currentUser.isStreakActiveToday {
-            print("[Background] Mile goal completed! Sending notification...")
+        if todaysDistance >= goalMiles {
+            print("[Background] Mile goal reached! Distance: \(todaysDistance), Goal: \(goalMiles)")
             
-            // Send completion notification
-            notificationService.sendMileCompletedNotification()
+            // Send completion notification only if conditions are met
+            if notificationService.shouldSendCompletionNotification(
+                currentMiles: todaysDistance,
+                goalMiles: goalMiles,
+                previousMiles: 0.0 // We don't have previous value in background, let the method handle it
+            ) {
+                notificationService.sendMileCompletedNotification()
+                print("[Background] Sent completion notification")
+            } else {
+                print("[Background] Skipped completion notification (already sent or conditions not met)")
+            }
             
             // Update user completion status
             userManager.completeRun(miles: todaysDistance)
             
             // Update daily reminder to congratulatory message
-            notificationService.updateDailyReminder(completed: true)
+            notificationService.updateDailyReminder(
+                isCompleted: true,
+                currentMiles: todaysDistance,
+                goalMiles: goalMiles
+            )
+        } else {
+            // Update daily reminder to motivational message
+            notificationService.updateDailyReminder(
+                isCompleted: false,
+                currentMiles: todaysDistance,
+                goalMiles: goalMiles
+            )
         }
     }
     
     private func updateWidgets() {
         // Update widget data store
         let user = userManager.currentUser
-        let miles = healthManager.todaysDistance
+        var miles = healthManager.todaysDistance
         
-        WidgetDataStore.save(todayMiles: miles, goal: user.goalMiles)
-        WidgetDataStore.save(streak: user.streak)
-        
-        print("[Background] Widgets updated - Miles: \(miles), Goal: \(user.goalMiles), Streak: \(user.streak)")
+        // Check for live workout data
+        Task { @MainActor in
+            // If there's an active workout, include live distance
+            if liveWorkoutManager.isWorkoutActive {
+                miles += liveWorkoutManager.currentWorkoutDistance
+                print("[Background] Including live workout distance: \(liveWorkoutManager.currentWorkoutDistance)")
+            }
+            
+            WidgetDataStore.save(todayMiles: miles, goal: user.goalMiles)
+            WidgetDataStore.save(streak: user.streak)
+            
+            print("[Background] Widgets updated - Miles: \(miles), Goal: \(user.goalMiles), Streak: \(user.streak)")
+        }
     }
 }
 

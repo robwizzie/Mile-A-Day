@@ -21,6 +21,11 @@ struct Mile_A_DayApp: App {
     init() {
         // Register background tasks when app launches
         MADBackgroundService.shared.registerBackgroundTasks()
+        
+        // Initialize live workout monitoring for real-time updates
+        Task { @MainActor in
+            LiveWorkoutManager.shared.startLiveWorkoutMonitoring()
+        }
     }
     
     var body: some Scene {

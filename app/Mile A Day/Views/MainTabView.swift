@@ -39,6 +39,9 @@ struct MainTabView: View {
             }
         }
         .onAppear {
+            // Reset daily notification tracking for new day
+            notificationService.resetDailyNotificationTracking()
+            
             // Request HealthKit permissions when app launches
             healthManager.requestAuthorization { success in
                 if success {
@@ -46,11 +49,18 @@ struct MainTabView: View {
                 }
             }
             
-            // Request notification permissions and schedule 6PM reminder according to today's status
+            // Request notification permissions and schedule smart daily reminder
             Task {
                 await notificationService.requestAuthorization()
             }
-            notificationService.updateDailyReminder(completed: userManager.currentUser.isStreakActiveToday)
+            
+            // Use smart daily reminder with completion status
+            let isCompleted = healthManager.todaysDistance >= userManager.currentUser.goalMiles
+            notificationService.updateDailyReminder(
+                isCompleted: isCompleted,
+                currentMiles: healthManager.todaysDistance,
+                goalMiles: userManager.currentUser.goalMiles
+            )
             
             // Debug: Force widget data update
             print("[Debug] Forcing widget data update - Miles: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles), Streak: \(userManager.currentUser.streak)")

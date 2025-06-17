@@ -47,9 +47,16 @@ struct NotificationSettingsView: View {
         prefs.save()
         // Update daily reminder schedule based on new prefs
         if prefs.dailyReminderEnabled {
-            // Determine if streak completed for today
-            let completed = UserManager().currentUser.isStreakActiveToday
-            notificationService.updateDailyReminder(completed: completed, at: prefs.dailyReminderHour)
+            // Get current health data for smart notification
+            let widgetData = WidgetDataStore.load()
+            
+            // Use smart daily reminder logic
+            notificationService.updateDailyReminder(
+                isCompleted: widgetData.miles >= widgetData.goal,
+                currentMiles: widgetData.miles,
+                goalMiles: widgetData.goal,
+                at: prefs.dailyReminderHour
+            )
         } else {
             // Remove existing reminder
             UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [MADNotificationService.Identifier.dailyReminder])

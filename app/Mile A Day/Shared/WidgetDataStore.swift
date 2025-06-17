@@ -6,6 +6,8 @@ struct WidgetDataStore {
     private static let milesKey = "today_miles_completed"
     private static let goalKey = "daily_goal"
     private static let streakKey = "streak_count"
+    private static let liveWorkoutActiveKey = "live_workout_active"
+    private static let liveWorkoutDistanceKey = "live_workout_distance"
 
     static func save(todayMiles: Double, goal: Double) {
         guard let defaults = UserDefaults(suiteName: suiteName) else { return }
@@ -42,5 +44,21 @@ struct WidgetDataStore {
             return 0
         }
         return defaults.integer(forKey: streakKey)
+    }
+    
+    // MARK: - Live Workout helpers
+    static func saveLiveWorkout(isActive: Bool, currentDistance: Double = 0.0) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        defaults.set(isActive, forKey: liveWorkoutActiveKey)
+        defaults.set(currentDistance, forKey: liveWorkoutDistanceKey)
+    }
+    
+    static func loadLiveWorkout() -> (isActive: Bool, distance: Double) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            return (false, 0.0)
+        }
+        let isActive = defaults.bool(forKey: liveWorkoutActiveKey)
+        let distance = defaults.double(forKey: liveWorkoutDistanceKey)
+        return (isActive, distance)
     }
 } 

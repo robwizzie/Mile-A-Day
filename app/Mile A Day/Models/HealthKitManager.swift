@@ -62,14 +62,17 @@ class HealthKitManager: ObservableObject {
         let now = Date()
         let startOfDay = Calendar.current.startOfDay(for: now)
         
+        // Always use current time for distance calculation
+        let endTime = now
+        
         // Look for both running and walking workouts
         let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
         let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
-        let datePredicate = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: .strictStartDate)
         
         // Combine the predicates to find running or walking workouts from today
         let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
-        let finalPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [compoundPredicate, datePredicate])
+        let todayPredicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endTime, options: .strictStartDate)
+        let finalPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [compoundPredicate, todayPredicate])
         
         let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
         

@@ -23,8 +23,12 @@ struct TodayProgressProvider: TimelineProvider {
         let data = WidgetDataStore.load()
         print("[Widget] Timeline - Miles: \(data.miles), Goal: \(data.goal)")
         let entry = TodayProgressEntry(date: Date(), milesCompleted: data.miles, goal: data.goal, streakCompleted: data.streakCompleted)
-        // Update every 15 minutes to reflect changes quickly, WidgetCenter.reload is also triggered on save
-        let nextRefresh = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date().addingTimeInterval(900)
+        
+        // Check if there might be an active workout to refresh more frequently
+        let isLikelyActiveWorkout = data.miles > 0 && data.miles < data.goal
+        let refreshInterval: TimeInterval = isLikelyActiveWorkout ? 60 : 900 // 1 minute vs 15 minutes
+        
+        let nextRefresh = Date().addingTimeInterval(refreshInterval)
         let timeline = Timeline(entries: [entry], policy: .after(nextRefresh))
         completion(timeline)
     }

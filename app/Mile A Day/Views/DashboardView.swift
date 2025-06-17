@@ -4,6 +4,7 @@ import HealthKit
 struct DashboardView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
+    @ObservedObject var liveWorkoutManager = LiveWorkoutManager.shared
     @EnvironmentObject var notificationService: MADNotificationService
     
     @State private var showConfetti = false
@@ -11,21 +12,39 @@ struct DashboardView: View {
     @State private var newGoalMiles: Double = 1.0
     @State private var isRefreshing = false
     
+    // Computed property for total distance including live workout
+    private var totalCurrentDistance: Double {
+        var total = healthManager.todaysDistance
+        if liveWorkoutManager.isWorkoutActive {
+            total += liveWorkoutManager.currentWorkoutDistance
+        }
+        return total
+    }
+    
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    // Live workout indicator (when active)
+                    if liveWorkoutManager.isWorkoutActive {
+                        LiveWorkoutCard(
+                            workoutType: liveWorkoutManager.currentWorkoutType,
+                            currentDistance: liveWorkoutManager.currentWorkoutDistance,
+                            startTime: liveWorkoutManager.workoutStartTime
+                        )
+                    }
+                    
                     // Streak card
                     StreakCard(streak: userManager.currentUser.streak, 
                               isActiveToday: userManager.currentUser.isStreakActiveToday,
                               isAtRisk: userManager.currentUser.isStreakAtRisk,
                               user: userManager.currentUser)
                     
-                    // Today's progress
+                    // Today's progress (includes live workout distance)
                     TodayProgressCard(
-                        currentDistance: healthManager.todaysDistance,
+                        currentDistance: totalCurrentDistance,
                         goalDistance: userManager.currentUser.goalMiles,
-                        didComplete: healthManager.hasCompletedMileToday(),
+                        didComplete: totalCurrentDistance >= userManager.currentUser.goalMiles,
                         onRefresh: refreshData
                     )
                     
@@ -72,10 +91,11 @@ struct DashboardView: View {
                     }
                 )
             }
-            .onChange(of: healthManager.todaysDistance) { oldValue, newValue in
+            .onChange(of: totalCurrentDistance) { oldValue, newValue in
+                let goalMiles = userManager.currentUser.goalMiles
+                
                 // Show confetti if the user just completed their goal
-                if oldValue < userManager.currentUser.goalMiles && 
-                   newValue >= userManager.currentUser.goalMiles {
+                if oldValue < goalMiles && newValue >= goalMiles {
                     showConfetti = true
                     
                     // Update user stats with comprehensive HealthKit data
@@ -87,9 +107,22 @@ struct DashboardView: View {
                         mostMilesInDay: healthManager.mostMilesInOneDay
                     )
                     
-                    // Send a notification
-                    notificationService.sendMileCompletedNotification()
+                    // Send a notification only if conditions are met
+                    if notificationService.shouldSendCompletionNotification(
+                        currentMiles: newValue,
+                        goalMiles: goalMiles,
+                        previousMiles: oldValue
+                    ) {
+                        notificationService.sendMileCompletedNotification()
+                    }
                 }
+                
+                // Update daily reminder based on current completion status
+                notificationService.updateDailyReminder(
+                    isCompleted: newValue >= goalMiles,
+                    currentMiles: newValue,
+                    goalMiles: goalMiles
+                )
             }
         }
         .confetti(isShowing: $showConfetti)
@@ -674,5 +707,123 @@ struct GoalSettingSheet: View {
                 newGoal = currentGoal
             }
         }
+    }
+}
+
+// MARK: - Live Workout Card Component
+
+struct LiveWorkoutCard: View {
+    let workoutType: HKWorkoutActivityType?
+    let currentDistance: Double
+    let startTime: Date?
+    
+    @State private var elapsedTime: TimeInterval = 0
+    @State private var timer: Timer?
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            // Header with live indicator
+            HStack {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                        .scaleEffect(1.0)
+                        .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: true)
+                    
+                    Text("LIVE WORKOUT")
+                        .font(.caption.bold())
+                        .foregroundColor(.red)
+                }
+                
+                Spacer()
+                
+                Text(workoutType?.name ?? "Workout")
+                    .font(.subheadline.bold())
+                    .foregroundColor(.primary)
+            }
+            
+            // Live metrics
+            HStack(spacing: 32) {
+                // Distance
+                VStack(spacing: 4) {
+                    Text(String(format: "%.2f", currentDistance))
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                    Text("miles")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                // Duration
+                VStack(spacing: 4) {
+                    Text(formatDuration(elapsedTime))
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
+                        .foregroundColor(.primary)
+                    Text("duration")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                // Pace (if distance > 0)
+                if currentDistance > 0.01 {
+                    VStack(spacing: 4) {
+                        Text(formatPace(minutes: elapsedTime / 60 / currentDistance))
+                            .font(.system(size: 16, weight: .medium, design: .rounded))
+                            .foregroundColor(.primary)
+                        Text("pace")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.red.opacity(0.1))
+                .stroke(.red.opacity(0.3), lineWidth: 1)
+        )
+        .onAppear {
+            startTimer()
+        }
+        .onDisappear {
+            stopTimer()
+        }
+    }
+    
+    private func startTimer() {
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            if let start = startTime {
+                elapsedTime = Date().timeIntervalSince(start)
+            }
+        }
+    }
+    
+    private func stopTimer() {
+        timer?.invalidate()
+        timer = nil
+    }
+    
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        let hours = Int(duration) / 3600
+        let minutes = Int(duration) % 3600 / 60
+        let seconds = Int(duration) % 60
+        
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            return String(format: "%d:%02d", minutes, seconds)
+        }
+    }
+    
+    private func formatPace(minutes: Double) -> String {
+        guard minutes > 0 && !minutes.isInfinite else { return "0:00" }
+        
+        let totalSeconds = Int(minutes * 60)
+        let mins = totalSeconds / 60
+        let secs = totalSeconds % 60
+        
+        return String(format: "%d:%02d", mins, secs)
     }
 } 
