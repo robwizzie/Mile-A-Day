@@ -1,0 +1,318 @@
+name: Deploy Lambda Functions and Layers
+
+on:
+    push:
+        branches:
+            - main
+        paths:
+            - 'backend/lambdas/**'
+            - 'backend/layers/**'
+
+jobs:
+    detect-changes:
+        runs-on: ubuntu-latest
+        outputs:
+            changed-lambdas: ${{ steps.changes.outputs.changed-lambdas }}
+            changed-layers: ${{ steps.changes.outputs.changed-layers }}
+            has-lambda-changes: ${{ steps.changes.outputs.has-lambda-changes }}
+            has-layer-changes: ${{ steps.changes.outputs.has-layer-changes }}
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 2
+
+            - name: Detect changes
+              id: changes
+              run: |
+                  set -e
+
+                  CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+                  echo "Changed files:"
+                  echo "$CHANGED_FILES"
+
+                  # Extract changed lambdas and layers
+                  CHANGED_LAMBDAS=$(echo "$CHANGED_FILES" | grep '^backend/lambdas/' | cut -d'/' -f3 | sort -u | grep -v '^$' || true)
+                  CHANGED_LAYERS=$(echo "$CHANGED_FILES" | grep '^backend/layers/' | cut -d'/' -f3 | sort -u | grep -v '^$' || true)
+
+                  # Convert to JSON arrays for matrix strategy
+                  if [ -n "$CHANGED_LAMBDAS" ]; then
+                    LAMBDA_JSON=$(echo "$CHANGED_LAMBDAS" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+                    echo "has-lambda-changes=true" >> $GITHUB_OUTPUT
+                  else
+                    LAMBDA_JSON="[]"
+                    echo "has-lambda-changes=false" >> $GITHUB_OUTPUT
+                  fi
+
+                  if [ -n "$CHANGED_LAYERS" ]; then
+                    LAYER_JSON=$(echo "$CHANGED_LAYERS" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+                    echo "has-layer-changes=true" >> $GITHUB_OUTPUT
+                  else
+                    LAYER_JSON="[]"
+                    echo "has-layer-changes=false" >> $GITHUB_OUTPUT
+                  fi
+
+                  echo "changed-lambdas=$LAMBDA_JSON" >> $GITHUB_OUTPUT
+                  echo "changed-layers=$LAYER_JSON" >> $GITHUB_OUTPUT
+
+                  echo "Lambda changes: $LAMBDA_JSON"
+                  echo "Layer changes: $LAYER_JSON"
+
+    deploy-layers:
+        runs-on: ubuntu-latest
+        needs: detect-changes
+        if: needs.detect-changes.outputs.has-layer-changes == 'true'
+        strategy:
+            matrix:
+                layer: ${{ fromJson(needs.detect-changes.outputs.changed-layers) }}
+            fail-fast: false
+        outputs:
+            layer-versions: ${{ steps.collect-versions.outputs.layer-versions }}
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Configure AWS credentials
+              uses: aws-actions/configure-aws-credentials@v4
+              with:
+                  aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+                  aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+                  aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+            - name: Validate layer directory
+              run: |
+                  set -e
+                  LAYER_PATH="backend/layers/${{ matrix.layer }}"
+
+                  if [ ! -d "$LAYER_PATH" ]; then
+                    echo "Error: Layer directory $LAYER_PATH does not exist"
+                    exit 1
+                  fi
+
+                  echo "Validated layer directory: $LAYER_PATH"
+
+            - name: Package and deploy layer
+              id: deploy-layer
+              run: |
+                  set -e
+
+                  LAYER_NAME="${{ matrix.layer }}"
+                  LAYER_PATH="backend/layers/$LAYER_NAME"
+                  ZIP_FILE="${LAYER_NAME}-layer.zip"
+
+                  echo "Packaging layer: $LAYER_NAME"
+                  cd "$LAYER_PATH"
+                  zip -r "../../../$ZIP_FILE" . -x "*.git*" "*.DS_Store*" "__pycache__/*" "*.pyc"
+                  cd - > /dev/null
+
+                  echo "Publishing layer version..."
+                  LAYER_VERSION=$(aws lambda publish-layer-version \
+                    --layer-name "$LAYER_NAME" \
+                    --zip-file "fileb://$ZIP_FILE" \
+                    --compatible-runtimes python3.9 python3.10 python3.11 python3.12 nodejs18.x nodejs20.x \
+                    --query 'Version' \
+                    --output text)
+
+                  if [ -z "$LAYER_VERSION" ]; then
+                    echo "Error: Failed to get layer version"
+                    exit 1
+                  fi
+
+                  echo "Successfully deployed layer $LAYER_NAME version $LAYER_VERSION"
+                  echo "layer-name=$LAYER_NAME" >> $GITHUB_OUTPUT
+                  echo "layer-version=$LAYER_VERSION" >> $GITHUB_OUTPUT
+
+                  # Create individual artifact file
+                  echo "${LAYER_NAME}:${LAYER_VERSION}" > "layer-version-${LAYER_NAME}.txt"
+
+                  # Cleanup
+                  rm "$ZIP_FILE"
+
+            - name: Upload layer version artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: layer-version-${{ matrix.layer }}
+                  path: layer-version-${{ matrix.layer }}.txt
+                  retention-days: 1
+
+    deploy-lambdas:
+        runs-on: ubuntu-latest
+        needs: [detect-changes, deploy-layers]
+        if: always() && needs.detect-changes.outputs.has-lambda-changes == 'true'
+        strategy:
+            matrix:
+                lambda: ${{ fromJson(needs.detect-changes.outputs.changed-lambdas) }}
+            fail-fast: false
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Configure AWS credentials
+              uses: aws-actions/configure-aws-credentials@v4
+              with:
+                  aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+                  aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+                  aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+            - name: Validate lambda directory
+              run: |
+                  set -e
+                  LAMBDA_PATH="backend/lambdas/${{ matrix.lambda }}"
+                  SRC_PATH="$LAMBDA_PATH/src"
+
+                  if [ ! -d "$SRC_PATH" ]; then
+                    echo "Error: Source directory $SRC_PATH does not exist"
+                    exit 1
+                  fi
+
+                  echo "Validated lambda directory: $SRC_PATH"
+
+            - name: Package and deploy lambda
+              run: |
+                  set -e
+
+                  LAMBDA_NAME="${{ matrix.lambda }}"
+                  LAMBDA_PATH="backend/lambdas/$LAMBDA_NAME"
+                  SRC_PATH="$LAMBDA_PATH/src"
+                  ZIP_FILE="${LAMBDA_NAME}-function.zip"
+
+                  echo "Packaging lambda: $LAMBDA_NAME"
+                  cd "$SRC_PATH"
+                  zip -r "../../../../$ZIP_FILE" . -x "*.git*" "*.DS_Store*" "__pycache__/*" "*.pyc" "tests/*" "*.md"
+                  cd - > /dev/null
+
+                  echo "Checking if lambda function exists..."
+                  if aws lambda get-function --function-name "$LAMBDA_NAME" >/dev/null 2>&1; then
+                    echo "Updating existing lambda function: $LAMBDA_NAME"
+                    aws lambda update-function-code \
+                      --function-name "$LAMBDA_NAME" \
+                      --zip-file "fileb://$ZIP_FILE"
+                    
+                    # Wait for update to complete
+                    echo "Waiting for function update to complete..."
+                    aws lambda wait function-updated --function-name "$LAMBDA_NAME"
+                    echo "Lambda function $LAMBDA_NAME updated successfully"
+                  else
+                    echo "Error: Lambda function $LAMBDA_NAME does not exist. Please create it first."
+                    exit 1
+                  fi
+
+                  # Cleanup
+                  rm "$ZIP_FILE"
+
+    update-lambda-layers:
+        runs-on: ubuntu-latest
+        needs: [detect-changes, deploy-layers, deploy-lambdas]
+        if: always() && needs.deploy-layers.result == 'success' && needs.detect-changes.outputs.has-layer-changes == 'true'
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Configure AWS credentials
+              uses: aws-actions/configure-aws-credentials@v4
+              with:
+                  aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+                  aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+                  aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+            - name: Download all layer version artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  pattern: layer-version-*
+                  merge-multiple: true
+
+            - name: Update lambda functions with new layer versions
+              run: |
+                  set -e
+
+                  # Build associative array of layer versions
+                  declare -A LATEST_LAYER_VERSIONS
+
+                  echo "Processing layer version files..."
+                  for file in layer-version-*.txt; do
+                    if [ -f "$file" ]; then
+                      echo "Reading $file"
+                      while IFS=: read -r NAME VERSION; do
+                        if [ -n "$NAME" ] && [ -n "$VERSION" ]; then
+                          LATEST_LAYER_VERSIONS[$NAME]=$VERSION
+                          echo "Registered layer $NAME with version $VERSION"
+                        fi
+                      done < "$file"
+                    fi
+                  done
+
+                  # Get list of changed layers
+                  CHANGED_LAYERS_JSON='${{ needs.detect-changes.outputs.changed-layers }}'
+                  CHANGED_LAYERS=$(echo "$CHANGED_LAYERS_JSON" | jq -r '.[]')
+
+                  echo "Changed layers: $CHANGED_LAYERS"
+
+                  # Get all lambda functions
+                  echo "Fetching all lambda functions..."
+                  LAMBDA_FUNCTIONS=$(aws lambda list-functions --query 'Functions[].FunctionName' --output text)
+
+                  if [ -z "$LAMBDA_FUNCTIONS" ]; then
+                    echo "No lambda functions found"
+                    exit 0
+                  fi
+
+                  echo "Found lambda functions: $LAMBDA_FUNCTIONS"
+
+                  # Update each function that uses changed layers
+                  for FUNC in $LAMBDA_FUNCTIONS; do
+                    echo "Checking function: $FUNC"
+                    
+                    # Get current layers for this function
+                    CURRENT_LAYERS=$(aws lambda get-function --function-name "$FUNC" --query 'Configuration.Layers[].LayerArn' --output text 2>/dev/null || true)
+                    
+                    if [ -z "$CURRENT_LAYERS" ]; then
+                      echo "Function $FUNC has no layers, skipping"
+                      continue
+                    fi
+
+                    echo "Current layers for $FUNC: $CURRENT_LAYERS"
+                    
+                    UPDATED=false
+                    NEW_LAYER_ARNS=()
+
+                    # Process each current layer
+                    for ARN in $CURRENT_LAYERS; do
+                      # Extract layer name and base ARN
+                      BASE_ARN=$(echo "$ARN" | sed 's/:[0-9]*$//')
+                      LAYER_NAME=$(echo "$ARN" | cut -d':' -f7)
+                      
+                      echo "Processing layer: $LAYER_NAME (ARN: $ARN)"
+
+                      # Check if this layer was changed
+                      if echo "$CHANGED_LAYERS" | grep -qx "$LAYER_NAME"; then
+                        if [ -n "${LATEST_LAYER_VERSIONS[$LAYER_NAME]:-}" ]; then
+                          NEW_ARN="$BASE_ARN:${LATEST_LAYER_VERSIONS[$LAYER_NAME]}"
+                          NEW_LAYER_ARNS+=("$NEW_ARN")
+                          echo "Will update $LAYER_NAME to version ${LATEST_LAYER_VERSIONS[$LAYER_NAME]}"
+                          UPDATED=true
+                        else
+                          echo "Warning: No version found for changed layer $LAYER_NAME, keeping current"
+                          NEW_LAYER_ARNS+=("$ARN")
+                        fi
+                      else
+                        NEW_LAYER_ARNS+=("$ARN")
+                        echo "Layer $LAYER_NAME unchanged, keeping current version"
+                      fi
+                    done
+
+                    # Update function if any layers changed
+                    if [ "$UPDATED" = true ]; then
+                      echo "Updating function $FUNC with new layer versions..."
+                      aws lambda update-function-configuration \
+                        --function-name "$FUNC" \
+                        --layers "${NEW_LAYER_ARNS[@]}"
+                      
+                      echo "Waiting for function configuration update to complete..."
+                      aws lambda wait function-updated --function-name "$FUNC"
+                      echo "Successfully updated function $FUNC"
+                    else
+                      echo "No layer updates needed for function $FUNC"
+                    fi
+                  done
+
+                  echo "Layer update process completed"
