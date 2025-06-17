@@ -1,0 +1,8 @@
+{
+	"httpMethod": "GET",
+	"path": "/my-function",
+	"queryStringParameters": {
+		"param1": "value1"
+	},
+	"body": null
+}
