@@ -24,3 +24,4 @@ export const handler = async event => {
 		body: JSON.stringify(user)
 	};
 };
+// Workflow test
