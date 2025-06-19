@@ -8,6 +8,10 @@ on:
             - 'backend/lambdas/**'
             - 'backend/layers/**'
 
+permissions:
+    id-token: write
+    contents: read
+
 jobs:
     detect-changes:
         runs-on: ubuntu-latest
@@ -62,6 +66,9 @@ jobs:
         runs-on: ubuntu-latest
         needs: detect-changes
         if: needs.detect-changes.outputs.has-layer-changes == 'true'
+        permissions:
+            id-token: write
+            contents: read
         strategy:
             matrix:
                 layer: ${{ fromJson(needs.detect-changes.outputs.changed-layers) }}
@@ -75,8 +82,8 @@ jobs:
             - name: Configure AWS credentials
               uses: aws-actions/configure-aws-credentials@v4
               with:
-                  aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-                  aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+                  role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+                  role-session-name: GitHubActions-DeployLayers
                   aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
             - name: Validate layer directory
@@ -139,6 +146,9 @@ jobs:
         runs-on: ubuntu-latest
         needs: [detect-changes, deploy-layers]
         if: always() && needs.detect-changes.outputs.has-lambda-changes == 'true'
+        permissions:
+            id-token: write
+            contents: read
         strategy:
             matrix:
                 lambda: ${{ fromJson(needs.detect-changes.outputs.changed-lambdas) }}
@@ -150,8 +160,8 @@ jobs:
             - name: Configure AWS credentials
               uses: aws-actions/configure-aws-credentials@v4
               with:
-                  aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-                  aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+                  role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+                  role-session-name: GitHubActions-DeployLambdas
                   aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
             - name: Validate lambda directory
@@ -204,6 +214,9 @@ jobs:
         runs-on: ubuntu-latest
         needs: [detect-changes, deploy-layers, deploy-lambdas]
         if: always() && needs.deploy-layers.result == 'success' && needs.detect-changes.outputs.has-layer-changes == 'true'
+        permissions:
+            id-token: write
+            contents: read
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
@@ -211,8 +224,8 @@ jobs:
             - name: Configure AWS credentials
               uses: aws-actions/configure-aws-credentials@v4
               with:
-                  aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-                  aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+                  role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+                  role-session-name: GitHubActions-UpdateLayers
                   aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
             - name: Download all layer version artifacts
