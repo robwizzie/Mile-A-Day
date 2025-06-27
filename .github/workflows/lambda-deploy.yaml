@@ -84,7 +84,7 @@ jobs:
               with:
                   role-to-assume: ${{ vars.AWS_ROLE_ARN }}
                   role-session-name: GitHubActions-DeployLayers
-                  aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+                  aws-region: ${{ vars.AWS_REGION || 'us-east-2' }}
 
             - name: Validate layer directory
               run: |
@@ -162,7 +162,7 @@ jobs:
               with:
                   role-to-assume: ${{ vars.AWS_ROLE_ARN }}
                   role-session-name: GitHubActions-DeployLambdas
-                  aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+                  aws-region: ${{ vars.AWS_REGION || 'us-east-2' }}
 
             - name: Validate lambda directory
               run: |
@@ -226,7 +226,7 @@ jobs:
               with:
                   role-to-assume: ${{ vars.AWS_ROLE_ARN }}
                   role-session-name: GitHubActions-UpdateLayers
-                  aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+                  aws-region: ${{ vars.AWS_REGION || 'us-east-2' }}
 
             - name: Download all layer version artifacts
               uses: actions/download-artifact@v4
