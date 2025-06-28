@@ -378,7 +378,7 @@ jobs:
                     for ARN in $CURRENT_LAYERS; do
                       # Extract layer name and base ARN
                       BASE_ARN=$(echo "$ARN" | sed 's/:[0-9]*$//')
-                      LAYER_NAME=$(echo "$ARN" | cut -d':' -f6)
+                      LAYER_NAME=$(echo "$ARN" | cut -d':' -f7)
                       
                       echo "Processing layer: $LAYER_NAME (ARN: $ARN)"
 
