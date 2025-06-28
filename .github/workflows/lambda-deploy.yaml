@@ -36,8 +36,8 @@ jobs:
                   echo "$CHANGED_FILES"
 
                   # Extract changed lambdas and layers
-                  CHANGED_LAMBDAS=$(echo "$CHANGED_FILES" | grep '^backend/lambdas/' | cut -d'/' -f3 | sort -u | grep -v '^$' || true)
-                  CHANGED_LAYERS=$(echo "$CHANGED_FILES" | grep '^backend/layers/' | cut -d'/' -f3 | sort -u | grep -v '^$' || true)
+                  CHANGED_LAMBDAS=$(echo "$CHANGED_FILES" | grep '^backend/lambdas/' | cut -d'/' -f3 | sort -u | grep -v '^ || true)
+                  CHANGED_LAYERS=$(echo "$CHANGED_FILES" | grep '^backend/layers/' | cut -d'/' -f3 | sort -u | grep -v '^ || true)
 
                   # Convert to JSON arrays for matrix strategy
                   if [ -n "$CHANGED_LAMBDAS" ]; then
@@ -347,11 +347,25 @@ jobs:
                   for FUNC in $LAMBDA_FUNCTIONS; do
                     echo "Checking function: $FUNC"
                     
-                    # Get current layers for this function
-                    CURRENT_LAYERS=$(aws lambda get-function --function-name "$FUNC" --query 'Configuration.Layers[].LayerArn' --output text 2>/dev/null || true)
+                    # Get current function configuration - more robust approach
+                    echo "=== DEBUG: Getting function configuration ==="
+                    FUNCTION_CONFIG=$(aws lambda get-function --function-name "$FUNC" --query 'Configuration' --output json 2>/dev/null || echo '{}')
+                    echo "Function config: $FUNCTION_CONFIG"
+                    
+                    # Check if layers exist in the configuration
+                    HAS_LAYERS=$(echo "$FUNCTION_CONFIG" | jq -r 'has("Layers")')
+                    echo "Has layers: $HAS_LAYERS"
+                    
+                    if [ "$HAS_LAYERS" = "false" ]; then
+                      echo "Function $FUNC has no layers, skipping"
+                      continue
+                    fi
+                    
+                    # Extract layer ARNs
+                    CURRENT_LAYERS=$(echo "$FUNCTION_CONFIG" | jq -r '.Layers[]?.LayerArn // empty' | tr '\n' ' ')
                     
                     if [ -z "$CURRENT_LAYERS" ]; then
-                      echo "Function $FUNC has no layers, skipping"
+                      echo "Function $FUNC has empty layers array, skipping"
                       continue
                     fi
 
@@ -362,7 +376,7 @@ jobs:
 
                     # Process each current layer
                     for ARN in $CURRENT_LAYERS; do
-                      # Extract layer name and base ARN - FIXED to use field 6 instead of 7
+                      # Extract layer name and base ARN
                       BASE_ARN=$(echo "$ARN" | sed 's/:[0-9]*$//')
                       LAYER_NAME=$(echo "$ARN" | cut -d':' -f6)
                       
