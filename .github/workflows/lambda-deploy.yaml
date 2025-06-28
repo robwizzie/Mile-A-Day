@@ -110,7 +110,7 @@ jobs:
 
                   LAYER_NAME="${{ matrix.layer }}"
                   LAYER_PATH="backend/layers/$LAYER_NAME"
-                  ZIP_FILE="${LAYER_NAME}-layer.zip"
+                  ZIP_FILE="${LAYER_NAME}.zip"
 
                   echo "Building layer: $LAYER_NAME"
                   cd "$LAYER_PATH"
