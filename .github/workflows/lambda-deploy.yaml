@@ -115,12 +115,6 @@ jobs:
                   echo "Building layer: $LAYER_NAME"
                   cd "$LAYER_PATH"
 
-                  # Clean any existing nodejs/node_modules
-                  if [ -d "nodejs/node_modules" ]; then
-                    echo "Cleaning existing node_modules..."
-                    rm -rf nodejs/node_modules
-                  fi
-
                   # Create nodejs directory if it doesn't exist
                   mkdir -p nodejs
 
