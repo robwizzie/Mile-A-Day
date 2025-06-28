@@ -79,6 +79,13 @@ jobs:
             - name: Checkout code
               uses: actions/checkout@v4
 
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '22'
+                  cache: 'npm'
+                  cache-dependency-path: 'backend/layers/${{ matrix.layer }}/package-lock.json'
+
             - name: Configure AWS credentials
               uses: aws-actions/configure-aws-credentials@v4
               with:
@@ -98,7 +105,7 @@ jobs:
 
                   echo "Validated layer directory: $LAYER_PATH"
 
-            - name: Package and deploy layer
+            - name: Build and package layer
               id: deploy-layer
               run: |
                   set -e
@@ -107,16 +114,73 @@ jobs:
                   LAYER_PATH="backend/layers/$LAYER_NAME"
                   ZIP_FILE="${LAYER_NAME}-layer.zip"
 
-                  echo "Packaging layer: $LAYER_NAME"
+                  echo "Building layer: $LAYER_NAME"
                   cd "$LAYER_PATH"
-                  zip -r "../../../$ZIP_FILE" . -x "*.git*" "*.DS_Store*" "__pycache__/*" "*.pyc"
+
+                  # Clean any existing nodejs/node_modules
+                  if [ -d "nodejs/node_modules" ]; then
+                    echo "Cleaning existing node_modules..."
+                    rm -rf nodejs/node_modules
+                  fi
+
+                  # Create nodejs directory if it doesn't exist
+                  mkdir -p nodejs
+
+                  # Install dependencies if package.json exists
+                  if [ -f "package.json" ]; then
+                    echo "Installing npm dependencies..."
+                    npm ci --prefix nodejs --production --no-optional
+                    
+                    # Verify installation
+                    if [ ! -d "nodejs/node_modules" ]; then
+                      echo "Error: npm install failed - no node_modules directory created"
+                      exit 1
+                    fi
+                    
+                    echo "Dependencies installed successfully"
+                    echo "Installed packages:"
+                    ls -la nodejs/node_modules/ | head -20
+                  else
+                    echo "No package.json found, creating layer without external dependencies"
+                  fi
+
+                  # Copy any custom modules from src/ to nodejs/node_modules/
+                  if [ -d "src" ]; then
+                    echo "Copying custom modules from src/ directory..."
+                    for module_dir in src/*/; do
+                      if [ -d "$module_dir" ]; then
+                        module_name=$(basename "$module_dir")
+                        echo "Copying module: $module_name"
+                        mkdir -p "nodejs/node_modules/$module_name"
+                        cp -r "$module_dir"* "nodejs/node_modules/$module_name/"
+                      fi
+                    done
+                  fi
+
+                  # Verify nodejs directory structure
+                  echo "Layer contents:"
+                  find nodejs -type f -name "*.js" -o -name "package.json" | head -20
+
+                  # Create ZIP file excluding development files
+                  echo "Creating ZIP package..."
+                  zip -r "../../../$ZIP_FILE" nodejs/ \
+                    -x "*.git*" "*.DS_Store*" "*__pycache__*" "*.pyc" \
+                       "*/test/*" "*/tests/*" "*/.nyc_output/*" \
+                       "*/coverage/*" "*/*.md" "*/.eslintrc*" \
+                       "*/.gitignore" "*/tsconfig.json"
+
                   cd - > /dev/null
+
+                  # Verify ZIP contents
+                  echo "ZIP file contents (first 20 files):"
+                  unzip -l "$ZIP_FILE" | head -20
 
                   echo "Publishing layer version..."
                   LAYER_VERSION=$(aws lambda publish-layer-version \
                     --layer-name "$LAYER_NAME" \
                     --zip-file "fileb://$ZIP_FILE" \
-                    --compatible-runtimes python3.9 python3.10 python3.11 python3.12 nodejs18.x nodejs20.x \
+                    --compatible-runtimes nodejs22.x \
+                    --description "Node.js 22.x layer: $LAYER_NAME" \
                     --query 'Version' \
                     --output text)
 
@@ -157,6 +221,11 @@ jobs:
             - name: Checkout code
               uses: actions/checkout@v4
 
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '22'
+
             - name: Configure AWS credentials
               uses: aws-actions/configure-aws-credentials@v4
               with:
@@ -188,7 +257,18 @@ jobs:
 
                   echo "Packaging lambda: $LAMBDA_NAME"
                   cd "$SRC_PATH"
-                  zip -r "../../../../$ZIP_FILE" . -x "*.git*" "*.DS_Store*" "__pycache__/*" "*.pyc" "tests/*" "*.md"
+
+                  # Install dependencies if package.json exists in lambda src
+                  if [ -f "package.json" ]; then
+                    echo "Installing lambda dependencies..."
+                    npm ci --production --no-optional
+                  fi
+
+                  zip -r "../../../../$ZIP_FILE" . \
+                    -x "*.git*" "*.DS_Store*" "*__pycache__*" "*.pyc" \
+                       "tests/*" "test/*" "*.md" ".eslintrc*" \
+                       ".gitignore" "tsconfig.json"
+
                   cd - > /dev/null
 
                   echo "Checking if lambda function exists..."
