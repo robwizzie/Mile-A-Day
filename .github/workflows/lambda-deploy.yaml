@@ -36,8 +36,8 @@ jobs:
                   echo "$CHANGED_FILES"
 
                   # Extract changed lambdas and layers
-                  CHANGED_LAMBDAS=$(echo "$CHANGED_FILES" | grep '^backend/lambdas/' | cut -d'/' -f3 | sort -u | grep -v '^ || true)
-                  CHANGED_LAYERS=$(echo "$CHANGED_FILES" | grep '^backend/layers/' | cut -d'/' -f3 | sort -u | grep -v '^ || true)
+                  CHANGED_LAMBDAS=$(echo "$CHANGED_FILES" | grep '^backend/lambdas/' | cut -d'/' -f3 | sort -u | grep -v '^$' || true)
+                  CHANGED_LAYERS=$(echo "$CHANGED_FILES" | grep '^backend/layers/' | cut -d'/' -f3 | sort -u | grep -v '^$' || true)
 
                   # Convert to JSON arrays for matrix strategy
                   if [ -n "$CHANGED_LAMBDAS" ]; then
