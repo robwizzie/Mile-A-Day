@@ -362,7 +362,7 @@ jobs:
                     fi
                     
                     # Extract layer ARNs
-                    CURRENT_LAYERS=$(echo "$FUNCTION_CONFIG" | jq -r '.Layers[]?.LayerArn // empty' | tr '\n' ' ')
+                    CURRENT_LAYERS=$(echo "$FUNCTION_CONFIG" | jq -r '.Layers[]?.Arn // empty' | tr '\n' ' ')
                     
                     if [ -z "$CURRENT_LAYERS" ]; then
                       echo "Function $FUNC has empty layers array, skipping"
