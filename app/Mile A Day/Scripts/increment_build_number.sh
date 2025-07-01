@@ -1,34 +1,33 @@
 #!/bin/bash
 
 # Auto-increment build number script for Mile A Day
-# This script increments the CFBundleVersion in Info.plist
-# Add this to Xcode Build Phases > New Run Script Phase
+# Increments CFBundleVersion each build.
 
 set -e
 
-# Get the Info.plist path
-INFO_PLIST="${BUILT_PRODUCTS_DIR}/${INFOPLIST_PATH}"
-PROJECT_INFO_PLIST="${SRCROOT}/Info.plist"
+# Full path to Info.plist for the current target (handles spaces automatically)
+PLIST_PATH="${PROJECT_DIR}/${INFOPLIST_FILE}"
 
-# If we're in a build environment and have an Info.plist
-if [ -f "${PROJECT_INFO_PLIST}" ]; then
-    # Get current build number
-    BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "${PROJECT_INFO_PLIST}")
-    
-    # Increment build number
-    NEW_BUILD_NUMBER=$((BUILD_NUMBER + 1))
-    
-    # Update build number in Info.plist
-    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${NEW_BUILD_NUMBER}" "${PROJECT_INFO_PLIST}"
-    
-    echo "Build number incremented from ${BUILD_NUMBER} to ${NEW_BUILD_NUMBER}"
-else
-    echo "Info.plist not found at ${PROJECT_INFO_PLIST}"
-    echo "Current directory: $(pwd)"
-    echo "SRCROOT: ${SRCROOT}"
-    echo "Looking for Info.plist in possible locations..."
-    find "${SRCROOT}" -name "Info.plist" -type f
+if [ ! -f "${PLIST_PATH}" ]; then
+  echo "[BuildNumber] ❌ Info.plist not found at path: ${PLIST_PATH}"
+  exit 1
 fi
+
+# Read current build number (defaults to 0 if missing)
+CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "${PLIST_PATH}" 2>/dev/null || echo "0")
+
+# Ensure numeric build number
+if ! [[ "$CURRENT_BUILD" =~ ^[0-9]+$ ]]; then
+  echo "[BuildNumber] ⚠️  Current build (CFBundleVersion) is not numeric: $CURRENT_BUILD. Resetting to 0."
+  CURRENT_BUILD=0
+fi
+
+NEW_BUILD=$((CURRENT_BUILD + 1))
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW_BUILD" "${PLIST_PATH}"
+
+echo "[BuildNumber] ✅ Incremented build number: ${CURRENT_BUILD} -> ${NEW_BUILD}"
+
+exit 0
 
 # Alternative approach using git commit count as build number
 # Uncomment the lines below if you prefer using git commit count

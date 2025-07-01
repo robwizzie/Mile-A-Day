@@ -378,7 +378,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ -f \"${SRCROOT}/Mile-A-Day-Info.plist\" ]; then\n    BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c \"Print CFBundleVersion\" \"${SRCROOT}/Mile-A-Day-Info.plist\")\n    NEW_BUILD_NUMBER=$((BUILD_NUMBER + 1))\n    /usr/libexec/PlistBuddy -c \"Set :CFBundleVersion ${NEW_BUILD_NUMBER}\" \"${SRCROOT}/Mile-A-Day-Info.plist\"\n    echo \"Build number incremented to: ${NEW_BUILD_NUMBER}\"\nfi\n";
+			shellScript = "if [ -f \"${SRCROOT}/Info.plist\" ]; then\n    BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c \"Print CFBundleVersion\" \"${SRCROOT}/Info.plist\")\n    NEW_BUILD_NUMBER=$((BUILD_NUMBER + 1))\n    /usr/libexec/PlistBuddy -c \"Set CFBundleVersion $NEW_BUILD_NUMBER\" \"${SRCROOT}/Info.plist\"\n    echo \"Build number incremented to: $NEW_BUILD_NUMBER\"\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

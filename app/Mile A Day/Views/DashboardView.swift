@@ -47,8 +47,8 @@ struct DashboardView: View {
                     // Enhanced Streak card with live progress
                     StreakCard(
                         streak: userManager.currentUser.streak, 
-                        isActiveToday: userManager.currentUser.isStreakActiveToday,
-                        isAtRisk: userManager.currentUser.isStreakAtRisk,
+                              isActiveToday: userManager.currentUser.isStreakActiveToday,
+                              isAtRisk: userManager.currentUser.isStreakAtRisk,
                         user: userManager.currentUser,
                         liveProgress: currentState.progress,
                         isLiveMode: currentState.isLiveMode,
@@ -335,7 +335,7 @@ struct StreakCard: View {
             return .orange
         }
     }
-
+    
     var body: some View {
         VStack(spacing: 20) {
             // Header with flame icon
@@ -356,13 +356,13 @@ struct StreakCard: View {
                     }
                     
                     Image(systemName: isLiveMode ? "dot.radiowaves.left.and.right" : "flame.fill")
-                        .font(.title2)
+                    .font(.title2)
                         .foregroundColor(streakColor)
                 }
                 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("Current Streak")
+                Text("Current Streak")
                             .font(.headline)
                             .fontWeight(.semibold)
                         
@@ -404,7 +404,7 @@ struct StreakCard: View {
                     .frame(width: 120, height: 120)
                 
                 // Live progress ring (shows goal completion progress)
-                Circle()
+                    Circle()
                     .stroke(Color.gray.opacity(0.2), lineWidth: 4)
                     .frame(width: 130, height: 130)
                 
@@ -445,7 +445,7 @@ struct StreakCard: View {
             
             // Status and time remaining section
             VStack(spacing: 12) {
-                if isActiveToday {
+                    if isActiveToday {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
@@ -458,12 +458,12 @@ struct StreakCard: View {
                     .padding(.vertical, 8)
                     .background(Color.green.opacity(0.1))
                     .cornerRadius(20)
-                } else {
+                    } else {
                     // Time remaining until streak ends
                     VStack(spacing: 8) {
                         HStack(spacing: 8) {
                             Image(systemName: isAtRisk ? "exclamationmark.triangle.fill" : "clock")
-                                .foregroundColor(isAtRisk ? .red : .orange)
+                            .foregroundColor(isAtRisk ? .red : .orange)
                             Text(isAtRisk ? "Streak at risk!" : "Time remaining:")
                                 .font(.subheadline)
                                 .fontWeight(.medium)
@@ -488,10 +488,10 @@ struct StreakCard: View {
                             .padding(.horizontal, 8)
                     }
                 }
+                }
             }
-        }
         .padding(20)
-        .background(
+            .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color(.systemBackground))
                 .shadow(color: streakColor.opacity(0.2), radius: 8, x: 0, y: 4)
@@ -535,8 +535,8 @@ struct TodayProgressCard: View {
                 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("Today's Progress")
-                            .font(.headline)
+                Text("Today's Progress")
+                    .font(.headline)
                         
                         if isLiveMode {
                             HStack(spacing: 4) {
@@ -1065,19 +1065,19 @@ struct LiveWorkoutCard: View {
                 }
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 8, height: 8)
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
                             .scaleEffect(pulseAnimation ? 1.3 : 1.0)
                             .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: pulseAnimation)
-                        
-                        Text("LIVE WORKOUT")
-                            .font(.caption.bold())
-                            .foregroundColor(.red)
-                    }
                     
-                    Text(workoutType?.name ?? "Workout")
+                    Text("LIVE WORKOUT")
+                        .font(.caption.bold())
+                        .foregroundColor(.red)
+                }
+                
+                Text(workoutType?.name ?? "Workout")
                         .font(.headline)
                         .fontWeight(.semibold)
                 }
@@ -1101,7 +1101,7 @@ struct LiveWorkoutCard: View {
                             .frame(width: 70, height: 70)
                         
                         VStack(spacing: 2) {
-                            Text(String(format: "%.2f", currentDistance))
+                    Text(String(format: "%.2f", currentDistance))
                                 .font(.system(size: 18, weight: .bold, design: .rounded))
                                 .foregroundColor(.blue)
                             Text("mi")
@@ -1154,7 +1154,7 @@ struct LiveWorkoutCard: View {
                                 )
                                 .frame(width: 70, height: 70)
                             
-                            Text(formatPace(minutes: elapsedTime / 60 / currentDistance))
+                        Text(formatPace(minutes: elapsedTime / 60 / currentDistance))
                                 .font(.system(size: 12, weight: .bold, design: .rounded))
                                 .foregroundColor(.orange)
                         }

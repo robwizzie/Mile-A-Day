@@ -207,7 +207,7 @@ struct RectangularStreakView: View {
             
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text("Streak")
+                Text("Streak")
                         .font(.caption2)
                         .fontWeight(.medium)
                     
