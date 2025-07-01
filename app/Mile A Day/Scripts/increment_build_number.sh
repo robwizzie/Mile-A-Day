@@ -8,7 +8,7 @@ set -e
 
 # Get the Info.plist path
 INFO_PLIST="${BUILT_PRODUCTS_DIR}/${INFOPLIST_PATH}"
-PROJECT_INFO_PLIST="${SRCROOT}/Mile A Day/Info.plist"
+PROJECT_INFO_PLIST="${SRCROOT}/Info.plist"
 
 # If we're in a build environment and have an Info.plist
 if [ -f "${PROJECT_INFO_PLIST}" ]; then
@@ -24,6 +24,10 @@ if [ -f "${PROJECT_INFO_PLIST}" ]; then
     echo "Build number incremented from ${BUILD_NUMBER} to ${NEW_BUILD_NUMBER}"
 else
     echo "Info.plist not found at ${PROJECT_INFO_PLIST}"
+    echo "Current directory: $(pwd)"
+    echo "SRCROOT: ${SRCROOT}"
+    echo "Looking for Info.plist in possible locations..."
+    find "${SRCROOT}" -name "Info.plist" -type f
 fi
 
 # Alternative approach using git commit count as build number
