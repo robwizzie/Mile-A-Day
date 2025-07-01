@@ -214,7 +214,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = B220463C2DF51EA9006ECF83 /* Build configuration list for PBXNativeTarget "Mile A Day" */;
 			buildPhases = (
-				B28BD74D2E1376E300F2C157 /* Auto Increment Build Number */,
 				B22046172DF51E9A006ECF83 /* Sources */,
 				B22046182DF51E9A006ECF83 /* Frameworks */,
 				B22046192DF51E9A006ECF83 /* Resources */,
@@ -359,28 +358,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		B28BD74D2E1376E300F2C157 /* Auto Increment Build Number */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 12;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-			);
-			name = "Auto Increment Build Number";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "if [ -f \"${SRCROOT}/Info.plist\" ]; then\n    BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c \"Print CFBundleVersion\" \"${SRCROOT}/Info.plist\")\n    NEW_BUILD_NUMBER=$((BUILD_NUMBER + 1))\n    /usr/libexec/PlistBuddy -c \"Set CFBundleVersion $NEW_BUILD_NUMBER\" \"${SRCROOT}/Info.plist\"\n    echo \"Build number incremented to: $NEW_BUILD_NUMBER\"\nfi\n";
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		B218EEDE2DFCD67F00E19230 /* Sources */ = {
