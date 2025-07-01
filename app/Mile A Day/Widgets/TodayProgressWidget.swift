@@ -6,27 +6,52 @@ struct TodayProgressEntry: TimelineEntry {
     let milesCompleted: Double
     let goal: Double
     let streakCompleted: Bool
+    let progress: Double // Pre-calculated progress capped at 1.0
+    let totalDistance: Double // Include live workout distance
 }
 
 struct TodayProgressProvider: TimelineProvider {
     func placeholder(in context: Context) -> TodayProgressEntry {
-        TodayProgressEntry(date: Date(), milesCompleted: 0.5, goal: 1.0, streakCompleted: false)
+        TodayProgressEntry(
+            date: Date(), 
+            milesCompleted: 0.5, 
+            goal: 1.0, 
+            streakCompleted: false,
+            progress: 0.5,
+            totalDistance: 0.5
+        )
     }
 
     func getSnapshot(in context: Context, completion: @escaping (TodayProgressEntry) -> Void) {
         let data = WidgetDataStore.load()
-        print("[Widget] Snapshot - Miles: \(data.miles), Goal: \(data.goal)")
-        completion(TodayProgressEntry(date: Date(), milesCompleted: data.miles, goal: data.goal, streakCompleted: data.streakCompleted))
+        print("[Widget] Snapshot - Base Miles: \(data.miles), Total: \(data.totalDistance), Goal: \(data.goal), Progress: \(data.progress * 100)%")
+        completion(TodayProgressEntry(
+            date: Date(), 
+            milesCompleted: data.miles, 
+            goal: data.goal, 
+            streakCompleted: data.streakCompleted,
+            progress: data.progress,
+            totalDistance: data.totalDistance
+        ))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<TodayProgressEntry>) -> Void) {
         let data = WidgetDataStore.load()
-        print("[Widget] Timeline - Miles: \(data.miles), Goal: \(data.goal)")
-        let entry = TodayProgressEntry(date: Date(), milesCompleted: data.miles, goal: data.goal, streakCompleted: data.streakCompleted)
+        let liveData = WidgetDataStore.loadLiveWorkout()
         
-        // Check if there might be an active workout to refresh more frequently
-        let isLikelyActiveWorkout = data.miles > 0 && data.miles < data.goal
-        let refreshInterval: TimeInterval = isLikelyActiveWorkout ? 60 : 900 // 1 minute vs 15 minutes
+        print("[Widget] Timeline - Base Miles: \(data.miles), Total: \(data.totalDistance), Goal: \(data.goal), Progress: \(data.progress * 100)%, Live Active: \(liveData.isActive)")
+        
+        let entry = TodayProgressEntry(
+            date: Date(), 
+            milesCompleted: data.miles, 
+            goal: data.goal, 
+            streakCompleted: data.streakCompleted,
+            progress: data.progress,
+            totalDistance: data.totalDistance
+        )
+        
+        // Refresh much more frequently for live workouts - every 15 seconds for true real-time
+        let refreshInterval: TimeInterval = liveData.isActive ? 15 : (data.streakCompleted ? 900 : 60) // 15s live, 1min incomplete, 15min completed
         
         let nextRefresh = Date().addingTimeInterval(refreshInterval)
         let timeline = Timeline(entries: [entry], policy: .after(nextRefresh))
@@ -37,26 +62,45 @@ struct TodayProgressProvider: TimelineProvider {
 struct TodayProgressWidgetEntryView: View {
     var entry: TodayProgressProvider.Entry
 
-    var progress: Double {
-        guard entry.goal > 0 else { return 0 }
-        return entry.milesCompleted / entry.goal
-    }
-
     var body: some View {
         Group {
             if #available(iOS 16.0, *) {
                 switch widgetFamily {
                 case .accessoryCircular:
-                    CircularProgressView(progress: progress, milesCompleted: entry.milesCompleted, goal: entry.goal, streakCompleted: entry.streakCompleted)
+                    CircularProgressView(
+                        progress: entry.progress,
+                        milesCompleted: entry.totalDistance,
+                        goal: entry.goal,
+                        streakCompleted: entry.streakCompleted
+                    )
                 case .accessoryRectangular:
-                    RectangularProgressView(progress: progress, milesCompleted: entry.milesCompleted, goal: entry.goal, streakCompleted: entry.streakCompleted)
+                    RectangularProgressView(
+                        progress: entry.progress,
+                        milesCompleted: entry.totalDistance,
+                        goal: entry.goal,
+                        streakCompleted: entry.streakCompleted
+                    )
                 case .accessoryInline:
-                    InlineProgressView(milesCompleted: entry.milesCompleted, goal: entry.goal, streakCompleted: entry.streakCompleted)
+                    InlineProgressView(
+                        milesCompleted: entry.totalDistance,
+                        goal: entry.goal,
+                        streakCompleted: entry.streakCompleted
+                    )
                 default:
-                    HomeScreenProgressView(progress: progress, milesCompleted: entry.milesCompleted, goal: entry.goal, streakCompleted: entry.streakCompleted)
+                    HomeScreenProgressView(
+                        progress: entry.progress,
+                        milesCompleted: entry.totalDistance,
+                        goal: entry.goal,
+                        streakCompleted: entry.streakCompleted
+                    )
                 }
             } else {
-                HomeScreenProgressView(progress: progress, milesCompleted: entry.milesCompleted, goal: entry.goal, streakCompleted: entry.streakCompleted)
+                HomeScreenProgressView(
+                    progress: entry.progress,
+                    milesCompleted: entry.totalDistance,
+                    goal: entry.goal,
+                    streakCompleted: entry.streakCompleted
+                )
             }
         }
     }
@@ -80,9 +124,9 @@ struct CircularProgressView: View {
                 .fill(streakCompleted ? Color.orange : Color.clear)
                 .stroke(Color.secondary.opacity(0.3), lineWidth: 2)
             
-            // Progress circle
+            // Progress circle - Always capped at 100%
             Circle()
-                .trim(from: 0, to: min(progress, 1.0))
+                .trim(from: 0, to: progress) // progress is already capped at 1.0
                 .stroke(streakCompleted ? Color.green : Color("appPrimary"), style: StrokeStyle(lineWidth: 4, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .scaleEffect(0.8)
@@ -128,7 +172,7 @@ struct RectangularProgressView: View {
                     
                     RoundedRectangle(cornerRadius: 2)
                         .fill(streakCompleted ? Color.green : Color("appPrimary"))
-                        .frame(width: CGFloat(progress) * geometry.size.width, height: 4)
+                        .frame(width: progress * geometry.size.width, height: 4) // progress already capped
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 2))
             }
@@ -148,6 +192,10 @@ struct InlineProgressView: View {
             Image(systemName: "figure.run")
             Text(String(format: "%.2f/%.1f mi", milesCompleted, goal))
                 .fontWeight(.medium)
+            if streakCompleted {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+            }
         }
     }
 }
@@ -170,9 +218,13 @@ struct HomeScreenProgressView: View {
                     .font(.headline)
                     .fontWeight(.semibold)
                 Spacer()
+                if streakCompleted {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                }
             }
             
-            // Progress Bar
+            // Progress Bar - Always capped at 100%
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 8)
@@ -181,7 +233,7 @@ struct HomeScreenProgressView: View {
                     
                     RoundedRectangle(cornerRadius: 8)
                         .fill(streakCompleted ? Color.green : Color("appPrimary"))
-                        .frame(width: CGFloat(progress) * geometry.size.width, height: 16)
+                        .frame(width: progress * geometry.size.width, height: 16) // progress already capped
                         .animation(.easeInOut, value: progress)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -202,13 +254,14 @@ struct HomeScreenProgressView: View {
                     .fontWeight(.bold)
             }
             
-            // Status
+            // Status or remaining distance
             if streakCompleted {
-                Label("Goal complete!", systemImage: "star.fill")
+                Label("Goal Complete!", systemImage: "star.fill")
                     .foregroundColor(.green)
                     .font(.caption)
             } else {
-                Text(String(format: "%.2f mi to go", max(goal - milesCompleted, 0)))
+                let remaining = max(goal - milesCompleted, 0.0)
+                Text(String(format: "%.2f mi to go", remaining))
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -217,8 +270,10 @@ struct HomeScreenProgressView: View {
     }
 }
 
+// MARK: - Widget Configuration
+
 struct TodayProgressWidget: Widget {
-    let kind = "TodayProgressWidget"
+    let kind: String = "TodayProgressWidget"
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: TodayProgressProvider()) { entry in
@@ -226,13 +281,13 @@ struct TodayProgressWidget: Widget {
                 .containerBackground(.fill.tertiary, for: .widget)
         }
         .configurationDisplayName("Today's Progress")
-        .description("Track your mile progress for today.")
-        .supportedFamilies([.systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline])
+        .description("Track your daily mile progress.")
+        .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline])
     }
 }
 
 #Preview(as: .systemSmall) {
     TodayProgressWidget()
 } timeline: {
-    TodayProgressEntry(date: .now, milesCompleted: 0.2, goal: 1.0, streakCompleted: false)
+    TodayProgressEntry(date: .now, milesCompleted: 0.2, goal: 1.0, streakCompleted: false, progress: 0.2, totalDistance: 0.2)
 } 

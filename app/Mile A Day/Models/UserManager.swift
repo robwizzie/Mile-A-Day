@@ -21,7 +21,7 @@ class UserManager: ObservableObject {
         
         // Initialize widget data store with current values
         let currentMiles = WidgetDataStore.load().miles
-        WidgetDataStore.save(todayMiles: currentMiles, goal: currentUser.goalMiles)
+        WidgetDataStore.save(todayMiles: currentMiles, goal: currentUser.goalMiles, liveWorkoutDistance: 0.0)
         WidgetDataStore.save(streak: currentUser.streak)
         
         // Load friends
@@ -80,6 +80,10 @@ class UserManager: ObservableObject {
     // Set user's daily goal
     func setDailyGoal(miles: Double) {
         currentUser.goalMiles = miles
+        
+        // Update widget data with new goal
+        let currentData = WidgetDataStore.load()
+        WidgetDataStore.save(todayMiles: currentData.miles, goal: miles, liveWorkoutDistance: 0.0)
         saveUserData()
         let currentMiles = WidgetDataStore.load().miles
         WidgetDataStore.save(todayMiles: currentMiles, goal: miles)

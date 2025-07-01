@@ -87,7 +87,10 @@ class HealthKitManager: ObservableObject {
                     self?.todaysDistance = 0.0
                     // Get current goal from widget store or default to 1.0
                     let currentGoal = WidgetDataStore.load().goal
-                    WidgetDataStore.save(todayMiles: 0, goal: currentGoal > 0 ? currentGoal : 1.0)
+                    let safeGoal = currentGoal > 0 ? currentGoal : 1.0
+                    
+                    // Use unified progress calculation
+                    WidgetDataStore.save(todayMiles: 0, goal: safeGoal, liveWorkoutDistance: 0.0)
                 }
                 return
             }
@@ -107,7 +110,10 @@ class HealthKitManager: ObservableObject {
                 self.recentWorkouts = workouts
                 // Get current goal from widget store or default to 1.0
                 let currentGoal = WidgetDataStore.load().goal
-                WidgetDataStore.save(todayMiles: totalMiles, goal: currentGoal > 0 ? currentGoal : 1.0)
+                let safeGoal = currentGoal > 0 ? currentGoal : 1.0
+                
+                // Use unified progress calculation - no live workout distance here since this is base HealthKit data
+                WidgetDataStore.save(todayMiles: totalMiles, goal: safeGoal, liveWorkoutDistance: 0.0)
             }
         }
         

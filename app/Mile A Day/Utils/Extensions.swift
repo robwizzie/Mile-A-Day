@@ -30,16 +30,21 @@ extension View {
 extension Double {
     // Format miles with appropriate decimal places
     var milesFormatted: String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.maximumFractionDigits = 2
-        formatter.minimumFractionDigits = 0
-        
-        if let formattedValue = formatter.string(from: NSNumber(value: self)) {
-            return "\(formattedValue) \(self == 1.0 ? "mile" : "miles")"
+        if self >= 1.0 {
+            return String(format: "%.2f mi", self)
+        } else {
+            return String(format: "%.2f mi", self)
         }
-        
-        return "\(self) miles"
+    }
+    
+    var kmFormatted: String {
+        let km = self * 1.60934
+        return String(format: "%.2f km", km)
+    }
+    
+    var metersFormatted: String {
+        let meters = self * 1609.34
+        return String(format: "%.0f m", meters)
     }
 }
 
@@ -98,5 +103,48 @@ extension HKWorkout {
         let seconds = Int((minutesPerMile - Double(minutes)) * 60)
         
         return String(format: "%d:%02d /mi", minutes, seconds)
+    }
+}
+
+// MARK: - Progress Calculation Utilities
+
+/// Unified progress calculation system to ensure 1-to-1 synchronization
+/// between Apple Fitness tracking and MAD tracking
+struct ProgressCalculator {
+    
+    /// Calculates progress percentage, ensuring it never exceeds 100%
+    /// - Parameters:
+    ///   - current: Current distance completed
+    ///   - goal: Goal distance
+    /// - Returns: Progress value between 0.0 and 1.0
+    static func calculateProgress(current: Double, goal: Double) -> Double {
+        guard goal > 0 else { return 0.0 }
+        return min(current / goal, 1.0)
+    }
+    
+    /// Determines if the goal has been completed
+    /// - Parameters:
+    ///   - current: Current distance completed
+    ///   - goal: Goal distance
+    /// - Returns: True if goal is completed (current >= goal)
+    static func isGoalCompleted(current: Double, goal: Double) -> Bool {
+        return current >= goal
+    }
+    
+    /// Calculates remaining distance to goal
+    /// - Parameters:
+    ///   - current: Current distance completed
+    ///   - goal: Goal distance
+    /// - Returns: Remaining distance (0 if goal is completed)
+    static func remainingDistance(current: Double, goal: Double) -> Double {
+        return max(goal - current, 0.0)
+    }
+    
+    /// Formats progress percentage for display
+    /// - Parameter progress: Progress value between 0.0 and 1.0
+    /// - Returns: Formatted percentage string
+    static func formatProgress(_ progress: Double) -> String {
+        let percentage = Int(progress * 100)
+        return "\(percentage)%"
     }
 } 

@@ -1,9 +1,11 @@
 import Foundation
 import HealthKit
 import WidgetKit
+import BackgroundTasks
+import UIKit
 
-/// Manages real-time workout tracking using periodic HealthKit queries
-/// Provides live updates during active workouts for iOS apps
+/// Manages real-time workout tracking with perfect synchronization
+/// Provides live updates across all app components and widgets
 final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable {
     static let shared = LiveWorkoutManager()
     
@@ -14,37 +16,43 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
     @Published var currentWorkoutDistance: Double = 0.0
     @Published var currentWorkoutType: HKWorkoutActivityType?
     @Published var workoutStartTime: Date?
+    @Published var liveProgress: Double = 0.0 // Real-time progress percentage
+    @Published var isGoalReached: Bool = false // Real-time goal status
     
-    // Monitoring timer
+    // Real-time monitoring with increased frequency
     private var monitoringTimer: Timer?
-    private var lastKnownWorkoutCount = 0
+    private var lastUpdateTime: Date = Date()
+    private var backgroundTaskIdentifier: UIBackgroundTaskIdentifier = UIBackgroundTaskIdentifier.invalid
     
     private override init() {
         super.init()
+        setupBackgroundNotifications()
     }
     
     // MARK: - Public API
     
-    /// Initialize live workout monitoring
+    /// Start real-time workout monitoring with background support
     func startLiveWorkoutMonitoring() {
-        print("[LiveWorkout] Starting live workout monitoring...")
-        startPeriodicChecking()
+        print("[LiveWorkout] Starting REAL-TIME workout monitoring with background support...")
+        startRealTimeMonitoring()
+        requestBackgroundProcessing()
     }
     
     /// Stop live workout monitoring
     func stopLiveWorkoutMonitoring() {
-        print("[LiveWorkout] Stopping live workout monitoring...")
-        stopPeriodicChecking()
+        print("[LiveWorkout] Stopping real-time workout monitoring...")
+        stopRealTimeMonitoring()
+        endBackgroundTask()
         Task { @MainActor in
             cleanupWorkoutSession()
         }
     }
     
-    // MARK: - Timer-Based Monitoring
+    // MARK: - Real-Time Monitoring (2-second intervals)
     
-    private func startPeriodicChecking() {
-        // Check every 10 seconds for new workouts
-        monitoringTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { @Sendable [weak self] _ in
+    private func startRealTimeMonitoring() {
+        // Check every 2 seconds for TRUE real-time updates
+        monitoringTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { @Sendable [weak self] _ in
             Task {
                 await self?.checkForActiveWorkouts()
             }
@@ -56,28 +64,72 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
         }
     }
     
-    private func stopPeriodicChecking() {
+    private func stopRealTimeMonitoring() {
         monitoringTimer?.invalidate()
         monitoringTimer = nil
     }
     
-    // MARK: - Workout Detection
+    // MARK: - Background Processing Support
+    
+    private func setupBackgroundNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
+    
+    @objc private func appDidEnterBackground() {
+        if isWorkoutActive {
+            requestBackgroundProcessing()
+        }
+    }
+    
+    @objc private func appWillEnterForeground() {
+        endBackgroundTask()
+        if isWorkoutActive {
+            startRealTimeMonitoring()
+        }
+    }
+    
+    private func requestBackgroundProcessing() {
+        backgroundTaskIdentifier = UIApplication.shared.beginBackgroundTask(withName: "LiveWorkoutTracking") {
+            self.endBackgroundTask()
+        }
+    }
+    
+    private func endBackgroundTask() {
+        if backgroundTaskIdentifier != UIBackgroundTaskIdentifier.invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTaskIdentifier)
+            backgroundTaskIdentifier = UIBackgroundTaskIdentifier.invalid
+        }
+    }
+    
+    // MARK: - Enhanced Workout Detection
     
     private func checkForActiveWorkouts() async {
         let now = Date()
-        let fiveMinutesAgo = now.addingTimeInterval(-300)
+        let threeMinutesAgo = now.addingTimeInterval(-180) // Reduced window for more recent data
         
         let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
         let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
         let typePredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
-        let datePredicate = HKQuery.predicateForSamples(withStart: fiveMinutesAgo, end: now, options: .strictStartDate)
+        let datePredicate = HKQuery.predicateForSamples(withStart: threeMinutesAgo, end: now, options: .strictStartDate)
         let workoutPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [typePredicate, datePredicate])
         
         return await withCheckedContinuation { continuation in
             let query = HKSampleQuery(
                 sampleType: HKObjectType.workoutType(),
                 predicate: workoutPredicate,
-                limit: 5,
+                limit: 3,
                 sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)]
             ) { @Sendable [weak self] _, samples, error in
                 guard let self = self, let workouts = samples as? [HKWorkout] else {
@@ -98,16 +150,16 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
     
     @MainActor
     private func processRecentWorkouts(_ workouts: [HKWorkout], currentTime: Date) {
-        // Look for workouts that started recently and might still be active
-        let potentialActiveWorkouts = workouts.filter { workout in
+        // Look for workouts that are currently active (very recent end times)
+        let activeWorkouts = workouts.filter { workout in
             let timeSinceStart = currentTime.timeIntervalSince(workout.startDate)
             let timeSinceEnd = currentTime.timeIntervalSince(workout.endDate)
             
-            // Consider active if started within 2 hours and ended within 30 seconds (still updating)
-            return timeSinceStart < 7200 && timeSinceEnd < 30
+            // Consider active if started within 3 hours and ended within 5 seconds (still updating)
+            return timeSinceStart < 10800 && timeSinceEnd < 5
         }
         
-        if let activeWorkout = potentialActiveWorkouts.first {
+        if let activeWorkout = activeWorkouts.first {
             handleActiveWorkout(activeWorkout)
         } else if isWorkoutActive {
             // No active workout found, cleanup
@@ -118,6 +170,8 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
     @MainActor
     private func handleActiveWorkout(_ workout: HKWorkout) {
         let wasActive = isWorkoutActive
+        let previousDistance = currentWorkoutDistance
+        let previousProgress = liveProgress
         
         isWorkoutActive = true
         currentWorkoutType = workout.workoutActivityType
@@ -127,11 +181,23 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
             currentWorkoutDistance = distance.doubleValue(for: HKUnit.mile())
         }
         
+        // Calculate real-time progress and goal status
+        let baseMiles = getTodaysBaseMiles()
+        let totalDistance = baseMiles + currentWorkoutDistance
+        let goal = getCurrentGoal()
+        
+        liveProgress = ProgressCalculator.calculateProgress(current: totalDistance, goal: goal)
+        isGoalReached = ProgressCalculator.isGoalCompleted(current: totalDistance, goal: goal)
+        
+        // Log significant changes
         if !wasActive {
-            print("[LiveWorkout] Started tracking active \(workout.workoutActivityType.name) workout")
+            print("[LiveWorkout] 🔴 LIVE MODE ACTIVATED - \(workout.workoutActivityType.name)")
+        } else if abs(currentWorkoutDistance - previousDistance) > 0.005 || abs(liveProgress - previousProgress) > 0.01 {
+            print("[LiveWorkout] 📊 REAL-TIME UPDATE - Distance: \(String(format: "%.3f", currentWorkoutDistance)), Progress: \(String(format: "%.1f", liveProgress * 100))%")
         }
         
-        updateLiveWorkoutData()
+        // Update all components in real-time
+        updateAllComponentsRealTime()
     }
     
     @MainActor
@@ -142,41 +208,83 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
         currentWorkoutType = nil
         workoutStartTime = nil
         currentWorkoutDistance = 0.0
+        liveProgress = 0.0
+        isGoalReached = false
         
         if wasActive {
-            print("[LiveWorkout] Workout session ended")
-            // Clear live workout state from widgets
-            WidgetDataStore.saveLiveWorkout(isActive: false, currentDistance: 0.0)
-            
-            // Final widget update
-            WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
-            WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+            print("[LiveWorkout] 🔴 LIVE MODE DEACTIVATED - Finalizing data")
+            // Final update to clear live state
+            updateAllComponentsRealTime()
         }
     }
     
-    // MARK: - Live Data Updates
+    // MARK: - Real-Time Component Updates
     
     @MainActor
-    private func updateLiveWorkoutData() {
-        // Calculate total miles for today (including current workout)
-        let existingMiles = getTodaysCompletedMiles()
-        let totalMilesForToday = existingMiles + currentWorkoutDistance
+    private func updateAllComponentsRealTime() {
+        let baseMiles = getTodaysBaseMiles()
+        let goal = getCurrentGoal()
         
-        print("[LiveWorkout] Updating live data - Current workout: \(currentWorkoutDistance), Total today: \(totalMilesForToday)")
-        
-        // Update widget data store with live data
-        let goalMiles = WidgetDataStore.load().goal
-        WidgetDataStore.save(todayMiles: totalMilesForToday, goal: goalMiles)
+        // Update widget data store with real-time data
+        WidgetDataStore.save(todayMiles: baseMiles, goal: goal, liveWorkoutDistance: currentWorkoutDistance)
         WidgetDataStore.saveLiveWorkout(isActive: isWorkoutActive, currentDistance: currentWorkoutDistance)
         
-        // Reload widgets to show live updates
+        // Force immediate widget updates for live data
         WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
         WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+        
+        // Update last update time
+        lastUpdateTime = Date()
     }
     
-    private func getTodaysCompletedMiles() -> Double {
-        // Return a simple baseline - this will be refined by the HealthKitManager
-        return WidgetDataStore.load().miles
+    private func getTodaysBaseMiles() -> Double {
+        let data = WidgetDataStore.load()
+        return data.miles
+    }
+    
+    private func getCurrentGoal() -> Double {
+        let data = WidgetDataStore.load()
+        return data.goal > 0 ? data.goal : 1.0
+    }
+    
+    // MARK: - Public State Access for Real-Time UI
+    
+    /// Get current total distance including live workout
+    func getCurrentTotalDistance() -> Double {
+        return getTodaysBaseMiles() + (isWorkoutActive ? currentWorkoutDistance : 0.0)
+    }
+    
+    /// Get real-time progress percentage (0.0 to 1.0)
+    func getCurrentProgress() -> Double {
+        if isWorkoutActive {
+            return liveProgress
+        }
+        let totalDistance = getCurrentTotalDistance()
+        let goal = getCurrentGoal()
+        return ProgressCalculator.calculateProgress(current: totalDistance, goal: goal)
+    }
+    
+    /// Check if goal is currently completed
+    func isCurrentGoalCompleted() -> Bool {
+        if isWorkoutActive {
+            return isGoalReached
+        }
+        let totalDistance = getCurrentTotalDistance()
+        let goal = getCurrentGoal()
+        return ProgressCalculator.isGoalCompleted(current: totalDistance, goal: goal)
+    }
+    
+    /// Get live workout state for UI components
+    func getLiveWorkoutState() -> (isActive: Bool, distance: Double, progress: Double, goalReached: Bool) {
+        return (isWorkoutActive, currentWorkoutDistance, liveProgress, isGoalReached)
+    }
+    
+    // MARK: - Cleanup
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        stopRealTimeMonitoring()
+        endBackgroundTask()
     }
 }
 

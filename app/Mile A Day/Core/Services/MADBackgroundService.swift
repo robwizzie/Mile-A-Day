@@ -248,7 +248,7 @@ final class MADBackgroundService: NSObject, ObservableObject {
                 print("[Background] Including live workout distance: \(liveWorkoutManager.currentWorkoutDistance)")
             }
             
-            WidgetDataStore.save(todayMiles: miles, goal: user.goalMiles)
+                            WidgetDataStore.save(todayMiles: miles, goal: user.goalMiles, liveWorkoutDistance: 0.0)
             WidgetDataStore.save(streak: user.streak)
             
             print("[Background] Widgets updated - Miles: \(miles), Goal: \(user.goalMiles), Streak: \(user.streak)")
