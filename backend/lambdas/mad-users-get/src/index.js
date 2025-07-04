@@ -1,4 +1,5 @@
 import { userDB } from './mock-data.js';
+import { query } from 'db-controller';
 
 export const handler = async event => {
 	const userId = event.pathParameters.userId;
