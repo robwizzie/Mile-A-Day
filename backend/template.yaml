@@ -12,11 +12,19 @@ Resources:
         Properties:
             CodeUri: lambdas/mad-users-get/src/
             Handler: index.handler
-            # Layers:
-            #   - !Ref MyLayer
+            Layers:
+                - !Ref DbControllerLayer
             Events:
                 Api:
                     Type: Api
                     Properties:
                         Path: /users/{userId}
                         Method: get
+
+    DbControllerLayer:
+        Type: AWS::Serverless::LayerVersion
+        Properties:
+            LayerName: mad-database-layer
+            ContentUri: layers/mad-database-layer
+            CompatibleRuntimes:
+                - nodejs22.x

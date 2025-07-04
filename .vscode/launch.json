@@ -7,7 +7,7 @@
 			"name": "Lambda: mad-users-get",
 			"invokeTarget": {
 				"target": "api",
-				"templatePath": "${workspaceFolder}/template.yaml",
+				"templatePath": "${workspaceFolder}/backend/template.yaml",
 				"logicalId": "UsersGet"
 			},
 			"api": {
