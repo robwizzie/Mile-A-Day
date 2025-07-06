@@ -1,5 +1,6 @@
 import { query } from 'db-controller';
 
+// Force rebuild (delete later)
 export const handler = async event => {
 	try {
 		const userId = event.pathParameters.userId;
