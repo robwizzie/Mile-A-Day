@@ -118,51 +118,57 @@ jobs:
 
                   mkdir -p nodejs
 
+                  # Clean previous installs if they exist
+                  rm -rf nodejs/node_modules
+
+                  # Install dependencies if package.json exists
                   if [ -f "nodejs/package.json" ]; then
-                    echo "Installing npm dependencies for layer..."
+                    echo "Installing npm dependencies for layer (nodejs/package.json)..."
                     cat nodejs/package.json
                     cd nodejs
                     if [ -f "package-lock.json" ]; then
-                      echo "Found package-lock.json, using npm ci..."
                       npm ci --omit=dev --omit=optional
                     else
-                      echo "No package-lock.json found, using npm install..."
                       npm install --omit=dev --omit=optional
                     fi
                     cd ..
-                    if [ ! -d "nodejs/node_modules" ]; then
-                      echo "Error: npm install failed"
-                      ls -la nodejs/
-                      exit 1
-                    fi
                   elif [ -f "package.json" ]; then
-                    echo "Found package.json in root, copying to nodejs directory..."
+                    echo "Found package.json in root, copying to nodejs/"
                     cp package.json nodejs/
                     [ -f "package-lock.json" ] && cp package-lock.json nodejs/
+
                     cd nodejs
-                    [ -f "package-lock.json" ] && npm ci --omit=dev --omit=optional || npm install --omit=dev --omit=optional
-                    cd ..
-                    if [ ! -d "nodejs/node_modules" ]; then
-                      echo "Error: npm install failed"
-                      ls -la nodejs/
-                      exit 1
+                    rm -rf node_modules
+                    if [ -f "package-lock.json" ]; then
+                      npm ci --omit=dev --omit=optional
+                    else
+                      npm install --omit=dev --omit=optional
                     fi
+                    cd ..
                   else
-                    echo "No package.json found, skipping npm install"
+                    echo "No package.json found. Skipping dependency install."
                   fi
 
+                  # Copy custom modules from src/
                   if [ -d "src" ]; then
                     echo "Copying custom modules from src/"
-                    for module_dir in src/*/; do
-                      [ -d "$module_dir" ] || continue
-                      module_name=$(basename "$module_dir")
-                      mkdir -p "nodejs/node_modules/$module_name"
-                      cp -r "$module_dir"* "nodejs/node_modules/$module_name/"
+                    ls -la src/
+
+                    for module_dir in src/*; do
+                      if [ -d "$module_dir" ]; then
+                        module_name=$(basename "$module_dir")
+                        echo "Copying module: $module_name"
+                        mkdir -p "nodejs/node_modules/$module_name"
+                        cp -r "$module_dir/"* "nodejs/node_modules/$module_name/"
+                      fi
                     done
+
+                    echo "Custom module structure after copy:"
+                    find nodejs/node_modules -type f | grep db-controller || echo "No db-controller content found"
                   fi
 
-                  echo "Layer contents:"
-                  find nodejs -type f -name "*.js" -o -name "package.json" | head -20
+                  echo "Final node_modules contents:"
+                  ls -la nodejs/node_modules/
 
                   echo "Creating ZIP package..."
                   zip -r "$ABSOLUTE_ZIP_PATH" nodejs/ \
@@ -173,8 +179,8 @@ jobs:
 
                   cd - > /dev/null
 
-                  echo "ZIP file contents (first 20 files):"
-                  unzip -l "$ABSOLUTE_ZIP_PATH" | head -20
+                  echo "Confirming zipped module presence:"
+                  unzip -l "$ABSOLUTE_ZIP_PATH" | grep db-controller || echo "db-controller not found in ZIP"
 
                   echo "Publishing layer version..."
                   LAYER_VERSION=$(aws lambda publish-layer-version \
