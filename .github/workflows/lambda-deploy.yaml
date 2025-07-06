@@ -225,18 +225,40 @@ jobs:
                   role-session-name: GitHubActions-DeployLambdas
                   aws-region: ${{ vars.AWS_REGION || 'us-east-2' }}
 
-            - name: Validate lambda directory
+            - name: Validate lambda directory and determine structure
+              id: validate-lambda
               run: |
                   set -e
                   LAMBDA_PATH="backend/lambdas/${{ matrix.lambda }}"
                   SRC_PATH="$LAMBDA_PATH/src"
 
-                  if [ ! -d "$SRC_PATH" ]; then
-                    echo "Error: Source directory $SRC_PATH does not exist"
+                  # Check if lambda directory exists
+                  if [ ! -d "$LAMBDA_PATH" ]; then
+                    echo "Error: Lambda directory $LAMBDA_PATH does not exist"
                     exit 1
                   fi
 
-                  echo "Validated lambda directory: $SRC_PATH"
+                  # Determine if using src/ structure or root structure
+                  if [ -d "$SRC_PATH" ]; then
+                    echo "Using src/ structure for lambda ${{ matrix.lambda }}"
+                    echo "source-path=$SRC_PATH" >> $GITHUB_OUTPUT
+                    echo "use-src-structure=true" >> $GITHUB_OUTPUT
+                  else
+                    # Check if there are source files directly in the lambda directory
+                    if find "$LAMBDA_PATH" -maxdepth 1 -name "*.js" -o -name "*.mjs" -o -name "*.ts" -o -name "index.*" | grep -q .; then
+                      echo "Using root structure for lambda ${{ matrix.lambda }}"
+                      echo "source-path=$LAMBDA_PATH" >> $GITHUB_OUTPUT
+                      echo "use-src-structure=false" >> $GITHUB_OUTPUT
+                    else
+                      echo "Error: No source files found in $LAMBDA_PATH or $SRC_PATH"
+                      echo "Expected either:"
+                      echo "  - Source files directly in $LAMBDA_PATH, or"
+                      echo "  - Source files in $SRC_PATH"
+                      exit 1
+                    fi
+                  fi
+
+                  echo "Validated lambda directory structure"
 
             - name: Package and deploy lambda
               run: |
@@ -244,24 +266,50 @@ jobs:
 
                   LAMBDA_NAME="${{ matrix.lambda }}"
                   LAMBDA_PATH="backend/lambdas/$LAMBDA_NAME"
-                  SRC_PATH="$LAMBDA_PATH/src"
+                  SOURCE_PATH="${{ steps.validate-lambda.outputs.source-path }}"
+                  USE_SRC_STRUCTURE="${{ steps.validate-lambda.outputs.use-src-structure }}"
                   ZIP_FILE="${LAMBDA_NAME}-function.zip"
 
                   echo "Packaging lambda: $LAMBDA_NAME"
-                  cd "$SRC_PATH"
+                  echo "Source path: $SOURCE_PATH"
+                  echo "Using src structure: $USE_SRC_STRUCTURE"
 
-                  # Install dependencies if package.json exists in lambda src
+                  cd "$SOURCE_PATH"
+
+                  # Install dependencies if package.json exists in the source directory
                   if [ -f "package.json" ]; then
                     echo "Installing lambda dependencies..."
                     npm ci --production --no-optional
+                    
+                    # Verify installation
+                    if [ ! -d "node_modules" ]; then
+                      echo "Warning: npm install completed but no node_modules directory found"
+                    else
+                      echo "Dependencies installed successfully"
+                    fi
+                  else
+                    echo "No package.json found in source directory"
                   fi
 
-                  zip -r "../../../../$ZIP_FILE" . \
+                  # Calculate the relative path back to the root for the ZIP file
+                  if [ "$USE_SRC_STRUCTURE" = "true" ]; then
+                    ZIP_PATH="../../../../$ZIP_FILE"
+                  else
+                    ZIP_PATH="../../../$ZIP_FILE"
+                  fi
+
+                  # Create ZIP file with all source files
+                  echo "Creating ZIP package from $SOURCE_PATH..."
+                  zip -r "$ZIP_PATH" . \
                     -x "*.git*" "*.DS_Store*" "*__pycache__*" "*.pyc" \
                        "tests/*" "test/*" "*.md" ".eslintrc*" \
-                       ".gitignore" "tsconfig.json"
+                       ".gitignore" "tsconfig.json" "*.test.js" "*.spec.js"
 
                   cd - > /dev/null
+
+                  # Verify ZIP contents
+                  echo "ZIP file contents (first 20 files):"
+                  unzip -l "$ZIP_FILE" | head -20
 
                   echo "Checking if lambda function exists..."
                   if aws lambda get-function --function-name "$LAMBDA_NAME" >/dev/null 2>&1; then

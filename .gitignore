@@ -3,3 +3,6 @@
 /backend/layers/*/nodejs/node_modules/*
 
 !/backend/layers/mad-database-layer/nodejs/node_modules/db-controller
+
+env.json
+env-sam.json

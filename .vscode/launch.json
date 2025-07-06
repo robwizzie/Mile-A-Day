@@ -13,6 +13,32 @@
 			"api": {
 				"path": "/users/rob",
 				"httpMethod": "get"
+			},
+			"sam": {
+				"localArguments": ["--container-env-vars", "${workspaceFolder}/backend/env.json"]
+			}
+		},
+		{
+			"type": "aws-sam",
+			"request": "direct-invoke",
+			"name": "Lambda: mad-users-post",
+			"invokeTarget": {
+				"target": "api",
+				"templatePath": "${workspaceFolder}/backend/template.yaml",
+				"logicalId": "UsersPost"
+			},
+			"api": {
+				"path": "/users/",
+				"httpMethod": "post",
+				"payload": {
+					"json": {
+						"username": "Dave",
+						"apple_id": "davidsimmerman@icloud.com"
+					}
+				}
+			},
+			"sam": {
+				"localArguments": ["--container-env-vars", "${workspaceFolder}/backend/env.json"]
 			}
 		}
 	]
