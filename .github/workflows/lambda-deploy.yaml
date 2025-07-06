@@ -112,6 +112,9 @@ jobs:
                   LAYER_PATH="backend/layers/$LAYER_NAME"
                   ZIP_FILE="${LAYER_NAME}.zip"
 
+                  # Store the absolute path to the ZIP file
+                  ABSOLUTE_ZIP_PATH="$(pwd)/$ZIP_FILE"
+
                   echo "Building layer: $LAYER_NAME"
                   cd "$LAYER_PATH"
 
@@ -210,12 +213,13 @@ jobs:
 
                   # Create ZIP file excluding development files
                   echo "Creating ZIP package..."
-                  zip -r "../../../$ZIP_FILE" nodejs/ \
+                  zip -r "$ABSOLUTE_ZIP_PATH" nodejs/ \
                     -x "*.git*" "*.DS_Store*" "*__pycache__*" "*.pyc" \
                        "*/test/*" "*/tests/*" "*/.nyc_output/*" \
                        "*/coverage/*" "*/*.md" "*/.eslintrc*" \
                        "*/.gitignore" "*/tsconfig.json"
 
+                  # Return to original directory
                   cd - > /dev/null
 
                   # Verify ZIP contents
