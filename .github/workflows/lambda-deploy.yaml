@@ -118,14 +118,69 @@ jobs:
                   # Create nodejs directory if it doesn't exist
                   mkdir -p nodejs
 
-                  # Install dependencies if package.json exists
-                  if [ -f "package.json" ]; then
-                    echo "Installing npm dependencies..."
-                    npm ci --prefix nodejs --production --no-optional
+                  # Install dependencies if package.json exists in nodejs directory
+                  if [ -f "nodejs/package.json" ]; then
+                    echo "Installing npm dependencies for layer..."
+                    echo "Layer package.json contents:"
+                    cat nodejs/package.json
+                    
+                    cd nodejs
+                    
+                    # Check if package-lock.json exists
+                    if [ -f "package-lock.json" ]; then
+                      echo "Found package-lock.json, using npm ci..."
+                      npm ci --omit=dev --omit=optional
+                    else
+                      echo "No package-lock.json found, using npm install..."
+                      npm install --omit=dev --omit=optional
+                    fi
+                    
+                    cd ..
                     
                     # Verify installation
                     if [ ! -d "nodejs/node_modules" ]; then
                       echo "Error: npm install failed - no node_modules directory created"
+                      echo "Contents of nodejs directory:"
+                      ls -la nodejs/
+                      exit 1
+                    fi
+                    
+                    echo "Dependencies installed successfully"
+                    echo "Installed packages:"
+                    ls -la nodejs/node_modules/ | head -20
+                    
+                  elif [ -f "package.json" ]; then
+                    echo "Found package.json in root, copying to nodejs directory..."
+                    echo "Layer package.json contents:"
+                    cat package.json
+                    
+                    # Copy package.json to nodejs directory
+                    cp package.json nodejs/
+                    
+                    # Check if package-lock.json exists and copy it too
+                    if [ -f "package-lock.json" ]; then
+                      echo "Found package-lock.json, copying to nodejs directory..."
+                      cp package-lock.json nodejs/
+                    fi
+                    
+                    cd nodejs
+                    
+                    # Install dependencies
+                    if [ -f "package-lock.json" ]; then
+                      echo "Running npm ci in nodejs directory..."
+                      npm ci --omit=dev --omit=optional
+                    else
+                      echo "Running npm install in nodejs directory..."
+                      npm install --omit=dev --omit=optional
+                    fi
+                    
+                    cd ..
+                    
+                    # Verify installation
+                    if [ ! -d "nodejs/node_modules" ]; then
+                      echo "Error: npm install failed - no node_modules directory created"
+                      echo "Contents of nodejs directory:"
+                      ls -la nodejs/
                       exit 1
                     fi
                     
@@ -133,7 +188,7 @@ jobs:
                     echo "Installed packages:"
                     ls -la nodejs/node_modules/ | head -20
                   else
-                    echo "No package.json found, creating layer without external dependencies"
+                    echo "No package.json found in root or nodejs directory, creating layer without external dependencies"
                   fi
 
                   # Copy any custom modules from src/ to nodejs/node_modules/

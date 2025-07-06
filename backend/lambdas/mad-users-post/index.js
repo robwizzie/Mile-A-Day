@@ -3,7 +3,6 @@ import crypto from 'node:crypto';
 
 const REQUIRED_KEYS = ['apple_id', 'username'];
 
-// Force rebuild (delete later)
 export const handler = async event => {
 	try {
 		const body = JSON.parse(event.body);
