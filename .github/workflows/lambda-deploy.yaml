@@ -279,13 +279,23 @@ jobs:
                   # Install dependencies if package.json exists in the source directory
                   if [ -f "package.json" ]; then
                     echo "Installing lambda dependencies..."
-                    npm ci --production --no-optional
+                    
+                    # Use npm ci if package-lock.json exists, otherwise use npm install
+                    if [ -f "package-lock.json" ]; then
+                      echo "Found package-lock.json, using npm ci..."
+                      npm ci --omit=dev --omit=optional
+                    else
+                      echo "No package-lock.json found, using npm install..."
+                      npm install --omit=dev --omit=optional
+                    fi
                     
                     # Verify installation
                     if [ ! -d "node_modules" ]; then
                       echo "Warning: npm install completed but no node_modules directory found"
                     else
                       echo "Dependencies installed successfully"
+                      echo "Installed packages:"
+                      ls -la node_modules/ 2>/dev/null | head -10 || echo "Could not list node_modules contents"
                     fi
                   else
                     echo "No package.json found in source directory"
