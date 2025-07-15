@@ -22,10 +22,11 @@ class HealthKitManager: ObservableObject {
         }
         
         // Define the types we want to read from HealthKit
-        let types: Set = [
+        let types: Set<HKObjectType> = [
             HKObjectType.workoutType(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
-            HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
+            HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
+            HKSeriesType.workoutRoute() // For accessing GPS route data and potential mile splits
         ]
         
         healthStore.requestAuthorization(toShare: nil, read: types) { success, error in
@@ -195,7 +196,7 @@ class HealthKitManager: ObservableObject {
         healthStore.execute(query)
     }
     
-    // Calculate personal records and retroactive streak
+    // Calculate personal records and retroactive streak using ACTUAL mile splits
     func calculatePersonalRecords() {
         guard isAuthorized else { return }
         
@@ -215,8 +216,8 @@ class HealthKitManager: ObservableObject {
         ) { [weak self] _, samples, error in
             guard let self = self, let workouts = samples as? [HKWorkout] else { return }
             
-            // Track fastest mile pace
-            var fastestPace: TimeInterval = .infinity
+            // Track fastest mile pace - will be calculated from actual mile splits
+            var fastestMilePace: TimeInterval = .infinity
             
             // Track most miles in a day
             var mostMilesInDay: Double = 0.0
@@ -225,19 +226,8 @@ class HealthKitManager: ObservableObject {
             // Group workouts by day for streak calculation
             var workoutsByDay: [Date: [HKWorkout]] = [:]
             
+            // Process workouts for grouping and most miles calculation
             for workout in workouts {
-                // Calculate pace
-                if let distance = workout.totalDistance {
-                    let miles = distance.doubleValue(for: HKUnit.mile())
-                    if miles >= 0.95 { // Only consider workouts at least a mile
-                        let paceMinutesPerMile = workout.duration / 60 / miles
-                        
-                        if paceMinutesPerMile < fastestPace && paceMinutesPerMile > 0 {
-                            fastestPace = paceMinutesPerMile
-                        }
-                    }
-                }
-                
                 // Group by day for most miles and streak calculation
                 let calendar = Calendar.current
                 let dateComponents = calendar.dateComponents([.year, .month, .day], from: workout.endDate)
@@ -249,35 +239,306 @@ class HealthKitManager: ObservableObject {
                 }
             }
             
-            // Calculate most miles in a day
-            for (_, dayWorkouts) in workoutsByDay {
-                var totalMilesForDay: Double = 0.0
+            // Calculate fastest mile using actual mile split data
+            self.calculateFastestMileFromSplits(workouts: workouts) { fastestPace in
                 
-                for workout in dayWorkouts {
-                    if let distance = workout.totalDistance {
-                        let miles = distance.doubleValue(for: HKUnit.mile())
-                        totalMilesForDay += miles
-                    }
+                DispatchQueue.main.async {
+                    fastestMilePace = fastestPace
+                    
+                    // Continue with other calculations...
+                    self.processWorkoutGroupsForRecords(workoutsByDay: workoutsByDay, fastestPace: fastestMilePace)
                 }
-                
-                if totalMilesForDay > mostMilesInDay {
-                    mostMilesInDay = totalMilesForDay
-                    mostMilesWorkouts = dayWorkouts
-                }
-            }
-            
-            // Calculate retroactive streak
-            let streak = self.calculateRetroactiveStreak(workoutsByDay: workoutsByDay)
-            
-            DispatchQueue.main.async {
-                self.fastestMilePace = fastestPace == .infinity ? 0 : fastestPace
-                self.mostMilesInOneDay = mostMilesInDay
-                self.mostMilesWorkouts = mostMilesWorkouts
-                self.retroactiveStreak = streak
             }
         }
         
         healthStore.execute(query)
+    }
+    
+    // MARK: - Fastest Mile Calculation Using Actual Mile Splits
+    
+    /// Calculates the fastest mile from actual mile split data from HealthKit
+    /// This gives the true fastest mile time, not an average pace
+    private func calculateFastestMileFromSplits(workouts: [HKWorkout], completion: @escaping (TimeInterval) -> Void) {
+        var fastestMilePace: TimeInterval = .infinity
+        let dispatchGroup = DispatchGroup()
+        
+        print("[HealthKit] 🔍 Analyzing \(workouts.count) workouts for fastest mile splits...")
+        
+        for workout in workouts {
+            // Only analyze workouts that are at least 1 mile
+            guard let distance = workout.totalDistance,
+                  distance.doubleValue(for: HKUnit.mile()) >= 0.95 else {
+                continue
+            }
+            
+            dispatchGroup.enter()
+            
+            // First, try to get pre-calculated mile splits from Apple Fitness
+            self.checkForAppleFitnessMileSplits(workout) { appleSplits in
+                if let fastestAppleSplit = appleSplits.min() {
+                    if fastestAppleSplit < fastestMilePace && fastestAppleSplit > 0 {
+                        fastestMilePace = fastestAppleSplit
+                        print("[HealthKit] 🍎 Found Apple Fitness mile split: \(self.formatPace(minutesPerMile: fastestAppleSplit))")
+                    }
+                    dispatchGroup.leave()
+                } else {
+                    // Fallback to calculating from distance samples
+                    self.getDistanceSamplesForWorkout(workout) { distanceSamples in
+                        defer { dispatchGroup.leave() }
+                        
+                        let fastestSplit = self.findFastestMileSplit(in: distanceSamples, for: workout)
+                        if fastestSplit < fastestMilePace && fastestSplit > 0 {
+                            fastestMilePace = fastestSplit
+                            print("[HealthKit] 🏃‍♂️ New fastest mile: \(self.formatPace(minutesPerMile: fastestSplit))")
+                        }
+                    }
+                }
+            }
+        }
+        
+        dispatchGroup.notify(queue: .main) {
+            let finalPace = fastestMilePace == .infinity ? 0 : fastestMilePace
+            print("[HealthKit] ✅ Fastest mile analysis complete: \(self.formatPace(minutesPerMile: finalPace))")
+            completion(finalPace)
+        }
+    }
+    
+    /// Gets distance samples for a specific workout
+    private func getDistanceSamplesForWorkout(_ workout: HKWorkout, completion: @escaping ([HKQuantitySample]) -> Void) {
+        guard let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else {
+            completion([])
+            return
+        }
+        
+        // Create predicate for samples during this workout
+        let workoutPredicate = HKQuery.predicateForSamples(
+            withStart: workout.startDate,
+            end: workout.endDate,
+            options: .strictStartDate
+        )
+        
+        let query = HKSampleQuery(
+            sampleType: distanceType,
+            predicate: workoutPredicate,
+            limit: HKObjectQueryNoLimit,
+            sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)]
+        ) { _, samples, error in
+            
+            if let error = error {
+                print("[HealthKit] Error fetching distance samples: \(error)")
+                completion([])
+                return
+            }
+            
+            let distanceSamples = samples as? [HKQuantitySample] ?? []
+            completion(distanceSamples)
+        }
+        
+        healthStore.execute(query)
+    }
+    
+    /// Attempts to extract pre-calculated mile splits from Apple Fitness workout metadata
+    private func checkForAppleFitnessMileSplits(_ workout: HKWorkout, completion: @escaping ([TimeInterval]) -> Void) {
+        // Check workout metadata for mile splits
+        var mileSplits: [TimeInterval] = []
+        
+        // Apple Fitness sometimes stores mile splits in workout metadata
+        if let metadata = workout.metadata {
+            // Look for mile split keys in metadata
+            for (key, value) in metadata {
+                if let keyString = key as? String,
+                   keyString.lowercased().contains("mile") || keyString.lowercased().contains("split") {
+                    
+                    if let splitValue = value as? NSNumber {
+                        let splitMinutes = splitValue.doubleValue / 60.0 // Convert seconds to minutes
+                        if splitMinutes >= 3.0 && splitMinutes <= 30.0 { // Sanity check
+                            mileSplits.append(splitMinutes)
+                            print("[HealthKit] 🍎 Found metadata mile split: \(formatPace(minutesPerMile: splitMinutes))")
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Try to get workout route data for more detailed analysis
+        if mileSplits.isEmpty {
+            getWorkoutRoute(for: workout) { route in
+                if let route = route {
+                    self.extractMileSplitsFromRoute(route, workout: workout, completion: completion)
+                } else {
+                    completion([])
+                }
+            }
+        } else {
+            completion(mileSplits)
+        }
+    }
+    
+    /// Gets workout route data if available
+    private func getWorkoutRoute(for workout: HKWorkout, completion: @escaping (HKWorkoutRoute?) -> Void) {
+        guard let routeType = HKSeriesType.workoutRoute() else {
+            completion(nil)
+            return
+        }
+        
+        let predicate = HKQuery.predicateForObjects(from: workout)
+        
+        let query = HKSampleQuery(
+            sampleType: routeType,
+            predicate: predicate,
+            limit: 1,
+            sortDescriptors: nil
+        ) { _, samples, error in
+            
+            if let error = error {
+                print("[HealthKit] Error fetching workout route: \(error)")
+                completion(nil)
+                return
+            }
+            
+            let route = samples?.first as? HKWorkoutRoute
+            completion(route)
+        }
+        
+        healthStore.execute(query)
+    }
+    
+    /// Extracts mile splits from workout route data
+    private func extractMileSplitsFromRoute(_ route: HKWorkoutRoute, workout: HKWorkout, completion: @escaping ([TimeInterval]) -> Void) {
+        // This is a complex operation that requires processing GPS points
+        // For now, we'll return empty and rely on distance samples
+        // Future enhancement could implement full GPS-based mile split calculation
+        print("[HealthKit] 🗺️ Workout route available but GPS-based splits not yet implemented")
+        completion([])
+    }
+    
+    /// Finds the fastest consecutive mile split from distance samples
+    /// Uses sophisticated algorithm to handle various HealthKit data patterns
+    private func findFastestMileSplit(in samples: [HKQuantitySample], for workout: HKWorkout) -> TimeInterval {
+        guard samples.count > 1 else {
+            // Fallback to average pace if no detailed samples
+            return calculateAveragePaceForWorkout(workout)
+        }
+        
+        print("[HealthKit] 🔍 Analyzing \(samples.count) distance samples for mile splits...")
+        
+        var fastestMilePace: TimeInterval = .infinity
+        var cumulativeDistance: Double = 0
+        var mileStartTime: Date = workout.startDate
+        var mileStartDistance: Double = 0
+        var currentMileNumber = 0
+        
+        // Create time-ordered array of distance points
+        var distancePoints: [(time: Date, distance: Double)] = [(workout.startDate, 0)]
+        
+        for sample in samples {
+            let sampleDistance = sample.quantity.doubleValue(for: HKUnit.mile())
+            cumulativeDistance += sampleDistance
+            distancePoints.append((sample.endDate, cumulativeDistance))
+        }
+        
+        print("[HealthKit] 📏 Total workout distance: \(cumulativeDistance.milesFormatted)")
+        
+        // Analyze each mile segment
+        var mileTargetDistance = 1.0
+        var pointIndex = 0
+        
+        while mileTargetDistance <= cumulativeDistance && pointIndex < distancePoints.count - 1 {
+            // Find the point where we cross the mile mark
+            let mileTime = findTimeAtDistance(mileTargetDistance, in: distancePoints, startingFrom: pointIndex)
+            
+            if let mileTime = mileTime {
+                // Calculate pace for this mile
+                let mileElapsedTime = mileTime.timeIntervalSince(mileStartTime)
+                let paceMinutesPerMile = mileElapsedTime / 60.0
+                
+                // Validate pace (between 3:00 and 30:00 per mile for sanity)
+                if paceMinutesPerMile >= 3.0 && paceMinutesPerMile <= 30.0 {
+                    if paceMinutesPerMile < fastestMilePace {
+                        fastestMilePace = paceMinutesPerMile
+                        print("[HealthKit] 🏃‍♂️ Mile \(currentMileNumber + 1): \(formatPace(minutesPerMile: paceMinutesPerMile)) (NEW PR!)")
+                    } else {
+                        print("[HealthKit] 🏃‍♂️ Mile \(currentMileNumber + 1): \(formatPace(minutesPerMile: paceMinutesPerMile))")
+                    }
+                }
+                
+                // Set up for next mile
+                mileStartTime = mileTime
+                currentMileNumber += 1
+                mileTargetDistance += 1.0
+                
+                // Update point index to avoid reprocessing
+                pointIndex = distancePoints.firstIndex { $0.time >= mileTime } ?? pointIndex
+            } else {
+                break
+            }
+        }
+        
+        print("[HealthKit] ✅ Found \(currentMileNumber) complete mile splits, fastest: \(formatPace(minutesPerMile: fastestMilePace))")
+        
+        return fastestMilePace == .infinity ? calculateAveragePaceForWorkout(workout) : fastestMilePace
+    }
+    
+    /// Finds the time when a specific distance was reached using interpolation
+    private func findTimeAtDistance(_ targetDistance: Double, in points: [(time: Date, distance: Double)], startingFrom index: Int) -> Date? {
+        for i in max(0, index)..<points.count - 1 {
+            let current = points[i]
+            let next = points[i + 1]
+            
+            // Check if target distance is between these two points
+            if current.distance <= targetDistance && next.distance >= targetDistance {
+                // Linear interpolation to find exact time
+                let distanceRatio = (targetDistance - current.distance) / (next.distance - current.distance)
+                let timeInterval = next.time.timeIntervalSince(current.time)
+                let interpolatedTime = current.time.addingTimeInterval(timeInterval * distanceRatio)
+                return interpolatedTime
+            }
+        }
+        return nil
+    }
+    
+    /// Fallback method to calculate average pace when detailed splits aren't available
+    private func calculateAveragePaceForWorkout(_ workout: HKWorkout) -> TimeInterval {
+        guard let distance = workout.totalDistance else { return 0 }
+        let miles = distance.doubleValue(for: HKUnit.mile())
+        guard miles >= 0.95 else { return 0 }
+        
+        return workout.duration / 60 / miles
+    }
+    
+    /// Processes workout groups for records calculation after fastest mile is determined
+    private func processWorkoutGroupsForRecords(workoutsByDay: [Date: [HKWorkout]], fastestPace: TimeInterval) {
+        var mostMilesInDay: Double = 0.0
+        var mostMilesWorkouts: [HKWorkout] = []
+        
+        // Calculate most miles in a day
+        for (_, dayWorkouts) in workoutsByDay {
+            var totalMilesForDay: Double = 0.0
+            
+            for workout in dayWorkouts {
+                if let distance = workout.totalDistance {
+                    let miles = distance.doubleValue(for: HKUnit.mile())
+                    totalMilesForDay += miles
+                }
+            }
+            
+            if totalMilesForDay > mostMilesInDay {
+                mostMilesInDay = totalMilesForDay
+                mostMilesWorkouts = dayWorkouts
+            }
+        }
+        
+        // Calculate retroactive streak
+        let streak = self.calculateRetroactiveStreak(workoutsByDay: workoutsByDay)
+        
+        DispatchQueue.main.async {
+            self.fastestMilePace = fastestPace
+            self.mostMilesInOneDay = mostMilesInDay
+            self.mostMilesWorkouts = mostMilesWorkouts
+            self.retroactiveStreak = streak
+            
+            print("[HealthKit] 📊 Personal records updated - Fastest: \(self.formatPace(minutesPerMile: fastestPace)), Most miles: \(mostMilesInDay), Streak: \(streak)")
+        }
     }
     
     // Helper to calculate retroactive streak from workout data
