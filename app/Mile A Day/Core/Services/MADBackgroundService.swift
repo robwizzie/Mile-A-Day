@@ -105,20 +105,15 @@ final class MADBackgroundService: NSObject, ObservableObject {
             print("[Background] Widget data was repaired during background refresh")
         }
         
+        // Set expiration handler with ALL necessary cleanup (fixed: was assigned twice)
         task.expirationHandler = {
-            print("[Background] Background task expired, cleaning up...")
+            print("[Background] Background task expired, performing cleanup...")
             self.liveWorkoutManager.stopLiveWorkoutMonitoring()
             task.setTaskCompleted(success: false)
         }
         
         // Schedule the next background refresh
         scheduleBackgroundRefresh()
-        
-        // Set expiration handler
-        task.expirationHandler = {
-            print("[Background] Background task expired")
-            task.setTaskCompleted(success: false)
-        }
         
         // Perform the background work
         Task { [weak self] in
