@@ -36,7 +36,7 @@ struct StreakCountProvider: TimelineProvider {
         let currentHour = Calendar.current.component(.hour, from: Date())
         let isAtRisk = currentHour >= 18 && !isGoalCompleted
         
-        print("[Streak Widget] Snapshot - Streak: \(streak), Progress: \(progress * 100)%, Live: \(isLiveMode), Completed: \(isGoalCompleted)")
+        print("[Streak Widget] Snapshot - Streak: \(streak), Progress: \(Int(progress * 100))%, Live: \(isLiveMode), Completed: \(isGoalCompleted)")
         
         completion(StreakCountEntry(
             date: Date(), 
@@ -62,7 +62,7 @@ struct StreakCountProvider: TimelineProvider {
         let currentHour = Calendar.current.component(.hour, from: Date())
         let isAtRisk = currentHour >= 18 && !isGoalCompleted
         
-        print("[Streak Widget] Timeline - Streak: \(streak), Progress: \(progress * 100)%, Live: \(isLiveMode), Completed: \(isGoalCompleted)")
+        print("[Streak Widget] Timeline - Streak: \(streak), Progress: \(Int(progress * 100))%, Live: \(isLiveMode), Completed: \(isGoalCompleted)")
         
         let entry = StreakCountEntry(
             date: Date(), 
@@ -74,7 +74,7 @@ struct StreakCountProvider: TimelineProvider {
         )
         
         // Refresh more frequently for live mode, otherwise hourly
-        let refreshInterval: TimeInterval = isLiveMode ? 30 : 3600
+        let refreshInterval: TimeInterval = isLiveMode ? 15 : 3600
         let nextRefresh = Date().addingTimeInterval(refreshInterval)
         completion(Timeline(entries: [entry], policy: .after(nextRefresh)))
     }

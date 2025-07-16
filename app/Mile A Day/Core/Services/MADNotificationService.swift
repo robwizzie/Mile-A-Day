@@ -64,8 +64,22 @@ final class MADNotificationService: NSObject, ObservableObject {
     // MARK: - Scheduling Helpers
 
     /// Immediately sends a local notification celebrating mile completion.
-    /// Prevents duplicate notifications for the same day.
+    /// Prevents duplicate notifications for the same day with enhanced data validation.
     func sendMileCompletedNotification() {
+        // Enhanced validation - check data consistency first
+        let currentState = WidgetDataStore.getCurrentState()
+        
+        // Verify data is fresh and goal is actually completed
+        if currentState.dataAge > 60 { // Data older than 1 minute
+            print("[Notifications] ⚠️ Skipping notification - data is stale (\(Int(currentState.dataAge))s old)")
+            return
+        }
+        
+        if !currentState.isCompleted {
+            print("[Notifications] ⚠️ Skipping notification - goal not actually completed according to current state")
+            return
+        }
+        
         // Check if we already sent a notification today
         if let lastDate = lastCompletionNotificationDate,
            Calendar.current.isDate(lastDate, inSameDayAs: Date()) {
@@ -84,7 +98,7 @@ final class MADNotificationService: NSObject, ObservableObject {
         lastCompletionNotificationDate = Date()
         userDefaults.set(lastCompletionNotificationDate, forKey: lastNotificationKey)
         
-        print("[Notifications] Sent mile completion notification")
+        print("[Notifications] ✅ Sent mile completion notification (validated: \(currentState.totalDistance.milesFormatted))")
     }
 
     /// Sends a local push announcing a friend's mile completion.
@@ -108,7 +122,13 @@ final class MADNotificationService: NSObject, ObservableObject {
         // Remove any pending daily reminder first
         center.removePendingNotificationRequests(withIdentifiers: [Identifier.dailyReminder])
         
-        print("[Notifications] Updating daily reminder - Completed: \(isCompleted), Miles: \(currentMiles)/\(goalMiles)")
+        // Use validated data from widget store for consistency
+        let currentState = WidgetDataStore.getCurrentState()
+        let validatedCompleted = currentState.isCompleted
+        let validatedMiles = currentState.totalDistance
+        let validatedGoal = currentState.goal
+        
+        print("[Notifications] Updating daily reminder - Completed: \(validatedCompleted), Miles: \(validatedMiles.milesFormatted)/\(validatedGoal.milesFormatted) (validated)")
         
         var dateComponents = DateComponents()
         dateComponents.hour = hour
@@ -119,7 +139,7 @@ final class MADNotificationService: NSObject, ObservableObject {
         let content = UNMutableNotificationContent()
         content.sound = .default
         
-        if isCompleted {
+        if validatedCompleted {
             // Congratulatory message - only schedule for tomorrow and beyond
             content.title = "Way to go!"
             content.body = "You crushed your mile today. See you tomorrow at the start line!"

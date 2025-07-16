@@ -22,10 +22,18 @@ struct Mile_A_DayApp: App {
         // Register background tasks when app launches
         MADBackgroundService.shared.registerBackgroundTasks()
         
+        // Validate and repair widget data on startup
+        let wasRepaired = WidgetDataStore.validateAndRepair()
+        if wasRepaired {
+            print("[App] 🔧 Widget data was repaired on startup")
+        }
+        
         // Initialize live workout monitoring for real-time updates
         Task { @MainActor in
             LiveWorkoutManager.shared.startLiveWorkoutMonitoring()
         }
+        
+        print("[App] 🚀 Mile A Day app initialized with live tracking enabled")
     }
     
     var body: some Scene {

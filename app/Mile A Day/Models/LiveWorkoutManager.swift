@@ -48,11 +48,11 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
         }
     }
     
-    // MARK: - Real-Time Monitoring (2-second intervals)
+    // MARK: - Real-Time Monitoring (1-second intervals for maximum responsiveness)
     
     private func startRealTimeMonitoring() {
-        // Check every 2 seconds for TRUE real-time updates
-        monitoringTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { @Sendable [weak self] _ in
+        // Check every 1 second for MAXIMUM real-time responsiveness
+        monitoringTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { @Sendable [weak self] _ in
             Task {
                 await self?.checkForActiveWorkouts()
             }
@@ -62,6 +62,8 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
         Task {
             await checkForActiveWorkouts()
         }
+        
+        print("[LiveWorkout] 🚀 Real-time monitoring started with 1-second intervals")
     }
     
     private func stopRealTimeMonitoring() {
@@ -225,13 +227,22 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
         let baseMiles = getTodaysBaseMiles()
         let goal = getCurrentGoal()
         
-        // Update widget data store with real-time data
-        WidgetDataStore.save(todayMiles: baseMiles, goal: goal, liveWorkoutDistance: currentWorkoutDistance)
-        WidgetDataStore.saveLiveWorkout(isActive: isWorkoutActive, currentDistance: currentWorkoutDistance)
+        // Validate data before updating
+        let validDistance = max(0.0, currentWorkoutDistance)
+        let validBaseMiles = max(0.0, baseMiles)
+        let validGoal = max(0.1, goal) // Minimum reasonable goal
         
-        // Force immediate widget updates for live data
-        WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
-        WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+        // Update widget data store with validated real-time data
+        WidgetDataStore.save(todayMiles: validBaseMiles, goal: validGoal, liveWorkoutDistance: validDistance)
+        WidgetDataStore.saveLiveWorkout(isActive: isWorkoutActive, currentDistance: validDistance)
+        
+        // Validate and repair widget data if needed
+        let wasRepaired = WidgetDataStore.validateAndRepair()
+        if wasRepaired {
+            print("[LiveWorkout] ⚠️ Widget data was repaired during live update")
+        }
+        
+        print("[LiveWorkout] 📱 Live update - Base: \(validBaseMiles), Live: \(validDistance), Goal: \(validGoal), Active: \(isWorkoutActive)")
         
         // Update last update time
         lastUpdateTime = Date()
@@ -239,12 +250,12 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
     
     private func getTodaysBaseMiles() -> Double {
         let data = WidgetDataStore.load()
-        return data.miles
+        return max(0.0, data.miles) // Ensure non-negative
     }
     
     private func getCurrentGoal() -> Double {
         let data = WidgetDataStore.load()
-        return data.goal > 0 ? data.goal : 1.0
+        return max(0.1, data.goal) // Ensure minimum reasonable goal
     }
     
     // MARK: - Public State Access for Real-Time UI
