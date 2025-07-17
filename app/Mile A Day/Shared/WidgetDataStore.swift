@@ -49,10 +49,17 @@ struct WidgetDataStore {
             
             print("[WidgetDataStore] 💾 Atomic Save - Base: \(todayMiles), Live: \(liveWorkoutDistance), Total: \(totalCurrentDistance), Goal: \(safeGoal), Progress: \(Int(progress * 100))%, Version: \(currentVersion)")
             
-            // Force immediate widget updates with proper timing
+            // Force immediate widget updates with proper timing - more aggressive for live tracking
             DispatchQueue.main.async {
-                WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
-                WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+                if liveWorkoutDistance > 0 {
+                    // Live tracking mode - reload all timelines immediately
+                    WidgetCenter.shared.reloadAllTimelines()
+                    print("[WidgetDataStore] 🔄 Live tracking mode - forced all widget reloads")
+                } else {
+                    // Normal mode - selective reloads
+                    WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
+                    WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+                }
             }
         }
     }
