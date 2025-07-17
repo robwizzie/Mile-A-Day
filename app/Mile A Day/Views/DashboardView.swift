@@ -1,5 +1,6 @@
 import SwiftUI
 import HealthKit
+import WidgetKit
 
 struct DashboardView: View {
     @ObservedObject var healthManager: HealthKitManager
@@ -152,11 +153,17 @@ struct DashboardView: View {
             .onChange(of: liveWorkoutManager.isWorkoutActive) { oldValue, newValue in
                 // Update widget data when workout state changes
                 updateWidgetData()
+                // Force immediate widget reload for live tracking state changes
+                WidgetCenter.shared.reloadAllTimelines()
                 print("[Dashboard] 🔴 Live workout state changed: \(newValue)")
             }
             .onChange(of: liveWorkoutManager.liveProgress) { oldValue, newValue in
                 // Update widget data when live progress changes
                 updateWidgetData()
+                // Force widget reload during live tracking
+                if liveWorkoutManager.isWorkoutActive {
+                    WidgetCenter.shared.reloadAllTimelines()
+                }
                 if abs(newValue - oldValue) > 0.01 {
                     print("[Dashboard] 📊 Live progress updated: \(String(format: "%.1f", newValue * 100))%")
                 }
@@ -164,6 +171,10 @@ struct DashboardView: View {
             .onChange(of: liveWorkoutManager.currentWorkoutDistance) { oldValue, newValue in
                 // Update widget data when workout distance changes
                 updateWidgetData()
+                // Force widget reload during live tracking
+                if liveWorkoutManager.isWorkoutActive {
+                    WidgetCenter.shared.reloadAllTimelines()
+                }
                 if abs(newValue - oldValue) > 0.005 {
                     print("[Dashboard] 🏃‍♂️ Live distance updated: \(String(format: "%.3f", newValue)) miles")
                 }
@@ -1209,6 +1220,10 @@ struct LiveWorkoutCard: View {
         }
         .onDisappear {
             stopTimer()
+            pulseAnimation = false
+        }
+        .onChange(of: liveWorkoutManager.isWorkoutActive) { oldValue, newValue in
+            pulseAnimation = newValue
         }
     }
     

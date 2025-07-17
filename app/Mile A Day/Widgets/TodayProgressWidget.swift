@@ -8,6 +8,7 @@ struct TodayProgressEntry: TimelineEntry {
     let streakCompleted: Bool
     let progress: Double // Pre-calculated progress capped at 1.0
     let totalDistance: Double // Include live workout distance
+    let isLiveTracking: Bool // Live tracking status
 }
 
 struct TodayProgressProvider: TimelineProvider {
@@ -18,7 +19,8 @@ struct TodayProgressProvider: TimelineProvider {
             goal: 1.0, 
             streakCompleted: false,
             progress: 0.5,
-            totalDistance: 0.5
+            totalDistance: 0.5,
+            isLiveTracking: false
         )
     }
 
@@ -31,7 +33,8 @@ struct TodayProgressProvider: TimelineProvider {
             goal: data.goal, 
             streakCompleted: data.streakCompleted,
             progress: data.progress,
-            totalDistance: data.totalDistance
+            totalDistance: data.totalDistance,
+            isLiveTracking: false // No live data in snapshot
         ))
     }
 
@@ -47,11 +50,12 @@ struct TodayProgressProvider: TimelineProvider {
             goal: data.goal, 
             streakCompleted: data.streakCompleted,
             progress: data.progress,
-            totalDistance: data.totalDistance
+            totalDistance: data.totalDistance,
+            isLiveTracking: liveData.isActive
         )
         
-        // Refresh much more frequently for live workouts - every 10 seconds for true real-time
-        let refreshInterval: TimeInterval = liveData.isActive ? 10 : (data.streakCompleted ? 900 : 60) // 10s live, 1min incomplete, 15min completed
+        // Refresh much more frequently for live workouts - every 5 seconds for true real-time
+        let refreshInterval: TimeInterval = liveData.isActive ? 5 : (data.streakCompleted ? 900 : 60) // 5s live, 1min incomplete, 15min completed
         
         let nextRefresh = Date().addingTimeInterval(refreshInterval)
         let timeline = Timeline(entries: [entry], policy: .after(nextRefresh))
@@ -71,27 +75,31 @@ struct TodayProgressWidgetEntryView: View {
                         progress: entry.progress,
                         milesCompleted: entry.totalDistance,
                         goal: entry.goal,
-                        streakCompleted: entry.streakCompleted
+                        streakCompleted: entry.streakCompleted,
+                        isLiveTracking: entry.isLiveTracking
                     )
                 case .accessoryRectangular:
                     RectangularProgressView(
                         progress: entry.progress,
                         milesCompleted: entry.totalDistance,
                         goal: entry.goal,
-                        streakCompleted: entry.streakCompleted
+                        streakCompleted: entry.streakCompleted,
+                        isLiveTracking: entry.isLiveTracking
                     )
                 case .accessoryInline:
                     InlineProgressView(
                         milesCompleted: entry.totalDistance,
                         goal: entry.goal,
-                        streakCompleted: entry.streakCompleted
+                        streakCompleted: entry.streakCompleted,
+                        isLiveTracking: entry.isLiveTracking
                     )
                 default:
                     HomeScreenProgressView(
                         progress: entry.progress,
                         milesCompleted: entry.totalDistance,
                         goal: entry.goal,
-                        streakCompleted: entry.streakCompleted
+                        streakCompleted: entry.streakCompleted,
+                        isLiveTracking: entry.isLiveTracking
                     )
                 }
             } else {
@@ -99,7 +107,8 @@ struct TodayProgressWidgetEntryView: View {
                     progress: entry.progress,
                     milesCompleted: entry.totalDistance,
                     goal: entry.goal,
-                    streakCompleted: entry.streakCompleted
+                    streakCompleted: entry.streakCompleted,
+                    isLiveTracking: entry.isLiveTracking
                 )
             }
         }
@@ -116,6 +125,7 @@ struct CircularProgressView: View {
     let milesCompleted: Double
     let goal: Double
     let streakCompleted: Bool
+    let isLiveTracking: Bool
     
     var body: some View {
         ZStack {
@@ -127,9 +137,21 @@ struct CircularProgressView: View {
             // Progress circle - Always capped at 100%
             Circle()
                 .trim(from: 0, to: progress) // progress is already capped at 1.0
-                .stroke(streakCompleted ? Color.green : Color("appPrimary"), style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                .stroke(streakCompleted ? Color.green : (isLiveTracking ? Color.red : Color("appPrimary")), style: StrokeStyle(lineWidth: 4, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .scaleEffect(0.8)
+                .animation(.easeInOut(duration: 0.5), value: progress)
+            
+            // Live tracking indicator
+            if isLiveTracking {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 4, height: 4)
+                    .scaleEffect(1.5)
+                    .opacity(0.8)
+                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLiveTracking)
+                    .offset(y: -25)
+            }
             
             VStack(spacing: 1) {
                 Text(String(format: "%.2f", milesCompleted))
@@ -149,15 +171,18 @@ struct RectangularProgressView: View {
     let milesCompleted: Double
     let goal: Double
     let streakCompleted: Bool
+    let isLiveTracking: Bool
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Image(systemName: "figure.run")
                     .font(.caption)
-                Text("Progress")
+                    .foregroundColor(isLiveTracking ? .red : .primary)
+                Text(isLiveTracking ? "LIVE" : "Progress")
                     .font(.caption)
                     .fontWeight(.medium)
+                    .foregroundColor(isLiveTracking ? .red : .primary)
                 Spacer()
                 Text(String(format: "%.2f/%.1f", milesCompleted, goal))
                     .font(.caption)
@@ -171,8 +196,9 @@ struct RectangularProgressView: View {
                         .frame(height: 4)
                     
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(streakCompleted ? Color.green : Color("appPrimary"))
+                        .fill(streakCompleted ? Color.green : (isLiveTracking ? Color.red : Color("appPrimary")))
                         .frame(width: progress * geometry.size.width, height: 4) // progress already capped
+                        .animation(.easeInOut(duration: 0.3), value: progress)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 2))
             }
@@ -186,15 +212,22 @@ struct InlineProgressView: View {
     let milesCompleted: Double
     let goal: Double
     let streakCompleted: Bool
+    let isLiveTracking: Bool
     
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: "figure.run")
+            Image(systemName: isLiveTracking ? "dot.radiowaves.left.and.right" : "figure.run")
+                .foregroundColor(isLiveTracking ? .red : .primary)
             Text(String(format: "%.2f/%.1f mi", milesCompleted, goal))
                 .fontWeight(.medium)
             if streakCompleted {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundColor(.green)
+            } else if isLiveTracking {
+                Text("LIVE")
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.red)
             }
         }
     }
@@ -207,20 +240,40 @@ struct HomeScreenProgressView: View {
     let milesCompleted: Double
     let goal: Double
     let streakCompleted: Bool
+    let isLiveTracking: Bool
     
     var body: some View {
         VStack(spacing: 12) {
             // Header
             HStack {
-                Image(systemName: "figure.run")
-                    .foregroundColor(.primary)
-                Text("Today's Progress")
+                Image(systemName: isLiveTracking ? "dot.radiowaves.left.and.right" : "figure.run")
+                    .foregroundColor(isLiveTracking ? .red : .primary)
+                Text(isLiveTracking ? "Live Tracking" : "Today's Progress")
                     .font(.headline)
                     .fontWeight(.semibold)
+                    .foregroundColor(isLiveTracking ? .red : .primary)
                 Spacer()
                 if streakCompleted {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
+                } else if isLiveTracking {
+                    HStack(spacing: 2) {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 6, height: 6)
+                            .scaleEffect(1.2)
+                            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: isLiveTracking)
+                        Text("LIVE")
+                            .font(.caption2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.red)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(Color.red.opacity(0.1))
+                    )
                 }
             }
             
@@ -232,9 +285,9 @@ struct HomeScreenProgressView: View {
                         .frame(height: 16)
                     
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(streakCompleted ? Color.green : Color("appPrimary"))
+                        .fill(streakCompleted ? Color.green : (isLiveTracking ? Color.red : Color("appPrimary")))
                         .frame(width: progress * geometry.size.width, height: 16) // progress already capped
-                        .animation(.easeInOut, value: progress)
+                        .animation(.easeInOut(duration: 0.5), value: progress)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 8))
             }
@@ -258,6 +311,10 @@ struct HomeScreenProgressView: View {
             if streakCompleted {
                 Label("Goal Complete!", systemImage: "star.fill")
                     .foregroundColor(.green)
+                    .font(.caption)
+            } else if isLiveTracking {
+                Label("Tracking in progress...", systemImage: "dot.radiowaves.left.and.right")
+                    .foregroundColor(.red)
                     .font(.caption)
             } else {
                 let remaining = max(goal - milesCompleted, 0.0)
@@ -289,5 +346,5 @@ struct TodayProgressWidget: Widget {
 #Preview(as: .systemSmall) {
     TodayProgressWidget()
 } timeline: {
-    TodayProgressEntry(date: .now, milesCompleted: 0.2, goal: 1.0, streakCompleted: false, progress: 0.2, totalDistance: 0.2)
+    TodayProgressEntry(date: .now, milesCompleted: 0.2, goal: 1.0, streakCompleted: false, progress: 0.2, totalDistance: 0.2, isLiveTracking: false)
 } 
