@@ -11,6 +11,6 @@ app.get('/', (req, res) => {
 	res.send('hello world!');
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
 	console.log(`🚀  Server running at http://localhost:${PORT}`);
 });
