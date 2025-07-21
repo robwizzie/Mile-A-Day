@@ -5,13 +5,14 @@
 			"name": "Debug Backend (tsx)",
 			"type": "node",
 			"request": "launch",
-			"program": "${workspaceFolder}/backend/src/server.ts",
-			"runtimeExecutable": "${workspaceFolder}/backend/node_modules/.bin/tsx",
+			"program": "src/server.ts",
+			"runtimeExecutable": "tsx",
+			"cwd": "${workspaceFolder}/backend",
+			"envFile": "${workspaceFolder}/backend/.env",
 			"env": {
 				"NODE_ENV": "development"
 			},
 			"console": "integratedTerminal",
-			"cwd": "${workspaceFolder}/backend",
 			"skipFiles": ["<node_internals>/**"]
 		}
 	]
