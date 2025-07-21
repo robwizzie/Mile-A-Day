@@ -1,3 +1,5 @@
 .cursor/rules/mad-cursor-rules.mdc
 
 node_modules
+.env
+dist
