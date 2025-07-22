@@ -51,8 +51,8 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
     // MARK: - Real-Time Monitoring (1-second intervals for maximum responsiveness)
     
     private func startRealTimeMonitoring() {
-        // Check every 0.5 seconds for MAXIMUM real-time responsiveness
-        monitoringTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { @Sendable [weak self] _ in
+        // Check every 1 second for MAXIMUM real-time responsiveness
+        monitoringTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { @Sendable [weak self] _ in
             Task {
                 await self?.checkForActiveWorkouts()
             }
@@ -63,7 +63,7 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
             await checkForActiveWorkouts()
         }
         
-        print("[LiveWorkout] 🚀 Real-time monitoring started with 0.5-second intervals")
+        print("[LiveWorkout] 🚀 Real-time monitoring started with 1-second intervals")
     }
     
     private func stopRealTimeMonitoring() {
@@ -194,10 +194,6 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
         // Log significant changes
         if !wasActive {
             print("[LiveWorkout] 🔴 LIVE MODE ACTIVATED - \(workout.workoutActivityType.name)")
-            // Send workout start notification
-            Task { @MainActor in
-                MADNotificationService.shared.sendWorkoutStartNotification()
-            }
         } else if abs(currentWorkoutDistance - previousDistance) > 0.005 || abs(liveProgress - previousProgress) > 0.01 {
             print("[LiveWorkout] 📊 REAL-TIME UPDATE - Distance: \(String(format: "%.3f", currentWorkoutDistance)), Progress: \(String(format: "%.1f", liveProgress * 100))%")
         }
@@ -239,12 +235,6 @@ final class LiveWorkoutManager: NSObject, ObservableObject, @unchecked Sendable 
         // Update widget data store with validated real-time data
         WidgetDataStore.save(todayMiles: validBaseMiles, goal: validGoal, liveWorkoutDistance: validDistance)
         WidgetDataStore.saveLiveWorkout(isActive: isWorkoutActive, currentDistance: validDistance)
-        
-        // Force immediate widget timeline reloads during live tracking
-        if isWorkoutActive {
-            WidgetCenter.shared.reloadAllTimelines()
-            print("[LiveWorkout] 🔄 Forced immediate widget reload for live tracking")
-        }
         
         // Validate and repair widget data if needed
         let wasRepaired = WidgetDataStore.validateAndRepair()
