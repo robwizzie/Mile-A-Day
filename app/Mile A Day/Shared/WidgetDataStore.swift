@@ -2,38 +2,33 @@ import Foundation
 import WidgetKit
 
 /// Centralized, thread-safe data store for app-widget communication
-/// Handles all data persistence and synchronization for live tracking
+/// Handles all data persistence and synchronization
 struct WidgetDataStore {
     private static let suiteName = "group.mileaday.shared"
     private static let milesKey = "today_miles_completed"
     private static let goalKey = "daily_goal"
     private static let streakKey = "streak_count"
-    private static let liveWorkoutActiveKey = "live_workout_active"
-    private static let liveWorkoutDistanceKey = "live_workout_distance"
     private static let lastUpdateKey = "last_update_timestamp"
     private static let dataVersionKey = "data_version"
     
     // Thread safety
     private static let queue = DispatchQueue(label: "com.mileaday.widgetstore", qos: .userInitiated)
     
-    /// Atomically saves today's progress data with live workout integration
+    /// Atomically saves today's progress data
     /// Ensures data consistency across all app components and widgets
-    static func save(todayMiles: Double, goal: Double, liveWorkoutDistance: Double = 0.0) {
+    static func save(todayMiles: Double, goal: Double) {
         queue.sync {
             guard let defaults = UserDefaults(suiteName: suiteName) else { 
                 print("[WidgetDataStore] ❌ Failed to access App Group UserDefaults")
                 return 
             }
             
-            // Calculate total current distance including live workout
-            let totalCurrentDistance = todayMiles + liveWorkoutDistance
-            
             // Ensure goal is never 0
             let safeGoal = goal > 0 ? goal : 1.0
             
             // Calculate progress and cap at 100%
-            let progress = min(totalCurrentDistance / safeGoal, 1.0)
-            let isCompleted = totalCurrentDistance >= safeGoal
+            let progress = min(todayMiles / safeGoal, 1.0)
+            let isCompleted = todayMiles >= safeGoal
             
             // Atomic update with versioning
             let currentVersion = defaults.integer(forKey: dataVersionKey) + 1
@@ -42,24 +37,17 @@ struct WidgetDataStore {
             defaults.set(todayMiles, forKey: milesKey)
             defaults.set(safeGoal, forKey: goalKey)
             defaults.set(isCompleted, forKey: "streak_completed_today")
-            defaults.set(totalCurrentDistance, forKey: "total_current_distance")
+            defaults.set(todayMiles, forKey: "total_current_distance")
             defaults.set(progress, forKey: "current_progress")
             defaults.set(timestamp, forKey: lastUpdateKey)
             defaults.set(currentVersion, forKey: dataVersionKey)
             
-            print("[WidgetDataStore] 💾 Atomic Save - Base: \(todayMiles), Live: \(liveWorkoutDistance), Total: \(totalCurrentDistance), Goal: \(safeGoal), Progress: \(Int(progress * 100))%, Version: \(currentVersion)")
+            print("[WidgetDataStore] 💾 Atomic Save - Miles: \(todayMiles), Goal: \(safeGoal), Progress: \(Int(progress * 100))%, Version: \(currentVersion)")
             
-            // Force immediate widget updates with proper timing - more aggressive for live tracking
+            // Force widget updates
             DispatchQueue.main.async {
-                if liveWorkoutDistance > 0 {
-                    // Live tracking mode - reload all timelines immediately
-                    WidgetCenter.shared.reloadAllTimelines()
-                    print("[WidgetDataStore] 🔄 Live tracking mode - forced all widget reloads")
-                } else {
-                    // Normal mode - selective reloads
-                    WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
-                    WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
-                }
+                WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
+                WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
             }
         }
     }
@@ -111,52 +99,17 @@ struct WidgetDataStore {
         }
     }
     
-    // MARK: - Live Workout helpers with enhanced synchronization
-    static func saveLiveWorkout(isActive: Bool, currentDistance: Double = 0.0) {
-        queue.sync {
-            guard let defaults = UserDefaults(suiteName: suiteName) else { return }
-            
-            let wasActive = defaults.bool(forKey: liveWorkoutActiveKey)
-            let wasDistance = defaults.double(forKey: liveWorkoutDistanceKey)
-            
-            defaults.set(isActive, forKey: liveWorkoutActiveKey)
-            defaults.set(currentDistance, forKey: liveWorkoutDistanceKey)
-            
-            let statusChange = wasActive != isActive
-            let distanceChange = abs(wasDistance - currentDistance) > 0.01
-            
-            if statusChange || distanceChange {
-                print("[WidgetDataStore] 🏃‍♂️ Live Workout Update - Active: \(isActive), Distance: \(currentDistance), Status Changed: \(statusChange)")
-                
-                // Immediately update the main data with live workout distance
-                let currentData = load()
-                save(todayMiles: currentData.miles, goal: currentData.goal, liveWorkoutDistance: currentDistance)
-            }
-        }
-    }
-    
-    static func loadLiveWorkout() -> (isActive: Bool, distance: Double) {
-        return queue.sync {
-            guard let defaults = UserDefaults(suiteName: suiteName) else {
-                return (false, 0.0)
-            }
-            let isActive = defaults.bool(forKey: liveWorkoutActiveKey)
-            let distance = defaults.double(forKey: liveWorkoutDistanceKey)
-            return (isActive, distance)
-        }
-    }
+
     
     // MARK: - Unified data access with consistency checks
     
-    /// Get complete current state including live workout data with data integrity validation
-    static func getCurrentState() -> (baseMiles: Double, liveDistance: Double, totalDistance: Double, goal: Double, progress: Double, isCompleted: Bool, isLiveMode: Bool, dataAge: TimeInterval) {
+    /// Get complete current state with data integrity validation
+    static func getCurrentState() -> (baseMiles: Double, totalDistance: Double, goal: Double, progress: Double, isCompleted: Bool, dataAge: TimeInterval) {
         return queue.sync {
             let mainData = load()
-            let liveData = loadLiveWorkout()
             
-            let totalDistance = mainData.miles + liveData.distance
-            let progress = min(totalDistance / mainData.goal, 1.0)
-            let isCompleted = totalDistance >= mainData.goal
+            let progress = min(mainData.miles / mainData.goal, 1.0)
+            let isCompleted = mainData.miles >= mainData.goal
             let dataAge = Date().timeIntervalSince(mainData.lastUpdate)
             
             // Data freshness validation
@@ -164,7 +117,7 @@ struct WidgetDataStore {
                 print("[WidgetDataStore] ⚠️ Data potentially stale - Age: \(Int(dataAge))s")
             }
             
-            return (mainData.miles, liveData.distance, totalDistance, mainData.goal, progress, isCompleted, liveData.isActive, dataAge)
+            return (mainData.miles, mainData.totalDistance, mainData.goal, progress, isCompleted, dataAge)
         }
     }
     
@@ -193,13 +146,7 @@ struct WidgetDataStore {
                 print("[WidgetDataStore] 🔧 Repaired negative miles: \(miles) -> 0.0")
             }
             
-            // Check for invalid live workout distance
-            let liveDistance = defaults.double(forKey: liveWorkoutDistanceKey)
-            if liveDistance < 0 {
-                defaults.set(0.0, forKey: liveWorkoutDistanceKey)
-                needsRepair = true
-                print("[WidgetDataStore] 🔧 Repaired negative live distance: \(liveDistance) -> 0.0")
-            }
+
             
             if needsRepair {
                 let currentVersion = defaults.integer(forKey: dataVersionKey) + 1
@@ -215,22 +162,4 @@ struct WidgetDataStore {
         }
     }
     
-    /// Clears all live workout data (call when workouts end)
-    static func clearLiveWorkout() {
-        queue.sync {
-            guard let defaults = UserDefaults(suiteName: suiteName) else { return }
-            
-            let wasActive = defaults.bool(forKey: liveWorkoutActiveKey)
-            defaults.set(false, forKey: liveWorkoutActiveKey)
-            defaults.set(0.0, forKey: liveWorkoutDistanceKey)
-            
-            if wasActive {
-                print("[WidgetDataStore] 🔴 Live workout cleared")
-                
-                // Update main data without live distance
-                let currentData = load()
-                save(todayMiles: currentData.miles, goal: currentData.goal, liveWorkoutDistance: 0.0)
-            }
-        }
-    }
 } 

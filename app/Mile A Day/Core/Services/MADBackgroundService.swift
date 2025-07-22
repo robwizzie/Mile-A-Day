@@ -14,7 +14,7 @@ final class MADBackgroundService: NSObject, ObservableObject {
     private let healthManager = HealthKitManager()
     private let userManager = UserManager()
     private let notificationService = MADNotificationService.shared
-    private let liveWorkoutManager = LiveWorkoutManager.shared
+
     
     // Background task identifier
     private static let backgroundTaskIdentifier = "com.mileaday.background-refresh"
@@ -105,10 +105,9 @@ final class MADBackgroundService: NSObject, ObservableObject {
             print("[Background] Widget data was repaired during background refresh")
         }
         
-        // Set expiration handler with ALL necessary cleanup (fixed: was assigned twice)
+        // Set expiration handler with cleanup
         task.expirationHandler = {
             print("[Background] Background task expired, performing cleanup...")
-            self.liveWorkoutManager.stopLiveWorkoutMonitoring()
             task.setTaskCompleted(success: false)
         }
         
@@ -247,19 +246,11 @@ final class MADBackgroundService: NSObject, ObservableObject {
         let user = userManager.currentUser
         var miles = healthManager.todaysDistance
         
-        // Check for live workout data
-        Task { @MainActor in
-            // If there's an active workout, include live distance
-            if liveWorkoutManager.isWorkoutActive {
-                miles += liveWorkoutManager.currentWorkoutDistance
-                print("[Background] Including live workout distance: \(liveWorkoutManager.currentWorkoutDistance)")
-            }
-            
-                            WidgetDataStore.save(todayMiles: miles, goal: user.goalMiles, liveWorkoutDistance: 0.0)
-            WidgetDataStore.save(streak: user.streak)
-            
-            print("[Background] Widgets updated - Miles: \(miles), Goal: \(user.goalMiles), Streak: \(user.streak)")
-        }
+        // Update widget data
+        WidgetDataStore.save(todayMiles: miles, goal: user.goalMiles)
+        WidgetDataStore.save(streak: user.streak)
+        
+        print("[Background] Widgets updated - Miles: \(miles), Goal: \(user.goalMiles), Streak: \(user.streak)")
     }
 }
 
@@ -280,13 +271,7 @@ extension MADBackgroundService {
             print("[Background] 🔧 Widget data was repaired when returning to foreground")
         }
         
-        // Ensure live tracking is running if needed
-        Task { @MainActor in
-            if !liveWorkoutManager.isWorkoutActive {
-                // Check if we should restart live tracking
-                liveWorkoutManager.startLiveWorkoutMonitoring()
-            }
-        }
+
         
         // Cancel any pending background tasks when app becomes active
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.backgroundTaskIdentifier)
