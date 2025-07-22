@@ -63,19 +63,6 @@ final class MADNotificationService: NSObject, ObservableObject {
 
     // MARK: - Scheduling Helpers
 
-    /// Sends a notification when a workout starts to indicate live tracking is active
-    func sendWorkoutStartNotification() {
-        let content = UNMutableNotificationContent()
-        content.title = "Live Tracking Active"
-        content.body = "Your workout is being tracked in real-time. Progress will update automatically!"
-        content.sound = .default
-        content.categoryIdentifier = "WORKOUT_START"
-        
-        schedule(content: content, trigger: .none, identifier: Identifier.workoutStarted)
-        
-        print("[Notifications] ✅ Sent workout start notification")
-    }
-
     /// Immediately sends a local notification celebrating mile completion.
     /// Prevents duplicate notifications for the same day with enhanced data validation.
     func sendMileCompletedNotification() {
@@ -249,7 +236,6 @@ extension MADNotificationService {
         static let mileCompleted = "mileCompleted"
         static let dailyReminder = "dailyReminder"
         static func friendCompleted(_ friend: String) -> String { "friendCompleted_\(friend)" }
-        static let workoutStarted = "workoutStarted"
     }
 }
 
