@@ -14,22 +14,21 @@ struct DashboardView: View {
     
     // Real-time unified state calculation with live workout integration
     private var currentState: (baseMiles: Double, liveDistance: Double, totalDistance: Double, goal: Double, progress: Double, isCompleted: Bool, isLiveMode: Bool) {
-        // Use centralized data store for consistency
-        let storeState = WidgetDataStore.getCurrentState()
+        let baseMiles = healthManager.todaysDistance
+        let liveDistance = liveWorkoutManager.isWorkoutActive ? liveWorkoutManager.currentWorkoutDistance : 0.0
+        let totalDistance = baseMiles + liveDistance
+        let goal = userManager.currentUser.goalMiles
         
-        // Prefer live workout manager data when active for most up-to-date info
-        let liveDistance = liveWorkoutManager.isWorkoutActive ? liveWorkoutManager.currentWorkoutDistance : storeState.liveDistance
-        let totalDistance = storeState.baseMiles + liveDistance
-        
+        // Use real-time progress from LiveWorkoutManager when active
         let progress = liveWorkoutManager.isWorkoutActive ? 
             liveWorkoutManager.liveProgress : 
-            storeState.progress
+            ProgressCalculator.calculateProgress(current: totalDistance, goal: goal)
         
         let isCompleted = liveWorkoutManager.isWorkoutActive ? 
             liveWorkoutManager.isGoalReached : 
-            storeState.isCompleted
+            ProgressCalculator.isGoalCompleted(current: totalDistance, goal: goal)
         
-        return (storeState.baseMiles, liveDistance, totalDistance, storeState.goal, progress, isCompleted, liveWorkoutManager.isWorkoutActive)
+        return (baseMiles, liveDistance, totalDistance, goal, progress, isCompleted, liveWorkoutManager.isWorkoutActive)
     }
     
     var body: some View {
@@ -547,22 +546,11 @@ struct TodayProgressCard: View {
                                     .scaleEffect(livePulse ? 1.3 : 1.0)
                                     .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: livePulse)
                                 
-                                Text("LIVE TRACKING")
+                                Text("LIVE")
                                     .font(.caption2)
                                     .fontWeight(.bold)
                                     .foregroundColor(.red)
-                                    .textCase(.uppercase)
                             }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill(Color.red.opacity(0.1))
-                                    .overlay(
-                                        Capsule()
-                                            .stroke(Color.red.opacity(0.3), lineWidth: 1)
-                                    )
-                            )
                         }
                     }
                     
@@ -1070,12 +1058,6 @@ struct LiveWorkoutCard: View {
                     Circle()
                         .fill(Color.red.opacity(0.1))
                         .frame(width: 44, height: 44)
-                        .overlay(
-                            Circle()
-                                .stroke(Color.red.opacity(0.3), lineWidth: 2)
-                                .scaleEffect(pulseAnimation ? 1.1 : 1.0)
-                                .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: pulseAnimation)
-                        )
                     
                     Image(systemName: workoutIcon)
                         .font(.title2)
@@ -1090,10 +1072,9 @@ struct LiveWorkoutCard: View {
                             .scaleEffect(pulseAnimation ? 1.3 : 1.0)
                             .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: pulseAnimation)
                     
-                    Text("LIVE TRACKING")
+                    Text("LIVE WORKOUT")
                         .font(.caption.bold())
                         .foregroundColor(.red)
-                        .textCase(.uppercase)
                 }
                 
                 Text(workoutType?.name ?? "Workout")
