@@ -242,15 +242,20 @@ final class MADBackgroundService: NSObject, ObservableObject {
     }
     
     private func updateWidgets() {
-        // Update widget data store
-        let user = userManager.currentUser
-        var miles = healthManager.todaysDistance
-        
-        // Update widget data
-        WidgetDataStore.save(todayMiles: miles, goal: user.goalMiles)
-        WidgetDataStore.save(streak: user.streak)
-        
-        print("[Background] Widgets updated - Miles: \(miles), Goal: \(user.goalMiles), Streak: \(user.streak)")
+        // Fetch fresh HealthKit data for background sync
+        Task { @MainActor in
+            await healthManager.fetchTodayMiles()
+            
+            // Update widget data store with fresh data
+            let user = userManager.currentUser
+            let miles = healthManager.todaysDistance
+            
+            // Update widget data with force refresh to ensure sync
+            WidgetDataStore.save(todayMiles: miles, goal: user.goalMiles, forceRefresh: true)
+            WidgetDataStore.save(streak: user.streak)
+            
+            print("[Background] Widgets updated with fresh HealthKit data - Miles: \(miles), Goal: \(user.goalMiles), Streak: \(user.streak)")
+        }
     }
 }
 
@@ -265,13 +270,17 @@ extension MADBackgroundService {
     
     /// Call this from App's sceneWillEnterForeground  
     func appWillEnterForeground() {
-        // Validate and repair data when returning to foreground
+        // Validate and repair data when returning to foreground (handles day transitions)
         let wasRepaired = WidgetDataStore.validateAndRepair()
         if wasRepaired {
             print("[Background] 🔧 Widget data was repaired when returning to foreground")
         }
         
-
+        // Force widget sync if needed
+        if WidgetDataStore.needsRefresh() {
+            WidgetDataStore.forceWidgetSync()
+            print("[Background] 🔄 Forced widget sync on foreground")
+        }
         
         // Cancel any pending background tasks when app becomes active
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.backgroundTaskIdentifier)

@@ -15,10 +15,10 @@ struct DashboardView: View {
     
     @State private var showInstructions = false
     
-    // Simplified state calculation - no live tracking
-    private var currentState: (baseMiles: Double, totalDistance: Double, goal: Double, progress: Double, isCompleted: Bool) {
+    // Enhanced state calculation with day awareness
+    private var currentState: (baseMiles: Double, totalDistance: Double, goal: Double, progress: Double, isCompleted: Bool, isToday: Bool) {
         let storeState = WidgetDataStore.getCurrentState()
-        return (storeState.baseMiles, storeState.totalDistance, storeState.goal, storeState.progress, storeState.isCompleted)
+        return (storeState.baseMiles, storeState.totalDistance, storeState.goal, storeState.progress, storeState.isCompleted, storeState.isToday)
     }
     
     var body: some View {
@@ -79,6 +79,11 @@ struct DashboardView: View {
             }
             .onAppear {
                 refreshData()
+                
+                // Check if widgets need refresh and force sync if needed
+                if WidgetDataStore.needsRefresh() {
+                    WidgetDataStore.forceWidgetSync()
+                }
             }
             .sheet(isPresented: $showGoalSheet) {
                 GoalSettingSheet(
@@ -167,7 +172,8 @@ struct DashboardView: View {
         let state = currentState
         WidgetDataStore.save(
             todayMiles: state.baseMiles,
-            goal: state.goal
+            goal: state.goal,
+            forceRefresh: state.isCompleted // Force refresh when goal completed
         )
         WidgetDataStore.save(streak: userManager.currentUser.streak)
     }
@@ -195,11 +201,13 @@ struct DashboardView: View {
                     fetchHealthData()
                 }
                 updateWidgetData()
+                WidgetDataStore.forceWidgetSync()
                 isRefreshing = false
             }
         } else {
             fetchHealthData()
             updateWidgetData()
+            WidgetDataStore.forceWidgetSync()
             isRefreshing = false
         }
     }
@@ -223,6 +231,7 @@ struct DashboardView: View {
         }
         
         updateWidgetData()
+        WidgetDataStore.forceWidgetSync()
         isRefreshing = false
     }
     

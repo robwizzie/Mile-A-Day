@@ -65,8 +65,8 @@ struct StreakCountProvider: TimelineProvider {
             isAtRisk: isAtRisk
         )
         
-        // Refresh hourly
-        let refreshInterval: TimeInterval = 3600
+        // More frequent refresh for better sync throughout the day
+        let refreshInterval: TimeInterval = isGoalCompleted ? 900 : 300 // 5min incomplete, 15min completed
         let nextRefresh = Date().addingTimeInterval(refreshInterval)
         completion(Timeline(entries: [entry], policy: .after(nextRefresh)))
     }

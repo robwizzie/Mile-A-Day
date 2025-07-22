@@ -49,8 +49,8 @@ struct TodayProgressProvider: TimelineProvider {
             totalDistance: data.totalDistance
         )
         
-        // Refresh based on completion status
-        let refreshInterval: TimeInterval = data.streakCompleted ? 900 : 60 // 1min incomplete, 15min completed
+        // More frequent refresh for better sync - widgets need to stay updated throughout the day
+        let refreshInterval: TimeInterval = data.streakCompleted ? 300 : 30 // 30s incomplete, 5min completed
         
         let nextRefresh = Date().addingTimeInterval(refreshInterval)
         let timeline = Timeline(entries: [entry], policy: .after(nextRefresh))

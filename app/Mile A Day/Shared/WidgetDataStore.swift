@@ -10,54 +10,90 @@ struct WidgetDataStore {
     private static let streakKey = "streak_count"
     private static let lastUpdateKey = "last_update_timestamp"
     private static let dataVersionKey = "data_version"
+    private static let lastSyncDateKey = "last_sync_date"
+    private static let dayTrackingKey = "current_tracking_day"
     
     // Thread safety
     private static let queue = DispatchQueue(label: "com.mileaday.widgetstore", qos: .userInitiated)
     
-    /// Atomically saves today's progress data
+    /// Atomically saves today's progress data with enhanced day tracking
     /// Ensures data consistency across all app components and widgets
-    static func save(todayMiles: Double, goal: Double) {
+    static func save(todayMiles: Double, goal: Double, forceRefresh: Bool = false) {
         queue.sync {
             guard let defaults = UserDefaults(suiteName: suiteName) else { 
                 print("[WidgetDataStore] ❌ Failed to access App Group UserDefaults")
                 return 
             }
             
+            // Check if we need to reset for a new day
+            let currentDay = getDayString(for: Date())
+            let lastTrackedDay = defaults.string(forKey: dayTrackingKey) ?? ""
+            
+            var finalMiles = todayMiles
+            
+            // If it's a new day, reset miles to current workout miles
+            if currentDay != lastTrackedDay {
+                print("[WidgetDataStore] 🌅 New day detected: \(lastTrackedDay) -> \(currentDay)")
+                finalMiles = todayMiles // Start fresh for new day
+                defaults.set(currentDay, forKey: dayTrackingKey)
+            }
+            
             // Ensure goal is never 0
             let safeGoal = goal > 0 ? goal : 1.0
             
             // Calculate progress and cap at 100%
-            let progress = min(todayMiles / safeGoal, 1.0)
-            let isCompleted = todayMiles >= safeGoal
+            let progress = min(finalMiles / safeGoal, 1.0)
+            let isCompleted = finalMiles >= safeGoal
             
             // Atomic update with versioning
             let currentVersion = defaults.integer(forKey: dataVersionKey) + 1
             let timestamp = Date().timeIntervalSince1970
             
-            defaults.set(todayMiles, forKey: milesKey)
+            defaults.set(finalMiles, forKey: milesKey)
             defaults.set(safeGoal, forKey: goalKey)
             defaults.set(isCompleted, forKey: "streak_completed_today")
-            defaults.set(todayMiles, forKey: "total_current_distance")
+            defaults.set(finalMiles, forKey: "total_current_distance")
             defaults.set(progress, forKey: "current_progress")
             defaults.set(timestamp, forKey: lastUpdateKey)
+            defaults.set(timestamp, forKey: lastSyncDateKey)
             defaults.set(currentVersion, forKey: dataVersionKey)
             
-            print("[WidgetDataStore] 💾 Atomic Save - Miles: \(todayMiles), Goal: \(safeGoal), Progress: \(Int(progress * 100))%, Version: \(currentVersion)")
+            print("[WidgetDataStore] 💾 Atomic Save - Miles: \(finalMiles), Goal: \(safeGoal), Progress: \(Int(progress * 100))%, Version: \(currentVersion), Day: \(currentDay)")
             
-            // Force widget updates
+            // Enhanced widget refresh strategy
             DispatchQueue.main.async {
-                WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
-                WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+                if forceRefresh || isCompleted {
+                    // Force all widgets to refresh immediately for important updates
+                    WidgetCenter.shared.reloadAllTimelines()
+                    print("[WidgetDataStore] 🔄 Forced all widget refresh")
+                } else {
+                    // Standard refresh for specific widgets
+                    WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
+                    WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+                }
             }
         }
     }
 
-    /// Atomically loads today's progress data with version checking
-    static func load() -> (miles: Double, goal: Double, streakCompleted: Bool, totalDistance: Double, progress: Double, version: Int, lastUpdate: Date) {
+    /// Atomically loads today's progress data with day validation
+    static func load() -> (miles: Double, goal: Double, streakCompleted: Bool, totalDistance: Double, progress: Double, version: Int, lastUpdate: Date, isToday: Bool) {
         return queue.sync {
             guard let defaults = UserDefaults(suiteName: suiteName) else {
                 print("[WidgetDataStore] ❌ Failed to access App Group UserDefaults")
-                return (0, 1, false, 0, 0, 0, Date())
+                return (0, 1, false, 0, 0, 0, Date(), true)
+            }
+            
+            // Check if data is from today
+            let currentDay = getDayString(for: Date())
+            let dataDay = defaults.string(forKey: dayTrackingKey) ?? ""
+            let isToday = currentDay == dataDay
+            
+            // If data is not from today, return reset values
+            if !isToday {
+                print("[WidgetDataStore] 📅 Detected stale data from: \(dataDay), current: \(currentDay)")
+                // Reset for new day but keep goal
+                let goal = defaults.double(forKey: goalKey) == 0 ? 1 : defaults.double(forKey: goalKey)
+                return (0, goal, false, 0, 0, 0, Date(), false)
             }
             
             let baseMiles = defaults.double(forKey: milesKey)
@@ -69,8 +105,8 @@ struct WidgetDataStore {
             let lastUpdateTimestamp = defaults.double(forKey: lastUpdateKey)
             let lastUpdate = Date(timeIntervalSince1970: lastUpdateTimestamp)
             
-            print("[WidgetDataStore] 📖 Load - Base: \(baseMiles), Goal: \(goal), Total: \(totalDistance), Progress: \(Int(progress * 100))%, Completed: \(streakCompleted), Version: \(version)")
-            return (baseMiles, goal, streakCompleted, totalDistance, progress, version, lastUpdate)
+            print("[WidgetDataStore] 📖 Load - Miles: \(baseMiles), Goal: \(goal), Total: \(totalDistance), Progress: \(Int(progress * 100))%, Completed: \(streakCompleted), Version: \(version), IsToday: \(isToday)")
+            return (baseMiles, goal, streakCompleted, totalDistance, progress, version, lastUpdate, isToday)
         }
     }
 
@@ -99,14 +135,62 @@ struct WidgetDataStore {
         }
     }
     
-
+    // MARK: - Enhanced sync and validation
     
+    /// Force widget refresh - call when returning from background or after workouts
+    static func forceWidgetSync() {
+        DispatchQueue.main.async {
+            WidgetCenter.shared.reloadAllTimelines()
+            print("[WidgetDataStore] 🔄 Forced complete widget sync")
+        }
+    }
+    
+    /// Check if widgets need refresh based on last sync time
+    static func needsRefresh() -> Bool {
+        return queue.sync {
+            guard let defaults = UserDefaults(suiteName: suiteName) else { return true }
+            
+            let lastSyncTimestamp = defaults.double(forKey: lastSyncDateKey)
+            let lastSync = Date(timeIntervalSince1970: lastSyncTimestamp)
+            let timeSinceSync = Date().timeIntervalSince(lastSync)
+            
+            // Consider refresh needed if:
+            // 1. Never synced (timestamp is 0)
+            // 2. More than 5 minutes since last sync
+            // 3. Day has changed since last sync
+            let needsRefresh = lastSyncTimestamp == 0 || 
+                              timeSinceSync > 300 || 
+                              !Calendar.current.isDate(lastSync, inSameDayAs: Date())
+            
+            if needsRefresh {
+                print("[WidgetDataStore] ⏰ Refresh needed - Last sync: \(Int(timeSinceSync))s ago")
+            }
+            
+            return needsRefresh
+        }
+    }
+    
+    /// Get current day string for day tracking
+    private static func getDayString(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone.current
+        return formatter.string(from: date)
+    }
+
     // MARK: - Unified data access with consistency checks
     
-    /// Get complete current state with data integrity validation
-    static func getCurrentState() -> (baseMiles: Double, totalDistance: Double, goal: Double, progress: Double, isCompleted: Bool, dataAge: TimeInterval) {
+    /// Get complete current state with data integrity validation and day checking
+    static func getCurrentState() -> (baseMiles: Double, totalDistance: Double, goal: Double, progress: Double, isCompleted: Bool, dataAge: TimeInterval, isToday: Bool) {
         return queue.sync {
             let mainData = load()
+            
+            // If data is not from today, return fresh state
+            if !mainData.isToday {
+                let progress = 0.0
+                let isCompleted = false
+                return (0.0, 0.0, mainData.goal, progress, isCompleted, 0, false)
+            }
             
             let progress = min(mainData.miles / mainData.goal, 1.0)
             let isCompleted = mainData.miles >= mainData.goal
@@ -117,18 +201,33 @@ struct WidgetDataStore {
                 print("[WidgetDataStore] ⚠️ Data potentially stale - Age: \(Int(dataAge))s")
             }
             
-            return (mainData.miles, mainData.totalDistance, mainData.goal, progress, isCompleted, dataAge)
+            return (mainData.miles, mainData.totalDistance, mainData.goal, progress, isCompleted, dataAge, true)
         }
     }
     
-    // MARK: - Data validation and cleanup
+    // MARK: - Data validation and cleanup with day awareness
     
-    /// Validates data integrity and fixes any inconsistencies
+    /// Validates data integrity and fixes any inconsistencies, handles day transitions
     static func validateAndRepair() -> Bool {
         return queue.sync {
             guard let defaults = UserDefaults(suiteName: suiteName) else { return false }
             
             var needsRepair = false
+            
+            // Check for day transition
+            let currentDay = getDayString(for: Date())
+            let lastTrackedDay = defaults.string(forKey: dayTrackingKey) ?? ""
+            
+            if currentDay != lastTrackedDay && !lastTrackedDay.isEmpty {
+                // New day detected - reset daily data
+                defaults.set(0.0, forKey: milesKey)
+                defaults.set(false, forKey: "streak_completed_today")
+                defaults.set(0.0, forKey: "total_current_distance")
+                defaults.set(0.0, forKey: "current_progress")
+                defaults.set(currentDay, forKey: dayTrackingKey)
+                needsRepair = true
+                print("[WidgetDataStore] 🌅 Day transition detected - reset daily data: \(lastTrackedDay) -> \(currentDay)")
+            }
             
             // Check for invalid goal
             let goal = defaults.double(forKey: goalKey)
@@ -145,8 +244,6 @@ struct WidgetDataStore {
                 needsRepair = true
                 print("[WidgetDataStore] 🔧 Repaired negative miles: \(miles) -> 0.0")
             }
-            
-
             
             if needsRepair {
                 let currentVersion = defaults.integer(forKey: dataVersionKey) + 1
