@@ -21,7 +21,7 @@ class UserManager: ObservableObject {
         
         // Initialize widget data store with current values
         let currentMiles = WidgetDataStore.load().miles
-        WidgetDataStore.save(todayMiles: currentMiles, goal: currentUser.goalMiles, liveWorkoutDistance: 0.0)
+        WidgetDataStore.save(todayMiles: currentMiles, goal: currentUser.goalMiles, forceRefresh: true)
         WidgetDataStore.save(streak: currentUser.streak)
         
         // Load friends
@@ -83,10 +83,10 @@ class UserManager: ObservableObject {
         
         // Update widget data with new goal
         let currentData = WidgetDataStore.load()
-        WidgetDataStore.save(todayMiles: currentData.miles, goal: miles, liveWorkoutDistance: 0.0)
+        WidgetDataStore.save(todayMiles: currentData.miles, goal: miles, forceRefresh: true)
         saveUserData()
         let currentMiles = WidgetDataStore.load().miles
-        WidgetDataStore.save(todayMiles: currentMiles, goal: miles)
+        WidgetDataStore.save(todayMiles: currentMiles, goal: miles, forceRefresh: true)
     }
     
     // Get users sorted by streak (for leaderboard)

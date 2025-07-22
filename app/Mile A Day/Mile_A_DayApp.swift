@@ -28,12 +28,7 @@ struct Mile_A_DayApp: App {
             print("[App] 🔧 Widget data was repaired on startup")
         }
         
-        // Initialize live workout monitoring for real-time updates
-        Task { @MainActor in
-            LiveWorkoutManager.shared.startLiveWorkoutMonitoring()
-        }
-        
-        print("[App] 🚀 Mile A Day app initialized with live tracking enabled")
+        print("[App] 🚀 Mile A Day app initialized")
     }
     
     var body: some Scene {

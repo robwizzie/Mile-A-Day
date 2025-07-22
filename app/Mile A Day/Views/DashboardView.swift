@@ -5,7 +5,7 @@ import WidgetKit
 struct DashboardView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
-    @ObservedObject var liveWorkoutManager = LiveWorkoutManager.shared
+
     @EnvironmentObject var notificationService: MADNotificationService
     
     @State private var showConfetti = false
@@ -13,58 +13,37 @@ struct DashboardView: View {
     @State private var newGoalMiles: Double = 1.0
     @State private var isRefreshing = false
     
-    // Real-time unified state calculation with live workout integration
-    private var currentState: (baseMiles: Double, liveDistance: Double, totalDistance: Double, goal: Double, progress: Double, isCompleted: Bool, isLiveMode: Bool) {
-        // Use centralized data store for consistency
+    @State private var showInstructions = false
+    
+    // Enhanced state calculation with day awareness
+    private var currentState: (baseMiles: Double, totalDistance: Double, goal: Double, progress: Double, isCompleted: Bool, isToday: Bool) {
         let storeState = WidgetDataStore.getCurrentState()
-        
-        // Prefer live workout manager data when active for most up-to-date info
-        let liveDistance = liveWorkoutManager.isWorkoutActive ? liveWorkoutManager.currentWorkoutDistance : storeState.liveDistance
-        let totalDistance = storeState.baseMiles + liveDistance
-        
-        let progress = liveWorkoutManager.isWorkoutActive ? 
-            liveWorkoutManager.liveProgress : 
-            storeState.progress
-        
-        let isCompleted = liveWorkoutManager.isWorkoutActive ? 
-            liveWorkoutManager.isGoalReached : 
-            storeState.isCompleted
-        
-        return (storeState.baseMiles, liveDistance, totalDistance, storeState.goal, progress, isCompleted, liveWorkoutManager.isWorkoutActive)
+        return (storeState.baseMiles, storeState.totalDistance, storeState.goal, storeState.progress, storeState.isCompleted, storeState.isToday)
     }
     
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    // Live workout indicator (when active)
-                    if liveWorkoutManager.isWorkoutActive {
-                        LiveWorkoutCard(
-                            workoutType: liveWorkoutManager.currentWorkoutType,
-                            currentDistance: liveWorkoutManager.currentWorkoutDistance,
-                            startTime: liveWorkoutManager.workoutStartTime
-                        )
-                    }
+                    // Instructions Card (prominent at top)
+                    InstructionsCard(showFullInstructions: $showInstructions)
                     
-                    // Enhanced Streak card with live progress
+                    // Simplified Streak card
                     StreakCard(
                         streak: userManager.currentUser.streak, 
-                              isActiveToday: userManager.currentUser.isStreakActiveToday,
-                              isAtRisk: userManager.currentUser.isStreakAtRisk,
+                        isActiveToday: userManager.currentUser.isStreakActiveToday,
+                        isAtRisk: userManager.currentUser.isStreakAtRisk,
                         user: userManager.currentUser,
-                        liveProgress: currentState.progress,
-                        isLiveMode: currentState.isLiveMode,
+                        progress: currentState.progress,
                         isGoalCompleted: currentState.isCompleted
                     )
                     
-                    // Today's progress with real-time live data
+                    // Simplified Today's progress
                     TodayProgressCard(
                         currentDistance: currentState.totalDistance,
                         goalDistance: currentState.goal,
                         progress: currentState.progress,
                         didComplete: currentState.isCompleted,
-                        isLiveMode: currentState.isLiveMode,
-                        liveDistance: currentState.liveDistance,
                         onRefresh: refreshData
                     )
                     
@@ -100,8 +79,11 @@ struct DashboardView: View {
             }
             .onAppear {
                 refreshData()
-                // Start real-time live workout monitoring
-                liveWorkoutManager.startLiveWorkoutMonitoring()
+                
+                // Check if widgets need refresh and force sync if needed
+                if WidgetDataStore.needsRefresh() {
+                    WidgetDataStore.forceWidgetSync()
+                }
             }
             .sheet(isPresented: $showGoalSheet) {
                 GoalSettingSheet(
@@ -150,34 +132,13 @@ struct DashboardView: View {
                 // Ensure widget data is always synchronized
                 updateWidgetData()
             }
-            .onChange(of: liveWorkoutManager.isWorkoutActive) { oldValue, newValue in
-                // Update widget data when workout state changes
-                updateWidgetData()
-                // Force immediate widget reload for live tracking state changes
-                WidgetCenter.shared.reloadAllTimelines()
-                print("[Dashboard] 🔴 Live workout state changed: \(newValue)")
-            }
-            .onChange(of: liveWorkoutManager.liveProgress) { oldValue, newValue in
-                // Update widget data when live progress changes
-                updateWidgetData()
-                // Force widget reload during live tracking
-                if liveWorkoutManager.isWorkoutActive {
-                    WidgetCenter.shared.reloadAllTimelines()
-                }
-                if abs(newValue - oldValue) > 0.01 {
-                    print("[Dashboard] 📊 Live progress updated: \(String(format: "%.1f", newValue * 100))%")
+            .onChange(of: currentState.isCompleted) { _, completed in
+                if completed && !showConfetti {
+                    triggerGoalCompletedCelebration()
                 }
             }
-            .onChange(of: liveWorkoutManager.currentWorkoutDistance) { oldValue, newValue in
-                // Update widget data when workout distance changes
-                updateWidgetData()
-                // Force widget reload during live tracking
-                if liveWorkoutManager.isWorkoutActive {
-                    WidgetCenter.shared.reloadAllTimelines()
-                }
-                if abs(newValue - oldValue) > 0.005 {
-                    print("[Dashboard] 🏃‍♂️ Live distance updated: \(String(format: "%.3f", newValue)) miles")
-                }
+            .sheet(isPresented: $showInstructions) {
+                FullInstructionsView()
             }
         }
         .confetti(isShowing: $showConfetti)
@@ -212,9 +173,22 @@ struct DashboardView: View {
         WidgetDataStore.save(
             todayMiles: state.baseMiles,
             goal: state.goal,
-            liveWorkoutDistance: state.liveDistance
+            forceRefresh: state.isCompleted // Force refresh when goal completed
         )
         WidgetDataStore.save(streak: userManager.currentUser.streak)
+    }
+    
+    private func triggerGoalCompletedCelebration() {
+        withAnimation {
+            showConfetti = true
+        }
+        
+        notificationService.sendMileCompletedNotification()
+        userManager.updateStreakForCompletion()
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            showConfetti = false
+        }
     }
     
     private func refreshData() {
@@ -227,11 +201,13 @@ struct DashboardView: View {
                     fetchHealthData()
                 }
                 updateWidgetData()
+                WidgetDataStore.forceWidgetSync()
                 isRefreshing = false
             }
         } else {
             fetchHealthData()
             updateWidgetData()
+            WidgetDataStore.forceWidgetSync()
             isRefreshing = false
         }
     }
@@ -255,6 +231,7 @@ struct DashboardView: View {
         }
         
         updateWidgetData()
+        WidgetDataStore.forceWidgetSync()
         isRefreshing = false
     }
     
@@ -287,26 +264,22 @@ struct DashboardView: View {
 
 // MARK: - Supporting Components
 
-// Enhanced Streak Card Component with Live Progress Circle
+// Simplified Streak Card Component
 struct StreakCard: View {
     let streak: Int
     let isActiveToday: Bool
     let isAtRisk: Bool
     let user: User
-    let liveProgress: Double
-    let isLiveMode: Bool
+    let progress: Double
     let isGoalCompleted: Bool
     
     @State private var animateProgress = false
-    @State private var livePulse = false
     
     var streakColor: Color {
         if isGoalCompleted {
             return .green
         } else if isAtRisk {
             return .red
-        } else if isLiveMode {
-            return .blue
         } else {
             return .orange
         }
@@ -317,34 +290,32 @@ struct StreakCard: View {
             return .green.opacity(0.1)
         } else if isAtRisk {
             return .red.opacity(0.1)
-        } else if isLiveMode {
-            return .blue.opacity(0.1)
         } else {
             return .orange.opacity(0.1)
         }
     }
     
     var statusText: String {
-        if isLiveMode {
-            return "Live Workout"
-        } else if isActiveToday {
-            return "Active Today"
+        if isGoalCompleted {
+            return "Goal Complete!"
+        } else if progress > 0 {
+            return "In Progress (\(Int(progress * 100))%)"
         } else if isAtRisk {
             return "At Risk"
         } else {
-            return "Keep It Going"
+            return "Ready to Start"
         }
     }
     
     var statusColor: Color {
-        if isLiveMode {
-            return .blue
-        } else if isActiveToday {
+        if isGoalCompleted {
             return .green
+        } else if progress > 0 {
+            return .blue
         } else if isAtRisk {
             return .red
         } else {
-            return .orange
+            return .gray
         }
     }
     
@@ -357,42 +328,15 @@ struct StreakCard: View {
                         .fill(backgroundColor)
                         .frame(width: 44, height: 44)
                     
-                    // Live pulse indicator when in live mode
-                    if isLiveMode {
-                        Circle()
-                            .stroke(Color.blue, lineWidth: 2)
-                            .frame(width: 44, height: 44)
-                            .scaleEffect(livePulse ? 1.1 : 1.0)
-                            .opacity(livePulse ? 0.0 : 1.0)
-                            .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: false), value: livePulse)
-                    }
-                    
-                    Image(systemName: isLiveMode ? "dot.radiowaves.left.and.right" : "flame.fill")
-                    .font(.title2)
+                    Image(systemName: "flame.fill")
+                        .font(.title2)
                         .foregroundColor(streakColor)
                 }
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                Text("Current Streak")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                        
-                        if isLiveMode {
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 6, height: 6)
-                                    .scaleEffect(livePulse ? 1.3 : 1.0)
-                                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: livePulse)
-                                
-                                Text("LIVE")
-                                    .font(.caption2)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.red)
-                            }
-                        }
-                    }
+                    Text("Current Streak")
+                        .font(.headline)
+                        .fontWeight(.semibold)
                     
                     Text(statusText)
                         .font(.caption)
@@ -415,13 +359,13 @@ struct StreakCard: View {
                     )
                     .frame(width: 120, height: 120)
                 
-                // Live progress ring (shows goal completion progress)
-                    Circle()
+                // Progress ring (shows goal completion progress)
+                Circle()
                     .stroke(Color.gray.opacity(0.2), lineWidth: 4)
                     .frame(width: 130, height: 130)
                 
                 Circle()
-                    .trim(from: 0, to: animateProgress ? liveProgress : 0)
+                    .trim(from: 0, to: animateProgress ? progress : 0)
                     .stroke(
                         streakColor,
                         style: StrokeStyle(lineWidth: 4, lineCap: .round)
@@ -430,10 +374,7 @@ struct StreakCard: View {
                     .rotationEffect(.degrees(-90))
                     .animation(.easeInOut(duration: 0.8), value: animateProgress)
                 
-                // Progress percentage text (when in live mode and progress > 0)
-                if isLiveMode && liveProgress > 0.01 {
-                    VStack(spacing: 2) {
-                        Text("\(Int(liveProgress * 100))%")
+                // Main streak number
                             .font(.caption2)
                             .fontWeight(.bold)
                             .foregroundColor(streakColor)
@@ -455,9 +396,9 @@ struct StreakCard: View {
                 }
             }
             
-            // Status and time remaining section
+            // Status section
             VStack(spacing: 12) {
-                    if isActiveToday {
+                if isGoalCompleted {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
@@ -470,12 +411,12 @@ struct StreakCard: View {
                     .padding(.vertical, 8)
                     .background(Color.green.opacity(0.1))
                     .cornerRadius(20)
-                    } else {
+                } else {
                     // Time remaining until streak ends
                     VStack(spacing: 8) {
                         HStack(spacing: 8) {
                             Image(systemName: isAtRisk ? "exclamationmark.triangle.fill" : "clock")
-                            .foregroundColor(isAtRisk ? .red : .orange)
+                                .foregroundColor(isAtRisk ? .red : .orange)
                             Text(isAtRisk ? "Streak at risk!" : "Time remaining:")
                                 .font(.subheadline)
                                 .fontWeight(.medium)
@@ -514,74 +455,30 @@ struct StreakCard: View {
         )
         .onAppear {
             animateProgress = true
-            if isLiveMode {
-                livePulse = true
-            }
         }
-        .onChange(of: liveProgress) { _, _ in
+        .onChange(of: progress) { _, _ in
             animateProgress = true
-        }
-        .onChange(of: isLiveMode) { _, newValue in
-            livePulse = newValue
         }
     }
 }
 
-// Today's Progress Card with real-time live updates
+// Simplified Today's Progress Card
 struct TodayProgressCard: View {
     let currentDistance: Double
     let goalDistance: Double
-    let progress: Double // Pre-calculated progress capped at 1.0
+    let progress: Double
     let didComplete: Bool
-    let isLiveMode: Bool
-    let liveDistance: Double
     let onRefresh: () -> Void
-    
-    @State private var livePulse = false
     
     var body: some View {
         VStack(spacing: 15) {
             HStack {
-                Image(systemName: isLiveMode ? "dot.radiowaves.left.and.right" : "figure.run")
-                    .foregroundColor(isLiveMode ? .blue : .primary)
+                Image(systemName: "figure.run")
+                    .foregroundColor(.primary)
                 
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                Text("Today's Progress")
-                    .font(.headline)
-                        
-                        if isLiveMode {
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 6, height: 6)
-                                    .scaleEffect(livePulse ? 1.3 : 1.0)
-                                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: livePulse)
-                                
-                                Text("LIVE TRACKING")
-                                    .font(.caption2)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.red)
-                                    .textCase(.uppercase)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill(Color.red.opacity(0.1))
-                                    .overlay(
-                                        Capsule()
-                                            .stroke(Color.red.opacity(0.3), lineWidth: 1)
-                                    )
-                            )
-                        }
-                    }
-                    
-                    if isLiveMode && liveDistance > 0.01 {
-                        Text("Live: +\(liveDistance.milesFormatted)")
-                            .font(.caption)
-                            .foregroundColor(.blue)
-                    }
+                    Text("Today's Progress")
+                        .font(.headline)
                 }
                 
                 Spacer()
@@ -620,14 +517,6 @@ struct TodayProgressCard: View {
         }
         .padding()
         .cardStyle()
-        .onAppear {
-            if isLiveMode {
-                livePulse = true
-            }
-        }
-        .onChange(of: isLiveMode) { _, newValue in
-            livePulse = newValue
-        }
     }
 }
 
@@ -1051,226 +940,338 @@ struct GoalSettingSheet: View {
     }
 }
 
-// MARK: - Enhanced Live Workout Card Component
 
-struct LiveWorkoutCard: View {
-    let workoutType: HKWorkoutActivityType?
-    let currentDistance: Double
-    let startTime: Date?
+
+// MARK: - Instructions Components
+
+struct InstructionsCard: View {
+    @Binding var showFullInstructions: Bool
     
-    @State private var elapsedTime: TimeInterval = 0
-    @State private var timer: Timer?
-    @State private var pulseAnimation = false
-    
-    var workoutIcon: String {
-        switch workoutType {
-        case .running:
-            return "figure.run"
-        case .walking:
-            return "figure.walk"
-        default:
-            return "figure.mixed.cardio"
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "info.circle.fill")
+                    .foregroundColor(.blue)
+                    .font(.title2)
+                
+                Text("How to Use Mile A Day")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                
+                Spacer()
+                
+                Button("Full Guide") {
+                    showFullInstructions = true
+                }
+                .font(.caption)
+                .foregroundColor(.blue)
+            }
+            
+            VStack(alignment: .leading, spacing: 8) {
+                InstructionStep(
+                    number: "1",
+                    text: "Set your daily mile goal using the gear icon",
+                    icon: "target"
+                )
+                
+                InstructionStep(
+                    number: "2", 
+                    text: "Start a walk or run workout in Apple Fitness",
+                    icon: "figure.walk"
+                )
+                
+                InstructionStep(
+                    number: "3",
+                    text: "Complete your target distance and end workout",
+                    icon: "checkmark.circle"
+                )
+                
+                InstructionStep(
+                    number: "4",
+                    text: "Return to Mile A Day - your streak will update automatically!",
+                    icon: "arrow.clockwise"
+                )
+            }
+            
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+                    .font(.caption)
+                
+                Text("Your widgets will refresh and show your updated progress")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.top, 4)
         }
+        .padding()
+        .cardStyle()
+    }
+}
+
+struct InstructionStep: View {
+    let number: String
+    let text: String
+    let icon: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.blue.opacity(0.1))
+                    .frame(width: 24, height: 24)
+                
+                Text(number)
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundColor(.blue)
+            }
+            
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .foregroundColor(.blue)
+                    .font(.caption)
+                
+                Text(text)
+                    .font(.caption)
+                    .foregroundColor(.primary)
+            }
+            
+            Spacer()
+        }
+    }
+}
+
+// MARK: - Full Instructions View
+
+struct FullInstructionsView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    // Header
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Welcome to Mile A Day")
+                            .font(.largeTitle)
+                            .fontWeight(.bold)
+                        
+                        Text("Build a consistent walking or running habit with simple goal tracking")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    // How it works section
+                    SectionCard(
+                        title: "How It Works",
+                        icon: "lightbulb.fill",
+                        color: .orange
+                    ) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            DetailedStep(
+                                number: "1",
+                                title: "Set Your Goal", 
+                                description: "Choose your daily walking/running target using the gear icon. Start with 1 mile and adjust as needed.",
+                                tip: "Start small and build consistency!"
+                            )
+                            
+                            DetailedStep(
+                                number: "2",
+                                title: "Use Apple Fitness",
+                                description: "Open Apple Fitness app and start a 'Walking' or 'Running' workout. Mile A Day reads your workout data automatically.",
+                                tip: "Make sure HealthKit permissions are enabled"
+                            )
+                            
+                            DetailedStep(
+                                number: "3",
+                                title: "Complete & Check Back",
+                                description: "Finish your workout in Apple Fitness, then return to Mile A Day. Your progress updates automatically!",
+                                tip: "Widgets will refresh within a few minutes"
+                            )
+                        }
+                    }
+                    
+                    // Tips section
+                    SectionCard(
+                        title: "Pro Tips",
+                        icon: "star.fill",
+                        color: .yellow
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            TipItem(
+                                icon: "target",
+                                text: "Start with achievable goals to build momentum"
+                            )
+                            
+                            TipItem(
+                                icon: "bell.fill",
+                                text: "Enable notifications for daily reminders and completion celebrations"
+                            )
+                            
+                            TipItem(
+                                icon: "square.grid.2x2.fill",
+                                text: "Add widgets to your home screen for quick progress checks"
+                            )
+                            
+                            TipItem(
+                                icon: "flame.fill",
+                                text: "Focus on consistency over speed - every day counts!"
+                            )
+                        }
+                    }
+                    
+                    // Troubleshooting section
+                    SectionCard(
+                        title: "Troubleshooting",
+                        icon: "questionmark.circle.fill",
+                        color: .blue
+                    ) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            TroubleshootingItem(
+                                question: "Progress not updating?",
+                                answer: "Pull down to refresh the main screen or restart the app. Check that HealthKit permissions are enabled."
+                            )
+                            
+                            TroubleshootingItem(
+                                question: "Widgets showing old data?",
+                                answer: "Widgets update automatically but may take a few minutes. You can force refresh by opening the app."
+                            )
+                            
+                            TroubleshootingItem(
+                                question: "Missing workouts?",
+                                answer: "Only Apple Fitness walking/running workouts count. Other workout apps may not sync properly."
+                            )
+                        }
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Instructions")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct SectionCard<Content: View>: View {
+    let title: String
+    let icon: String
+    let color: Color
+    let content: Content
+    
+    init(title: String, icon: String, color: Color, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.icon = icon
+        self.color = color
+        self.content = content()
     }
     
     var body: some View {
-        VStack(spacing: 20) {
-            // Enhanced header with workout icon
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
+                Image(systemName: icon)
+                    .foregroundColor(color)
+                    .font(.title2)
+                
+                Text(title)
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                
+                Spacer()
+            }
+            
+            content
+        }
+        .padding()
+        .cardStyle()
+    }
+}
+
+struct DetailedStep: View {
+    let number: String
+    let title: String
+    let description: String
+    let tip: String
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
                 ZStack {
                     Circle()
-                        .fill(Color.red.opacity(0.1))
-                        .frame(width: 44, height: 44)
-                        .overlay(
-                            Circle()
-                                .stroke(Color.red.opacity(0.3), lineWidth: 2)
-                                .scaleEffect(pulseAnimation ? 1.1 : 1.0)
-                                .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: pulseAnimation)
-                        )
+                        .fill(Color.blue)
+                        .frame(width: 32, height: 32)
                     
-                    Image(systemName: workoutIcon)
-                        .font(.title2)
-                        .foregroundColor(.red)
+                    Text(number)
+                        .font(.headline)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
                 }
                 
                 VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 8, height: 8)
-                            .scaleEffect(pulseAnimation ? 1.3 : 1.0)
-                            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: pulseAnimation)
-                    
-                    Text("LIVE TRACKING")
-                        .font(.caption.bold())
-                        .foregroundColor(.red)
-                        .textCase(.uppercase)
-                }
-                
-                Text(workoutType?.name ?? "Workout")
+                    Text(title)
                         .font(.headline)
                         .fontWeight(.semibold)
+                    
+                    Text(description)
+                        .font(.body)
+                        .foregroundColor(.secondary)
                 }
                 
                 Spacer()
             }
             
-            // Enhanced live metrics with background circles
-            HStack(spacing: 24) {
-                // Distance metric
-                VStack(spacing: 8) {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [Color.blue.opacity(0.3), Color.blue.opacity(0.1)]),
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 70, height: 70)
-                        
-                        VStack(spacing: 2) {
-                    Text(String(format: "%.2f", currentDistance))
-                                .font(.system(size: 18, weight: .bold, design: .rounded))
-                                .foregroundColor(.blue)
-                            Text("mi")
-                                .font(.caption2)
-                                .foregroundColor(.blue.opacity(0.8))
-                        }
-                    }
-                    
-                    Text("Distance")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(.secondary)
-                }
+            HStack(spacing: 8) {
+                Image(systemName: "lightbulb.fill")
+                    .foregroundColor(.yellow)
+                    .font(.caption)
                 
-                // Duration metric
-                VStack(spacing: 8) {
-                    ZStack {
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    gradient: Gradient(colors: [Color.purple.opacity(0.3), Color.purple.opacity(0.1)]),
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 70, height: 70)
-                        
-                        Text(formatDurationCompact(elapsedTime))
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundColor(.purple)
-                    }
-                    
-                    Text("Duration")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(.secondary)
-                }
-                
-                // Pace metric (if distance > 0)
-                if currentDistance > 0.01 {
-                    VStack(spacing: 8) {
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        gradient: Gradient(colors: [Color.orange.opacity(0.3), Color.orange.opacity(0.1)]),
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .frame(width: 70, height: 70)
-                            
-                        Text(formatPace(minutes: elapsedTime / 60 / currentDistance))
-                                .font(.system(size: 12, weight: .bold, design: .rounded))
-                                .foregroundColor(.orange)
-                        }
-                        
-                        Text("Pace")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(.secondary)
-                    }
-                }
+                Text(tip)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .italic()
             }
+            .padding(.leading, 44)
+        }
+    }
+}
+
+struct TipItem: View {
+    let icon: String
+    let text: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .foregroundColor(.yellow)
+                .font(.body)
+                .frame(width: 20)
             
-            // Motivational message
-            Text("Keep going! Every step counts towards your goal.")
-                .font(.caption)
+            Text(text)
+                .font(.body)
+        }
+    }
+}
+
+struct TroubleshootingItem: View {
+    let question: String
+    let answer: String
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(question)
+                .font(.body)
+                .fontWeight(.semibold)
+            
+            Text(answer)
+                .font(.body)
                 .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 8)
         }
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemBackground))
-                .shadow(color: Color.red.opacity(0.2), radius: 8, x: 0, y: 4)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.red.opacity(0.3), lineWidth: 1)
-        )
-        .onAppear {
-            startTimer()
-            pulseAnimation = true
-        }
-        .onDisappear {
-            stopTimer()
-            pulseAnimation = false
-        }
-        .onChange(of: liveWorkoutManager.isWorkoutActive) { oldValue, newValue in
-            pulseAnimation = newValue
-        }
-    }
-    
-    private func startTimer() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            if let start = startTime {
-                elapsedTime = Date().timeIntervalSince(start)
-            }
-        }
-    }
-    
-    private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
-    }
-    
-    private func formatDuration(_ duration: TimeInterval) -> String {
-        let hours = Int(duration) / 3600
-        let minutes = Int(duration) % 3600 / 60
-        let seconds = Int(duration) % 60
-        
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
-        } else {
-            return String(format: "%d:%02d", minutes, seconds)
-        }
-    }
-    
-    private func formatDurationCompact(_ duration: TimeInterval) -> String {
-        let hours = Int(duration) / 3600
-        let minutes = Int(duration) % 3600 / 60
-        let seconds = Int(duration) % 60
-        
-        if hours > 0 {
-            return String(format: "%d:%02d", hours, minutes)
-        } else {
-            return String(format: "%d:%02d", minutes, seconds)
-        }
-    }
-    
-    private func formatPace(minutes: Double) -> String {
-        guard minutes > 0 && !minutes.isInfinite else { return "0:00" }
-        
-        let totalSeconds = Int(minutes * 60)
-        let mins = totalSeconds / 60
-        let secs = totalSeconds % 60
-        
-        return String(format: "%d:%02d", mins, secs)
     }
 } 
