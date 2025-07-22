@@ -99,21 +99,14 @@ final class MADBackgroundService: NSObject, ObservableObject {
     private func handleBackgroundRefresh(task: BGAppRefreshTask) {
         print("[Background] Background refresh task started")
         
-        // Validate and repair widget data first
-        let wasRepaired = WidgetDataStore.validateAndRepair()
-        if wasRepaired {
-            print("[Background] Widget data was repaired during background refresh")
-        }
-        
-        // Set expiration handler with ALL necessary cleanup (fixed: was assigned twice)
-        task.expirationHandler = {
-            print("[Background] Background task expired, performing cleanup...")
-            self.liveWorkoutManager.stopLiveWorkoutMonitoring()
-            task.setTaskCompleted(success: false)
-        }
-        
         // Schedule the next background refresh
         scheduleBackgroundRefresh()
+        
+        // Set expiration handler
+        task.expirationHandler = {
+            print("[Background] Background task expired")
+            task.setTaskCompleted(success: false)
+        }
         
         // Perform the background work
         Task { [weak self] in
@@ -269,25 +262,10 @@ extension MADBackgroundService {
     /// Call this from App's sceneDidEnterBackground
     func appDidEnterBackground() {
         scheduleBackgroundRefresh()
-        print("[Background] App entered background - background refresh scheduled")
     }
     
     /// Call this from App's sceneWillEnterForeground  
     func appWillEnterForeground() {
-        // Validate and repair data when returning to foreground
-        let wasRepaired = WidgetDataStore.validateAndRepair()
-        if wasRepaired {
-            print("[Background] 🔧 Widget data was repaired when returning to foreground")
-        }
-        
-        // Ensure live tracking is running if needed
-        Task { @MainActor in
-            if !liveWorkoutManager.isWorkoutActive {
-                // Check if we should restart live tracking
-                liveWorkoutManager.startLiveWorkoutMonitoring()
-            }
-        }
-        
         // Cancel any pending background tasks when app becomes active
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.backgroundTaskIdentifier)
         

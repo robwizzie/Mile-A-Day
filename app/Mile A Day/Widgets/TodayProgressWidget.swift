@@ -24,7 +24,7 @@ struct TodayProgressProvider: TimelineProvider {
 
     func getSnapshot(in context: Context, completion: @escaping (TodayProgressEntry) -> Void) {
         let data = WidgetDataStore.load()
-        print("[Widget] Snapshot - Base Miles: \(data.miles), Total: \(data.totalDistance), Goal: \(data.goal), Progress: \(Int(data.progress * 100))%")
+        print("[Widget] Snapshot - Base Miles: \(data.miles), Total: \(data.totalDistance), Goal: \(data.goal), Progress: \(data.progress * 100)%")
         completion(TodayProgressEntry(
             date: Date(), 
             milesCompleted: data.miles, 
@@ -39,7 +39,7 @@ struct TodayProgressProvider: TimelineProvider {
         let data = WidgetDataStore.load()
         let liveData = WidgetDataStore.loadLiveWorkout()
         
-        print("[Widget] Timeline - Base Miles: \(data.miles), Total: \(data.totalDistance), Goal: \(data.goal), Progress: \(Int(data.progress * 100))%, Live Active: \(liveData.isActive)")
+        print("[Widget] Timeline - Base Miles: \(data.miles), Total: \(data.totalDistance), Goal: \(data.goal), Progress: \(data.progress * 100)%, Live Active: \(liveData.isActive)")
         
         let entry = TodayProgressEntry(
             date: Date(), 
@@ -50,8 +50,8 @@ struct TodayProgressProvider: TimelineProvider {
             totalDistance: data.totalDistance
         )
         
-        // Refresh much more frequently for live workouts - every 10 seconds for true real-time
-        let refreshInterval: TimeInterval = liveData.isActive ? 10 : (data.streakCompleted ? 900 : 60) // 10s live, 1min incomplete, 15min completed
+        // Refresh much more frequently for live workouts - every 15 seconds for true real-time
+        let refreshInterval: TimeInterval = liveData.isActive ? 15 : (data.streakCompleted ? 900 : 60) // 15s live, 1min incomplete, 15min completed
         
         let nextRefresh = Date().addingTimeInterval(refreshInterval)
         let timeline = Timeline(entries: [entry], policy: .after(nextRefresh))
