@@ -7,7 +7,6 @@ struct TodayProgressEntry: TimelineEntry {
     let goal: Double
     let streakCompleted: Bool
     let progress: Double // Pre-calculated progress capped at 1.0
-    let totalDistance: Double // Include live workout distance
 }
 
 struct TodayProgressProvider: TimelineProvider {
@@ -17,41 +16,37 @@ struct TodayProgressProvider: TimelineProvider {
             milesCompleted: 0.5, 
             goal: 1.0, 
             streakCompleted: false,
-            progress: 0.5,
-            totalDistance: 0.5
+            progress: 0.5
         )
     }
 
     func getSnapshot(in context: Context, completion: @escaping (TodayProgressEntry) -> Void) {
         let data = WidgetDataStore.load()
-        print("[Widget] Snapshot - Base Miles: \(data.miles), Total: \(data.totalDistance), Goal: \(data.goal), Progress: \(data.progress * 100)%")
+        print("[Widget] Snapshot - Miles: \(data.miles), Goal: \(data.goal), Progress: \(data.progress * 100)%")
         completion(TodayProgressEntry(
             date: Date(), 
             milesCompleted: data.miles, 
             goal: data.goal, 
             streakCompleted: data.streakCompleted,
-            progress: data.progress,
-            totalDistance: data.totalDistance
+            progress: data.progress
         ))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<TodayProgressEntry>) -> Void) {
         let data = WidgetDataStore.load()
-        let liveData = WidgetDataStore.loadLiveWorkout()
         
-        print("[Widget] Timeline - Base Miles: \(data.miles), Total: \(data.totalDistance), Goal: \(data.goal), Progress: \(data.progress * 100)%, Live Active: \(liveData.isActive)")
+        print("[Widget] Timeline - Miles: \(data.miles), Goal: \(data.goal), Progress: \(data.progress * 100)%")
         
         let entry = TodayProgressEntry(
             date: Date(), 
             milesCompleted: data.miles, 
             goal: data.goal, 
             streakCompleted: data.streakCompleted,
-            progress: data.progress,
-            totalDistance: data.totalDistance
+            progress: data.progress
         )
         
-        // Refresh much more frequently for live workouts - every 15 seconds for true real-time
-        let refreshInterval: TimeInterval = liveData.isActive ? 15 : (data.streakCompleted ? 900 : 60) // 15s live, 1min incomplete, 15min completed
+        // Refresh every minute for incomplete goals, every 15 minutes for completed goals
+        let refreshInterval: TimeInterval = data.streakCompleted ? 900 : 60 // 1min incomplete, 15min completed
         
         let nextRefresh = Date().addingTimeInterval(refreshInterval)
         let timeline = Timeline(entries: [entry], policy: .after(nextRefresh))
@@ -69,27 +64,27 @@ struct TodayProgressWidgetEntryView: View {
                 case .accessoryCircular:
                     CircularProgressView(
                         progress: entry.progress,
-                        milesCompleted: entry.totalDistance,
+                        milesCompleted: entry.milesCompleted,
                         goal: entry.goal,
                         streakCompleted: entry.streakCompleted
                     )
                 case .accessoryRectangular:
                     RectangularProgressView(
                         progress: entry.progress,
-                        milesCompleted: entry.totalDistance,
+                        milesCompleted: entry.milesCompleted,
                         goal: entry.goal,
                         streakCompleted: entry.streakCompleted
                     )
                 case .accessoryInline:
                     InlineProgressView(
-                        milesCompleted: entry.totalDistance,
+                        milesCompleted: entry.milesCompleted,
                         goal: entry.goal,
                         streakCompleted: entry.streakCompleted
                     )
                 default:
                     HomeScreenProgressView(
                         progress: entry.progress,
-                        milesCompleted: entry.totalDistance,
+                        milesCompleted: entry.milesCompleted,
                         goal: entry.goal,
                         streakCompleted: entry.streakCompleted
                     )
@@ -97,7 +92,7 @@ struct TodayProgressWidgetEntryView: View {
             } else {
                 HomeScreenProgressView(
                     progress: entry.progress,
-                    milesCompleted: entry.totalDistance,
+                    milesCompleted: entry.milesCompleted,
                     goal: entry.goal,
                     streakCompleted: entry.streakCompleted
                 )
@@ -289,5 +284,5 @@ struct TodayProgressWidget: Widget {
 #Preview(as: .systemSmall) {
     TodayProgressWidget()
 } timeline: {
-    TodayProgressEntry(date: .now, milesCompleted: 0.2, goal: 1.0, streakCompleted: false, progress: 0.2, totalDistance: 0.2)
+    TodayProgressEntry(date: .now, milesCompleted: 0.2, goal: 1.0, streakCompleted: false, progress: 0.2)
 } 

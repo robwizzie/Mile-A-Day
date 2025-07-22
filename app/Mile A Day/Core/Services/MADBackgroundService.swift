@@ -14,7 +14,7 @@ final class MADBackgroundService: NSObject, ObservableObject {
     private let healthManager = HealthKitManager()
     private let userManager = UserManager()
     private let notificationService = MADNotificationService.shared
-    private let liveWorkoutManager = LiveWorkoutManager.shared
+    // Live workout functionality removed
     
     // Background task identifier
     private static let backgroundTaskIdentifier = "com.mileaday.background-refresh"
@@ -240,19 +240,11 @@ final class MADBackgroundService: NSObject, ObservableObject {
         let user = userManager.currentUser
         var miles = healthManager.todaysDistance
         
-        // Check for live workout data
-        Task { @MainActor in
-            // If there's an active workout, include live distance
-            if liveWorkoutManager.isWorkoutActive {
-                miles += liveWorkoutManager.currentWorkoutDistance
-                print("[Background] Including live workout distance: \(liveWorkoutManager.currentWorkoutDistance)")
-            }
-            
-                            WidgetDataStore.save(todayMiles: miles, goal: user.goalMiles, liveWorkoutDistance: 0.0)
-            WidgetDataStore.save(streak: user.streak)
-            
-            print("[Background] Widgets updated - Miles: \(miles), Goal: \(user.goalMiles), Streak: \(user.streak)")
-        }
+        // Update widget data
+        WidgetDataStore.save(todayMiles: miles, goal: user.goalMiles)
+        WidgetDataStore.save(streak: user.streak)
+        
+        print("[Background] Widgets updated - Miles: \(miles), Goal: \(user.goalMiles), Streak: \(user.streak)")
     }
 }
 

@@ -25,18 +25,16 @@ struct StreakCountProvider: TimelineProvider {
     func getSnapshot(in context: Context, completion: @escaping (StreakCountEntry) -> Void) {
         let streak = WidgetDataStore.loadStreak()
         let widgetData = WidgetDataStore.load()
-        let liveData = WidgetDataStore.loadLiveWorkout()
         
         // Calculate status
         let isGoalCompleted = widgetData.streakCompleted
-        let isLiveMode = liveData.isActive
         let progress = widgetData.progress
         
         // Simple risk calculation for widget (past 6pm and not completed)
         let currentHour = Calendar.current.component(.hour, from: Date())
         let isAtRisk = currentHour >= 18 && !isGoalCompleted
         
-        print("[Streak Widget] Snapshot - Streak: \(streak), Progress: \(progress * 100)%, Live: \(isLiveMode), Completed: \(isGoalCompleted)")
+        print("[Streak Widget] Snapshot - Streak: \(streak), Progress: \(progress * 100)%, Completed: \(isGoalCompleted)")
         
         completion(StreakCountEntry(
             date: Date(), 
@@ -51,11 +49,9 @@ struct StreakCountProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<StreakCountEntry>) -> Void) {
         let streak = WidgetDataStore.loadStreak()
         let widgetData = WidgetDataStore.load()
-        let liveData = WidgetDataStore.loadLiveWorkout()
         
         // Calculate status
         let isGoalCompleted = widgetData.streakCompleted
-        let isLiveMode = liveData.isActive
         let progress = widgetData.progress
         
         // Simple risk calculation for widget
