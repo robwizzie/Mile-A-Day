@@ -64,7 +64,7 @@ struct MainTabView: View {
             
             // Debug: Force widget data update
             print("[Debug] Forcing widget data update - Miles: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles), Streak: \(userManager.currentUser.streak)")
-                            WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles, forceRefresh: true)
+                            WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles, liveWorkoutDistance: 0.0)
             WidgetDataStore.save(streak: userManager.currentUser.streak)
         }
     }
