@@ -215,29 +215,14 @@ class HealthKitManager: ObservableObject {
         ) { [weak self] _, samples, error in
             guard let self = self, let workouts = samples as? [HKWorkout] else { return }
             
-            // Track fastest mile pace
-            var fastestPace: TimeInterval = .infinity
-            
             // Track most miles in a day
             var mostMilesInDay: Double = 0.0
             var mostMilesWorkouts: [HKWorkout] = []
             
-            // Group workouts by day for streak calculation
+            // Group workouts by day for streak calculation and most miles
             var workoutsByDay: [Date: [HKWorkout]] = [:]
             
             for workout in workouts {
-                // Calculate pace
-                if let distance = workout.totalDistance {
-                    let miles = distance.doubleValue(for: HKUnit.mile())
-                    if miles >= 0.95 { // Only consider workouts at least a mile
-                        let paceMinutesPerMile = workout.duration / 60 / miles
-                        
-                        if paceMinutesPerMile < fastestPace && paceMinutesPerMile > 0 {
-                            fastestPace = paceMinutesPerMile
-                        }
-                    }
-                }
-                
                 // Group by day for most miles and streak calculation
                 let calendar = Calendar.current
                 let dateComponents = calendar.dateComponents([.year, .month, .day], from: workout.endDate)
@@ -270,14 +255,64 @@ class HealthKitManager: ObservableObject {
             let streak = self.calculateRetroactiveStreak(workoutsByDay: workoutsByDay)
             
             DispatchQueue.main.async {
-                self.fastestMilePace = fastestPace == .infinity ? 0 : fastestPace
                 self.mostMilesInOneDay = mostMilesInDay
                 self.mostMilesWorkouts = mostMilesWorkouts
                 self.retroactiveStreak = streak
             }
+            
+            // Now fetch the fastest mile pace separately using proper HealthKit speed data
+            self.fetchFastestMilePace()
         }
         
         healthStore.execute(query)
+    }
+    
+        // Fetch fastest mile pace from workout data (average pace of fastest workout that's at least 1 mile)
+    private func fetchFastestMilePace() {
+        guard isAuthorized else { return }
+        
+        // Get all running and walking workouts
+        let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
+        let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
+        let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
+        
+        let workoutQuery = HKSampleQuery(
+            sampleType: HKObjectType.workoutType(),
+            predicate: compoundPredicate,
+            limit: HKObjectQueryNoLimit,
+            sortDescriptors: nil
+        ) { [weak self] _, samples, error in
+            guard let self = self, let workouts = samples as? [HKWorkout] else { return }
+            
+            var fastestPace: TimeInterval = .infinity
+            
+            // Find the fastest average pace from workouts that are at least 0.95 miles
+            for workout in workouts {
+                if let distance = workout.totalDistance {
+                    let miles = distance.doubleValue(for: HKUnit.mile())
+                    
+                    // Only consider workouts that are at least 0.95 miles (accounts for GPS variance)
+                    if miles >= 0.95 {
+                        // Calculate average pace for this workout (minutes per mile)
+                        let avgPaceMinutesPerMile = workout.duration / 60.0 / miles
+                        
+                        // Check for reasonable pace values (between 3:00 and 20:00 per mile)
+                        if avgPaceMinutesPerMile >= 3.0 && avgPaceMinutesPerMile <= 20.0 {
+                            if avgPaceMinutesPerMile < fastestPace {
+                                fastestPace = avgPaceMinutesPerMile
+                            }
+                        }
+                    }
+                }
+            }
+            
+            DispatchQueue.main.async {
+                self.fastestMilePace = fastestPace == .infinity ? 0.0 : fastestPace
+                print("[HealthKit] Fastest mile pace calculated: \(self.formatPace(minutesPerMile: self.fastestMilePace))")
+            }
+        }
+        
+        healthStore.execute(workoutQuery)
     }
     
     // Helper to calculate retroactive streak from workout data

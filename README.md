@@ -32,6 +32,7 @@ A clean, focused app for tracking your daily mile goal without the complexity of
 - **Streak Tracking**: Monitor your current streak and see if you're at risk of breaking it
 - **Goal Management**: Easily adjust your daily mile goal from the settings (gear icon)
 - **Recent Workouts**: View your recent running and walking activities
+- **Personal Records**: Track your fastest mile pace and other achievements
 
 #### Widgets
 - **Home Screen Widgets**: Add widgets to see your progress at a glance
@@ -62,6 +63,19 @@ A clean, focused app for tracking your daily mile goal without the complexity of
 - **Special Badges**: Get recognition for unique accomplishments
 - **Badge Notifications**: See when you've earned new badges
 
+### 📊 Personal Records
+
+#### Fastest Mile Pace
+- **Accurate Calculation**: Your fastest mile pace is calculated from the average pace of your fastest workout that's at least 1 mile long
+- **No Data Manipulation**: The app uses the exact workout data from HealthKit without any modifications
+- **Realistic Records**: Only considers workouts between 3:00-20:00 per mile pace to filter out GPS errors
+- **Automatic Updates**: Your record updates automatically as you complete faster workouts
+
+#### Most Miles in One Day
+- Tracks the highest daily mileage across all your workouts
+- Combines multiple workouts from the same day
+- Updates automatically when you beat your record
+
 ### 🔧 Troubleshooting
 
 #### Data Not Updating?
@@ -80,6 +94,11 @@ A clean, focused app for tracking your daily mile goal without the complexity of
 - The day resets at midnight in your current location
 - Historical data is analyzed to build retroactive streaks
 
+#### Fastest Pace Not Showing?
+- Make sure you have workouts that are at least 1 mile long
+- The app only considers realistic pace times (3-20 minutes per mile)
+- Pace is calculated from complete workouts, not segments
+
 ### 🎯 Best Practices
 
 1. **Enable HealthKit Permissions**: Essential for accurate tracking
@@ -87,6 +106,7 @@ A clean, focused app for tracking your daily mile goal without the complexity of
 3. **Use Any Fitness App**: Mile A Day works with whatever app you prefer
 4. **Check Progress Regularly**: Use widgets or open the app to stay motivated
 5. **Maintain Consistency**: Small daily efforts lead to big results
+6. **Complete Full Workouts**: For accurate pace tracking, complete workouts of at least 1 mile
 
 ### 📊 Data Privacy
 
@@ -102,6 +122,12 @@ A clean, focused app for tracking your daily mile goal without the complexity of
 - Walking (outdoor and indoor)
 - Hiking
 - Any other HealthKit distance-based workout
+
+### Pace Calculation Details
+- **Fastest Mile Pace**: Average pace of your fastest workout ≥1 mile
+- **Workout Pace**: Average pace for individual workouts (total time ÷ total distance)
+- **Data Source**: Direct from HealthKit workout data (no manipulation)
+- **Filtering**: Reasonable pace ranges to exclude GPS errors
 
 ### iOS Requirements
 - iOS 16.0 or later
