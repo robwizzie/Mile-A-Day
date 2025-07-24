@@ -3,10 +3,43 @@ import SwiftUI
 struct BadgesView: View {
     @ObservedObject var userManager: UserManager
     @State private var showConfetti = false
+    @State private var selectedFilter: BadgeFilter = .all
     
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
+                // Badge count header
+                if !userManager.currentUser.badges.isEmpty {
+                    VStack(spacing: 12) {
+                        HStack {
+                            Text("Your Badges")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            Spacer()
+                            let earnedCount = filteredBadges.filter { !$0.isLocked }.count
+                            let totalCount = filteredBadges.count
+                            Text("\(earnedCount) of \(totalCount)")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        
+                        // Filter buttons
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                ForEach(BadgeFilter.allCases, id: \.self) { filter in
+                                    FilterButton(
+                                        title: filter.title,
+                                        isSelected: selectedFilter == filter,
+                                        action: { selectedFilter = filter }
+                                    )
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+                
                 if userManager.currentUser.badges.isEmpty {
                     emptyBadgesView
                 } else {
@@ -50,10 +83,30 @@ struct BadgesView: View {
         .padding()
     }
     
+    // Filtered badges based on selected filter
+    private var filteredBadges: [Badge] {
+        let allBadges = userManager.currentUser.getAllBadges()
+        
+        switch selectedFilter {
+        case .all:
+            return allBadges
+        case .streak:
+            return allBadges.filter { $0.id.starts(with: "streak_") || $0.id.starts(with: "consistency_") }
+        case .miles:
+            return allBadges.filter { $0.id.starts(with: "miles_") }
+        case .speed:
+            return allBadges.filter { $0.id.starts(with: "pace_") }
+        case .distance:
+            return allBadges.filter { $0.id.starts(with: "daily_") }
+        case .new:
+            return allBadges.filter { $0.isNew && !$0.isLocked }
+        }
+    }
+    
     // Grid layout for badges
     private var badgesGridView: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 20) {
-            ForEach(userManager.currentUser.badges) { badge in
+            ForEach(filteredBadges) { badge in
                 BadgeCard(badge: badge)
             }
         }
@@ -68,15 +121,32 @@ struct BadgeCard: View {
         VStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(badge.rarity.color.opacity(0.2))
+                    .fill(badge.isLocked ? Color.gray.opacity(0.2) : badge.rarity.color.opacity(0.2))
                     .frame(width: 80, height: 80)
                 
-                Image(systemName: badgeIcon(for: badge))
-                    .font(.system(size: 35))
-                    .foregroundColor(badge.rarity.color)
+                if badge.isLocked {
+                    // Locked badge appearance
+                    ZStack {
+                        Image(systemName: badgeIcon(for: badge))
+                            .font(.system(size: 35))
+                            .foregroundColor(.gray)
+                            .opacity(0.3)
+                        
+                        // Lock overlay
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(.gray)
+                            .offset(x: 20, y: -20)
+                    }
+                } else {
+                    // Unlocked badge appearance
+                    Image(systemName: badgeIcon(for: badge))
+                        .font(.system(size: 35))
+                        .foregroundColor(badge.rarity.color)
+                }
             }
             .overlay(alignment: .topTrailing) {
-                if badge.isNew {
+                if badge.isNew && !badge.isLocked {
                     Text("NEW")
                         .font(.caption2)
                         .fontWeight(.bold)
@@ -91,30 +161,38 @@ struct BadgeCard: View {
             
             Text(badge.name)
                 .font(.headline)
+                .foregroundColor(badge.isLocked ? .gray : .primary)
                 .multilineTextAlignment(.center)
             
             Text(badge.description)
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(badge.isLocked ? .gray.opacity(0.7) : .secondary)
                 .multilineTextAlignment(.center)
             
             Text(rarityLabel(for: badge.rarity))
                 .font(.caption2)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(badge.rarity.color.opacity(0.2))
-                .foregroundColor(badge.rarity.color)
+                .background(badge.isLocked ? Color.gray.opacity(0.2) : badge.rarity.color.opacity(0.2))
+                .foregroundColor(badge.isLocked ? .gray : badge.rarity.color)
                 .cornerRadius(10)
             
-            Text("Earned \(badge.dateAwarded.formattedDate)")
-                .font(.caption2)
-                .foregroundColor(.secondary)
+            if badge.isLocked {
+                Text("LOCKED")
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.gray)
+            } else {
+                Text("Earned \(badge.dateAwarded.formattedDate)")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
         .padding()
         .frame(minWidth: 150)
         .background(Color(.systemBackground))
         .cornerRadius(15)
-        .shadow(color: badge.rarity.color.opacity(0.2), radius: 5, x: 0, y: 2)
+        .shadow(color: badge.isLocked ? Color.gray.opacity(0.1) : badge.rarity.color.opacity(0.2), radius: 5, x: 0, y: 2)
     }
     
     // Helper to get appropriate icon for badge
@@ -123,6 +201,12 @@ struct BadgeCard: View {
             return "flame.fill"
         } else if badge.id.starts(with: "miles_") {
             return "figure.run"
+        } else if badge.id.starts(with: "pace_") {
+            return "bolt.fill"
+        } else if badge.id.starts(with: "daily_") {
+            return "figure.run.circle.fill"
+        } else if badge.id.starts(with: "consistency_") {
+            return "calendar.badge.clock"
         } else {
             return "star.fill"
         }
@@ -138,6 +222,49 @@ struct BadgeCard: View {
         case .legendary:
             return "LEGENDARY"
         }
+    }
+}
+
+// MARK: - Badge Filter
+enum BadgeFilter: CaseIterable {
+    case all, streak, miles, speed, distance, new
+    
+    var title: String {
+        switch self {
+        case .all:
+            return "All"
+        case .streak:
+            return "Streaks"
+        case .miles:
+            return "Miles"
+        case .speed:
+            return "Speed"
+        case .distance:
+            return "Distance"
+        case .new:
+            return "New"
+        }
+    }
+}
+
+// MARK: - Filter Button
+struct FilterButton: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.medium)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(isSelected ? Color("appPrimary") : Color(.systemGray5))
+                .foregroundColor(isSelected ? .white : .primary)
+                .cornerRadius(16)
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 }
 

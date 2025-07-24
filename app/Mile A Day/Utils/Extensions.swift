@@ -65,6 +65,15 @@ extension Date {
     }
 }
 
+// Identifiable wrapper for HKWorkout
+struct IdentifiableWorkout: Identifiable {
+    let workout: HKWorkout
+    
+    var id: UUID {
+        return workout.uuid
+    }
+}
+
 // HKWorkout extension for easier data access
 extension HKWorkout {
     var formattedDistance: String {
@@ -97,7 +106,12 @@ extension HKWorkout {
               distance.doubleValue(for: HKUnit.mile()) > 0 else { return "N/A" }
         
         let miles = distance.doubleValue(for: HKUnit.mile())
-        let minutesPerMile = duration / 60 / miles
+        
+        // For the average pace display, we use the workout's total duration and distance
+        // This gives us the average pace for the entire workout, which is appropriate for workout summaries
+        let minutesPerMile = duration / 60.0 / miles
+        
+        guard minutesPerMile > 0 && minutesPerMile < 60 else { return "N/A" } // Sanity check
         
         let minutes = Int(minutesPerMile)
         let seconds = Int((minutesPerMile - Double(minutes)) * 60)

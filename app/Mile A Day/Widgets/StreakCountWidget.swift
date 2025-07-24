@@ -5,7 +5,6 @@ struct StreakCountEntry: TimelineEntry {
     let date: Date
     let streak: Int
     let liveProgress: Double
-    let isLiveMode: Bool
     let isGoalCompleted: Bool
     let isAtRisk: Bool
 }
@@ -16,7 +15,6 @@ struct StreakCountProvider: TimelineProvider {
             date: Date(), 
             streak: 5, 
             liveProgress: 0.3, 
-            isLiveMode: false, 
             isGoalCompleted: false,
             isAtRisk: false
         )
@@ -25,24 +23,21 @@ struct StreakCountProvider: TimelineProvider {
     func getSnapshot(in context: Context, completion: @escaping (StreakCountEntry) -> Void) {
         let streak = WidgetDataStore.loadStreak()
         let widgetData = WidgetDataStore.load()
-        let liveData = WidgetDataStore.loadLiveWorkout()
         
         // Calculate status
         let isGoalCompleted = widgetData.streakCompleted
-        let isLiveMode = liveData.isActive
         let progress = widgetData.progress
         
         // Simple risk calculation for widget (past 6pm and not completed)
         let currentHour = Calendar.current.component(.hour, from: Date())
         let isAtRisk = currentHour >= 18 && !isGoalCompleted
         
-        print("[Streak Widget] Snapshot - Streak: \(streak), Progress: \(progress * 100)%, Live: \(isLiveMode), Completed: \(isGoalCompleted)")
+        print("[Streak Widget] Snapshot - Streak: \(streak), Progress: \(progress * 100)%, Completed: \(isGoalCompleted)")
         
         completion(StreakCountEntry(
             date: Date(), 
             streak: streak, 
             liveProgress: progress, 
-            isLiveMode: isLiveMode, 
             isGoalCompleted: isGoalCompleted,
             isAtRisk: isAtRisk
         ))
@@ -51,30 +46,27 @@ struct StreakCountProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<StreakCountEntry>) -> Void) {
         let streak = WidgetDataStore.loadStreak()
         let widgetData = WidgetDataStore.load()
-        let liveData = WidgetDataStore.loadLiveWorkout()
         
         // Calculate status
         let isGoalCompleted = widgetData.streakCompleted
-        let isLiveMode = liveData.isActive
         let progress = widgetData.progress
         
         // Simple risk calculation for widget
         let currentHour = Calendar.current.component(.hour, from: Date())
         let isAtRisk = currentHour >= 18 && !isGoalCompleted
         
-        print("[Streak Widget] Timeline - Streak: \(streak), Progress: \(progress * 100)%, Live: \(isLiveMode), Completed: \(isGoalCompleted)")
+        print("[Streak Widget] Timeline - Streak: \(streak), Progress: \(progress * 100)%, Completed: \(isGoalCompleted)")
         
         let entry = StreakCountEntry(
             date: Date(), 
             streak: streak, 
             liveProgress: progress, 
-            isLiveMode: isLiveMode, 
             isGoalCompleted: isGoalCompleted,
             isAtRisk: isAtRisk
         )
         
-        // Refresh more frequently for live mode, otherwise hourly
-        let refreshInterval: TimeInterval = isLiveMode ? 30 : 3600
+        // Refresh hourly
+        let refreshInterval: TimeInterval = 3600
         let nextRefresh = Date().addingTimeInterval(refreshInterval)
         completion(Timeline(entries: [entry], policy: .after(nextRefresh)))
     }
@@ -114,8 +106,6 @@ extension StreakCountEntry {
             return .green
         } else if isAtRisk {
             return .red
-        } else if isLiveMode {
-            return .blue
         } else {
             return .orange
         }
@@ -126,8 +116,6 @@ extension StreakCountEntry {
             return .green.opacity(0.1)
         } else if isAtRisk {
             return .red.opacity(0.1)
-        } else if isLiveMode {
-            return .blue.opacity(0.1)
         } else {
             return .orange.opacity(0.1)
         }
@@ -160,21 +148,13 @@ struct CircularStreakView: View {
             
             // Center content
             VStack(spacing: 1) {
-                Image(systemName: entry.isLiveMode ? "dot.radiowaves.left.and.right" : "flame.fill")
+                Image(systemName: "flame.fill")
                     .font(.system(size: 10))
                     .foregroundColor(entry.streakColor)
                 
                 Text("\(entry.streak)")
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundColor(entry.streakColor)
-            }
-            
-            // Live indicator dot
-            if entry.isLiveMode {
-                Circle()
-                    .fill(Color.red)
-                    .frame(width: 4, height: 4)
-                    .offset(x: 20, y: -20)
             }
         }
     }
@@ -192,17 +172,9 @@ struct RectangularStreakView: View {
                     .fill(entry.backgroundColor)
                     .frame(width: 28, height: 28)
                 
-                Image(systemName: entry.isLiveMode ? "dot.radiowaves.left.and.right" : "flame.fill")
+                Image(systemName: "flame.fill")
                     .font(.caption)
                     .foregroundColor(entry.streakColor)
-                
-                // Live indicator
-                if entry.isLiveMode {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 3, height: 3)
-                        .offset(x: 10, y: -10)
-                }
             }
             
             VStack(alignment: .leading, spacing: 1) {
@@ -210,13 +182,6 @@ struct RectangularStreakView: View {
                 Text("Streak")
                         .font(.caption2)
                         .fontWeight(.medium)
-                    
-                    if entry.isLiveMode {
-                        Text("LIVE")
-                            .font(.caption2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.red)
-                    }
                 }
                 
                 Text("\(entry.streak) days")
@@ -228,22 +193,15 @@ struct RectangularStreakView: View {
             Spacer()
             
             // Progress indicator
-            VStack(spacing: 1) {
-                Text("\(Int(entry.liveProgress * 100))%")
-                    .font(.caption2)
-                    .fontWeight(.bold)
-                    .foregroundColor(entry.streakColor)
-                
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.gray.opacity(0.3))
-                    .frame(width: 20, height: 2)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(entry.streakColor)
-                            .frame(width: 20 * entry.liveProgress, height: 2),
-                        alignment: .leading
-                    )
-            }
+            RoundedRectangle(cornerRadius: 1)
+                .fill(Color.gray.opacity(0.3))
+                .frame(width: 20, height: 2)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(entry.streakColor)
+                        .frame(width: 20 * entry.liveProgress, height: 2),
+                    alignment: .leading
+                )
         }
         .padding(.horizontal, 4)
     }
@@ -255,23 +213,11 @@ struct InlineStreakView: View {
     
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: entry.isLiveMode ? "dot.radiowaves.left.and.right" : "flame.fill")
+            Image(systemName: "flame.fill")
                 .foregroundColor(entry.streakColor)
             
             Text("\(entry.streak) day streak")
                 .fontWeight(.medium)
-            
-            if entry.isLiveMode {
-                Circle()
-                    .fill(Color.red)
-                    .frame(width: 4, height: 4)
-            }
-            
-            if entry.liveProgress > 0.01 {
-                Text("(\(Int(entry.liveProgress * 100))%)")
-                    .font(.caption2)
-                    .foregroundColor(entry.streakColor)
-            }
         }
     }
 }
@@ -281,7 +227,6 @@ struct InlineStreakView: View {
 struct HomeScreenStreakView: View {
     let entry: StreakCountEntry
     @State private var animateProgress = false
-    @State private var livePulse = false
     
     var body: some View {
         ZStack {
@@ -308,27 +253,7 @@ struct HomeScreenStreakView: View {
                 .rotationEffect(.degrees(-90))
                 .animation(.easeInOut(duration: 0.8), value: animateProgress)
             
-            // Live pulse indicator when in live mode
-            if entry.isLiveMode {
-                Circle()
-                    .stroke(entry.streakColor, lineWidth: 2)
-                    .frame(width: 100, height: 100)
-                    .scaleEffect(livePulse ? 1.1 : 1.0)
-                    .opacity(livePulse ? 0.0 : 1.0)
-                    .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: false), value: livePulse)
-            }
-            
-            // Progress percentage (when in live mode and progress > 0)
-            if entry.isLiveMode && entry.liveProgress > 0.01 {
-                VStack(spacing: 1) {
-                    Text("\(Int(entry.liveProgress * 100))%")
-                        .font(.caption2)
-                        .fontWeight(.bold)
-                        .foregroundColor(entry.streakColor)
-                        .opacity(0.8)
-                }
-                .offset(y: -35)
-            }
+
             
             // Streak number in center
             VStack(spacing: 4) {
@@ -345,9 +270,6 @@ struct HomeScreenStreakView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             animateProgress = true
-            if entry.isLiveMode {
-                livePulse = true
-            }
         }
     }
 }
@@ -369,5 +291,5 @@ struct StreakCountWidget: Widget {
 #Preview(as: .systemSmall) {
     StreakCountWidget()
 } timeline: {
-    StreakCountEntry(date: .now, streak: 10, liveProgress: 0.7, isLiveMode: true, isGoalCompleted: false, isAtRisk: false)
+    StreakCountEntry(date: .now, streak: 10, liveProgress: 0.7, isGoalCompleted: false, isAtRisk: false)
 } 

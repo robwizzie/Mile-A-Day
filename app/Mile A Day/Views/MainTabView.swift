@@ -32,6 +32,13 @@ struct MainTabView: View {
             }
             
             NavigationStack {
+                StepsView(healthManager: healthManager, userManager: userManager)
+            }
+            .tabItem {
+                Label("Calendar", systemImage: "calendar")
+            }
+            
+            NavigationStack {
                 ProfileView(userManager: userManager, healthManager: healthManager)
             }
             .tabItem {
@@ -46,6 +53,11 @@ struct MainTabView: View {
             healthManager.requestAuthorization { success in
                 if success {
                     healthManager.fetchAllWorkoutData()
+                    
+                    // Check for retroactive badges after data is loaded
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        userManager.checkForRetroactiveBadges()
+                    }
                 }
             }
             
@@ -64,7 +76,7 @@ struct MainTabView: View {
             
             // Debug: Force widget data update
             print("[Debug] Forcing widget data update - Miles: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles), Streak: \(userManager.currentUser.streak)")
-                            WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles, liveWorkoutDistance: 0.0)
+                            WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles)
             WidgetDataStore.save(streak: userManager.currentUser.streak)
         }
     }
@@ -84,9 +96,9 @@ struct ProfileView: View {
     private func formatPace(_ pace: TimeInterval) -> String {
         guard pace > 0 else { return "Not set" }
         
-        let totalSeconds = Int(pace * 60)
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
+        let totalMinutes = pace
+        let minutes = Int(totalMinutes)
+        let seconds = Int((totalMinutes - Double(minutes)) * 60)
         
         return String(format: "%d:%02d /mi", minutes, seconds)
     }
@@ -146,7 +158,7 @@ struct ProfileView: View {
                     } label: {
                         StatItem(
                             title: "Fastest Mile", 
-                            value: formatPace(userManager.currentUser.fastestMilePace), 
+                            value: formatPace(healthManager.fastestMilePace), 
                             icon: "hare.fill", 
                             iconColor: .green
                         )
@@ -190,7 +202,7 @@ struct ProfileView: View {
             MostMilesDetailView(miles: userManager.currentUser.mostMilesInOneDay, healthManager: healthManager)
         }
         .sheet(isPresented: $showingFastestPaceDetail) {
-            FastestPaceDetailView(pace: userManager.currentUser.fastestMilePace)
+            FastestPaceDetailView(pace: healthManager.fastestMilePace)
         }
     }
 }
@@ -319,9 +331,9 @@ struct FastestPaceDetailView: View {
     var formattedPace: String {
         guard pace > 0 else { return "Not yet recorded" }
         
-        let totalSeconds = Int(pace * 60)
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
+        let totalMinutes = pace
+        let minutes = Int(totalMinutes)
+        let seconds = Int((totalMinutes - Double(minutes)) * 60)
         
         return String(format: "%d:%02d /mi", minutes, seconds)
     }

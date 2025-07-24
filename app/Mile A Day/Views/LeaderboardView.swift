@@ -53,9 +53,9 @@ enum LeaderboardValueType {
             return user.totalMiles.milesFormatted
         case .fastestPace:
             if user.fastestMilePace > 0 {
-                let totalSeconds = Int(user.fastestMilePace * 60)
-                let minutes = totalSeconds / 60
-                let seconds = totalSeconds % 60
+                let totalMinutes = user.fastestMilePace
+                let minutes = Int(totalMinutes)
+                let seconds = Int((totalMinutes - Double(minutes)) * 60)
                 return String(format: "%d:%02d /mi", minutes, seconds)
             } else {
                 return "N/A"

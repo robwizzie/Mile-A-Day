@@ -13,6 +13,9 @@ class HealthKitManager: ObservableObject {
     @Published var mostMilesInOneDay: Double = 0.0
     @Published var retroactiveStreak: Int = 0
     @Published var mostMilesWorkouts: [HKWorkout] = []
+    @Published var todaysSteps: Int = 0
+    @Published var dailyStepsData: [Date: Int] = [:]
+    @Published var dailyMileGoals: [Date: Bool] = [:]
     
     // Request authorization to access HealthKit data
     func requestAuthorization(completion: @escaping (Bool) -> Void) {
@@ -25,7 +28,8 @@ class HealthKitManager: ObservableObject {
         let types: Set = [
             HKObjectType.workoutType(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
-            HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
+            HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
+            HKObjectType.quantityType(forIdentifier: .stepCount)!
         ]
         
         healthStore.requestAuthorization(toShare: nil, read: types) { success, error in
@@ -90,7 +94,7 @@ class HealthKitManager: ObservableObject {
                     let safeGoal = currentGoal > 0 ? currentGoal : 1.0
                     
                     // Use unified progress calculation
-                    WidgetDataStore.save(todayMiles: 0, goal: safeGoal, liveWorkoutDistance: 0.0)
+                    WidgetDataStore.save(todayMiles: 0, goal: safeGoal)
                 }
                 return
             }
@@ -112,8 +116,8 @@ class HealthKitManager: ObservableObject {
                 let currentGoal = WidgetDataStore.load().goal
                 let safeGoal = currentGoal > 0 ? currentGoal : 1.0
                 
-                // Use unified progress calculation - no live workout distance here since this is base HealthKit data
-                WidgetDataStore.save(todayMiles: totalMiles, goal: safeGoal, liveWorkoutDistance: 0.0)
+                // Use unified progress calculation
+                WidgetDataStore.save(todayMiles: totalMiles, goal: safeGoal)
             }
         }
         
@@ -215,29 +219,14 @@ class HealthKitManager: ObservableObject {
         ) { [weak self] _, samples, error in
             guard let self = self, let workouts = samples as? [HKWorkout] else { return }
             
-            // Track fastest mile pace
-            var fastestPace: TimeInterval = .infinity
-            
             // Track most miles in a day
             var mostMilesInDay: Double = 0.0
             var mostMilesWorkouts: [HKWorkout] = []
             
-            // Group workouts by day for streak calculation
+            // Group workouts by day for streak calculation and most miles
             var workoutsByDay: [Date: [HKWorkout]] = [:]
             
             for workout in workouts {
-                // Calculate pace
-                if let distance = workout.totalDistance {
-                    let miles = distance.doubleValue(for: HKUnit.mile())
-                    if miles >= 0.95 { // Only consider workouts at least a mile
-                        let paceMinutesPerMile = workout.duration / 60 / miles
-                        
-                        if paceMinutesPerMile < fastestPace && paceMinutesPerMile > 0 {
-                            fastestPace = paceMinutesPerMile
-                        }
-                    }
-                }
-                
                 // Group by day for most miles and streak calculation
                 let calendar = Calendar.current
                 let dateComponents = calendar.dateComponents([.year, .month, .day], from: workout.endDate)
@@ -270,14 +259,64 @@ class HealthKitManager: ObservableObject {
             let streak = self.calculateRetroactiveStreak(workoutsByDay: workoutsByDay)
             
             DispatchQueue.main.async {
-                self.fastestMilePace = fastestPace == .infinity ? 0 : fastestPace
                 self.mostMilesInOneDay = mostMilesInDay
                 self.mostMilesWorkouts = mostMilesWorkouts
                 self.retroactiveStreak = streak
             }
+            
+            // Now fetch the fastest mile pace separately using proper HealthKit speed data
+            self.fetchFastestMilePace()
         }
         
         healthStore.execute(query)
+    }
+    
+        // Fetch fastest mile pace from workout data (average pace of fastest workout that's at least 1 mile)
+    private func fetchFastestMilePace() {
+        guard isAuthorized else { return }
+        
+        // Get all running and walking workouts
+        let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
+        let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
+        let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
+        
+        let workoutQuery = HKSampleQuery(
+            sampleType: HKObjectType.workoutType(),
+            predicate: compoundPredicate,
+            limit: HKObjectQueryNoLimit,
+            sortDescriptors: nil
+        ) { [weak self] _, samples, error in
+            guard let self = self, let workouts = samples as? [HKWorkout] else { return }
+            
+            var fastestPace: TimeInterval = .infinity
+            
+            // Find the fastest average pace from workouts that are at least 0.95 miles
+            for workout in workouts {
+                if let distance = workout.totalDistance {
+                    let miles = distance.doubleValue(for: HKUnit.mile())
+                    
+                    // Only consider workouts that are at least 0.95 miles (accounts for GPS variance)
+                    if miles >= 0.95 {
+                        // Calculate average pace for this workout (minutes per mile)
+                        let avgPaceMinutesPerMile = workout.duration / 60.0 / miles
+                        
+                        // Check for reasonable pace values (between 3:00 and 20:00 per mile)
+                        if avgPaceMinutesPerMile >= 3.0 && avgPaceMinutesPerMile <= 20.0 {
+                            if avgPaceMinutesPerMile < fastestPace {
+                                fastestPace = avgPaceMinutesPerMile
+                            }
+                        }
+                    }
+                }
+            }
+            
+            DispatchQueue.main.async {
+                self.fastestMilePace = fastestPace == .infinity ? 0.0 : fastestPace
+                print("[HealthKit] Fastest mile pace calculated: \(self.formatPace(minutesPerMile: self.fastestMilePace))")
+            }
+        }
+        
+        healthStore.execute(workoutQuery)
     }
     
     // Helper to calculate retroactive streak from workout data
@@ -328,6 +367,8 @@ class HealthKitManager: ObservableObject {
         fetchRecentWorkouts()
         fetchTotalLifetimeMiles()
         calculatePersonalRecords()
+        fetchTodaysSteps()
+        fetchMonthlyStepsData()
     }
     
     // Format pace in minutes:seconds per mile
@@ -339,5 +380,149 @@ class HealthKitManager: ObservableObject {
         let seconds = totalSeconds % 60
         
         return String(format: "%d:%02d /mi", minutes, seconds)
+    }
+    
+    // MARK: - Step Counter Functions
+    
+    // Fetch today's step count
+    func fetchTodaysSteps() {
+        guard isAuthorized else { return }
+        
+        let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount)!
+        let now = Date()
+        let startOfDay = Calendar.current.startOfDay(for: now)
+        
+        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: .strictStartDate)
+        
+        let query = HKStatisticsQuery(
+            quantityType: stepType,
+            quantitySamplePredicate: predicate,
+            options: .cumulativeSum
+        ) { [weak self] _, result, error in
+            guard let self = self else { return }
+            
+            DispatchQueue.main.async {
+                if let sum = result?.sumQuantity() {
+                    self.todaysSteps = Int(sum.doubleValue(for: HKUnit.count()))
+                } else {
+                    self.todaysSteps = 0
+                }
+                print("[HealthKit] Today's steps: \(self.todaysSteps)")
+            }
+        }
+        
+        healthStore.execute(query)
+    }
+    
+    // Fetch step data and mile goals for a specific month
+    func fetchMonthlyStepsData(for month: Date = Date(), completion: (() -> Void)? = nil) {
+        guard isAuthorized else { return }
+        
+        let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount)!
+        let calendar = Calendar.current
+        
+        // Get the date interval for the specified month
+        guard let monthInterval = calendar.dateInterval(of: .month, for: month) else { return }
+        
+        let startOfMonth = monthInterval.start
+        let endOfMonth = monthInterval.end
+        
+        var dailySteps: [Date: Int] = [:]
+        var dailyMileGoals: [Date: Bool] = [:]
+        let group = DispatchGroup()
+        
+        // Create a date range query for each day in the month
+        var currentDate = startOfMonth
+        while currentDate < endOfMonth {
+            let startOfDay = calendar.startOfDay(for: currentDate)
+            let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+            
+            group.enter()
+            
+            // Query for steps
+            let stepPredicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay, options: .strictStartDate)
+            
+            let stepQuery = HKStatisticsQuery(
+                quantityType: stepType,
+                quantitySamplePredicate: stepPredicate,
+                options: .cumulativeSum
+            ) { _, result, error in
+                defer { group.leave() }
+                
+                let steps = result?.sumQuantity()?.doubleValue(for: HKUnit.count()) ?? 0
+                dailySteps[startOfDay] = Int(steps)
+            }
+            
+            healthStore.execute(stepQuery)
+            
+            // Query for mile goal (running/walking workouts)
+            group.enter()
+            
+            let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
+            let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
+            let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
+            let workoutPredicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay, options: .strictStartDate)
+            let finalWorkoutPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [compoundPredicate, workoutPredicate])
+            
+            let workoutQuery = HKSampleQuery(
+                sampleType: HKObjectType.workoutType(),
+                predicate: finalWorkoutPredicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                defer { group.leave() }
+                
+                if let workouts = samples as? [HKWorkout] {
+                    let totalMiles = workouts.reduce(0.0) { total, workout in
+                        if let distance = workout.totalDistance {
+                            return total + distance.doubleValue(for: HKUnit.mile())
+                        }
+                        return total
+                    }
+                    // Check if mile goal was reached (assuming 1 mile goal)
+                    dailyMileGoals[startOfDay] = totalMiles >= 0.95
+                } else {
+                    dailyMileGoals[startOfDay] = false
+                }
+            }
+            
+            healthStore.execute(workoutQuery)
+            currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate) ?? currentDate
+        }
+        
+        group.notify(queue: .main) { [weak self] in
+            self?.dailyStepsData = dailySteps
+            self?.dailyMileGoals = dailyMileGoals
+            completion?()
+        }
+    }
+    
+    // Get workouts for a specific date
+    func getWorkoutsForDate(_ date: Date, completion: @escaping ([HKWorkout]) -> Void) {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+        
+        let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
+        let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
+        let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
+        let datePredicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay, options: .strictStartDate)
+        let finalPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [compoundPredicate, datePredicate])
+        
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+        
+        let query = HKSampleQuery(
+            sampleType: HKObjectType.workoutType(),
+            predicate: finalPredicate,
+            limit: HKObjectQueryNoLimit,
+            sortDescriptors: [sortDescriptor]
+        ) { _, samples, error in
+            DispatchQueue.main.async {
+                let workouts = samples as? [HKWorkout] ?? []
+                completion(workouts)
+            }
+        }
+        
+        healthStore.execute(query)
     }
 } 

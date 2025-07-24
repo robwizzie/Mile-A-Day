@@ -21,7 +21,7 @@ class UserManager: ObservableObject {
         
         // Initialize widget data store with current values
         let currentMiles = WidgetDataStore.load().miles
-        WidgetDataStore.save(todayMiles: currentMiles, goal: currentUser.goalMiles, liveWorkoutDistance: 0.0)
+        WidgetDataStore.save(todayMiles: currentMiles, goal: currentUser.goalMiles)
         WidgetDataStore.save(streak: currentUser.streak)
         
         // Load friends
@@ -31,9 +31,9 @@ class UserManager: ObservableObject {
         } else {
             // Sample friends for development
             self.friends = [
-                User(name: "Alex", streak: 12, totalMiles: 45.2, fastestMilePace: 8.5*60, mostMilesInOneDay: 3.5),
-                User(name: "Taylor", streak: 30, totalMiles: 120.7, fastestMilePace: 7.2*60, mostMilesInOneDay: 6.2),
-                User(name: "Jordan", streak: 5, totalMiles: 18.1, fastestMilePace: 9.3*60, mostMilesInOneDay: 2.8)
+                User(name: "Alex", streak: 12, totalMiles: 45.2, fastestMilePace: 8.5, mostMilesInOneDay: 3.5),
+                User(name: "Taylor", streak: 30, totalMiles: 120.7, fastestMilePace: 7.2, mostMilesInOneDay: 6.2),
+                User(name: "Jordan", streak: 5, totalMiles: 18.1, fastestMilePace: 9.3, mostMilesInOneDay: 2.8)
             ]
         }
     }
@@ -68,7 +68,9 @@ class UserManager: ObservableObject {
             mostMilesInDay: mostMilesInDay,
             date: Date()
         )
-        saveUserData()
+        
+        // Check for retroactive badges after updating stats
+        checkForRetroactiveBadges()
     }
     
     // Legacy method for backward compatibility
@@ -83,7 +85,7 @@ class UserManager: ObservableObject {
         
         // Update widget data with new goal
         let currentData = WidgetDataStore.load()
-        WidgetDataStore.save(todayMiles: currentData.miles, goal: miles, liveWorkoutDistance: 0.0)
+        WidgetDataStore.save(todayMiles: currentData.miles, goal: miles)
         saveUserData()
         let currentMiles = WidgetDataStore.load().miles
         WidgetDataStore.save(todayMiles: currentMiles, goal: miles)
@@ -135,5 +137,12 @@ class UserManager: ObservableObject {
     // Check if there are any new badges
     var hasNewBadges: Bool {
         return currentUser.badges.contains { $0.isNew }
+    }
+    
+    // Check for retroactive badges based on current stats
+    func checkForRetroactiveBadges() {
+        // Force a badge check with current stats
+        currentUser.checkForMilestoneBadges()
+        saveUserData()
     }
 } 
