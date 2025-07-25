@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { PostgresService } from '../../services/DbService.js';
+import crypto from 'crypto';
 
 const REQUIRED_KEYS = ['username', 'apple_id'];
 
