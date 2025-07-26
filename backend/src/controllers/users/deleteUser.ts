@@ -3,7 +3,7 @@ import { PostgresService } from '../../services/DbService.js';
 
 const db = PostgresService.getInstance();
 
-export default async function getUser(req: Request, res: Response) {
+export default async function deleteUser(req: Request, res: Response) {
 	const userId = req.params.id;
 
 	const results = await db.query('SELECT * FROM users WHERE user_id = $1', [userId]);
