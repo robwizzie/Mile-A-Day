@@ -21,7 +21,7 @@ export default async function createUser(req: Request, res: Response) {
 
 	const existingAppleId = await db.query('SELECT user_id FROM users WHERE apple_id = $1', [apple_id]);
 
-	if (existingAppleId) {
+	if (existingAppleId.length) {
 		return res.status(400).json({
 			error: 'Bad Request',
 			message: `User already exists with Apple ID ${apple_id}`
