@@ -288,6 +288,7 @@ struct CalendarDayView: View {
                 }
             }
             .frame(width: 32, height: 40)
+            .padding(4)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isSelected ? Color("appPrimary") : Color.clear)
@@ -322,18 +323,48 @@ struct DateDetailView: View {
     @State private var workouts: [HKWorkout] = []
     @State private var totalSteps: Int = 0
     @State private var selectedWorkout: IdentifiableWorkout?
+    @State private var currentDate: Date
     
     private let calendar = Calendar.current
+    
+    init(date: Date, healthManager: HealthKitManager, userManager: UserManager) {
+        self.date = date
+        self.healthManager = healthManager
+        self.userManager = userManager
+        self._currentDate = State(initialValue: date)
+    }
     
     var body: some View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 20) {
-                    // Date header
+                    // Date header with navigation
                     VStack(spacing: 12) {
-                        Text(calendar.isDateInToday(date) ? "Today" : formatDate(date))
-                            .font(.title2)
-                            .fontWeight(.bold)
+                        HStack {
+                            Button {
+                                navigateToPreviousDay()
+                            } label: {
+                                Image(systemName: "chevron.left")
+                                    .font(.title2)
+                                    .foregroundColor(.blue)
+                            }
+                            
+                            Spacer()
+                            
+                            Text(calendar.isDateInToday(currentDate) ? "Today" : formatDate(currentDate))
+                                .font(.title2)
+                                .fontWeight(.bold)
+                            
+                            Spacer()
+                            
+                            Button {
+                                navigateToNextDay()
+                            } label: {
+                                Image(systemName: "chevron.right")
+                                    .font(.title2)
+                                    .foregroundColor(.blue)
+                            }
+                        }
                         
                         // Steps with progress bar
                         VStack(spacing: 8) {
@@ -428,20 +459,20 @@ struct DateDetailView: View {
         .onAppear {
             loadData()
         }
-        .onChange(of: date) { _, _ in
+        .onChange(of: currentDate) { _, _ in
             loadData()
         }
     }
     
     private func loadData() {
         // Get steps for this date
-        let startOfDay = calendar.startOfDay(for: date)
+        let startOfDay = calendar.startOfDay(for: currentDate)
         totalSteps = healthManager.dailyStepsData[startOfDay] ?? 0
         
         // If steps data is not available, try to fetch it
         if totalSteps == 0 {
             // This will trigger a refresh of the monthly data
-            healthManager.fetchMonthlyStepsData(for: date) {
+            healthManager.fetchMonthlyStepsData(for: currentDate) {
                 DispatchQueue.main.async {
                     self.totalSteps = self.healthManager.dailyStepsData[startOfDay] ?? 0
                 }
@@ -449,10 +480,22 @@ struct DateDetailView: View {
         }
         
         // Get workouts for this date
-        healthManager.getWorkoutsForDate(date) { workoutList in
+        healthManager.getWorkoutsForDate(currentDate) { workoutList in
             DispatchQueue.main.async {
                 self.workouts = workoutList
             }
+        }
+    }
+    
+    private func navigateToPreviousDay() {
+        if let previousDay = calendar.date(byAdding: .day, value: -1, to: currentDate) {
+            currentDate = previousDay
+        }
+    }
+    
+    private func navigateToNextDay() {
+        if let nextDay = calendar.date(byAdding: .day, value: 1, to: currentDate) {
+            currentDate = nextDay
         }
     }
     

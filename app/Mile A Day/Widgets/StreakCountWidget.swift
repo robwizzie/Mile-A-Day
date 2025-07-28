@@ -7,6 +7,7 @@ struct StreakCountEntry: TimelineEntry {
     let liveProgress: Double
     let isGoalCompleted: Bool
     let isAtRisk: Bool
+    let timeUntilReset: String?
 }
 
 struct StreakCountProvider: TimelineProvider {
@@ -16,7 +17,8 @@ struct StreakCountProvider: TimelineProvider {
             streak: 5, 
             liveProgress: 0.3, 
             isGoalCompleted: false,
-            isAtRisk: false
+            isAtRisk: false,
+            timeUntilReset: "6h 30m remaining"
         )
     }
 
@@ -28,18 +30,22 @@ struct StreakCountProvider: TimelineProvider {
         let isGoalCompleted = widgetData.streakCompleted
         let progress = widgetData.progress
         
-        // Simple risk calculation for widget (past 6pm and not completed)
+        // Calculate risk status and time remaining
         let currentHour = Calendar.current.component(.hour, from: Date())
         let isAtRisk = currentHour >= 18 && !isGoalCompleted
         
-        print("[Streak Widget] Snapshot - Streak: \(streak), Progress: \(progress * 100)%, Completed: \(isGoalCompleted)")
+        // Calculate time until reset if not completed
+        let timeUntilReset = calculateTimeUntilReset(isCompleted: isGoalCompleted)
+        
+        print("[Streak Widget] Snapshot - Streak: \(streak), Progress: \(progress * 100)%, Completed: \(isGoalCompleted), At Risk: \(isAtRisk)")
         
         completion(StreakCountEntry(
             date: Date(), 
             streak: streak, 
             liveProgress: progress, 
             isGoalCompleted: isGoalCompleted,
-            isAtRisk: isAtRisk
+            isAtRisk: isAtRisk,
+            timeUntilReset: timeUntilReset
         ))
     }
 
@@ -51,24 +57,50 @@ struct StreakCountProvider: TimelineProvider {
         let isGoalCompleted = widgetData.streakCompleted
         let progress = widgetData.progress
         
-        // Simple risk calculation for widget
+        // Calculate risk status and time remaining
         let currentHour = Calendar.current.component(.hour, from: Date())
         let isAtRisk = currentHour >= 18 && !isGoalCompleted
         
-        print("[Streak Widget] Timeline - Streak: \(streak), Progress: \(progress * 100)%, Completed: \(isGoalCompleted)")
+        // Calculate time until reset if not completed
+        let timeUntilReset = calculateTimeUntilReset(isCompleted: isGoalCompleted)
+        
+        print("[Streak Widget] Timeline - Streak: \(streak), Progress: \(progress * 100)%, Completed: \(isGoalCompleted), At Risk: \(isAtRisk)")
         
         let entry = StreakCountEntry(
             date: Date(), 
             streak: streak, 
             liveProgress: progress, 
             isGoalCompleted: isGoalCompleted,
-            isAtRisk: isAtRisk
+            isAtRisk: isAtRisk,
+            timeUntilReset: timeUntilReset
         )
         
-        // Refresh hourly
-        let refreshInterval: TimeInterval = 3600
+        // Refresh more frequently if streak is at risk
+        let refreshInterval: TimeInterval = isAtRisk ? 1800 : 3600 // 30 minutes if at risk, 1 hour otherwise
         let nextRefresh = Date().addingTimeInterval(refreshInterval)
         completion(Timeline(entries: [entry], policy: .after(nextRefresh)))
+    }
+    
+    private func calculateTimeUntilReset(isCompleted: Bool) -> String? {
+        if isCompleted { return nil }
+        
+        let calendar = Calendar.current
+        let now = Date()
+        
+        // Get end of today
+        guard let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: now) else {
+            return nil
+        }
+        
+        let timeRemaining = endOfDay.timeIntervalSince(now)
+        let hours = Int(timeRemaining) / 3600
+        let minutes = Int(timeRemaining) % 3600 / 60
+        
+        if hours > 0 {
+            return "\(hours)h \(minutes)m remaining"
+        } else {
+            return "\(minutes)m remaining"
+        }
     }
 }
 
@@ -179,15 +211,30 @@ struct RectangularStreakView: View {
             
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                Text("Streak")
+                    Text("Streak")
                         .font(.caption2)
                         .fontWeight(.medium)
+                    
+                    // At-risk indicator
+                    if entry.isAtRisk {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 8))
+                            .foregroundColor(.red)
+                    }
                 }
                 
                 Text("\(entry.streak) days")
                     .font(.caption)
                     .fontWeight(.bold)
                     .foregroundColor(entry.streakColor)
+                
+                // Show time remaining if at risk - use same color as streak
+                if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
+                    Text(timeRemaining)
+                        .font(.system(size: 8))
+                        .foregroundColor(entry.streakColor.opacity(0.8))
+                        .lineLimit(1)
+                }
             }
             
             Spacer()
@@ -218,6 +265,13 @@ struct InlineStreakView: View {
             
             Text("\(entry.streak) day streak")
                 .fontWeight(.medium)
+            
+            // At-risk indicator
+            if entry.isAtRisk {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.red)
+                    .font(.caption2)
+            }
         }
     }
 }
@@ -227,49 +281,75 @@ struct InlineStreakView: View {
 struct HomeScreenStreakView: View {
     let entry: StreakCountEntry
     @State private var animateProgress = false
+    @State private var animateAtRisk = false
     
     var body: some View {
-        ZStack {
-            // Background circle
-            Circle()
-                .fill(
-                    LinearGradient(
-                        gradient: Gradient(colors: [entry.streakColor.opacity(0.3), entry.streakColor.opacity(0.1)]),
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+        VStack(spacing: 4) {
+            ZStack {
+                // Background circle
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: [entry.streakColor.opacity(0.3), entry.streakColor.opacity(0.1)]),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
-                )
-                .frame(width: 90, height: 90)
-            
-            // Live progress ring
-            Circle()
-                .stroke(Color.gray.opacity(0.2), lineWidth: 4)
-                .frame(width: 100, height: 100)
-            
-            Circle()
-                .trim(from: 0, to: animateProgress ? entry.liveProgress : 0)
-                .stroke(entry.streakColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                .frame(width: 100, height: 100)
-                .rotationEffect(.degrees(-90))
-                .animation(.easeInOut(duration: 0.8), value: animateProgress)
-            
-
-            
-            // Streak number in center
-            VStack(spacing: 4) {
-                Text("\(entry.streak)")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(entry.streakColor)
+                    .frame(width: 90, height: 90)
+                    .scaleEffect(animateAtRisk ? 1.05 : 1.0)
                 
-                Text(entry.streak == 1 ? "day" : "days")
-                    .font(.caption)
-                    .fontWeight(.medium)
+                // Live progress ring
+                Circle()
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 4)
+                    .frame(width: 100, height: 100)
+                
+                Circle()
+                    .trim(from: 0, to: animateProgress ? entry.liveProgress : 0)
+                    .stroke(entry.streakColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .frame(width: 100, height: 100)
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeInOut(duration: 0.8), value: animateProgress)
+                
+                // Streak number in center
+                VStack(spacing: 2) {
+                    // At-risk warning icon
+                    if entry.isAtRisk {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundColor(.red)
+                            .scaleEffect(animateAtRisk ? 1.2 : 1.0)
+                    }
+                    
+                    Text("\(entry.streak)")
+                        .font(.system(size: entry.isAtRisk ? 28 : 32, weight: .bold, design: .rounded))
+                        .foregroundColor(entry.streakColor)
+                    
+                    Text(entry.streak == 1 ? "day" : "days")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(entry.streakColor.opacity(0.8))
+                }
+            }
+            
+            // Time remaining below the circle if at risk
+            if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
+                Text(timeRemaining)
+                    .font(.system(size: 10))
                     .foregroundColor(entry.streakColor.opacity(0.8))
+                    .fontWeight(.medium)
+                    .lineLimit(1)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             animateProgress = true
+            
+            // Start pulsing animation for at-risk streaks
+            if entry.isAtRisk {
+                withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+                    animateAtRisk = true
+                }
+            }
         }
     }
 }
@@ -291,5 +371,7 @@ struct StreakCountWidget: Widget {
 #Preview(as: .systemSmall) {
     StreakCountWidget()
 } timeline: {
-    StreakCountEntry(date: .now, streak: 10, liveProgress: 0.7, isGoalCompleted: false, isAtRisk: false)
+    StreakCountEntry(date: .now, streak: 10, liveProgress: 0.7, isGoalCompleted: false, isAtRisk: false, timeUntilReset: "4h 23m remaining")
+    StreakCountEntry(date: .now, streak: 7, liveProgress: 0.3, isGoalCompleted: false, isAtRisk: true, timeUntilReset: "2h 15m remaining")
+    StreakCountEntry(date: .now, streak: 15, liveProgress: 1.0, isGoalCompleted: true, isAtRisk: false, timeUntilReset: nil)
 } 

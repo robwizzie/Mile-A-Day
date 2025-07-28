@@ -1,5 +1,7 @@
 import SwiftUI
 import HealthKit
+import WidgetKit
+import UIKit
 
 struct DashboardView: View {
     @ObservedObject var healthManager: HealthKitManager
@@ -39,17 +41,20 @@ struct DashboardView: View {
                         goalDistance: currentState.goal,
                         progress: currentState.progress,
                         didComplete: currentState.isCompleted,
-                        onRefresh: refreshData
+                        onRefresh: refreshData,
+                        isRefreshing: isRefreshing,
+                        user: userManager.currentUser
                     )
                     
                     // Streak card with simplified progress
                     StreakCard(
                         streak: userManager.currentUser.streak, 
-                              isActiveToday: userManager.currentUser.isStreakActiveToday,
-                              isAtRisk: userManager.currentUser.isStreakAtRisk,
+                        isActiveToday: userManager.currentUser.isStreakActiveToday,
+                        isAtRisk: userManager.currentUser.isStreakAtRisk,
                         user: userManager.currentUser,
                         progress: currentState.progress,
-                        isGoalCompleted: currentState.isCompleted
+                        isGoalCompleted: currentState.isCompleted,
+                        isRefreshing: isRefreshing
                     )
                     
                     // Stats grid
@@ -220,24 +225,40 @@ struct DashboardView: View {
         }
     }
     
-    private func refreshData() {
-        healthManager.fetchAllWorkoutData()
-        syncWidgetData()
-    }
-    
-    private func refreshDataAsync() async {
-        await withCheckedContinuation { continuation in
-            healthManager.fetchAllWorkoutData()
-            syncWidgetData()
-            continuation.resume()
-        }
-    }
-    
     private func syncWidgetData() {
         let state = currentState
         WidgetDataStore.save(todayMiles: state.distance, goal: state.goal)
         WidgetDataStore.save(streak: userManager.currentUser.streak)
-        print("[Dashboard] Synced widget data - Miles: \(state.distance), Goal: \(state.goal), Progress: \(state.progress * 100)%")
+        
+        // Force widget updates
+        WidgetCenter.shared.reloadAllTimelines()
+        
+        print("[Dashboard] Synced widget data - Miles: \(state.distance), Goal: \(state.goal), Progress: \(state.progress * 100)%, Streak: \(userManager.currentUser.streak)")
+    }
+    
+    private func refreshData() {
+        isRefreshing = true
+        healthManager.fetchAllWorkoutData()
+        
+        // Allow time for HealthKit data to process, then sync widgets
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            syncWidgetData()
+            isRefreshing = false
+        }
+    }
+    
+    private func refreshDataAsync() async {
+        await withCheckedContinuation { continuation in
+            isRefreshing = true
+            healthManager.fetchAllWorkoutData()
+            
+            // Allow time for HealthKit data to process
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                syncWidgetData()
+                isRefreshing = false
+                continuation.resume()
+            }
+        }
     }
     
     private func triggerConfetti() {
@@ -459,9 +480,43 @@ struct StreakCard: View {
     let user: User
     let progress: Double
     let isGoalCompleted: Bool
+    let isRefreshing: Bool
     @State private var animateStreak = false
     @State private var showingShareSheet = false
-    @State private var shareImage: UIImage?
+    @State private var streakImage: UIImage?
+    @State private var progressImage: UIImage?
+    @State private var isPressed = false
+    
+    // Dynamic colors based on streak status
+    var streakColor: Color {
+        if isGoalCompleted {
+            return .green
+        } else if isAtRisk {
+            return .red
+        } else {
+            return .orange
+        }
+    }
+    
+    var backgroundColor: Color {
+        if isGoalCompleted {
+            return .green.opacity(0.1)
+        } else if isAtRisk {
+            return .red.opacity(0.1)
+        } else {
+            return .orange.opacity(0.1)
+        }
+    }
+    
+    var gradientColors: [Color] {
+        if isGoalCompleted {
+            return [.green.opacity(0.3), .green.opacity(0.1)]
+        } else if isAtRisk {
+            return [.red.opacity(0.3), .red.opacity(0.1)]
+        } else {
+            return [.orange.opacity(0.3), .orange.opacity(0.1)]
+        }
+    }
     
     var body: some View {
         VStack(spacing: 12) {
@@ -476,76 +531,172 @@ struct StreakCard: View {
                 Circle()
                     .fill(
                         LinearGradient(
-                            gradient: Gradient(colors: [isGoalCompleted ? .green.opacity(0.3) : .orange.opacity(0.3), 
-                                                      isGoalCompleted ? .green.opacity(0.1) : .orange.opacity(0.1)]),
+                            gradient: Gradient(colors: gradientColors),
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
                     .frame(width: 120, height: 120)
+                    .scaleEffect(isPressed ? 0.95 : 1.0)
                 
-                // Progress ring
-                    Circle()
+                // Progress ring - now changes color with streak status
+                Circle()
                     .stroke(Color.gray.opacity(0.2), lineWidth: 5)
                     .frame(width: 130, height: 130)
                 
                 Circle()
                     .trim(from: 0, to: progress)
-                    .stroke(isGoalCompleted ? Color.green : Color.orange, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .stroke(streakColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                     .frame(width: 130, height: 130)
                     .rotationEffect(.degrees(-90))
                     .animation(.easeInOut(duration: 0.8), value: progress)
+                
+                // Loading indicator overlay when refreshing
+                if isRefreshing {
+                    Circle()
+                        .stroke(Color.blue.opacity(0.3), lineWidth: 2)
+                        .frame(width: 140, height: 140)
+                        .rotationEffect(.degrees(-90))
+                        .overlay(
+                            Circle()
+                                .trim(from: 0, to: 0.25)
+                                .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                                .frame(width: 140, height: 140)
+                                .rotationEffect(.degrees(animateStreak ? 360 : 0))
+                                .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: animateStreak)
+                        )
+                }
                 
                 // Center content
                 VStack(spacing: 4) {
                     Text("\(streak)")
                         .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .foregroundColor(isGoalCompleted ? .green : .orange)
-                        .scaleEffect(animateStreak ? 1.1 : 1.0)
+                        .foregroundColor(streakColor)
+                        .scaleEffect(animateStreak && !isRefreshing ? 1.1 : 1.0)
                         .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateStreak)
+                        .opacity(isRefreshing ? 0.6 : 1.0)
                     
                     Text(streak == 1 ? "day" : "days")
                         .font(.caption)
                         .fontWeight(.medium)
-                        .foregroundColor(isGoalCompleted ? .green.opacity(0.8) : .orange.opacity(0.8))
+                        .foregroundColor(streakColor.opacity(0.8))
+                        .opacity(isRefreshing ? 0.6 : 1.0)
                 }
             }
             
-            // Status message (only if not completed)
-            if !isGoalCompleted {
-                    if isAtRisk {
+            // Status message with time until streak reset
+            VStack(spacing: 4) {
+                if isGoalCompleted {
+                    Label("Goal completed!", systemImage: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                } else if isAtRisk {
                     Label("Streak at risk!", systemImage: "exclamationmark.triangle.fill")
                         .foregroundColor(.red)
                         .font(.caption)
+                        .fontWeight(.medium)
+                    
+                    // Show time until streak ends - use same color as streak
+                    Text(user.formattedTimeUntilReset)
+                        .font(.caption2)
+                        .foregroundColor(streakColor.opacity(0.8))
+                        .fontWeight(.medium)
                 } else {
                     Text("Keep it going!")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    // Show time until streak is at risk if not completed - use same color as streak
+                    if !isActiveToday, user.timeUntilStreakReset != nil {
+                        Text(user.formattedTimeUntilReset)
+                            .font(.caption2)
+                            .foregroundColor(streakColor.opacity(0.8))
                     }
                 }
-                }
+            }
+            
+
+        }
         .padding()
-            .background(
+        .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color(.systemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(.systemGray4), lineWidth: 1)
+                )
                 .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
         )
-        .onLongPressGesture {
+        .scaleEffect(isPressed ? 0.98 : 1.0)
+        .animation(.easeInOut(duration: 0.1), value: isPressed)
+        .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 50) {
             generateShareImage()
+        } onPressingChanged: { pressing in
+            withAnimation(.easeInOut(duration: 0.1)) {
+                isPressed = pressing
+            }
+            
+            if pressing {
+                // Light haptic feedback when press starts
+                let impact = UIImpactFeedbackGenerator(style: .light)
+                impact.impactOccurred()
+            } else {
+                // Medium haptic feedback when released/completed
+                let impact = UIImpactFeedbackGenerator(style: .medium)
+                impact.impactOccurred()
+            }
         }
         .sheet(isPresented: $showingShareSheet) {
-            if let image = shareImage {
-                ShareSheet(items: [image])
+            SharePreviewView(streakImage: streakImage, progressImage: progressImage, title: "Share", initialTab: 0)
+        }
+        .onAppear {
+            // Start pulsing animation for streaks at risk (but not while refreshing)
+            if isAtRisk && !isRefreshing {
+                animateStreak = true
+            }
+        }
+        .onChange(of: isRefreshing) { oldValue, newValue in
+            if newValue {
+                // Start loading animation
+                animateStreak = true
+            } else {
+                // Stop loading animation and start appropriate streak animation
+                if isAtRisk {
+                    // Keep animating for at-risk streaks
+                    animateStreak = true
+                } else {
+                    // Stop animation for normal streaks
+                    animateStreak = false
+                }
             }
         }
     }
     
     private func generateShareImage() {
-        let renderer = ImageRenderer(content: StreakShareView(streak: streak, isGoalCompleted: isGoalCompleted))
-        renderer.scale = 3.0 // High resolution for Instagram
+        // Generate streak image that matches dashboard exactly
+        let streakRenderer = ImageRenderer(content: StreakCardShareView(
+            streak: streak,
+            isActiveToday: isActiveToday,
+            isAtRisk: isAtRisk,
+            user: user,
+            progress: progress,
+            isGoalCompleted: isGoalCompleted
+        ))
+        streakRenderer.scale = 3.0 // High resolution for Instagram
         
-        if let image = renderer.uiImage {
-            shareImage = image
+        // Generate progress image that matches dashboard exactly
+        let progressRenderer = ImageRenderer(content: TodayProgressCardShareView(
+            currentDistance: progress * user.goalMiles,
+            goalDistance: user.goalMiles,
+            progress: progress,
+            didComplete: isGoalCompleted
+        ))
+        progressRenderer.scale = 3.0 // High resolution for Instagram
+        
+        if let streakImg = streakRenderer.uiImage, let progressImg = progressRenderer.uiImage {
+            streakImage = streakImg
+            progressImage = progressImg
             showingShareSheet = true
         }
     }
@@ -557,11 +708,15 @@ struct TodayProgressCard: View {
     let progress: Double
     let didComplete: Bool
     let onRefresh: () -> Void
+    let isRefreshing: Bool
+    let user: User
     @State private var animateProgress = false
     @State private var animateNumbers = false
     @State private var animateBar = false
     @State private var showingShareSheet = false
-    @State private var shareImage: UIImage?
+    @State private var streakImage: UIImage?
+    @State private var progressImage: UIImage?
+    @State private var isPressed = false
     
     var body: some View {
         VStack(spacing: 12) {
@@ -576,14 +731,28 @@ struct TodayProgressCard: View {
                 if didComplete {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
-                            }
-                Button(action: onRefresh) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.title3)
+                }
+                if isRefreshing {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.title3)
+                            .foregroundColor(.blue)
+                            .rotationEffect(.degrees(360))
+                            .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: isRefreshing)
+                        
+                        Text("Updating...")
+                            .font(.caption2)
+                            .foregroundColor(.blue)
+                    }
+                } else {
+                    Button(action: onRefresh) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.title3)
                             .foregroundColor(.blue)
                     }
                 }
-                
+            }
+            
             // Progress Bar
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
@@ -634,13 +803,21 @@ struct TodayProgressCard: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+            
+
         }
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(Color(.systemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(.systemGray4), lineWidth: 1)
+                )
                 .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
         )
+        .scaleEffect(isPressed ? 0.98 : 1.0)
+        .animation(.easeInOut(duration: 0.1), value: isPressed)
         .onAppear {
             withAnimation(.easeInOut(duration: 0.5).delay(0.2)) {
                 animateProgress = true
@@ -656,27 +833,52 @@ struct TodayProgressCard: View {
                 }
             }
         }
-        .onLongPressGesture {
+        .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 50) {
             generateShareImage()
+        } onPressingChanged: { pressing in
+            withAnimation(.easeInOut(duration: 0.1)) {
+                isPressed = pressing
+            }
+            
+            if pressing {
+                // Light haptic feedback when press starts
+                let impact = UIImpactFeedbackGenerator(style: .light)
+                impact.impactOccurred()
+            } else {
+                // Medium haptic feedback when released/completed
+                let impact = UIImpactFeedbackGenerator(style: .medium)
+                impact.impactOccurred()
+            }
         }
         .sheet(isPresented: $showingShareSheet) {
-            if let image = shareImage {
-                ShareSheet(items: [image])
-            }
+            SharePreviewView(streakImage: streakImage, progressImage: progressImage, title: "Share", initialTab: 1)
         }
     }
     
     private func generateShareImage() {
-        let renderer = ImageRenderer(content: TodayProgressShareView(
+        // Generate progress image that matches dashboard exactly
+        let progressRenderer = ImageRenderer(content: TodayProgressCardShareView(
             currentDistance: currentDistance,
             goalDistance: goalDistance,
             progress: progress,
             didComplete: didComplete
         ))
-        renderer.scale = 3.0 // High resolution for Instagram
+        progressRenderer.scale = 3.0 // High resolution for Instagram
         
-        if let image = renderer.uiImage {
-            shareImage = image
+        // Generate streak image that matches dashboard exactly
+        let streakRenderer = ImageRenderer(content: StreakCardShareView(
+            streak: user.streak,
+            isActiveToday: user.isStreakActiveToday,
+            isAtRisk: user.isStreakAtRisk,
+            user: user,
+            progress: progress,
+            isGoalCompleted: didComplete
+        ))
+        streakRenderer.scale = 3.0 // High resolution for Instagram
+        
+        if let progressImg = progressRenderer.uiImage, let streakImg = streakRenderer.uiImage {
+            progressImage = progressImg
+            streakImage = streakImg
             showingShareSheet = true
         }
     }
@@ -1085,6 +1287,28 @@ struct GoalSettingSheet: View {
 struct StreakShareView: View {
     let streak: Int
     let isGoalCompleted: Bool
+    let isAtRisk: Bool
+    
+    // Dynamic colors for share view
+    var streakColor: Color {
+        if isGoalCompleted {
+            return .green
+        } else if isAtRisk {
+            return .red
+        } else {
+            return .orange
+        }
+    }
+    
+    var gradientColors: [Color] {
+        if isGoalCompleted {
+            return [.green.opacity(0.3), .green.opacity(0.1)]
+        } else if isAtRisk {
+            return [.red.opacity(0.3), .red.opacity(0.1)]
+        } else {
+            return [.orange.opacity(0.3), .orange.opacity(0.1)]
+        }
+    }
     
     var body: some View {
         VStack(spacing: 20) {
@@ -1111,8 +1335,7 @@ struct StreakShareView: View {
                     Circle()
                         .fill(
                             LinearGradient(
-                                gradient: Gradient(colors: [isGoalCompleted ? .green.opacity(0.3) : .orange.opacity(0.3), 
-                                                          isGoalCompleted ? .green.opacity(0.1) : .orange.opacity(0.1)]),
+                                gradient: Gradient(colors: gradientColors),
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
                             )
@@ -1125,8 +1348,8 @@ struct StreakShareView: View {
                         .frame(width: 150, height: 150)
                     
                     Circle()
-                        .trim(from: 0, to: isGoalCompleted ? 1.0 : 0.8)
-                        .stroke(isGoalCompleted ? Color.green : Color.orange, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                        .trim(from: 0, to: isGoalCompleted ? 1.0 : (isAtRisk ? 0.2 : 0.8))
+                        .stroke(streakColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                         .frame(width: 150, height: 150)
                         .rotationEffect(.degrees(-90))
                     
@@ -1134,20 +1357,26 @@ struct StreakShareView: View {
                     VStack(spacing: 4) {
                         Text("\(streak)")
                             .font(.system(size: 48, weight: .bold, design: .rounded))
-                            .foregroundColor(isGoalCompleted ? .green : .orange)
+                            .foregroundColor(streakColor)
                         
                         Text(streak == 1 ? "day" : "days")
                             .font(.subheadline)
                             .fontWeight(.medium)
-                            .foregroundColor(isGoalCompleted ? .green.opacity(0.8) : .orange.opacity(0.8))
+                            .foregroundColor(streakColor.opacity(0.8))
                     }
                 }
                 
+                // Status message
                 if isGoalCompleted {
                     Text("Goal Completed Today! 🎉")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .foregroundColor(.green)
+                } else if isAtRisk {
+                    Text("Streak at risk! ⚠️")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.red)
                 } else {
                     Text("Keep the streak alive!")
                         .font(.subheadline)
@@ -1262,6 +1491,214 @@ struct TodayProgressShareView: View {
     }
 }
 
+// MARK: - Dashboard Card Share Views
+
+struct StreakCardShareView: View {
+    let streak: Int
+    let isActiveToday: Bool
+    let isAtRisk: Bool
+    let user: User
+    let progress: Double
+    let isGoalCompleted: Bool
+    
+    // Dynamic colors based on streak status
+    var streakColor: Color {
+        if isGoalCompleted {
+            return .green
+        } else if isAtRisk {
+            return .red
+        } else {
+            return .orange
+        }
+    }
+    
+    var backgroundColor: Color {
+        if isGoalCompleted {
+            return .green.opacity(0.1)
+        } else if isAtRisk {
+            return .red.opacity(0.1)
+        } else {
+            return .orange.opacity(0.1)
+        }
+    }
+    
+    var gradientColors: [Color] {
+        if isGoalCompleted {
+            return [.green.opacity(0.3), .green.opacity(0.1)]
+        } else if isAtRisk {
+            return [.red.opacity(0.3), .red.opacity(0.1)]
+        } else {
+            return [.orange.opacity(0.3), .orange.opacity(0.1)]
+        }
+    }
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            // Title
+            Text("Current Streak")
+                .font(.headline)
+                .fontWeight(.semibold)
+            
+            // Streak circle with fire icon (matching widget design)
+            ZStack {
+                // Background circle
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            gradient: Gradient(colors: gradientColors),
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 120, height: 120)
+                
+                // Progress ring - now changes color with streak status
+                Circle()
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 5)
+                    .frame(width: 130, height: 130)
+                
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(streakColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .frame(width: 130, height: 130)
+                    .rotationEffect(.degrees(-90))
+                
+                // Center content
+                VStack(spacing: 4) {
+                    Text("\(streak)")
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .foregroundColor(streakColor)
+                    
+                    Text(streak == 1 ? "day" : "days")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(streakColor.opacity(0.8))
+                }
+            }
+            
+            // Status message with time until streak reset
+            VStack(spacing: 4) {
+                if isGoalCompleted {
+                    Label("Goal completed!", systemImage: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                } else if isAtRisk {
+                    Label("Streak at risk!", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundColor(.red)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                    
+                    // Show time until streak ends - use same color as streak
+                    Text(user.formattedTimeUntilReset)
+                        .font(.caption2)
+                        .foregroundColor(streakColor.opacity(0.8))
+                        .fontWeight(.medium)
+                } else {
+                    Text("Keep it going!")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    // Show time until streak is at risk if not completed - use same color as streak
+                    if !isActiveToday, user.timeUntilStreakReset != nil {
+                        Text(user.formattedTimeUntilReset)
+                            .font(.caption2)
+                            .foregroundColor(streakColor.opacity(0.8))
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.systemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(.systemGray4), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+        )
+        .frame(width: 300, height: 400) // Fixed size for consistent sharing
+    }
+}
+
+struct TodayProgressCardShareView: View {
+    let currentDistance: Double
+    let goalDistance: Double
+    let progress: Double
+    let didComplete: Bool
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            // Header
+            HStack {
+                Image(systemName: "figure.run")
+                    .foregroundColor(.primary)
+                Text("Today's Progress")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                Spacer()
+                if didComplete {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                }
+            }
+            
+            // Progress Bar
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.gray.opacity(0.2))
+                        .frame(height: 16)
+                    
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(didComplete ? Color.green : Color("appPrimary"))
+                        .frame(width: progress * geometry.size.width, height: 16)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .frame(height: 16)
+            
+            // Distance Display
+            HStack {
+                Text(String(format: "%.2f", currentDistance))
+                    .font(.title2)
+                    .fontWeight(.bold)
+                
+                Text("of")
+                    .font(.subheadline)
+                
+                Text(String(format: "%.1f mi", goalDistance))
+                    .font(.title2)
+                    .fontWeight(.bold)
+            }
+            
+            // Status or remaining distance
+            if didComplete {
+                Label("Goal Complete!", systemImage: "star.fill")
+                    .foregroundColor(.green)
+                    .font(.caption)
+            } else {
+                let remaining = max(goalDistance - currentDistance, 0.0)
+                Text(String(format: "%.2f mi to go", remaining))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(.systemBackground))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(Color(.systemGray4), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+        )
+        .frame(width: 300, height: 300) // Fixed size for consistent sharing
+    }
+}
+
 // MARK: - Share Sheet
 
 struct ShareSheet: UIViewControllerRepresentable {
@@ -1273,4 +1710,148 @@ struct ShareSheet: UIViewControllerRepresentable {
     }
     
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - Share Preview View
+
+struct SharePreviewView: View {
+    let streakImage: UIImage?
+    let progressImage: UIImage?
+    let title: String
+    let initialTab: Int // 0 for streak, 1 for progress
+    @Environment(\.dismiss) private var dismiss
+    @State private var showingShareSheet = false
+    @State private var selectedImage: UIImage?
+    @State private var copyButtonText = "Copy"
+    @State private var showingCopiedFeedback = false
+    @State private var currentTab = 0
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                // Carousel for multiple images
+                if let streakImage = streakImage, let progressImage = progressImage {
+                    // Both images available - show carousel
+                    TabView(selection: $currentTab) {
+                        // Streak image
+                        VStack(spacing: 12) {
+                            Text("Streak")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            
+                            Image(uiImage: streakImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .padding()
+                        }
+                        .tag(0)
+                        
+                        // Progress image
+                        VStack(spacing: 12) {
+                            Text("Progress")
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                            
+                            Image(uiImage: progressImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .padding()
+                        }
+                        .tag(1)
+                    }
+                    .tabViewStyle(PageTabViewStyle())
+                    .indexViewStyle(PageIndexViewStyle(backgroundDisplayMode: .always))
+                    .onAppear {
+                        currentTab = initialTab
+                        selectedImage = initialTab == 0 ? streakImage : progressImage
+                    }
+                    .onChange(of: currentTab) { _, newValue in
+                        selectedImage = newValue == 0 ? streakImage : progressImage
+                    }
+                    .onChange(of: showingCopiedFeedback) { _, newValue in
+                        if newValue {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                copyButtonText = "Copy"
+                                showingCopiedFeedback = false
+                            }
+                        }
+                    }
+                } else {
+                    // Single image
+                    Image(uiImage: selectedImage ?? streakImage ?? progressImage ?? UIImage())
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding()
+                        .onAppear {
+                            selectedImage = streakImage ?? progressImage
+                        }
+                }
+                
+                // Action buttons
+                HStack(spacing: 12) {
+                    // Copy button
+                    Button {
+                        if let imageToCopy = selectedImage {
+                            UIPasteboard.general.image = imageToCopy
+                            // Haptic feedback for copy
+                            let impact = UIImpactFeedbackGenerator(style: .medium)
+                            impact.impactOccurred()
+                            
+                            // Show "Copied!" feedback
+                            copyButtonText = "Copied!"
+                            showingCopiedFeedback = true
+                        }
+                    } label: {
+                        HStack {
+                            Image(systemName: showingCopiedFeedback ? "checkmark" : "doc.on.doc")
+                            Text(copyButtonText)
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(showingCopiedFeedback ? Color.green : Color.green)
+                        .cornerRadius(12)
+                        .animation(.easeInOut(duration: 0.2), value: showingCopiedFeedback)
+                    }
+                    .disabled(selectedImage == nil)
+                    
+                    // Share button
+                    Button {
+                        showingShareSheet = true
+                    } label: {
+                        HStack {
+                            Image(systemName: "square.and.arrow.up")
+                            Text("Share")
+                        }
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .cornerRadius(12)
+                    }
+                    .disabled(selectedImage == nil)
+                }
+                .padding(.horizontal)
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingShareSheet) {
+            if let image = selectedImage {
+                ShareSheet(items: [image])
+            }
+        }
+    }
 }
