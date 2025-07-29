@@ -40,6 +40,7 @@ struct MainTabView: View {
             
             NavigationStack {
                 ProfileView(userManager: userManager, healthManager: healthManager)
+                    .environment(\.appStateManager, AppStateManager())
             }
             .tabItem {
                 Label("Profile", systemImage: "person.fill")
