@@ -631,7 +631,7 @@ struct StreakCard: View {
         .scaleEffect(isPressed ? 0.98 : 1.0)
         .animation(.easeInOut(duration: 0.1), value: isPressed)
         .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 50) {
-            generateShareImage()
+            generateShareImage(theme: colorScheme)
         } onPressingChanged: { pressing in
             withAnimation(.easeInOut(duration: 0.1)) {
                 isPressed = pressing
@@ -648,7 +648,7 @@ struct StreakCard: View {
             }
         }
         .sheet(isPresented: $showingShareSheet) {
-            SharePreviewView(streakImage: streakImage, progressImage: progressImage, title: "Share", initialTab: 0)
+            SharePreviewView(streakImage: streakImage, progressImage: progressImage, title: "Share", initialTab: 0, user: user, progress: progress, isGoalCompleted: isGoalCompleted)
         }
         .onAppear {
             // Start pulsing animation for streaks at risk (but not while refreshing)
@@ -673,7 +673,9 @@ struct StreakCard: View {
         }
     }
     
-    private func generateShareImage() {
+    @Environment(\.colorScheme) private var colorScheme
+    
+    private func generateShareImage(theme: ColorScheme = .light) {
         // Generate streak image that matches dashboard exactly
         let streakRenderer = ImageRenderer(content: StreakCardShareView(
             streak: streak,
@@ -682,7 +684,7 @@ struct StreakCard: View {
             user: user,
             progress: progress,
             isGoalCompleted: isGoalCompleted
-        ))
+        ).environment(\.colorScheme, theme))
         streakRenderer.scale = 3.0 // High resolution for Instagram
         
         // Generate progress image that matches dashboard exactly
@@ -690,8 +692,9 @@ struct StreakCard: View {
             currentDistance: progress * user.goalMiles,
             goalDistance: user.goalMiles,
             progress: progress,
-            didComplete: isGoalCompleted
-        ))
+            didComplete: isGoalCompleted,
+            totalMiles: user.totalMiles
+        ).environment(\.colorScheme, theme))
         progressRenderer.scale = 3.0 // High resolution for Instagram
         
         if let streakImg = streakRenderer.uiImage, let progressImg = progressRenderer.uiImage {
@@ -717,6 +720,7 @@ struct TodayProgressCard: View {
     @State private var streakImage: UIImage?
     @State private var progressImage: UIImage?
     @State private var isPressed = false
+    @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         VStack(spacing: 12) {
@@ -834,7 +838,7 @@ struct TodayProgressCard: View {
             }
         }
         .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 50) {
-            generateShareImage()
+            generateShareImage(theme: colorScheme)
         } onPressingChanged: { pressing in
             withAnimation(.easeInOut(duration: 0.1)) {
                 isPressed = pressing
@@ -851,18 +855,19 @@ struct TodayProgressCard: View {
             }
         }
         .sheet(isPresented: $showingShareSheet) {
-            SharePreviewView(streakImage: streakImage, progressImage: progressImage, title: "Share", initialTab: 1)
+            SharePreviewView(streakImage: streakImage, progressImage: progressImage, title: "Share", initialTab: 1, user: user, progress: progress, isGoalCompleted: didComplete)
         }
     }
     
-    private func generateShareImage() {
+    private func generateShareImage(theme: ColorScheme = .light) {
         // Generate progress image that matches dashboard exactly
         let progressRenderer = ImageRenderer(content: TodayProgressCardShareView(
             currentDistance: currentDistance,
             goalDistance: goalDistance,
             progress: progress,
-            didComplete: didComplete
-        ))
+            didComplete: didComplete,
+            totalMiles: user.totalMiles
+        ).environment(\.colorScheme, theme))
         progressRenderer.scale = 3.0 // High resolution for Instagram
         
         // Generate streak image that matches dashboard exactly
@@ -873,7 +878,7 @@ struct TodayProgressCard: View {
             user: user,
             progress: progress,
             isGoalCompleted: didComplete
-        ))
+        ).environment(\.colorScheme, theme))
         streakRenderer.scale = 3.0 // High resolution for Instagram
         
         if let progressImg = progressRenderer.uiImage, let streakImg = streakRenderer.uiImage {
@@ -1407,6 +1412,7 @@ struct TodayProgressShareView: View {
     let goalDistance: Double
     let progress: Double
     let didComplete: Bool
+    let totalMiles: Double
     
     var body: some View {
         VStack(spacing: 20) {
@@ -1471,6 +1477,18 @@ struct TodayProgressShareView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
+                
+                // Total miles display
+                HStack {
+                    Image(systemName: "trophy.fill")
+                        .foregroundColor(.orange)
+                        .font(.subheadline)
+                    Text(String(format: "Total Miles: %.1f", totalMiles))
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                }
+                .padding(.top, 8)
             }
             
             // Footer
@@ -1627,6 +1645,7 @@ struct TodayProgressCardShareView: View {
     let goalDistance: Double
     let progress: Double
     let didComplete: Bool
+    let totalMiles: Double
     
     var body: some View {
         VStack(spacing: 12) {
@@ -1684,6 +1703,18 @@ struct TodayProgressCardShareView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+            
+            // Total miles display
+            HStack {
+                Image(systemName: "trophy.fill")
+                    .foregroundColor(.orange)
+                    .font(.caption)
+                Text(String(format: "Total Miles: %.1f", totalMiles))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.primary)
+            }
+            .padding(.top, 4)
         }
         .padding()
         .background(
@@ -1695,7 +1726,7 @@ struct TodayProgressCardShareView: View {
                 )
                 .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
         )
-        .frame(width: 300, height: 300) // Fixed size for consistent sharing
+        .frame(width: 300, height: 320) // Fixed size for consistent sharing
     }
 }
 
@@ -1719,12 +1750,18 @@ struct SharePreviewView: View {
     let progressImage: UIImage?
     let title: String
     let initialTab: Int // 0 for streak, 1 for progress
+    let user: User
+    let progress: Double
+    let isGoalCompleted: Bool
     @Environment(\.dismiss) private var dismiss
     @State private var showingShareSheet = false
     @State private var selectedImage: UIImage?
     @State private var copyButtonText = "Copy"
     @State private var showingCopiedFeedback = false
     @State private var currentTab = 0
+    @State private var selectedTheme: ColorScheme = .light
+    @State private var regeneratedImages: (streak: UIImage?, progress: UIImage?) = (nil, nil)
+    @Environment(\.colorScheme) private var systemColorScheme
     
     var body: some View {
         NavigationStack {
@@ -1739,7 +1776,7 @@ struct SharePreviewView: View {
                                 .font(.headline)
                                 .fontWeight(.semibold)
                             
-                            Image(uiImage: streakImage)
+                            Image(uiImage: regeneratedImages.streak ?? streakImage)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1753,7 +1790,7 @@ struct SharePreviewView: View {
                                 .font(.headline)
                                 .fontWeight(.semibold)
                             
-                            Image(uiImage: progressImage)
+                            Image(uiImage: regeneratedImages.progress ?? progressImage)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1765,10 +1802,12 @@ struct SharePreviewView: View {
                     .indexViewStyle(PageIndexViewStyle(backgroundDisplayMode: .always))
                     .onAppear {
                         currentTab = initialTab
-                        selectedImage = initialTab == 0 ? streakImage : progressImage
+                        selectedTheme = systemColorScheme
+                        selectedImage = initialTab == 0 ? (regeneratedImages.streak ?? streakImage) : (regeneratedImages.progress ?? progressImage)
+                        regenerateImages()
                     }
                     .onChange(of: currentTab) { _, newValue in
-                        selectedImage = newValue == 0 ? streakImage : progressImage
+                        selectedImage = newValue == 0 ? (regeneratedImages.streak ?? streakImage) : (regeneratedImages.progress ?? progressImage)
                     }
                     .onChange(of: showingCopiedFeedback) { _, newValue in
                         if newValue {
@@ -1780,13 +1819,15 @@ struct SharePreviewView: View {
                     }
                 } else {
                     // Single image
-                    Image(uiImage: selectedImage ?? streakImage ?? progressImage ?? UIImage())
+                    Image(uiImage: selectedImage ?? (regeneratedImages.streak ?? streakImage) ?? (regeneratedImages.progress ?? progressImage) ?? UIImage())
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding()
                         .onAppear {
-                            selectedImage = streakImage ?? progressImage
+                            selectedTheme = systemColorScheme
+                            selectedImage = regeneratedImages.streak ?? regeneratedImages.progress ?? streakImage ?? progressImage
+                            regenerateImages()
                         }
                 }
                 
@@ -1846,12 +1887,54 @@ struct SharePreviewView: View {
                         dismiss()
                     }
                 }
+                
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        selectedTheme = selectedTheme == .light ? .dark : .light
+                        regenerateImages()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: selectedTheme == .light ? "moon.fill" : "sun.max.fill")
+                                .foregroundColor(selectedTheme == .light ? .blue : .orange)
+                            Text(selectedTheme == .light ? "Dark" : "Light")
+                                .font(.caption)
+                                .foregroundColor(selectedTheme == .light ? .blue : .orange)
+                        }
+                    }
+                }
             }
         }
         .sheet(isPresented: $showingShareSheet) {
             if let image = selectedImage {
                 ShareSheet(items: [image])
             }
+        }
+    }
+    
+    private func regenerateImages() {
+        // Generate new images with the selected theme
+        let streakRenderer = ImageRenderer(content: StreakCardShareView(
+            streak: user.streak,
+            isActiveToday: user.isStreakActiveToday,
+            isAtRisk: user.isStreakAtRisk,
+            user: user,
+            progress: progress,
+            isGoalCompleted: isGoalCompleted
+        ).environment(\.colorScheme, selectedTheme))
+        streakRenderer.scale = 3.0
+        
+        let progressRenderer = ImageRenderer(content: TodayProgressCardShareView(
+            currentDistance: progress * user.goalMiles,
+            goalDistance: user.goalMiles,
+            progress: progress,
+            didComplete: isGoalCompleted,
+            totalMiles: user.totalMiles
+        ).environment(\.colorScheme, selectedTheme))
+        progressRenderer.scale = 3.0
+        
+        if let streakImg = streakRenderer.uiImage, let progressImg = progressRenderer.uiImage {
+            regeneratedImages = (streak: streakImg, progress: progressImg)
+            selectedImage = currentTab == 0 ? streakImg : progressImg
         }
     }
 }
