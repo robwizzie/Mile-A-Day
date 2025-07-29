@@ -673,6 +673,8 @@ struct StreakCard: View {
         }
     }
     
+    @Environment(\.colorScheme) private var colorScheme
+    
     private func generateShareImage() {
         // Generate streak image that matches dashboard exactly
         let streakRenderer = ImageRenderer(content: StreakCardShareView(
@@ -682,7 +684,7 @@ struct StreakCard: View {
             user: user,
             progress: progress,
             isGoalCompleted: isGoalCompleted
-        ))
+        ).environment(\.colorScheme, colorScheme))
         streakRenderer.scale = 3.0 // High resolution for Instagram
         
         // Generate progress image that matches dashboard exactly
@@ -690,8 +692,9 @@ struct StreakCard: View {
             currentDistance: progress * user.goalMiles,
             goalDistance: user.goalMiles,
             progress: progress,
-            didComplete: isGoalCompleted
-        ))
+            didComplete: isGoalCompleted,
+            totalMiles: user.totalMiles
+        ).environment(\.colorScheme, colorScheme))
         progressRenderer.scale = 3.0 // High resolution for Instagram
         
         if let streakImg = streakRenderer.uiImage, let progressImg = progressRenderer.uiImage {
@@ -717,6 +720,7 @@ struct TodayProgressCard: View {
     @State private var streakImage: UIImage?
     @State private var progressImage: UIImage?
     @State private var isPressed = false
+    @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         VStack(spacing: 12) {
@@ -861,8 +865,9 @@ struct TodayProgressCard: View {
             currentDistance: currentDistance,
             goalDistance: goalDistance,
             progress: progress,
-            didComplete: didComplete
-        ))
+            didComplete: didComplete,
+            totalMiles: user.totalMiles
+        ).environment(\.colorScheme, colorScheme))
         progressRenderer.scale = 3.0 // High resolution for Instagram
         
         // Generate streak image that matches dashboard exactly
@@ -873,7 +878,7 @@ struct TodayProgressCard: View {
             user: user,
             progress: progress,
             isGoalCompleted: didComplete
-        ))
+        ).environment(\.colorScheme, colorScheme))
         streakRenderer.scale = 3.0 // High resolution for Instagram
         
         if let progressImg = progressRenderer.uiImage, let streakImg = streakRenderer.uiImage {
@@ -1407,6 +1412,7 @@ struct TodayProgressShareView: View {
     let goalDistance: Double
     let progress: Double
     let didComplete: Bool
+    let totalMiles: Double
     
     var body: some View {
         VStack(spacing: 20) {
@@ -1471,6 +1477,18 @@ struct TodayProgressShareView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
+                
+                // Total miles display
+                HStack {
+                    Image(systemName: "trophy.fill")
+                        .foregroundColor(.orange)
+                        .font(.subheadline)
+                    Text(String(format: "Total Miles: %.1f", totalMiles))
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
+                }
+                .padding(.top, 8)
             }
             
             // Footer
@@ -1627,6 +1645,7 @@ struct TodayProgressCardShareView: View {
     let goalDistance: Double
     let progress: Double
     let didComplete: Bool
+    let totalMiles: Double
     
     var body: some View {
         VStack(spacing: 12) {
@@ -1684,6 +1703,18 @@ struct TodayProgressCardShareView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+            
+            // Total miles display
+            HStack {
+                Image(systemName: "trophy.fill")
+                    .foregroundColor(.orange)
+                    .font(.caption)
+                Text(String(format: "Total Miles: %.1f", totalMiles))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.primary)
+            }
+            .padding(.top, 4)
         }
         .padding()
         .background(
@@ -1695,7 +1726,7 @@ struct TodayProgressCardShareView: View {
                 )
                 .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
         )
-        .frame(width: 300, height: 300) // Fixed size for consistent sharing
+        .frame(width: 300, height: 320) // Fixed size for consistent sharing
     }
 }
 
