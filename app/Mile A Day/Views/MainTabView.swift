@@ -12,6 +12,7 @@ struct MainTabView: View {
             NavigationStack {
                 DashboardView(healthManager: healthManager, userManager: userManager)
                     .environmentObject(notificationService)
+                    .preferredColorScheme(nil) // Allow system to control color scheme
             }
             .tabItem {
                 Label("Dashboard", systemImage: "house.fill")
@@ -19,6 +20,7 @@ struct MainTabView: View {
             
             NavigationStack {
                 LeaderboardView(userManager: userManager, healthManager: healthManager)
+                    .preferredColorScheme(nil)
             }
             .tabItem {
                 Label("Friends", systemImage: "person.2.fill")
@@ -26,6 +28,7 @@ struct MainTabView: View {
             
             NavigationStack {
                 BadgesView(userManager: userManager)
+                    .preferredColorScheme(nil)
             }
             .tabItem {
                 Label("Badges", systemImage: "trophy.fill")
@@ -33,6 +36,7 @@ struct MainTabView: View {
             
             NavigationStack {
                 StepsView(healthManager: healthManager, userManager: userManager)
+                    .preferredColorScheme(nil)
             }
             .tabItem {
                 Label("Calendar", systemImage: "calendar")
@@ -40,11 +44,14 @@ struct MainTabView: View {
             
             NavigationStack {
                 ProfileView(userManager: userManager, healthManager: healthManager)
+                    .preferredColorScheme(nil)
             }
             .tabItem {
                 Label("Profile", systemImage: "person.fill")
             }
         }
+        .accentColor(.primary) // Ensure tab icons adapt to color scheme
+        .background(Color(.systemBackground)) // Ensure background adapts to dark mode
         .onAppear {
             // Reset daily notification tracking for new day
             notificationService.resetDailyNotificationTracking()
@@ -183,7 +190,7 @@ struct ProfileView: View {
             .padding()
             .background(Color(.systemBackground))
             .cornerRadius(15)
-            .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
+            .shadow(color: Color.primary.opacity(0.1), radius: 5, x: 0, y: 2)
             
             NavigationLink(destination: NotificationSettingsView()) {
                 Text("Notification Settings")

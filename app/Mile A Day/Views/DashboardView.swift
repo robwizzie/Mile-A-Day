@@ -108,8 +108,16 @@ struct DashboardView: View {
             }
             .onAppear {
                 refreshData()
-                // Always sync widget data when the dashboard appears
+                // Always sync widget data when the dashboard appears - multiple times for reliability
                 syncWidgetData()
+                
+                // Ensure fastest mile data is fresh
+                healthManager.fetchFastestMilePace()
+                
+                // Additional widget sync after a delay to ensure consistency
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    syncWidgetData()
+                }
                 
                 // Check if this is the first time opening the app after completing today's goal
                 let today = Calendar.current.startOfDay(for: Date())
@@ -238,10 +246,17 @@ struct DashboardView: View {
     
     private func refreshData() {
         isRefreshing = true
+        
+        // Fetch data in order to ensure consistency
         healthManager.fetchAllWorkoutData()
         
-        // Allow time for HealthKit data to process, then sync widgets
+        // Allow time for HealthKit data to process, then sync widgets multiple times for reliability
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            syncWidgetData()
+        }
+        
+        // Additional sync after a longer delay to ensure data consistency
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             syncWidgetData()
             isRefreshing = false
         }
@@ -254,6 +269,11 @@ struct DashboardView: View {
             
             // Allow time for HealthKit data to process
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                syncWidgetData()
+            }
+            
+            // Additional sync for reliability
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 syncWidgetData()
                 isRefreshing = false
                 continuation.resume()
@@ -891,6 +911,23 @@ struct TodayProgressCard: View {
 
 // MARK: - Supporting Components
 
+// Dark mode adaptive card style
+extension View {
+    func cardStyle() -> some View {
+        self
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.systemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color(.systemGray4), lineWidth: 1)
+                    )
+                    .shadow(color: Color.primary.opacity(0.1), radius: 8, x: 0, y: 4)
+            )
+    }
+}
+
 // Stats Grid Component
 struct StatsGridView: View {
     let user: User
@@ -899,6 +936,14 @@ struct StatsGridView: View {
     @State private var showMostMilesDetail = false
     
     var formattedFastestPace: String {
+        // Always try to ensure we have the latest fastest pace data
+        if healthManager.fastestMilePace <= 0 {
+            // Trigger a fresh calculation if we don't have data
+            DispatchQueue.main.async {
+                healthManager.fetchFastestMilePace()
+            }
+        }
+        
         if healthManager.fastestMilePace > 0 {
             let totalMinutes = healthManager.fastestMilePace
             let minutes = Int(totalMinutes)

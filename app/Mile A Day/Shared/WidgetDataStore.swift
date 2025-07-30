@@ -10,7 +10,10 @@ struct WidgetDataStore {
     /// Saves today's progress data
     /// Ensures progress never exceeds 100% and maintains accurate sync
     static func save(todayMiles: Double, goal: Double) {
-        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        guard let defaults = UserDefaults(suiteName: suiteName) else { 
+            print("[WidgetDataStore] ERROR: Could not access App Group UserDefaults")
+            return 
+        }
         
         // Ensure goal is never 0
         let safeGoal = goal > 0 ? goal : 1.0
@@ -21,13 +24,25 @@ struct WidgetDataStore {
         
         print("[WidgetDataStore] Saving - Miles: \(todayMiles), Goal: \(safeGoal), Progress: \(progress * 100)%, Completed: \(isCompleted)")
         
+        // Save all values with proper synchronization
         defaults.set(todayMiles, forKey: milesKey)
         defaults.set(safeGoal, forKey: goalKey)
         defaults.set(isCompleted, forKey: "streak_completed_today")
         defaults.set(todayMiles, forKey: "total_current_distance")
         defaults.set(progress, forKey: "current_progress")
         
-        WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
+        // Force synchronization to disk
+        defaults.synchronize()
+        
+        // Reload widgets with error handling
+        DispatchQueue.main.async {
+            WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
+            
+            // Additional reload after slight delay for reliability
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
+            }
+        }
     }
 
     /// Loads today's progress data
@@ -48,9 +63,24 @@ struct WidgetDataStore {
 
     // MARK: - Streak helpers
     static func save(streak: Int) {
-        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        guard let defaults = UserDefaults(suiteName: suiteName) else { 
+            print("[WidgetDataStore] ERROR: Could not access App Group UserDefaults for streak")
+            return 
+        }
+        
+        print("[WidgetDataStore] Saving streak: \(streak)")
         defaults.set(streak, forKey: streakKey)
-        WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+        defaults.synchronize()
+        
+        // Reload widgets with error handling
+        DispatchQueue.main.async {
+            WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+            
+            // Additional reload after slight delay for reliability
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+            }
+        }
     }
 
     static func loadStreak() -> Int {
