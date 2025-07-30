@@ -18,7 +18,7 @@ struct Mile_A_DayApp: App {
     
     var body: some Scene {
         WindowGroup {
-            MainTabView()
+            RootView()
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
                     // Schedule background refresh when app enters background
                     MADBackgroundService.shared.appDidEnterBackground()
