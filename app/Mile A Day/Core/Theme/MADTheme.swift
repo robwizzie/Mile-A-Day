@@ -6,12 +6,34 @@ struct MADTheme {
     
     // MARK: - Colors
     struct Colors {
-        // Primary brand colors from MAD logo
-        static let madRed = Color(red: 0.85, green: 0.25, blue: 0.35) // Deep red from logo
+        // Primary brand colors from MAD logo - Enhanced for vibrant onboarding
+        static let madRed = Color(red: 0.92, green: 0.28, blue: 0.38) // Brighter, more vibrant red
+        static let madRedDeep = Color(red: 0.85, green: 0.25, blue: 0.35) // Original deep red
         static let madBlack = Color(red: 0.1, green: 0.1, blue: 0.1) // Rich black
         static let madWhite = Color.white
         
-        // Gradient variations for visual interest
+        // Vibrant gradient variations for onboarding
+        static let vibrantRedGradient = LinearGradient(
+            colors: [
+                Color(red: 1.0, green: 0.4, blue: 0.5),    // Bright coral-red
+                Color(red: 0.95, green: 0.25, blue: 0.4),  // Vibrant red
+                Color(red: 0.85, green: 0.15, blue: 0.3)   // Deep red
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        
+        static let onboardingGradient = LinearGradient(
+            colors: [
+                Color(red: 0.98, green: 0.95, blue: 0.96), // Light pink-white
+                Color(red: 0.95, green: 0.92, blue: 0.94), // Soft pink tint
+                Color(red: 0.92, green: 0.88, blue: 0.91)  // Warmer background
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        
+        // Original gradient variations for other UI elements
         static let redGradient = LinearGradient(
             colors: [
                 Color(red: 0.9, green: 0.3, blue: 0.4),
@@ -29,6 +51,11 @@ struct MADTheme {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
+        
+        // Accent colors for onboarding visual elements
+        static let accentOrange = Color(red: 1.0, green: 0.65, blue: 0.3)  // Warm orange
+        static let accentYellow = Color(red: 1.0, green: 0.9, blue: 0.3)   // Bright yellow
+        static let accentPink = Color(red: 1.0, green: 0.5, blue: 0.7)     // Soft pink
         
         // Text colors - adapt to dark mode
         static let primaryText = Color.primary
@@ -62,6 +89,10 @@ struct MADTheme {
         static let title1 = Font.system(size: 28, weight: .bold, design: .rounded)
         static let title2 = Font.system(size: 22, weight: .bold, design: .rounded)
         static let title3 = Font.system(size: 20, weight: .semibold, design: .rounded)
+        
+        // Onboarding specific typography
+        static let onboardingTitle = Font.system(size: 32, weight: .heavy, design: .rounded)
+        static let onboardingSubtitle = Font.system(size: 18, weight: .medium, design: .rounded)
         
         // Body text
         static let headline = Font.system(size: 17, weight: .semibold, design: .rounded)
