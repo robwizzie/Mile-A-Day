@@ -5,13 +5,13 @@ import HealthKit
 
 // View extension for common modifiers
 extension View {
-    // Card style for uniform appearance
+    // Card style for uniform appearance with dark mode support
     func cardStyle() -> some View {
         self
             .padding()
             .background(Color(.systemBackground))
             .cornerRadius(15)
-            .shadow(color: Color.black.opacity(0.1), radius: 5, x: 0, y: 2)
+            .shadow(color: Color.primary.opacity(0.1), radius: 5, x: 0, y: 2)
     }
     
     // Streak badge style
@@ -22,7 +22,7 @@ extension View {
             .background(Color("appPrimary"))
             .foregroundColor(.white)
             .cornerRadius(12)
-            .shadow(color: Color.black.opacity(0.1), radius: 3, x: 0, y: 1)
+            .shadow(color: Color.primary.opacity(0.1), radius: 3, x: 0, y: 1)
     }
 }
 

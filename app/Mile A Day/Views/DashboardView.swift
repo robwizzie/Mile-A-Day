@@ -108,8 +108,18 @@ struct DashboardView: View {
             }
             .onAppear {
                 refreshData()
-                // Always sync widget data when the dashboard appears
+                // Always sync widget data when the dashboard appears - multiple times for reliability
                 syncWidgetData()
+                
+                // Ensure fastest mile data is fresh and reliable
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    healthManager.fetchFastestMilePace()
+                }
+                
+                // Additional widget sync after a delay to ensure consistency
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    syncWidgetData()
+                }
                 
                 // Check if this is the first time opening the app after completing today's goal
                 let today = Calendar.current.startOfDay(for: Date())
@@ -149,7 +159,7 @@ struct DashboardView: View {
                     if showCelebration {
                         ZStack {
                             // Background blur
-                            Color.black.opacity(0.4)
+                            Color.primary.opacity(0.4)
                                 .ignoresSafeArea()
                             
                             // Celebration content
@@ -208,7 +218,7 @@ struct DashboardView: View {
                             .background(
                                 RoundedRectangle(cornerRadius: 20)
                                     .fill(Color(.systemBackground))
-                                    .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 10)
+                                    .shadow(color: Color.primary.opacity(0.2), radius: 20, x: 0, y: 10)
                             )
                             .scaleEffect(showCelebration ? 1.0 : 0.8)
                             .opacity(showCelebration ? 1.0 : 0.0)
@@ -238,10 +248,17 @@ struct DashboardView: View {
     
     private func refreshData() {
         isRefreshing = true
+        
+        // Fetch data in order to ensure consistency
         healthManager.fetchAllWorkoutData()
         
-        // Allow time for HealthKit data to process, then sync widgets
+        // Allow time for HealthKit data to process, then sync widgets multiple times for reliability
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            syncWidgetData()
+        }
+        
+        // Additional sync after a longer delay to ensure data consistency
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             syncWidgetData()
             isRefreshing = false
         }
@@ -254,6 +271,11 @@ struct DashboardView: View {
             
             // Allow time for HealthKit data to process
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                syncWidgetData()
+            }
+            
+            // Additional sync for reliability
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                 syncWidgetData()
                 isRefreshing = false
                 continuation.resume()
@@ -897,8 +919,13 @@ struct StatsGridView: View {
     let healthManager: HealthKitManager
     @State private var showFastestPaceDetail = false
     @State private var showMostMilesDetail = false
+    @State private var isRefreshingFastestPace = false
     
     var formattedFastestPace: String {
+        if isRefreshingFastestPace {
+            return "Loading..."
+        }
+        
         if healthManager.fastestMilePace > 0 {
             let totalMinutes = healthManager.fastestMilePace
             let minutes = Int(totalMinutes)
@@ -922,6 +949,16 @@ struct StatsGridView: View {
                     StatCard(title: "Fastest Mile", value: formattedFastestPace, icon: "hare.fill")
                 }
                 .buttonStyle(PlainButtonStyle())
+                .onLongPressGesture {
+                    // Manual refresh of fastest mile data
+                    isRefreshingFastestPace = true
+                    healthManager.fetchFastestMilePace()
+                    
+                    // Set a timeout to stop refreshing indicator
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        isRefreshingFastestPace = false
+                    }
+                }
                 
                 Button {
                     showMostMilesDetail = true
@@ -940,6 +977,23 @@ struct StatsGridView: View {
         }
         .sheet(isPresented: $showMostMilesDetail) {
             MostMilesDetailView(miles: user.mostMilesInOneDay, healthManager: healthManager)
+        }
+        .onAppear {
+            // Ensure fastest mile data is loaded when stats grid appears
+            if healthManager.fastestMilePace <= 0 {
+                isRefreshingFastestPace = true
+                healthManager.fetchFastestMilePace()
+                
+                // Set a timeout to stop refreshing indicator
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    isRefreshingFastestPace = false
+                }
+            }
+        }
+        .onChange(of: healthManager.fastestMilePace) { oldValue, newValue in
+            if newValue > 0 {
+                isRefreshingFastestPace = false
+            }
         }
     }
 }
@@ -990,7 +1044,7 @@ struct RecentWorkoutsView: View {
                     Button {
                         selectedWorkout = IdentifiableWorkout(workout: workout)
                     } label: {
-                        WorkoutRow(workout: workout)
+                        DashboardWorkoutRow(workout: workout)
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
@@ -1004,8 +1058,8 @@ struct RecentWorkoutsView: View {
     }
 }
 
-// Workout Row Component
-struct WorkoutRow: View {
+// Workout Row Component for DashboardView (without MADTheme dependency)
+struct DashboardWorkoutRow: View {
     let workout: HKWorkout
     
     var workoutTypeText: String {
@@ -1077,12 +1131,12 @@ struct WorkoutDetailView: View {
                     
                     // Stats grid
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
-                        StatBox(title: "Duration", value: workout.formattedDuration, icon: "clock.fill", color: .orange)
-                        StatBox(title: "Pace", value: workout.pace, icon: "hare.fill", color: .green)
+                        DashboardStatBox(title: "Duration", value: workout.formattedDuration, icon: "clock.fill", color: .orange)
+                        DashboardStatBox(title: "Pace", value: workout.pace, icon: "hare.fill", color: .green)
                         if let calories = calories {
-                            StatBox(title: "Calories Burned", value: "\(Int(calories)) calories", icon: "flame.fill", color: .red)
+                            DashboardStatBox(title: "Calories Burned", value: "\(Int(calories)) calories", icon: "flame.fill", color: .red)
                         }
-                        StatBox(title: "Type", value: workout.workoutActivityType == .running ? "Running" : "Walking", icon: "figure.run", color: .purple)
+                        DashboardStatBox(title: "Type", value: workout.workoutActivityType == .running ? "Running" : "Walking", icon: "figure.run", color: .purple)
                     }
                     .padding()
                     
@@ -1152,7 +1206,8 @@ struct WorkoutDetailView: View {
     }
 }
 
-struct StatBox: View {
+// StatBox component for DashboardView (without MADTheme dependency)
+struct DashboardStatBox: View {
     let title: String
     let value: String
     let icon: String

@@ -272,8 +272,13 @@ class HealthKitManager: ObservableObject {
     }
     
         // Fetch fastest mile pace from workout data (average pace of fastest workout that's at least 1 mile)
-    private func fetchFastestMilePace() {
-        guard isAuthorized else { return }
+    func fetchFastestMilePace() {
+        guard isAuthorized else { 
+            print("[HealthKit] Not authorized for fastest mile calculation")
+            return 
+        }
+        
+        print("[HealthKit] Starting fastest mile pace calculation...")
         
         // Get all running and walking workouts
         let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
@@ -286,9 +291,25 @@ class HealthKitManager: ObservableObject {
             limit: HKObjectQueryNoLimit,
             sortDescriptors: nil
         ) { [weak self] _, samples, error in
-            guard let self = self, let workouts = samples as? [HKWorkout] else { return }
+            guard let self = self else { 
+                print("[HealthKit] Self is nil in fastest mile calculation")
+                return 
+            }
+            
+            if let error = error {
+                print("[HealthKit] Error fetching workouts for fastest mile: \(error.localizedDescription)")
+                return
+            }
+            
+            guard let workouts = samples as? [HKWorkout] else {
+                print("[HealthKit] No workouts found for fastest mile calculation")
+                return
+            }
+            
+            print("[HealthKit] Found \(workouts.count) workouts to analyze for fastest mile")
             
             var fastestPace: TimeInterval = .infinity
+            var qualifyingWorkouts = 0
             
             // Find the fastest average pace from workouts that are at least 0.95 miles
             for workout in workouts {
@@ -302,17 +323,27 @@ class HealthKitManager: ObservableObject {
                         
                         // Check for reasonable pace values (between 3:00 and 20:00 per mile)
                         if avgPaceMinutesPerMile >= 3.0 && avgPaceMinutesPerMile <= 20.0 {
+                            qualifyingWorkouts += 1
                             if avgPaceMinutesPerMile < fastestPace {
                                 fastestPace = avgPaceMinutesPerMile
+                                print("[HealthKit] New fastest pace found: \(self.formatPace(minutesPerMile: avgPaceMinutesPerMile)) from workout on \(workout.endDate)")
                             }
                         }
                     }
                 }
             }
             
+            print("[HealthKit] Analyzed \(qualifyingWorkouts) qualifying workouts for fastest mile")
+            
             DispatchQueue.main.async {
-                self.fastestMilePace = fastestPace == .infinity ? 0.0 : fastestPace
-                print("[HealthKit] Fastest mile pace calculated: \(self.formatPace(minutesPerMile: self.fastestMilePace))")
+                let calculatedPace = fastestPace == .infinity ? 0.0 : fastestPace
+                self.fastestMilePace = calculatedPace
+                
+                if calculatedPace > 0 {
+                    print("[HealthKit] Fastest mile pace calculated: \(self.formatPace(minutesPerMile: calculatedPace))")
+                } else {
+                    print("[HealthKit] No qualifying workouts found for fastest mile pace calculation")
+                }
             }
         }
         
