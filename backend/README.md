@@ -52,26 +52,27 @@ Whenever an error occurs, the API will respond with an error code as well as an 
 #### Examples
 
 <details>
-    <summary>Click to expand</summary>
-    **GET** `/users/peter`
+<summary>Click to expand</summary>
 
-    ##### Example Response
-
-    ```
-    {
-        "user_id": "peter",
-        "username": "PJ",
-        "email": "peter@mindgoblin.tech",
-        "first_name": "Peter",
-        "last_name": "Johnson"
-    }
-    ```
-
-    ##### Full cURL Example
-
-    ```
-    curl --location 'https://mad.mindgoblin.tech/users/peter'
-    ```
+> **GET** `/users/peter`
+>
+> ##### Example Response
+>
+> ```
+> {
+>    "user_id": "peter",
+>    "username": "PJ",
+>    "email": "peter@mindgoblin.tech",
+>    "first_name": "Peter",
+>    "last_name": "Johnson"
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```
+> curl --location 'https://mad.mindgoblin.tech/users/peter'
+> ```
 
 </details>
 
@@ -95,30 +96,33 @@ _**Note: one of email or username is required**_
 #### Examples
 
 <details>
-    <summary>Click to expand</summary>
-    ##### With username
-    **GET** `/users/search?username=peter`
-    
-    ##### With email
-    **GET** `/users/search?email=peter%40mindgoblin.tech`
+<summary>Click to expand</summary>
 
-    ##### Example Response
-
-    ```
-    {
-        "user_id": "peter",
-        "username": "PJ",
-        "email": "peter@mindgoblin.tech",
-        "first_name": "Peter",
-        "last_name": "Johnson"
-    }
-    ```
-
-    ##### Full cURL Example
-
-    ```
-    curl --location 'https://mad.mindgoblin.tech/users/search?username=peter'
-    ```
+> ##### With username
+>
+> **GET** `/users/search?username=peter`
+>
+> ##### With email
+>
+> **GET** `/users/search?email=peter%40mindgoblin.tech`
+>
+> ##### Example Response
+>
+> ```
+> {
+>     "user_id": "peter",
+>     "username": "PJ",
+>     "email": "peter@mindgoblin.tech",
+>     "first_name": "Peter",
+>     "last_name": "Johnson"
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```
+> curl --location 'https://mad.mindgoblin.tech/users/search?username=peter'
+> ```
 
 </details>
 
@@ -142,44 +146,45 @@ _**Note: one of email or username is required**_
 #### Examples
 
 <details>
-    <summary>Click to expand</summary>
-    **POST** `/users/create`
+<summary>Click to expand</summary>
 
-    ##### Example Body
-
-    ```
-    {
-        "username": "PJ",
-        "email": "peter@mindgoblin.tech",
-        "first_name": "Peter",
-        "last_name": "Johnson"
-    }
-    ```
-
-    ##### Example Response
-
-    ```
-    {
-        "user_id": "peter",
-        "username": "PJ",
-        "email": "peter@mindgoblin.tech",
-        "first_name": "Peter",
-        "last_name": "Johnson"
-    }
-    ```
-
-    ##### Full cURL Example
-
-    ```
-    curl --location 'https://mad.mindgoblin.tech/users/create' \
-    --header 'Content-Type: application/json' \
-    --data-raw '{
-        "username": "PJ",
-        "email": "peter@mindgoblin.tech",
-        "first_name": "Peter",
-        "last_name": "Johnson"
-    }'
-    ```
+> **POST** `/users/create`
+>
+> ##### Example Body
+>
+> ```
+> {
+>     "username": "PJ",
+>     "email": "peter@mindgoblin.tech",
+>     "first_name": "Peter",
+>     "last_name": "Johnson"
+> }
+> ```
+>
+> ##### Example Response
+>
+> ```
+> {
+>     "user_id": "peter",
+>     "username": "PJ",
+>     "email": "peter@mindgoblin.tech",
+>     "first_name": "Peter",
+>     "last_name": "Johnson"
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```
+> curl --location 'https://mad.mindgoblin.tech/users/create' \
+> --header 'Content-Type: application/json' \
+> --data-raw '{
+>     "username": "PJ",
+>     "email": "peter@mindgoblin.tech",
+>     "first_name": "Peter",
+>     "last_name": "Johnson"
+> }'
+> ```
 
 </details>
 
@@ -200,22 +205,23 @@ _**Note: one of email or username is required**_
 #### Examples
 
 <details>
-    <summary>Click to expand</summary>
-    **DELETE** `/users/peter`
+<summary>Click to expand</summary>
 
-    ##### Example Response
-
-    ```
-    {
-        "message": "Successfully deleted user peter",
-    }
-    ```
-
-    ##### Full cURL Example
-
-    ```
-    curl --location --request DELETE 'https://mad.mindgoblin.tech/users/peter'
-    ```
+> **DELETE** `/users/peter`
+>
+> ##### Example Response
+>
+> ```
+> {
+>     "message": "Successfully deleted user peter",
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```
+> curl --location --request DELETE 'https://mad.mindgoblin.tech/users/peter'
+> ```
 
 </details>
 
@@ -240,39 +246,40 @@ _**Note: fields that are not included in the response will not be updated**_
 #### Examples
 
 <details>
-    <summary>Click to expand</summary>
-    **PATCH** `/users/peter`
+<summary>Click to expand</summary>
 
-    ##### Example Body
-
-    ```
-    {
-        "first_name": "PJ",
-    }
-    ```
-
-    ##### Example Response
-
-    ```
-    {
-        "user_id": "peter",
-        "username": "PJ",
-        "email": "peter@mindgoblin.tech",
-        "first_name": "PJ",
-        "last_name": "Johnson"
-    }
-    ```
-
-    ##### Full cURL Example
-
-    ```
-    curl --location --request PATCH 'https://mad.mindgoblin.tech/users/peter' \
-    --header 'Content-Type: application/json' \
-    --data '    {
-            "first_name": "PJ"
-        }
-    '
-    ```
+> **PATCH** `/users/peter`
+>
+> ##### Example Body
+>
+> ```
+> {
+>     "first_name": "PJ",
+> }
+> ```
+>
+> ##### Example Response
+>
+> ```
+> {
+>     "user_id": "peter",
+>     "username": "PJ",
+>     "email": "peter@mindgoblin.tech",
+>     "first_name": "PJ",
+>     "last_name": "Johnson"
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```
+> curl --location --request PATCH 'https://mad.mindgoblin.tech/users/peter' \
+> --header 'Content-Type: application/json' \
+> --data '    {
+>         "first_name": "PJ"
+>     }
+> '
+> ```
 
 </details>
 
