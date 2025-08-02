@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 
 export default function hasRequiredKeys(keys: string[], req: Request, res: Response) {
+	const definedKeys = { ...req.query, ...req.body, ...req.params };
+
 	const missingKeys = keys.filter(key => !(key in req.body));
 
 	if (!missingKeys.length) {
