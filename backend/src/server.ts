@@ -1,7 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import dotenv from 'dotenv';
-import userRoutes from './routes/users.js';
+import userRoutes from './routes/usersRoutes.js';
 import friendRoutes from './routes/friendshipsRoutes.js';
 
 dotenv.config();
