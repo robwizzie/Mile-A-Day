@@ -23,7 +23,7 @@ export async function getFriends(req: Request, res: Response) {
 
 	const user = await getUser(userId);
 	if (!user) {
-		return res.status(400).send({ error: `No user found with ID ${user}` });
+		return res.status(400).send({ error: `No user found with ID ${userId}` });
 	}
 
 	const friends = await getUserFriends(userId);
@@ -38,7 +38,7 @@ export async function getSentRequests(req: Request, res: Response) {
 
 	const user = await getUser(userId);
 	if (!user) {
-		return res.status(400).send({ error: `No user found with ID ${user}` });
+		return res.status(400).send({ error: `No user found with ID ${userId}` });
 	}
 
 	const friendRequests = await getUserSentRequests(userId);
@@ -53,7 +53,7 @@ export async function getFriendRequests(req: Request, res: Response) {
 
 	const user = await getUser(userId);
 	if (!user) {
-		return res.status(400).send({ error: `No user found with ID ${user}` });
+		return res.status(400).send({ error: `No user found with ID ${userId}` });
 	}
 
 	const friendRequests = await getUserFriendRequests(userId);
