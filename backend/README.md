@@ -6,8 +6,8 @@
     -   **[Get User](#get-user)**
     -   **[Search For User](#search-for-user)**
     -   **[Create User](#create-user)**
-    -   **[Delete User](#delete-user)**
     -   **[Update User](#update-user)**
+    -   **[Delete User](#delete-user)**
 
 ## API Domain
 
@@ -190,43 +190,6 @@ _**Note: one of email or username is required**_
 
 <br/><br/>
 
-<a name="delete-user"></a>
-
-### Delete User
-
-**DELETE** `/users/{userId}`
-
-#### Parameters
-
-| Name   | Type           | Description                  | Required |
-| :----- | :------------- | :--------------------------- | :------: |
-| userId | Path Parameter | The ID of the user to delete |    ✅    |
-
-#### Examples
-
-<details>
-<summary>Click to expand</summary>
-
-> **DELETE** `/users/peter`
->
-> ##### Example Response
->
-> ```
-> {
->     "message": "Successfully deleted user peter",
-> }
-> ```
->
-> ##### Full cURL Example
->
-> ```
-> curl --location --request DELETE 'https://mad.mindgoblin.tech/users/peter'
-> ```
-
-</details>
-
-<br/><br/>
-
 <a name="update-user"></a>
 
 ### Update User
@@ -279,6 +242,43 @@ _**Note: fields that are not included in the response will not be updated**_
 >         "first_name": "PJ"
 >     }
 > '
+> ```
+
+</details>
+
+<br/><br/>
+
+<a name="delete-user"></a>
+
+### Delete User
+
+**DELETE** `/users/{userId}`
+
+#### Parameters
+
+| Name   | Type           | Description                  | Required |
+| :----- | :------------- | :--------------------------- | :------: |
+| userId | Path Parameter | The ID of the user to delete |    ✅    |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **DELETE** `/users/peter`
+>
+> ##### Example Response
+>
+> ```
+> {
+>     "message": "Successfully deleted user peter",
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```
+> curl --location --request DELETE 'https://mad.mindgoblin.tech/users/peter'
 > ```
 
 </details>
