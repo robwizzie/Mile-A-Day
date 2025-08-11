@@ -1,6 +1,7 @@
 import Foundation
 import HealthKit
 import WidgetKit
+import CoreLocation
 
 class HealthKitManager: ObservableObject {
     let healthStore = HKHealthStore()
@@ -24,6 +25,25 @@ class HealthKitManager: ObservableObject {
         return calendar
     }()
     
+    // Cache workout timezone by workout UUID string -> timezone identifier
+    private let timeZoneCacheKey = "workout_tz_cache"
+    private var workoutTimeZoneCache: [String: String] = [:]
+    private let cacheQueue = DispatchQueue(label: "com.mileaday.tzcache")
+    
+    private func loadTimeZoneCache() {
+        if !workoutTimeZoneCache.isEmpty { return }
+        if let data = UserDefaults.standard.data(forKey: timeZoneCacheKey),
+           let dict = try? JSONDecoder().decode([String: String].self, from: data) {
+            workoutTimeZoneCache = dict
+        }
+    }
+    
+    private func saveTimeZoneCache() {
+        if let data = try? JSONEncoder().encode(workoutTimeZoneCache) {
+            UserDefaults.standard.set(data, forKey: timeZoneCacheKey)
+        }
+    }
+    
     // Request authorization to access HealthKit data
     func requestAuthorization(completion: @escaping (Bool) -> Void) {
         guard HKHealthStore.isHealthDataAvailable() else {
@@ -36,7 +56,8 @@ class HealthKitManager: ObservableObject {
             HKObjectType.workoutType(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
-            HKObjectType.quantityType(forIdentifier: .stepCount)!
+            HKObjectType.quantityType(forIdentifier: .stepCount)!,
+            HKSeriesType.workoutRoute()
         ]
         
         healthStore.requestAuthorization(toShare: nil, read: types) { success, error in
@@ -46,6 +67,7 @@ class HealthKitManager: ObservableObject {
                 // Enable background delivery for workouts when authorized
                 if success {
                     self.enableBackgroundDelivery()
+                    self.loadTimeZoneCache()
                 }
                 
                 completion(success)
@@ -226,50 +248,40 @@ class HealthKitManager: ObservableObject {
         ) { [weak self] _, samples, error in
             guard let self = self, let workouts = samples as? [HKWorkout] else { return }
             
-            // Track most miles in a day
-            var mostMilesInDay: Double = 0.0
-            var mostMilesWorkouts: [HKWorkout] = []
-            
-            // Group workouts by day for streak calculation and most miles
-            var workoutsByDay: [Date: [HKWorkout]] = [:]
-            
-            for workout in workouts {
-                // Group by UTC day for most miles and streak calculation to avoid current-timezone effects
-                let dayKey = self.utcCalendar.startOfDay(for: workout.endDate)
-                if workoutsByDay[dayKey] == nil {
-                    workoutsByDay[dayKey] = []
-                }
-                workoutsByDay[dayKey]?.append(workout)
-            }
-            
-            // Calculate most miles in a day
-            for (_, dayWorkouts) in workoutsByDay {
-                var totalMilesForDay: Double = 0.0
+            // Group workouts by their local day (based on where the workout took place)
+            self.groupWorkoutsByLocalDay(workouts) { workoutsByDay in
+                // Calculate most miles in a day
+                var mostMilesInDay: Double = 0.0
+                var mostMilesWorkouts: [HKWorkout] = []
                 
-                for workout in dayWorkouts {
-                    if let distance = workout.totalDistance {
-                        let miles = distance.doubleValue(for: HKUnit.mile())
-                        totalMilesForDay += miles
+                for (_, dayWorkouts) in workoutsByDay {
+                    var totalMilesForDay: Double = 0.0
+                    
+                    for workout in dayWorkouts {
+                        if let distance = workout.totalDistance {
+                            let miles = distance.doubleValue(for: HKUnit.mile())
+                            totalMilesForDay += miles
+                        }
+                    }
+                    
+                    if totalMilesForDay > mostMilesInDay {
+                        mostMilesInDay = totalMilesForDay
+                        mostMilesWorkouts = dayWorkouts
                     }
                 }
                 
-                if totalMilesForDay > mostMilesInDay {
-                    mostMilesInDay = totalMilesForDay
-                    mostMilesWorkouts = dayWorkouts
+                // Calculate retroactive streak
+                let streak = self.calculateRetroactiveStreak(workoutsByDay: workoutsByDay)
+                
+                DispatchQueue.main.async {
+                    self.mostMilesInOneDay = mostMilesInDay
+                    self.mostMilesWorkouts = mostMilesWorkouts
+                    self.retroactiveStreak = streak
                 }
+                
+                // Now fetch the fastest mile pace separately using proper HealthKit speed data
+                self.fetchFastestMilePace()
             }
-            
-            // Calculate retroactive streak
-            let streak = self.calculateRetroactiveStreak(workoutsByDay: workoutsByDay)
-            
-            DispatchQueue.main.async {
-                self.mostMilesInOneDay = mostMilesInDay
-                self.mostMilesWorkouts = mostMilesWorkouts
-                self.retroactiveStreak = streak
-            }
-            
-            // Now fetch the fastest mile pace separately using proper HealthKit speed data
-            self.fetchFastestMilePace()
         }
         
         healthStore.execute(query)
@@ -352,6 +364,84 @@ class HealthKitManager: ObservableObject {
         }
         
         healthStore.execute(workoutQuery)
+    }
+    
+    // Group workouts by local day (workout location timezone). Falls back to UTC if timezone cannot be resolved.
+    private func groupWorkoutsByLocalDay(_ workouts: [HKWorkout], completion: @escaping ([Date: [HKWorkout]]) -> Void) {
+        var workoutsByDay: [Date: [HKWorkout]] = [:]
+        let group = DispatchGroup()
+        let syncQueue = DispatchQueue(label: "com.mileaday.grouping")
+        
+        for workout in workouts {
+            group.enter()
+            resolveTimeZoneForWorkout(workout) { tz in
+                let calendar: Calendar = {
+                    var cal = self.utcCalendar
+                    if let tz = tz {
+                        cal.timeZone = tz
+                    }
+                    return cal
+                }()
+                let localDay = calendar.startOfDay(for: workout.endDate)
+                // Normalize key to UTC midnight so all keys are comparable
+                let key = self.utcCalendar.startOfDay(for: localDay)
+                syncQueue.async {
+                    if workoutsByDay[key] == nil { workoutsByDay[key] = [] }
+                    workoutsByDay[key]?.append(workout)
+                    group.leave()
+                }
+            }
+        }
+        
+        group.notify(queue: .global(qos: .userInitiated)) {
+            completion(workoutsByDay)
+        }
+    }
+    
+    // Resolve the workout's timezone using its HKWorkoutRoute first location via reverse geocoding; cached by workout UUID.
+    private func resolveTimeZoneForWorkout(_ workout: HKWorkout, completion: @escaping (TimeZone?) -> Void) {
+        loadTimeZoneCache()
+        let key = workout.uuid.uuidString
+        // Use cache if present
+        if let tzId = workoutTimeZoneCache[key], let tz = TimeZone(identifier: tzId) {
+            completion(tz)
+            return
+        }
+        
+        // Fetch associated route sample
+        let routeType = HKSeriesType.workoutRoute()
+        let predicate = HKQuery.predicateForObjects(from: workout)
+        let routeQuery = HKSampleQuery(sampleType: routeType, predicate: predicate, limit: 1, sortDescriptors: nil) { [weak self] _, samples, error in
+            guard let self = self else { completion(nil); return }
+            if let route = (samples as? [HKWorkoutRoute])?.first {
+                // Stream route locations; take the first location to infer time zone
+                var resolved = false
+                let routeLocationsQuery = HKWorkoutRouteQuery(route: route) { _, locationsOrNil, done, error in
+                    if let locs = locationsOrNil, let first = locs.first, !resolved {
+                        resolved = true
+                        let geocoder = CLGeocoder()
+                        geocoder.reverseGeocodeLocation(first) { placemarks, error in
+                            if let tz = placemarks?.first?.timeZone {
+                                self.cacheQueue.async {
+                                    self.workoutTimeZoneCache[key] = tz.identifier
+                                    self.saveTimeZoneCache()
+                                }
+                                completion(tz)
+                            } else {
+                                completion(nil)
+                            }
+                        }
+                    }
+                    if done && !resolved {
+                        completion(nil)
+                    }
+                }
+                self.healthStore.execute(routeLocationsQuery)
+            } else {
+                completion(nil)
+            }
+        }
+        healthStore.execute(routeQuery)
     }
     
     // Helper to calculate retroactive streak from workout data
