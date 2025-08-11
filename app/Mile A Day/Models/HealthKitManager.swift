@@ -17,6 +17,13 @@ class HealthKitManager: ObservableObject {
     @Published var dailyStepsData: [Date: Int] = [:]
     @Published var dailyMileGoals: [Date: Bool] = [:]
     
+    // Calendar pinned to UTC to avoid streak resets due to local timezone changes while traveling
+    private var utcCalendar: Calendar = {
+        var calendar = Calendar.current
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
+    }()
+    
     // Request authorization to access HealthKit data
     func requestAuthorization(completion: @escaping (Bool) -> Void) {
         guard HKHealthStore.isHealthDataAvailable() else {
@@ -64,7 +71,7 @@ class HealthKitManager: ObservableObject {
         guard isAuthorized else { return }
         
         let now = Date()
-        let startOfDay = Calendar.current.startOfDay(for: now)
+        let startOfDay = utcCalendar.startOfDay(for: now)
         
         // Always use current time for distance calculation
         let endTime = now
@@ -227,15 +234,12 @@ class HealthKitManager: ObservableObject {
             var workoutsByDay: [Date: [HKWorkout]] = [:]
             
             for workout in workouts {
-                // Group by day for most miles and streak calculation
-                let calendar = Calendar.current
-                let dateComponents = calendar.dateComponents([.year, .month, .day], from: workout.endDate)
-                if let date = calendar.date(from: dateComponents) {
-                    if workoutsByDay[date] == nil {
-                        workoutsByDay[date] = []
-                    }
-                    workoutsByDay[date]?.append(workout)
+                // Group by UTC day for most miles and streak calculation to avoid current-timezone effects
+                let dayKey = self.utcCalendar.startOfDay(for: workout.endDate)
+                if workoutsByDay[dayKey] == nil {
+                    workoutsByDay[dayKey] = []
                 }
+                workoutsByDay[dayKey]?.append(workout)
             }
             
             // Calculate most miles in a day
@@ -352,7 +356,7 @@ class HealthKitManager: ObservableObject {
     
     // Helper to calculate retroactive streak from workout data
     private func calculateRetroactiveStreak(workoutsByDay: [Date: [HKWorkout]]) -> Int {
-        let calendar = Calendar.current
+        let calendar = utcCalendar
         let today = calendar.startOfDay(for: Date())
         let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
         
@@ -421,7 +425,7 @@ class HealthKitManager: ObservableObject {
         
         let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount)!
         let now = Date()
-        let startOfDay = Calendar.current.startOfDay(for: now)
+        let startOfDay = utcCalendar.startOfDay(for: now)
         
         let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: now, options: .strictStartDate)
         
@@ -450,7 +454,7 @@ class HealthKitManager: ObservableObject {
         guard isAuthorized else { return }
         
         let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount)!
-        let calendar = Calendar.current
+        let calendar = utcCalendar
         
         // Get the date interval for the specified month
         guard let monthInterval = calendar.dateInterval(of: .month, for: month) else { return }
@@ -530,7 +534,7 @@ class HealthKitManager: ObservableObject {
     
     // Get workouts for a specific date
     func getWorkoutsForDate(_ date: Date, completion: @escaping ([HKWorkout]) -> Void) {
-        let calendar = Calendar.current
+        let calendar = utcCalendar
         let startOfDay = calendar.startOfDay(for: date)
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
         

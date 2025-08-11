@@ -12,10 +12,16 @@ struct User: Identifiable, Codable {
     var goalMiles: Double = 1.0
     var badges: [Badge] = []
     
+    private var utcCalendar: Calendar {
+        var cal = Calendar.current
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        return cal
+    }
+    
     // Check if the streak is active today
     var isStreakActiveToday: Bool {
         guard let lastCompletion = lastCompletionDate else { return false }
-        return Calendar.current.isDateInToday(lastCompletion)
+        return utcCalendar.isDateInToday(lastCompletion)
     }
     
     // Check if the streak is at risk (not completed today and it's past a certain time)
@@ -23,11 +29,11 @@ struct User: Identifiable, Codable {
         // If already completed today, streak is not at risk
         if isStreakActiveToday { return false }
         
-        // Get current time
+        // Get current time (use UTC hour for consistent threshold)
         let now = Date()
-        let hour = Calendar.current.component(.hour, from: now)
+        let hour = utcCalendar.component(.hour, from: now)
         
-        // Streak is at risk if it's past 6pm
+        // Streak is at risk if it's past 6pm UTC
         return hour >= 18
     }
     
@@ -36,10 +42,10 @@ struct User: Identifiable, Codable {
         // If already completed today, return nil
         if isStreakActiveToday { return nil }
         
-        let calendar = Calendar.current
+        let calendar = utcCalendar
         let now = Date()
         
-        // Get end of today
+        // Get end of today in UTC
         guard let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: now) else {
             return nil
         }
@@ -89,9 +95,9 @@ struct User: Identifiable, Codable {
         }
         
         // Only update completion date if we've completed a mile today
-        if miles >= 0.95 && Calendar.current.isDateInToday(date) {
+        if miles >= 0.95 && utcCalendar.isDateInToday(date) {
             lastCompletionDate = date
-        } else if Calendar.current.isDateInToday(date) {
+        } else if utcCalendar.isDateInToday(date) {
             // If it's today but we haven't completed a mile, clear the completion date
             // This ensures isStreakActiveToday returns false
             lastCompletionDate = nil
@@ -107,7 +113,7 @@ struct User: Identifiable, Codable {
         totalMiles += miles
         
         // If already completed today, just update stats
-        if Calendar.current.isDateInToday(lastCompletionDate ?? Date.distantPast) {
+        if utcCalendar.isDateInToday(lastCompletionDate ?? Date.distantPast) {
             lastCompletionDate = date
             return
         }
@@ -202,7 +208,7 @@ struct User: Identifiable, Codable {
     
     // Calculate retroactive date when badge should have been earned
     private func calculateRetroactiveDate(for milestone: Int, type: BadgeType) -> Date {
-        let calendar = Calendar.current
+        let calendar = utcCalendar
         let today = Date()
         
         switch type {

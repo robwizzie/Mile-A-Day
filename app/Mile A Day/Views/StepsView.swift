@@ -149,7 +149,11 @@ struct StepsCalendarView: View {
     @Binding var currentMonth: Date
     let onDateSelected: (Date) -> Void
     
-    private let calendar = Calendar.current
+    private var calendar: Calendar = {
+        var cal = Calendar.current
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        return cal
+    }()
     private let daysInWeek = 7
     private let weeksToShow = 6
     
@@ -253,7 +257,11 @@ struct CalendarDayView: View {
     let isCurrentMonth: Bool
     let onTap: () -> Void
     
-    private let calendar = Calendar.current
+    private var calendar: Calendar = {
+        var cal = Calendar.current
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        return cal
+    }()
     private let stepGoal: Double = 10000
     
     var body: some View {
@@ -325,7 +333,11 @@ struct DateDetailView: View {
     @State private var selectedWorkout: IdentifiableWorkout?
     @State private var currentDate: Date
     
-    private let calendar = Calendar.current
+    private var calendar: Calendar = {
+        var cal = Calendar.current
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        return cal
+    }()
     
     init(date: Date, healthManager: HealthKitManager, userManager: UserManager) {
         self.date = date

@@ -22,6 +22,12 @@ struct StreakCountProvider: TimelineProvider {
         )
     }
 
+    private var utcCalendar: Calendar {
+        var cal = Calendar.current
+        cal.timeZone = TimeZone(secondsFromGMT: 0)!
+        return cal
+    }
+
     func getSnapshot(in context: Context, completion: @escaping (StreakCountEntry) -> Void) {
         let streak = WidgetDataStore.loadStreak()
         let widgetData = WidgetDataStore.load()
@@ -31,7 +37,7 @@ struct StreakCountProvider: TimelineProvider {
         let progress = widgetData.progress
         
         // Calculate risk status and time remaining
-        let currentHour = Calendar.current.component(.hour, from: Date())
+        let currentHour = utcCalendar.component(.hour, from: Date())
         let isAtRisk = currentHour >= 18 && !isGoalCompleted
         
         // Calculate time until reset if not completed
@@ -58,7 +64,7 @@ struct StreakCountProvider: TimelineProvider {
         let progress = widgetData.progress
         
         // Calculate risk status and time remaining
-        let currentHour = Calendar.current.component(.hour, from: Date())
+        let currentHour = utcCalendar.component(.hour, from: Date())
         let isAtRisk = currentHour >= 18 && !isGoalCompleted
         
         // Calculate time until reset if not completed
@@ -84,10 +90,10 @@ struct StreakCountProvider: TimelineProvider {
     private func calculateTimeUntilReset(isCompleted: Bool) -> String? {
         if isCompleted { return nil }
         
-        let calendar = Calendar.current
+        let calendar = utcCalendar
         let now = Date()
         
-        // Get end of today
+        // Get end of today in UTC
         guard let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: now) else {
             return nil
         }

@@ -121,9 +121,11 @@ struct DashboardView: View {
                     syncWidgetData()
                 }
                 
-                // Check if this is the first time opening the app after completing today's goal
-                let today = Calendar.current.startOfDay(for: Date())
-                let lastCompletion = Calendar.current.startOfDay(for: lastGoalCompletionDate)
+                // Check if this is the first time opening the app after completing today's goal (UTC-based)
+                var utcCal = Calendar.current
+                utcCal.timeZone = TimeZone(secondsFromGMT: 0)!
+                let today = utcCal.startOfDay(for: Date())
+                let lastCompletion = utcCal.startOfDay(for: lastGoalCompletionDate)
                 
                 if currentState.isCompleted && today != lastCompletion {
                     // This is the first time opening after completing today's goal
