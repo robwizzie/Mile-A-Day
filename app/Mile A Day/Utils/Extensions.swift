@@ -101,6 +101,42 @@ extension HKWorkout {
         return formatter.string(from: endDate)
     }
     
+    /// Returns the workout date formatted in its original timezone (if available)
+    /// Falls back to device timezone if location data unavailable
+    func formattedDateInOriginalTimezone(completion: @escaping (String) -> Void) {
+        // Try to get the workout's original timezone
+        if let healthKitManager = getHealthKitManagerInstance() {
+            healthKitManager.getLocalCalendarForWorkout(self) { calendar in
+                let formatter = DateFormatter()
+                formatter.dateStyle = .medium
+                formatter.timeStyle = .short
+                formatter.timeZone = calendar.timeZone
+                
+                let formattedString = formatter.string(from: self.endDate)
+                let timezoneInfo = calendar.timeZone.identifier
+                
+                DispatchQueue.main.async {
+                    completion("\(formattedString) (\(timezoneInfo))")
+                }
+            }
+        } else {
+            // Fallback to device timezone
+            completion(formattedDate)
+        }
+    }
+    
+    /// Synchronous version that shows device timezone with note if location-aware is enabled
+    var formattedDateWithTimezoneInfo: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        let deviceTimeString = formatter.string(from: endDate)
+        
+        // Add timezone identifier to show this is device timezone
+        let timezoneAbbrev = TimeZone.current.abbreviation() ?? TimeZone.current.identifier
+        return "\(deviceTimeString) (\(timezoneAbbrev) - device timezone)"
+    }
+    
     var pace: String {
         guard let distance = totalDistance,
               distance.doubleValue(for: HKUnit.mile()) > 0 else { return "N/A" }
@@ -161,4 +197,14 @@ struct ProgressCalculator {
         let percentage = Int(progress * 100)
         return "\(percentage)%"
     }
+}
+
+// MARK: - Timezone Utilities for UI
+
+/// Helper function to get HealthKitManager instance from the environment
+/// This is a simplified approach - in production you'd want proper dependency injection
+private func getHealthKitManagerInstance() -> HealthKitManager? {
+    // For now, return nil to use fallback behavior
+    // TODO: Implement proper dependency injection to access HealthKitManager
+    return nil
 } 

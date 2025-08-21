@@ -182,6 +182,17 @@ struct ProfileView: View {
                 
                 Divider()
                 
+                NavigationLink(destination: AppSettingsView(healthManager: healthManager)) {
+                    MADSettingsRow(
+                        icon: "gear.circle.fill",
+                        title: "App Settings",
+                        subtitle: "Timezone and tracking preferences",
+                        iconColor: Color.gray
+                    )
+                }
+                
+                Divider()
+                
                 MADSettingsRow(
                     icon: "heart.fill",
                     title: "Health Data",
