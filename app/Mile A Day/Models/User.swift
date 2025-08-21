@@ -12,6 +12,19 @@ struct User: Identifiable, Codable {
     var goalMiles: Double = 1.0
     var badges: [Badge] = []
     
+    // Apple Sign In fields
+    var appleId: String?
+    var email: String?
+    var authProvider: AuthProvider = .guest
+    var backendUserId: String?
+    var authToken: String?
+    
+    enum AuthProvider: String, Codable {
+        case apple
+        case google
+        case guest
+    }
+    
     // Check if the streak is active today
     var isStreakActiveToday: Bool {
         guard let lastCompletion = lastCompletionDate else { return false }

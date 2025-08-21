@@ -1,10 +1,14 @@
 import SwiftUI
+import AuthenticationServices
 
 struct AuthenticationView: View {
     @Environment(\.appStateManager) var appStateManager
+    @EnvironmentObject var userManager: UserManager
+    @StateObject private var appleSignInManager = AppleSignInManager()
     @State private var logoScale: CGFloat = 0.8
     @State private var contentOpacity: Double = 0
     @State private var buttonsOffset: CGFloat = 50
+    @State private var showError = false
     
     var body: some View {
         ZStack {
@@ -62,15 +66,20 @@ struct AuthenticationView: View {
                 VStack(spacing: MADTheme.Spacing.lg) {
                     // Sign in with Apple
                     Button(action: {
-                        // TODO: Implement Apple Sign In
                         handleAppleSignIn()
                     }) {
                         HStack(spacing: MADTheme.Spacing.md) {
-                            Image(systemName: "applelogo")
-                                .font(.system(size: 20, weight: .medium))
-                                .foregroundColor(.white)
+                            if appleSignInManager.isLoading {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "applelogo")
+                                    .font(.system(size: 20, weight: .medium))
+                                    .foregroundColor(.white)
+                            }
                             
-                            Text("Continue with Apple")
+                            Text(appleSignInManager.isLoading ? "Signing in..." : "Continue with Apple")
                                 .font(MADTheme.Typography.headline)
                                 .foregroundColor(.white)
                         }
@@ -87,8 +96,11 @@ struct AuthenticationView: View {
                             y: MADTheme.Shadow.medium.y
                         )
                     }
+                    .disabled(appleSignInManager.isLoading)
                     .scaleEffect(contentOpacity)
                     
+                    // Commented out Google Sign In
+                    /*
                     // Sign in with Google
                     Button(action: {
                         // TODO: Implement Google Sign In
@@ -118,7 +130,10 @@ struct AuthenticationView: View {
                         )
                     }
                     .scaleEffect(contentOpacity)
+                    */
                     
+                    // Commented out Guest Sign In
+                    /*
                     // Alternative sign-in options
                     VStack(spacing: MADTheme.Spacing.md) {
                         HStack {
@@ -142,6 +157,7 @@ struct AuthenticationView: View {
                         .madTertiaryButton()
                     }
                     .opacity(contentOpacity)
+                    */
                 }
                 .padding(.horizontal, MADTheme.Spacing.lg)
                 .offset(y: buttonsOffset)
@@ -179,6 +195,14 @@ struct AuthenticationView: View {
         .onAppear {
             startAnimations()
         }
+        .alert("Sign In Error", isPresented: $showError) {
+            Button("OK") { }
+        } message: {
+            Text(appleSignInManager.errorMessage ?? "An unknown error occurred")
+        }
+        .onChange(of: appleSignInManager.errorMessage) { errorMessage in
+            showError = errorMessage != nil
+        }
     }
     
     private func startAnimations() {
@@ -196,13 +220,33 @@ struct AuthenticationView: View {
     }
     
     private func handleAppleSignIn() {
-        // Simulate Apple Sign In for UI purposes
-        withAnimation(MADTheme.Animation.standard) {
-            // TODO: Replace with actual Apple Sign In implementation
-            appStateManager.completeAuthentication()
+        Task {
+            do {
+                print("Starting Apple Sign In...")
+                let (profile, backendResponse) = try await appleSignInManager.signIn()
+                print("Apple Sign In successful, updating user manager...")
+                
+                // Update user manager with Apple authentication data
+                userManager.handleAppleSignIn(profile: profile, backendResponse: backendResponse)
+                print("User manager updated successfully")
+                
+                await MainActor.run {
+                    withAnimation(MADTheme.Animation.standard) {
+                        appStateManager.completeAuthentication()
+                    }
+                }
+            } catch {
+                print("Apple Sign In failed with error: \(error)")
+                await MainActor.run {
+                    appleSignInManager.errorMessage = error.localizedDescription
+                    appleSignInManager.isLoading = false
+                }
+            }
         }
     }
     
+    // Commented out Google Sign In
+    /*
     private func handleGoogleSignIn() {
         // Simulate Google Sign In for UI purposes
         withAnimation(MADTheme.Animation.standard) {
@@ -210,13 +254,17 @@ struct AuthenticationView: View {
             appStateManager.completeAuthentication()
         }
     }
+    */
     
+    // Commented out Guest Sign In
+    /*
     private func handleGuestSignIn() {
         // Allow guest access
         withAnimation(MADTheme.Animation.standard) {
             appStateManager.completeAuthentication()
         }
     }
+    */
 }
 
 /// Google Logo Recreation
