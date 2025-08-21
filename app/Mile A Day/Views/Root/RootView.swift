@@ -22,6 +22,7 @@ struct RootView: View {
                 
             case .authentication:
                 AuthenticationView()
+                    .environmentObject(userManager)
                     .transition(.asymmetric(
                         insertion: .move(edge: .bottom).combined(with: .opacity),
                         removal: .move(edge: .top).combined(with: .opacity)

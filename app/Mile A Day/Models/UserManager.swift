@@ -4,10 +4,12 @@ import SwiftUI
 class UserManager: ObservableObject {
     @Published var currentUser: User
     @Published var friends: [User] = []
+    @Published var authToken: String?
     
     private let userDefaults = UserDefaults.standard
     private let currentUserKey = "currentUser"
     private let friendsKey = "friends"
+    private let authTokenKey = "authToken"
     
     init() {
         // Load or create a new user
@@ -18,6 +20,9 @@ class UserManager: ObservableObject {
             // Default user
             self.currentUser = User(name: "You")
         }
+        
+        // Load auth token
+        self.authToken = userDefaults.string(forKey: authTokenKey)
         
         // Initialize widget data store with current values
         let currentMiles = WidgetDataStore.load().miles
@@ -48,8 +53,51 @@ class UserManager: ObservableObject {
             userDefaults.set(encoded, forKey: friendsKey)
         }
         
+        // Save auth token
+        if let token = authToken {
+            userDefaults.set(token, forKey: authTokenKey)
+        }
+        
         // Push streak to widget store
         WidgetDataStore.save(streak: currentUser.streak)
+    }
+    
+    // Handle Apple Sign In completion
+    func handleAppleSignIn(profile: AppleSignInManager.AppleUserProfile, backendResponse: AppleSignInManager.BackendAuthResponse) {
+        // Update current user with Apple data
+        currentUser.appleId = profile.id
+        currentUser.email = profile.email
+        currentUser.authProvider = .apple
+        currentUser.backendUserId = backendResponse.user.user_id
+        currentUser.authToken = backendResponse.token
+        
+        // Update name if we have it from Apple
+        if let fullName = profile.fullName?.formatted(), !fullName.isEmpty {
+            currentUser.name = fullName
+        } else if !backendResponse.user.username.isEmpty {
+            currentUser.name = backendResponse.user.username
+        }
+        
+        // Store auth token
+        authToken = backendResponse.token
+        
+        // Save all data
+        saveUserData()
+    }
+    
+    // Sign out
+    func signOut() {
+        currentUser.appleId = nil
+        currentUser.email = nil
+        currentUser.authProvider = .guest
+        currentUser.backendUserId = nil
+        currentUser.authToken = nil
+        authToken = nil
+        
+        // Clear stored token
+        userDefaults.removeObject(forKey: authTokenKey)
+        
+        saveUserData()
     }
     
     // Update user stats from HealthKit data
