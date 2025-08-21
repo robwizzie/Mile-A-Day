@@ -57,10 +57,13 @@ export class AppleAuthService {
 
 		// Split full name into first and last name
 		const nameParts = authData.full_name?.split(' ') || [];
-		const first_name = nameParts[0] || null;
-		const last_name = nameParts.slice(1).join(' ') || null;
+		const first_name = nameParts[0] || undefined;
+		const last_name = nameParts.slice(1).join(' ') || undefined;
 
-		await db.query('INSERT INTO users (user_id, username, email, first_name, last_name, apple_id, auth_provider) VALUES ($1, $2, $3, $4, $5, $6, $7)', [user_id, username, authData.email, first_name, last_name, authData.user_id, 'apple']);
+		await db.query(
+			'INSERT INTO users (user_id, username, email, first_name, last_name, apple_id, auth_provider) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+			[user_id, username, authData.email, first_name, last_name, authData.user_id, 'apple']
+		);
 
 		return {
 			user_id,
