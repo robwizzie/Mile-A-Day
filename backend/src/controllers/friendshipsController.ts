@@ -21,7 +21,7 @@ export async function getFriends(req: Request, res: Response) {
 
 	const { userId } = req.params;
 
-	const user = await getUser(userId);
+	const user = await getUser({ userId });
 	if (!user) {
 		return res.status(400).send({ error: `No user found with ID ${userId}` });
 	}
@@ -36,7 +36,7 @@ export async function getSentRequests(req: Request, res: Response) {
 
 	const { userId } = req.params;
 
-	const user = await getUser(userId);
+	const user = await getUser({ userId });
 	if (!user) {
 		return res.status(400).send({ error: `No user found with ID ${userId}` });
 	}
@@ -51,7 +51,7 @@ export async function getFriendRequests(req: Request, res: Response) {
 
 	const { userId } = req.params;
 
-	const user = await getUser(userId);
+	const user = await getUser({ userId });
 	if (!user) {
 		return res.status(400).send({ error: `No user found with ID ${userId}` });
 	}
