@@ -3,7 +3,7 @@ import http from 'http';
 import dotenv from 'dotenv';
 import userRoutes from './routes/usersRoutes.js';
 import friendRoutes from './routes/friendshipsRoutes.js';
-import appleAuthRoutes from './routes/appleAuthRoutes.js';
+import authRoutes from './routes/authRoutes.js';
 
 dotenv.config();
 
@@ -13,7 +13,7 @@ const PORT = parseInt(process.env.PORT ?? '3000');
 app.use(express.json());
 app.use('/users', userRoutes);
 app.use('/friends', friendRoutes);
-app.use('/auth/apple', appleAuthRoutes);
+app.use('/auth', authRoutes);
 
 app.get('/status', (req, res) => {
 	res.send('healthy');

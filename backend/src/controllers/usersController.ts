@@ -35,38 +35,6 @@ export async function searchUsers(req: Request, res: Response) {
 	res.json(results[0]);
 }
 
-export async function createUser(req: Request, res: Response) {
-	if (!hasRequiredKeys(['userId'], req, res)) return;
-
-	const user_id = crypto.randomUUID().replaceAll('-', '');
-	const { username, email, first_name = null, last_name = null } = req.body;
-
-	const existingAppleId = await db.query('SELECT user_id FROM users WHERE email = $1', [email]);
-
-	if (existingAppleId.length) {
-		return res.status(400).json({
-			error: 'Bad Request',
-			message: `User already exists with Apple ID ${email}`
-		});
-	}
-
-	await db.query('INSERT INTO users (user_id, username, email, first_name, last_name) VALUES ($1, $2, $3, $4, $5)', [
-		user_id,
-		username,
-		email,
-		first_name,
-		last_name
-	]);
-
-	res.json({
-		user_id,
-		username,
-		email,
-		first_name,
-		last_name
-	});
-}
-
 const MUTABLE_FIELDS = ['username', 'first_name', 'last_name'];
 
 export async function updateUser(req: Request, res: Response) {
