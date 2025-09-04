@@ -112,8 +112,8 @@ class AppleSignInManager: NSObject, ObservableObject {
 
         let authData = [
             "user_id": profile.id,
-            "identity_token": credential.identityToken?.base64EncodedString() ?? "",
-            "authorization_code": credential.authorizationCode?.base64EncodedString() ?? "",
+            "identity_token": credential.identityToken ?? "",
+            "authorization_code": credential.authorizationCode ?? "",
             "email": profile.email ?? "",
         ]
 
