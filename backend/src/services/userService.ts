@@ -1,5 +1,6 @@
-import { AppleAuthRequest, User } from '../types/user.js';
+import { User } from '../types/user.js';
 import { PostgresService } from './DbService.js';
+import crypto from 'crypto';
 
 const db = PostgresService.getInstance();
 
