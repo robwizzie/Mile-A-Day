@@ -2,6 +2,8 @@ import { Request, Response } from 'express';
 import { PostgresService } from '../services/DbService.js';
 import crypto from 'crypto';
 import hasRequiredKeys from '../utils/hasRequiredKeys.js';
+import { getUser as dbFetchUser, createUser as dbCreateUser } from '../services/userService.js';
+import { AppleAuthRequest } from '../types/user.js';
 
 const db = PostgresService.getInstance();
 
@@ -36,8 +38,6 @@ export async function searchUsers(req: Request, res: Response) {
 }
 
 export async function createUser(req: Request, res: Response) {
-	if (!hasRequiredKeys(['userId'], req, res)) return;
-
 	const user_id = crypto.randomUUID().replaceAll('-', '');
 	const { username, email, first_name = null, last_name = null } = req.body;
 
@@ -65,6 +65,28 @@ export async function createUser(req: Request, res: Response) {
 		first_name,
 		last_name
 	});
+}
+
+export async function signIn(req: Request, res: Response) {
+	if (!hasRequiredKeys(['user_id', 'identity_token', 'authorization_code'], req, res)) return;
+
+	const authData: AppleAuthRequest = {
+		user_id: req.body.user_id,
+		identity_token: req.body.identity_token,
+		authorization_code: req.body.authorization_code,
+		email: req.body.email
+	};
+
+	let user = await dbFetchUser({ email: req.body.email });
+
+	if (!user) {
+		const { user_id } = await dbCreateUser({ email: req.body.email, apple_id: authData.user_id });
+		user = { user_id, email: req.body.email };
+	}
+
+	const timestamp = Date.now();
+	const randomBytes = crypto.randomBytes(16).toString('hex');
+	const token = `${user.user_id}.${timestamp}.${randomBytes}`;
 }
 
 const MUTABLE_FIELDS = ['username', 'first_name', 'last_name'];
