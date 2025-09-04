@@ -5,6 +5,9 @@ import userRoutes from './routes/usersRoutes.js';
 import friendRoutes from './routes/friendshipsRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 
+import { webcrypto } from 'node:crypto';
+(globalThis as any).crypto ??= webcrypto;
+
 dotenv.config();
 
 const app = express();
