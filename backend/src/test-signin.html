@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Apple Sign-In Test</title>
+    <meta name="appleid-signin-client-id" content="YOUR_APPLE_CLIENT_ID">
+    <meta name="appleid-signin-scope" content="name email">
+    <meta name="appleid-signin-redirect-uri" content="http://localhost:3000/static/test-signin.html">
+    <meta name="appleid-signin-state" content="test">
+    <script type="text/javascript" src="https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"></script>
+</head>
+<body>
+    <h1>Apple Sign-In Test</h1>
+    <div id="appleid-signin" data-color="black" data-border="true" data-type="sign in"></div>
+    
+    <div id="status"></div>
+    <div id="userInfo"></div>
+    
+    <script>
+        AppleID.auth.init({
+            clientId: 'org.robertwiscount.Mile-A-Day', // Replace with your actual client ID
+            scope: 'name email',
+            redirectURI: 'http://localhost:3000/static/test-signin.html',
+            state: 'test'
+        });
+
+        // Listen for authorization success
+        document.addEventListener('AppleIDSignInOnSuccess', async (event) => {
+            const { authorization } = event.detail;
+            
+            document.getElementById('status').innerHTML = 'Apple Sign-In successful! Calling your backend...';
+            
+            try {
+                // Call your sign-in endpoint
+                const response = await fetch('/auth/signin', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        user_id: authorization.user,
+                        identity_token: authorization.id_token,
+                        authorization_code: authorization.code,
+                        email: authorization.user // You might need to adjust this
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // Save token to cookie
+                    document.cookie = `auth_token=${data.token}; path=/; max-age=2592000`; // 30 days
+                    
+                    document.getElementById('status').innerHTML = 'Sign-in successful! Token saved to cookies.';
+                    document.getElementById('userInfo').innerHTML = `
+                        <h3>User Info:</h3>
+                        <p>User ID: ${data.user.user_id}</p>
+                        <p>Email: ${data.user.email}</p>
+                        <p>Token: ${data.token.substring(0, 50)}...</p>
+                    `;
+                } else {
+                    const error = await response.json();
+                    document.getElementById('status').innerHTML = `Error: ${error.error}`;
+                }
+            } catch (err) {
+                document.getElementById('status').innerHTML = `Network error: ${err.message}`;
+            }
+        });
+
+        // Listen for authorization failures
+        document.addEventListener('AppleIDSignInOnFailure', (event) => {
+            document.getElementById('status').innerHTML = `Apple Sign-In failed: ${event.detail.error}`;
+        });
+    </script>
+    
+    <hr>
+    <h3>Test Protected Endpoint</h3>
+    <button onclick="testProtectedEndpoint()">Test /users/:userId with token</button>
+    <div id="protectedResult"></div>
+    
+    <script>
+        async function testProtectedEndpoint() {
+            const cookies = document.cookie.split(';');
+            const authCookie = cookies.find(cookie => cookie.trim().startsWith('auth_token='));
+            
+            if (!authCookie) {
+                document.getElementById('protectedResult').innerHTML = 'No auth token found. Sign in first.';
+                return;
+            }
+            
+            const token = authCookie.split('=')[1];
+            
+            try {
+                // You'll need to replace 'USER_ID_HERE' with an actual user ID
+                const response = await fetch('/users/USER_ID_HERE', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const result = await response.json();
+                document.getElementById('protectedResult').innerHTML = `
+                    <h4>Protected endpoint result:</h4>
+                    <pre>${JSON.stringify(result, null, 2)}</pre>
+                `;
+            } catch (err) {
+                document.getElementById('protectedResult').innerHTML = `Error: ${err.message}`;
+            }
+        }
+    </script>
+</body>
+</html>
