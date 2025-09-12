@@ -2,13 +2,14 @@ import SwiftUI
 
 // Detail view for Fastest Pace
 struct FastestPaceDetailView: View {
-    let pace: TimeInterval
+    @ObservedObject var healthManager: HealthKitManager
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedWorkout: IdentifiableWorkout?
     
     var formattedPace: String {
-        guard pace > 0 else { return "Not yet recorded" }
+        guard healthManager.fastestMilePace > 0 else { return "Not yet recorded" }
         
-        let totalMinutes = pace
+        let totalMinutes = healthManager.fastestMilePace
         let minutes = Int(totalMinutes)
         let seconds = Int((totalMinutes - Double(minutes)) * 60)
         
@@ -16,8 +17,8 @@ struct FastestPaceDetailView: View {
     }
     
     var speedMph: String {
-        guard pace > 0 else { return "0.0 mph" }
-        return String(format: "%.1f mph", 60 / pace)
+        guard healthManager.fastestMilePace > 0 else { return "0.0 mph" }
+        return String(format: "%.1f mph", 60 / healthManager.fastestMilePace)
     }
     
     var body: some View {
@@ -69,8 +70,31 @@ struct FastestPaceDetailView: View {
                     .padding(.horizontal, MADTheme.Spacing.lg)
                     
                     // Performance categories
-                    if pace > 0 {
+                    if healthManager.fastestMilePace > 0 {
                         performanceSection
+                    }
+                    
+                    // Workouts that achieved the fastest mile
+                    if !healthManager.fastestMileWorkouts.isEmpty {
+                        VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
+                            Text("Fastest Mile Workouts")
+                                .font(MADTheme.Typography.title3)
+                                .fontWeight(.bold)
+                                .foregroundColor(MADTheme.Colors.primaryText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            
+                            ForEach(healthManager.fastestMileWorkouts, id: \.uuid) { workout in
+                                Button {
+                                    selectedWorkout = IdentifiableWorkout(workout: workout)
+                                } label: {
+                                    WorkoutRow(workout: workout)
+                                        .padding(MADTheme.Spacing.lg)
+                                        .madCard()
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                        .padding(.horizontal, MADTheme.Spacing.lg)
                     }
                     
                     // Tips and achievements
@@ -133,6 +157,9 @@ struct FastestPaceDetailView: View {
                     .madTertiaryButton()
                 }
             }
+            .sheet(item: $selectedWorkout) { identifiableWorkout in
+                WorkoutDetailView(workout: identifiableWorkout.workout)
+            }
         }
     }
     
@@ -148,35 +175,35 @@ struct FastestPaceDetailView: View {
                 PerformanceCategoryRow(
                     category: "Elite",
                     paceRange: "< 5:00",
-                    isActive: pace < 5.0,
+                    isActive: healthManager.fastestMilePace < 5.0,
                     color: .purple
                 )
                 
                 PerformanceCategoryRow(
                     category: "Competitive",
                     paceRange: "5:00 - 6:30",
-                    isActive: pace >= 5.0 && pace < 6.5,
+                    isActive: healthManager.fastestMilePace >= 5.0 && healthManager.fastestMilePace < 6.5,
                     color: MADTheme.Colors.madRed
                 )
                 
                 PerformanceCategoryRow(
                     category: "Recreational",
                     paceRange: "6:30 - 8:00",
-                    isActive: pace >= 6.5 && pace < 8.0,
+                    isActive: healthManager.fastestMilePace >= 6.5 && healthManager.fastestMilePace < 8.0,
                     color: Color.blue
                 )
                 
                 PerformanceCategoryRow(
                     category: "Fitness",
                     paceRange: "8:00 - 10:00",
-                    isActive: pace >= 8.0 && pace < 10.0,
+                    isActive: healthManager.fastestMilePace >= 8.0 && healthManager.fastestMilePace < 10.0,
                     color: MADTheme.Colors.success
                 )
                 
                 PerformanceCategoryRow(
                     category: "Beginner",
                     paceRange: "10:00+",
-                    isActive: pace >= 10.0,
+                    isActive: healthManager.fastestMilePace >= 10.0,
                     color: MADTheme.Colors.warning
                 )
             }
@@ -222,5 +249,5 @@ struct PerformanceCategoryRow: View {
 }
 
 #Preview {
-    FastestPaceDetailView(pace: 7.5)
+    FastestPaceDetailView(healthManager: HealthKitManager())
 }

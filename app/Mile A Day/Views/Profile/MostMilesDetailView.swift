@@ -6,6 +6,7 @@ struct MostMilesDetailView: View {
     let miles: Double
     @ObservedObject var healthManager: HealthKitManager
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedWorkout: IdentifiableWorkout?
     
     var body: some View {
         NavigationStack {
@@ -71,9 +72,14 @@ struct MostMilesDetailView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             
                             ForEach(healthManager.mostMilesWorkouts, id: \.uuid) { workout in
-                                WorkoutRow(workout: workout)
-                                    .padding(MADTheme.Spacing.lg)
-                                    .madCard()
+                                Button {
+                                    selectedWorkout = IdentifiableWorkout(workout: workout)
+                                } label: {
+                                    WorkoutRow(workout: workout)
+                                        .padding(MADTheme.Spacing.lg)
+                                        .madCard()
+                                }
+                                .buttonStyle(PlainButtonStyle())
                             }
                         }
                         .padding(.horizontal, MADTheme.Spacing.lg)
@@ -138,6 +144,9 @@ struct MostMilesDetailView: View {
                     }
                     .madTertiaryButton()
                 }
+            }
+            .sheet(item: $selectedWorkout) { identifiableWorkout in
+                WorkoutDetailView(workout: identifiableWorkout.workout)
             }
         }
     }

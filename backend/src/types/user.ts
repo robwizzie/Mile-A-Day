@@ -4,6 +4,8 @@ export type User = {
 	email: string;
 	first_name?: string;
 	last_name?: string;
+	bio?: string;
+	profile_image_url?: string;
 	apple_id?: string; // Apple's unique user identifier
 	auth_provider?: 'apple' | 'google' | 'guest';
 };

@@ -5,11 +5,16 @@ struct ProfileView: View {
     @ObservedObject var userManager: UserManager
     @ObservedObject var healthManager: HealthKitManager
     
-    @State private var isEditingName = false
-    @State private var newName = ""
     @State private var showingMostMilesDetail = false
     @State private var showingFastestPaceDetail = false
     @State private var showingLogoutConfirmation = false
+    @State private var showingUsernameSetup = false
+    @State private var showingBioEditor = false
+    @State private var showingUsernameEditor = false
+    @State private var showingImagePicker = false
+    @State private var selectedImage: UIImage?
+    @State private var currentProfileImage: UIImage?
+    @State private var showingPrivacySettings = false
     
     var body: some View {
         ScrollView {
@@ -38,11 +43,13 @@ struct ProfileView: View {
             MostMilesDetailView(miles: userManager.currentUser.mostMilesInOneDay, healthManager: healthManager)
         }
         .sheet(isPresented: $showingFastestPaceDetail) {
-            FastestPaceDetailView(pace: healthManager.fastestMilePace)
+            FastestPaceDetailView(healthManager: healthManager)
         }
         .alert("Sign Out", isPresented: $showingLogoutConfirmation) {
             Button("Cancel", role: .cancel) { }
             Button("Sign Out", role: .destructive) {
+                // Sign out immediately
+                userManager.signOut()
                 appStateManager.signOut()
             }
         } message: {
@@ -53,15 +60,52 @@ struct ProfileView: View {
     private var profileHeader: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
             // Profile Image
-            ZStack {
-                Circle()
-                    .fill(MADTheme.Colors.redGradient)
+            Button(action: {
+                showingImagePicker = true
+            }) {
+                ZStack {
+                    Circle()
+                        .fill(MADTheme.Colors.redGradient)
+                        .frame(width: 100, height: 100)
+                    
+                    // Use current profile image state, with fallback to stored images
+                    if let image = currentProfileImage ?? getCustomProfileImage() ?? getAppleProfileImage() {
+                        Image(uiImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 100, height: 100)
+                            .clipShape(Circle())
+                            .transition(.scale.combined(with: .opacity))
+                    } else {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 40, weight: .medium))
+                            .foregroundColor(.white)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                    
+                    // Edit overlay with animation
+                    VStack {
+                        Spacer()
+                        HStack {
+                            Spacer()
+                            Circle()
+                                .fill(Color.black.opacity(0.7))
+                                .frame(width: 28, height: 28)
+                                .overlay(
+                                    Image(systemName: "camera.fill")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.white)
+                                )
+                                .scaleEffect(0.9)
+                                .animation(.easeInOut(duration: 0.2), value: currentProfileImage)
+                        }
+                    }
                     .frame(width: 100, height: 100)
-                
-                Image(systemName: "person.fill")
-                    .font(.system(size: 40, weight: .medium))
-                    .foregroundColor(.white)
+                }
             }
+            .buttonStyle(.plain)
+            .scaleEffect(currentProfileImage != nil ? 1.0 : 0.95)
+            .animation(.easeInOut(duration: 0.3), value: currentProfileImage)
             .shadow(
                 color: MADTheme.Shadow.medium.color,
                 radius: MADTheme.Shadow.medium.radius,
@@ -69,39 +113,154 @@ struct ProfileView: View {
                 y: MADTheme.Shadow.medium.y
             )
             
-            // Name Section
+            // Username Section (main name under profile picture)
             VStack(spacing: MADTheme.Spacing.sm) {
-                if isEditingName {
-                    TextField("Your name", text: $newName)
-                        .font(MADTheme.Typography.title2)
-                        .multilineTextAlignment(.center)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit {
-                            if !newName.isEmpty {
-                                userManager.currentUser.name = newName
-                                userManager.saveUserData()
-                            }
-                            isEditingName = false
-                        }
-                } else {
-                    Text(userManager.currentUser.name)
+                // Username as main name
+                if let username = userManager.currentUser.username {
+                    Text("@\(username)")
                         .font(MADTheme.Typography.title2)
                         .fontWeight(.bold)
                         .foregroundColor(MADTheme.Colors.primaryText)
-                        .onTapGesture {
-                            newName = userManager.currentUser.name
-                            isEditingName = true
-                        }
+                } else {
+                    Text("Set Username")
+                        .font(MADTheme.Typography.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(MADTheme.Colors.secondaryText)
                 }
                 
+                // Edit Username Button
+                if userManager.currentUser.username != nil {
+                    Button("Edit Username") {
+                        showingUsernameEditor = true
+                    }
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(MADTheme.Colors.madRed)
+                    .padding(.horizontal, MADTheme.Spacing.md)
+                    .padding(.vertical, MADTheme.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                            .fill(MADTheme.Colors.madRed.opacity(0.1))
+                    )
+                } else {
+                    Button("Set Username") {
+                        showingUsernameSetup = true
+                    }
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(MADTheme.Colors.madRed)
+                    .padding(.horizontal, MADTheme.Spacing.md)
+                    .padding(.vertical, MADTheme.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                            .fill(MADTheme.Colors.madRed.opacity(0.1))
+                    )
+                }
+                
+                
                 Text("MAD Member")
-                    .font(MADTheme.Typography.callout)
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(MADTheme.Colors.secondaryText)
+            }
+            
+            // Bio Section
+            VStack(spacing: MADTheme.Spacing.sm) {
+                if let bio = userManager.currentUser.bio, !bio.isEmpty {
+                    VStack(spacing: MADTheme.Spacing.sm) {
+                        Text(bio)
+                            .font(MADTheme.Typography.body)
+                            .foregroundColor(MADTheme.Colors.secondaryText)
+                            .multilineTextAlignment(.center)
+                        
+                        Button("Edit Bio") {
+                            showingBioEditor = true
+                        }
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(MADTheme.Colors.madRed)
+                        .padding(.horizontal, MADTheme.Spacing.sm)
+                        .padding(.vertical, MADTheme.Spacing.xs)
+                        .background(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                                .fill(MADTheme.Colors.madRed.opacity(0.1))
+                        )
+                    }
+                } else {
+                    Button("Create Bio") {
+                        showingBioEditor = true
+                    }
+                    .font(MADTheme.Typography.body)
                     .foregroundColor(MADTheme.Colors.madRed)
                     .fontWeight(.medium)
+                    .padding(.horizontal, MADTheme.Spacing.md)
+                    .padding(.vertical, MADTheme.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                            .fill(MADTheme.Colors.madRed.opacity(0.1))
+                    )
+                }
             }
         }
         .padding(MADTheme.Spacing.xl)
         .madCard()
+        .sheet(isPresented: $showingUsernameSetup) {
+            UsernameSetupView()
+                .environmentObject(userManager)
+        }
+        .sheet(isPresented: $showingBioEditor) {
+            BioEditorView(
+                bio: userManager.currentUser.bio ?? "",
+                onSave: { newBio in
+                    // Update local data immediately
+                    userManager.currentUser.bio = newBio.isEmpty ? nil : newBio
+                    userManager.saveUserData()
+                    
+                    // Sync to backend
+                    syncBioToBackend(newBio)
+                    
+                    showingBioEditor = false
+                },
+                onCancel: {
+                    showingBioEditor = false
+                }
+            )
+        }
+        .sheet(isPresented: $showingUsernameEditor) {
+            UsernameEditorView(
+                currentUsername: userManager.currentUser.username ?? "",
+                onSave: { newUsername in
+                    updateUsername(newUsername)
+                    showingUsernameEditor = false
+                },
+                onCancel: {
+                    showingUsernameEditor = false
+                }
+            )
+        }
+        .sheet(isPresented: $showingImagePicker) {
+            ImagePicker(selectedImage: $selectedImage)
+                .onDisappear {
+                    // Reset selected image when picker is dismissed
+                    selectedImage = nil
+                }
+        }
+        .sheet(isPresented: $showingPrivacySettings) {
+            PrivacySettingsView()
+        }
+        .onChange(of: selectedImage) { oldImage, newImage in
+            if let image = newImage {
+                // Update UI immediately with animation
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    currentProfileImage = image
+                }
+                // Save to storage
+                saveCustomProfileImage(image)
+            }
+        }
+        .onAppear {
+            // Load current profile image on appear
+            currentProfileImage = getCustomProfileImage() ?? getAppleProfileImage()
+            
+            // Log user data when profile view appears
+            logUserData()
+        }
     }
     
     private var statsSection: some View {
@@ -202,12 +361,26 @@ struct ProfileView: View {
                 
                 Divider()
                 
-                MADSettingsRow(
-                    icon: "person.2.fill",
-                    title: "Friends & Leaderboard",
-                    subtitle: "Social features",
-                    iconColor: Color.blue
-                )
+                NavigationLink(destination: FriendsListView()) {
+                    MADSettingsRow(
+                        icon: "person.2.fill",
+                        title: "Friends & Leaderboard",
+                        subtitle: "Social features",
+                        iconColor: Color.blue
+                    )
+                }
+                
+                Divider()
+                
+                Button(action: { showingPrivacySettings = true }) {
+                    MADSettingsRow(
+                        icon: "lock.shield.fill",
+                        title: "Privacy Settings",
+                        subtitle: "Control what others can see",
+                        iconColor: MADTheme.Colors.madRed
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
                 
                 Divider()
                 
@@ -217,6 +390,22 @@ struct ProfileView: View {
                     subtitle: "FAQ and contact",
                     iconColor: Color.orange
                 )
+                
+                Divider()
+                
+                Button(action: {
+                    // Log user data for testing
+                    logUserData()
+                    showingLogoutConfirmation = true
+                }) {
+                    MADSettingsRow(
+                        icon: "arrow.right.square.fill",
+                        title: "Sign Out",
+                        subtitle: "Sign out and return to login",
+                        iconColor: MADTheme.Colors.madRed
+                    )
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(MADTheme.Spacing.lg)
@@ -251,13 +440,98 @@ struct ProfileView: View {
     
     // Helper function for pace formatting
     private func formatPace(_ pace: TimeInterval) -> String {
-        guard pace > 0 else { return "Not set" }
+        print("[ProfileView] formatPace called with value: \(pace)")
+        
+        guard pace > 0 else { 
+            print("[ProfileView] Returning 'Not yet recorded'")
+            return "Not yet recorded" 
+        }
         
         let totalMinutes = pace
         let minutes = Int(totalMinutes)
         let seconds = Int((totalMinutes - Double(minutes)) * 60)
-        
-        return String(format: "%d:%02d /mi", minutes, seconds)
+        let formatted = String(format: "%d:%02d /mi", minutes, seconds)
+        print("[ProfileView] Formatted pace: \(formatted)")
+        return formatted
+    }
+    
+    // Helper function to get custom profile image
+    private func getCustomProfileImage() -> UIImage? {
+        // Load custom profile image from UserDefaults
+        if let data = UserDefaults.standard.data(forKey: "customProfileImage"),
+           let image = UIImage(data: data) {
+            return image
+        }
+        return nil
+    }
+    
+    // Helper function to get Apple profile image
+    private func getAppleProfileImage() -> UIImage? {
+        return userManager.getAppleProfileImage()
+    }
+    
+    // Helper function to save custom profile image
+    private func saveCustomProfileImage(_ image: UIImage) {
+        if let data = image.jpegData(compressionQuality: 0.8) {
+            UserDefaults.standard.set(data, forKey: "customProfileImage")
+        }
+    }
+    
+    // Helper function to log user data
+    private func logUserData() {
+        print("🔍 Current User Data:")
+        print("  - Name: \(userManager.currentUser.name)")
+        print("  - Username: \(userManager.currentUser.username ?? "nil")")
+        print("  - Bio: \(userManager.currentUser.bio ?? "nil")")
+        print("  - Email: \(userManager.currentUser.email ?? "nil")")
+        print("  - Apple ID: \(userManager.currentUser.appleId ?? "nil")")
+        print("  - Backend User ID: \(userManager.currentUser.backendUserId ?? "nil")")
+        print("  - Auth Token: \(userManager.authToken ?? "nil")")
+        print("  - Streak: \(userManager.currentUser.streak)")
+        print("  - Total Miles: \(userManager.currentUser.totalMiles)")
+        print("  - Auth Provider: \(userManager.currentUser.authProvider)")
+        print("  - Has Username: \(userManager.currentUser.hasUsername)")
+        print("  - Custom Profile Image: \(getCustomProfileImage() != nil ? "Yes" : "No")")
+        print("  - Apple Profile Image: \(getAppleProfileImage() != nil ? "Yes" : "No")")
+    }
+    
+    // Helper function to update username
+    private func updateUsername(_ username: String) {
+        Task {
+            do {
+                // Update username in backend
+                if let authToken = userManager.authToken,
+                   let backendUserId = userManager.currentUser.backendUserId {
+                    try await UsernameService.updateUsername(username, userId: backendUserId, authToken: authToken)
+                }
+                
+                // Update local user
+                await MainActor.run {
+                    userManager.currentUser.username = username
+                    userManager.saveUserData()
+                }
+            } catch {
+                await MainActor.run {
+                    // Handle error - could show an alert
+                    print("Failed to update username: \(error)")
+                }
+            }
+        }
+    }
+    
+    // Helper function to sync bio to backend
+    private func syncBioToBackend(_ bio: String) {
+        Task {
+            do {
+                if let authToken = userManager.authToken,
+                   let backendUserId = userManager.currentUser.backendUserId {
+                    try await BioService.updateBio(bio, userId: backendUserId, authToken: authToken)
+                    print("✅ Bio synced to backend successfully")
+                }
+            } catch {
+                print("❌ Failed to sync bio to backend: \(error)")
+            }
+        }
     }
 }
 

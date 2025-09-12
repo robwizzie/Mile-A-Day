@@ -200,8 +200,8 @@ struct AuthenticationView: View {
         } message: {
             Text(appleSignInManager.errorMessage ?? "An unknown error occurred")
         }
-        .onChange(of: appleSignInManager.errorMessage) { errorMessage in
-            showError = errorMessage != nil
+        .onChange(of: appleSignInManager.errorMessage) { oldValue, newValue in
+            showError = newValue != nil
         }
     }
     
@@ -232,7 +232,7 @@ struct AuthenticationView: View {
                 
                 await MainActor.run {
                     withAnimation(MADTheme.Animation.standard) {
-                        appStateManager.completeAuthentication()
+                        appStateManager.completeAuthentication(userManager: userManager)
                     }
                 }
             } catch {
