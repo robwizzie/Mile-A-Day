@@ -29,12 +29,7 @@ export async function signIn(req: Request, res: Response) {
 			user = await dbCreateUser({ email: emailFromToken, apple_sub: appleSub });
 		}
 
-		const token = await new SignJWT({ provider: 'apple' })
-			.setProtectedHeader({ alg: 'HS256' })
-			.setSubject(user.user_id)
-			.setIssuedAt()
-			.setExpirationTime('30d')
-			.sign(new TextEncoder().encode(appJwtSecret));
+		const token = await new SignJWT({ provider: 'apple' }).setProtectedHeader({ alg: 'HS256' }).setSubject(user.user_id).setIssuedAt().setExpirationTime('30d').sign(new TextEncoder().encode(appJwtSecret));
 
 		return res.json({ user, token });
 	} catch (err) {

@@ -3,6 +3,7 @@ import HealthKit
 import UserNotifications
 
 struct MainTabView: View {
+    @Environment(\.appStateManager) var appStateManager
     @StateObject private var healthManager = HealthKitManager()
     @StateObject private var userManager = UserManager()
     @StateObject private var notificationService = MADNotificationService.shared
@@ -18,7 +19,7 @@ struct MainTabView: View {
             }
             
             NavigationStack {
-                LeaderboardView(userManager: userManager, healthManager: healthManager)
+                FriendsListView()
             }
             .tabItem {
                 Label("Friends", systemImage: "person.2.fill")
@@ -40,7 +41,7 @@ struct MainTabView: View {
             
             NavigationStack {
                 ProfileView(userManager: userManager, healthManager: healthManager)
-                    .environment(\.appStateManager, AppStateManager())
+                    .environment(\.appStateManager, appStateManager)
             }
             .tabItem {
                 Label("Profile", systemImage: "person.fill")

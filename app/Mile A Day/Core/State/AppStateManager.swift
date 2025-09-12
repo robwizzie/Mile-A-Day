@@ -10,6 +10,7 @@ class AppStateManager: ObservableObject {
         case splash
         case onboarding
         case authentication
+        case usernameSetup
         case main
     }
     
@@ -61,11 +62,39 @@ class AppStateManager: ObservableObject {
         }
     }
     
-    /// Complete authentication (this will be called by actual auth implementation later)
+    /// Complete authentication and check if username setup is needed
     func completeAuthentication() {
         userDefaults.set(true, forKey: isAuthenticatedKey)
         isAuthenticated = true
         
+        DispatchQueue.main.async {
+            withAnimation(MADTheme.Animation.standard) {
+                // Check if user needs to set up username
+                // This will be determined by the UserManager
+                self.currentState = .usernameSetup
+            }
+        }
+    }
+    
+    /// Complete authentication with username check
+    func completeAuthentication(userManager: UserManager) {
+        userDefaults.set(true, forKey: isAuthenticatedKey)
+        isAuthenticated = true
+        
+        DispatchQueue.main.async {
+            withAnimation(MADTheme.Animation.standard) {
+                // Check if user already has a username
+                if userManager.currentUser.hasUsername {
+                    self.currentState = .main
+                } else {
+                    self.currentState = .usernameSetup
+                }
+            }
+        }
+    }
+    
+    /// Complete username setup and move to main app
+    func completeUsernameSetup() {
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 self.currentState = .main

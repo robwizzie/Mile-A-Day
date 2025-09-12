@@ -1,11 +1,5 @@
 import { Router } from 'express';
-import {
-	getFriends,
-	getFriendRequests,
-	sendRequest,
-	getFriendshipHandler,
-	getSentRequests
-} from '../controllers/friendshipsController.js';
+import { getFriends, getFriendRequests, sendRequest, getFriendshipHandler, getSentRequests } from '../controllers/friendshipsController.js';
 
 const router = Router();
 

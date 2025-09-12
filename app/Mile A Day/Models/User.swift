@@ -4,6 +4,8 @@ import SwiftUI
 struct User: Identifiable, Codable {
     var id = UUID()
     var name: String
+    var username: String?
+    var bio: String?
     var streak: Int = 0
     var totalMiles: Double = 0.0
     var fastestMilePace: TimeInterval = 0.0  // Minutes per mile (fastest pace)
@@ -19,10 +21,18 @@ struct User: Identifiable, Codable {
     var backendUserId: String?
     var authToken: String?
     
+    // Privacy settings
+    var privacySettings: PrivacySettings = .default
+    
     enum AuthProvider: String, Codable {
         case apple
         case google
         case guest
+    }
+    
+    // Check if user has a username set
+    var hasUsername: Bool {
+        return username != nil && !username!.isEmpty
     }
     
     // Check if the streak is active today

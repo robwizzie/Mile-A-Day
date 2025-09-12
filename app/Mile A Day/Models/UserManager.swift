@@ -41,6 +41,12 @@ class UserManager: ObservableObject {
                 User(name: "Jordan", streak: 5, totalMiles: 18.1, fastestMilePace: 9.3, mostMilesInOneDay: 2.8)
             ]
         }
+        
+        // Load privacy settings
+        if let privacyData = userDefaults.data(forKey: "privacySettings"),
+           let decodedPrivacy = try? JSONDecoder().decode(PrivacySettings.self, from: privacyData) {
+            self.currentUser.privacySettings = decodedPrivacy
+        }
     }
     
     // Save user data
@@ -56,6 +62,11 @@ class UserManager: ObservableObject {
         // Save auth token
         if let token = authToken {
             userDefaults.set(token, forKey: authTokenKey)
+        }
+        
+        // Save privacy settings
+        if let privacyEncoded = try? JSONEncoder().encode(currentUser.privacySettings) {
+            userDefaults.set(privacyEncoded, forKey: "privacySettings")
         }
         
         // Push streak to widget store
@@ -74,15 +85,39 @@ class UserManager: ObservableObject {
         // Update name if we have it from Apple
         if let fullName = profile.fullName?.formatted(), !fullName.isEmpty {
             currentUser.name = fullName
-        } else if !backendResponse.user.username.isEmpty {
-            currentUser.name = backendResponse.user.username
+        } else if ((backendResponse.user.username?.isEmpty) == nil) {
+            currentUser.name = backendResponse.user.username ?? "User"
+        }
+        
+        // Save Apple profile image if available
+        if let profileImage = profile.profileImage {
+            saveAppleProfileImage(profileImage)
         }
         
         // Store auth token
         authToken = backendResponse.token
         
+        // Store backend user ID in UserDefaults for FriendService
+        UserDefaults.standard.set(backendResponse.user.user_id, forKey: "backendUserId")
+        
         // Save all data
         saveUserData()
+    }
+    
+    // Save Apple profile image
+    private func saveAppleProfileImage(_ image: UIImage) {
+        if let data = image.jpegData(compressionQuality: 0.8) {
+            UserDefaults.standard.set(data, forKey: "appleProfileImage")
+        }
+    }
+    
+    // Get Apple profile image
+    func getAppleProfileImage() -> UIImage? {
+        if let data = UserDefaults.standard.data(forKey: "appleProfileImage"),
+           let image = UIImage(data: data) {
+            return image
+        }
+        return nil
     }
     
     // Sign out

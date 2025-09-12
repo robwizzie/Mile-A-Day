@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PostgresService } from '../services/DbService.js';
 import crypto from 'crypto';
 import hasRequiredKeys from '../utils/hasRequiredKeys.js';
+import { updateUsername, checkUsernameAvailability, updateBio, updateProfileImage } from '../services/userService.js';
 
 const db = PostgresService.getInstance();
 
@@ -33,6 +34,17 @@ export async function searchUsers(req: Request, res: Response) {
 	}
 
 	res.json(results[0]);
+}
+
+export async function searchUsersByPartialUsername(req: Request, res: Response) {
+	if (!hasRequiredKeys(['username'], req, res)) return;
+
+	const { username } = req.query;
+	const searchTerm = `%${username}%`;
+
+	const results = await db.query(`SELECT user_id, username, first_name, last_name, bio, profile_image_url FROM users WHERE username ILIKE $1 LIMIT 10`, [searchTerm]);
+
+	res.json(results);
 }
 
 const MUTABLE_FIELDS = ['username', 'first_name', 'last_name'];
@@ -95,4 +107,71 @@ export async function deleteUser(req: Request, res: Response) {
 	res.json({
 		message: `Successfully deleted user ${userId}`
 	});
+}
+
+export async function updateUserUsername(req: Request, res: Response) {
+	if (!hasRequiredKeys(['username'], req, res)) return;
+
+	const userId = req.params.userId;
+	const { username } = req.body;
+
+	try {
+		await updateUsername({ userId, username });
+		res.json({ success: true, message: 'Username updated successfully' });
+	} catch (error) {
+		res.status(400).json({
+			error: 'Username update failed',
+			message: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+}
+
+export async function checkUsername(req: Request, res: Response) {
+	if (!hasRequiredKeys(['username'], req, res)) return;
+
+	const { username } = req.query;
+
+	try {
+		const isAvailable = await checkUsernameAvailability(username as string);
+		res.json({ available: isAvailable });
+	} catch (error) {
+		res.status(500).json({
+			error: 'Username check failed',
+			message: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+}
+
+export async function updateUserBio(req: Request, res: Response) {
+	if (!hasRequiredKeys(['bio'], req, res)) return;
+
+	const userId = req.params.userId;
+	const { bio } = req.body;
+
+	try {
+		await updateBio({ userId, bio });
+		res.json({ success: true, message: 'Bio updated successfully' });
+	} catch (error) {
+		res.status(400).json({
+			error: 'Bio update failed',
+			message: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+}
+
+export async function updateUserProfileImage(req: Request, res: Response) {
+	if (!hasRequiredKeys(['profileImageUrl'], req, res)) return;
+
+	const userId = req.params.userId;
+	const { profileImageUrl } = req.body;
+
+	try {
+		await updateProfileImage({ userId, profileImageUrl });
+		res.json({ success: true, message: 'Profile image updated successfully' });
+	} catch (error) {
+		res.status(400).json({
+			error: 'Profile image update failed',
+			message: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
 }
