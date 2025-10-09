@@ -261,7 +261,8 @@ class HealthKitManager: ObservableObject {
                 DispatchQueue.main.async {
                     self?.todaysDistance = 0.0
                     // Get current goal from widget store or default to 1.0
-                    let currentGoal = WidgetDataStore.load().goal
+                    let widgetData = WidgetDataStore.load()
+                    let currentGoal = widgetData.goal
                     let safeGoal = currentGoal > 0 ? currentGoal : 1.0
                     
                     // Use unified progress calculation
@@ -639,7 +640,8 @@ class HealthKitManager: ObservableObject {
             self.todaysDistance = totalMiles
             self.recentWorkouts = todaysWorkouts
             // Get current goal from widget store or default to 1.0
-            let currentGoal = WidgetDataStore.load().goal
+            let widgetData = WidgetDataStore.load()
+            let currentGoal = widgetData.goal
             let safeGoal = currentGoal > 0 ? currentGoal : 1.0
             
             // Use unified progress calculation
@@ -890,65 +892,63 @@ class HealthKitManager: ObservableObject {
     private func calculateRetroactiveStreak(workoutsByDay: [Date: [HKWorkout]]) -> Int {
         print("[HealthKit] Calculating streak with timezone-aware adjustments...")
         
-        // STEP 1: Apply timezone corrections for recent workouts (last 60 days)
+        // STEP 1: Apply timezone corrections for ALL workouts (not just recent ones)
+        // This ensures that past trips to different timezones (like Hawaii) are properly handled
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let sixtyDaysAgo = calendar.date(byAdding: .day, value: -60, to: today) ?? today
         
         var correctedWorkoutsByDay = workoutsByDay
         var pendingCorrections: [(originalDate: Date, correctedDate: Date, workouts: [HKWorkout])] = []
         
         // Find workouts that need timezone correction
         for (deviceDate, workouts) in workoutsByDay {
-            // Only correct recent workouts to avoid processing too many
-            if deviceDate >= sixtyDaysAgo {
-                for workout in workouts {
-                    // Check if this workout might have a timezone issue based on timing
-                    let workoutHour = calendar.component(.hour, from: workout.endDate)
+            // Check ALL workouts for timezone issues, not just recent ones
+            for workout in workouts {
+                // Check if this workout might have a timezone issue based on timing
+                let workoutHour = calendar.component(.hour, from: workout.endDate)
+                
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateStyle = .short
+                dateFormatter.timeStyle = .short
+                print("[HealthKit] Checking workout on \(dateFormatter.string(from: deviceDate)) at hour \(workoutHour)")
+                
+                // If workout was at unusual hours (late night/early morning), it might be timezone shifted
+                if workoutHour <= 5 || workoutHour >= 22 {
+                    print("[HealthKit] → Unusual hour \(workoutHour), checking for timezone correction...")
+                    // Quick timezone check for Hawaii and other common travel destinations
+                    let _ = 0.0 // We don't have exact location, but we can infer
+                    let _ = 0.0
                     
-                    let dateFormatter = DateFormatter()
-                    dateFormatter.dateStyle = .short
-                    dateFormatter.timeStyle = .short
-                    print("[HealthKit] Checking workout on \(dateFormatter.string(from: deviceDate)) at hour \(workoutHour)")
+                    // GENERAL TIMEZONE CORRECTION: Detect likely timezone shifts based on workout timing
                     
-                    // If workout was at unusual hours (late night/early morning), it might be timezone shifted
-                    if workoutHour <= 5 || workoutHour >= 22 {
-                        print("[HealthKit] → Unusual hour \(workoutHour), checking for timezone correction...")
-                        // Quick timezone check for Hawaii and other common travel destinations
-                        let _ = 0.0 // We don't have exact location, but we can infer
-                        let _ = 0.0
-                        
-                        // GENERAL TIMEZONE CORRECTION: Detect likely timezone shifts based on workout timing
-                        
-                        // EST to Hawaii (HST): 6 hour difference (EST is UTC-5, HST is UTC-10, but during daylight time EST is UTC-4 and HST stays UTC-10)
-                        // So the actual difference is 6 hours during daylight time
-                        
-                        // If workout was recorded between 10 PM - 6 AM EST, it's likely from a western timezone
-                        if workoutHour >= 22 || workoutHour <= 6 {
-                            // Try Hawaii timezone correction (-6 hours)
-                            if let hawaiiCorrectedDate = calendar.date(byAdding: .hour, value: -6, to: workout.endDate) {
-                                let correctedDay = calendar.startOfDay(for: hawaiiCorrectedDate)
-                                let hawaiiHour = calendar.component(.hour, from: hawaiiCorrectedDate)
-                                
-                                // Check if this results in a more reasonable workout time (6 AM - 10 PM HST)
-                                if hawaiiHour >= 6 && hawaiiHour <= 22 && correctedDay != deviceDate {
-                                    print("[HealthKit] ✅ Correcting HAWAII workout \(workout.endDate) from \(deviceDate) to \(correctedDay)")
-                                    pendingCorrections.append((originalDate: deviceDate, correctedDate: correctedDay, workouts: [workout]))
-                                }
+                    // EST to Hawaii (HST): 6 hour difference (EST is UTC-5, HST is UTC-10, but during daylight time EST is UTC-4 and HST stays UTC-10)
+                    // So the actual difference is 6 hours during daylight time
+                    
+                    // If workout was recorded between 10 PM - 6 AM EST, it's likely from a western timezone
+                    if workoutHour >= 22 || workoutHour <= 6 {
+                        // Try Hawaii timezone correction (-6 hours)
+                        if let hawaiiCorrectedDate = calendar.date(byAdding: .hour, value: -6, to: workout.endDate) {
+                            let correctedDay = calendar.startOfDay(for: hawaiiCorrectedDate)
+                            let hawaiiHour = calendar.component(.hour, from: hawaiiCorrectedDate)
+                            
+                            // Check if this results in a more reasonable workout time (6 AM - 10 PM HST)
+                            if hawaiiHour >= 6 && hawaiiHour <= 22 && correctedDay != deviceDate {
+                                print("[HealthKit] ✅ Correcting HAWAII workout \(workout.endDate) from \(deviceDate) to \(correctedDay)")
+                                pendingCorrections.append((originalDate: deviceDate, correctedDate: correctedDay, workouts: [workout]))
                             }
                         }
-                        
-                        // Also check for Pacific timezone (-3 hours from EST)
-                        else if workoutHour >= 1 && workoutHour <= 3 {
-                            if let pacificCorrectedDate = calendar.date(byAdding: .hour, value: -3, to: workout.endDate) {
-                                let correctedDay = calendar.startOfDay(for: pacificCorrectedDate)
-                                let pacificHour = calendar.component(.hour, from: pacificCorrectedDate)
-                                
-                                // Check if this results in a reasonable workout time (6 AM - 10 PM PST)
-                                if pacificHour >= 6 && pacificHour <= 22 && correctedDay != deviceDate {
-                                    print("[HealthKit] ✅ Correcting PACIFIC workout \(workout.endDate) from \(deviceDate) to \(correctedDay)")
-                                    pendingCorrections.append((originalDate: deviceDate, correctedDate: correctedDay, workouts: [workout]))
-                                }
+                    }
+                    
+                    // Also check for Pacific timezone (-3 hours from EST)
+                    else if workoutHour >= 1 && workoutHour <= 3 {
+                        if let pacificCorrectedDate = calendar.date(byAdding: .hour, value: -3, to: workout.endDate) {
+                            let correctedDay = calendar.startOfDay(for: pacificCorrectedDate)
+                            let pacificHour = calendar.component(.hour, from: pacificCorrectedDate)
+                            
+                            // Check if this results in a reasonable workout time (6 AM - 10 PM PST)
+                            if pacificHour >= 6 && pacificHour <= 22 && correctedDay != deviceDate {
+                                print("[HealthKit] ✅ Correcting PACIFIC workout \(workout.endDate) from \(deviceDate) to \(correctedDay)")
+                                pendingCorrections.append((originalDate: deviceDate, correctedDate: correctedDay, workouts: [workout]))
                             }
                         }
                     }
