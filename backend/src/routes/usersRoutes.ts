@@ -1,5 +1,16 @@
 import { Router } from 'express';
-import { deleteUser, getUser, searchUsers, searchUsersByPartialUsername, updateUser, updateUserUsername, checkUsername, updateUserBio, updateUserProfileImage } from '../controllers/usersController.js';
+import {
+	deleteUser,
+	getUser,
+	searchUsers,
+	searchUsersByPartialUsername,
+	updateUser,
+	updateUserUsername,
+	checkUsername,
+	updateUserBio,
+	updateUserProfileImage
+} from '../controllers/usersController.js';
+import { requireSelfAccess } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -7,10 +18,10 @@ router.get('/search', searchUsers);
 router.get('/search-partial', searchUsersByPartialUsername);
 router.get('/check-username', checkUsername);
 router.get('/:userId', getUser);
-router.delete('/:userId', deleteUser);
-router.patch('/:userId', updateUser);
-router.patch('/:userId/username', updateUserUsername);
-router.patch('/:userId/bio', updateUserBio);
-router.patch('/:userId/profile-image', updateUserProfileImage);
+router.delete('/:userId', requireSelfAccess('userId'), deleteUser);
+router.patch('/:userId', requireSelfAccess('userId'), updateUser);
+router.patch('/:userId/username', requireSelfAccess('userId'), updateUserUsername);
+router.patch('/:userId/bio', requireSelfAccess('userId'), updateUserBio);
+router.patch('/:userId/profile-image', requireSelfAccess('userId'), updateUserProfileImage);
 
 export default router;
