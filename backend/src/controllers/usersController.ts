@@ -21,28 +21,17 @@ export async function getUser(req: Request, res: Response) {
 }
 
 export async function searchUsers(req: Request, res: Response) {
-	if (!hasRequiredKeys([['username', 'email']], req, res)) return;
+	if (!hasRequiredKeys(['query'], req, res)) return;
 
-	const { username, email } = req.query;
+	const { query } = req.query;
 
-	const results = await db.query(`SELECT * FROM users WHERE ${username ? 'username' : 'email'} = $1`, [username ?? email]);
+	const results = await db.query(`SELECT * FROM users WHERE username ILIKE $1 OR email ILIKE $1 LIMIT 50`, [`%${query}%`]);
 
 	if (!results.length) {
 		return res.status(404).json({
 			error: 'User not found'
 		});
 	}
-
-	res.json(results[0]);
-}
-
-export async function searchUsersByPartialUsername(req: Request, res: Response) {
-	if (!hasRequiredKeys(['username'], req, res)) return;
-
-	const { username } = req.query;
-	const searchTerm = `%${username}%`;
-
-	const results = await db.query(`SELECT user_id, username, first_name, last_name, bio, profile_image_url FROM users WHERE username ILIKE $1 LIMIT 10`, [searchTerm]);
 
 	res.json(results);
 }

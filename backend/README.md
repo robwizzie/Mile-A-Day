@@ -212,48 +212,50 @@ Authenticates users via Apple Sign-In and returns a JWT token for accessing prot
 
 <a name="search-for-user"></a>
 
-### Search For User
+### Search For Users
 
 **GET** `/users/search`
 
+Searches for users by partial username or email match. Returns up to 50 results.
+
 #### Parameters
 
-| Name     | Type            | Description                                                    | Required |
-| :------- | :-------------- | :------------------------------------------------------------- | :------: |
-| username | Query Parameter | The _<u>exact</u>_ username of the user to search for.         |    ✖️    |
-| email    | Query Parameter | The _<u>exact</u>_ URL-encoded email of the user to search for |    ✖️    |
-
-_**Note: one of email or username is required**_
+| Name  | Type            | Description                                                                | Required |
+| :---- | :-------------- | :------------------------------------------------------------------------- | :------: |
+| query | Query Parameter | Search term to match against username or email (case-insensitive, partial) |    ✅    |
 
 #### Examples
 
 <details>
 <summary>Click to expand</summary>
 
-> ##### With username
->
-> **GET** `/users/search?username=peter`
->
-> ##### With email
->
-> **GET** `/users/search?email=peter%40mindgoblin.tech`
+> **GET** `/users/search?query=peter`
 >
 > ##### Example Response
 >
 > ```
-> {
->     "user_id": "peter",
->     "username": "PJ",
->     "email": "peter@mindgoblin.tech",
->     "first_name": "Peter",
->     "last_name": "Johnson"
-> }
+> [
+>     {
+>         "user_id": "peter",
+>         "username": "PJ",
+>         "email": "peter@mindgoblin.tech",
+>         "first_name": "Peter",
+>         "last_name": "Johnson"
+>     },
+>     {
+>         "user_id": "peter2",
+>         "username": "PeterParker",
+>         "email": "spiderman@example.com",
+>         "first_name": "Peter",
+>         "last_name": "Parker"
+>     }
+> ]
 > ```
 >
 > ##### Full cURL Example
 >
 > ```
-> curl --location 'https://mad.mindgoblin.tech/users/search?username=peter'
+> curl --location 'https://mad.mindgoblin.tech/users/search?query=peter'
 > ```
 
 </details>
