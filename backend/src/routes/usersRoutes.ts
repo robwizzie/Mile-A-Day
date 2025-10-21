@@ -3,7 +3,6 @@ import {
 	deleteUser,
 	getUser,
 	searchUsers,
-	searchUsersByPartialUsername,
 	updateUser,
 	updateUserUsername,
 	checkUsername,
@@ -15,7 +14,6 @@ import { requireSelfAccess } from '../middleware/auth.js';
 const router = Router();
 
 router.get('/search', searchUsers);
-router.get('/search-partial', searchUsersByPartialUsername);
 router.get('/check-username', checkUsername);
 router.get('/:userId', getUser);
 router.delete('/:userId', requireSelfAccess('userId'), deleteUser);
