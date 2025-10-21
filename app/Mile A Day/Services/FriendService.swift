@@ -63,22 +63,32 @@ class FriendService: ObservableObject {
                 throw FriendServiceError.invalidResponse
             }
             
+            print("[FriendService] 📊 Response status code: \(httpResponse.statusCode)")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("[FriendService] 📦 Response body: \(responseString)")
+            }
+            
             // Handle different status codes
             switch httpResponse.statusCode {
             case 200...299:
                 break
             case 401:
+                print("[FriendService] ❌ Unauthorized (401)")
                 throw FriendServiceError.unauthorized
             case 404:
+                print("[FriendService] ❌ User not found (404)")
                 throw FriendServiceError.userNotFound
             case 400:
                 // Try to parse error message from response
                 if let errorData = try? JSONDecoder().decode([String: String].self, from: data),
                    let errorMessage = errorData["error"] {
+                    print("[FriendService] ❌ Bad request (400): \(errorMessage)")
                     throw FriendServiceError.apiError(errorMessage)
                 }
+                print("[FriendService] ❌ Bad request (400)")
                 throw FriendServiceError.badRequest
             default:
+                print("[FriendService] ❌ Server error (\(httpResponse.statusCode))")
                 throw FriendServiceError.serverError(httpResponse.statusCode)
             }
             
@@ -95,22 +105,47 @@ class FriendService: ObservableObject {
     }
     
     // MARK: - Friend Search
-    /// Search for users by exact username
+    /// Search for users by username (returns first matching user)
     func searchUser(byUsername username: String) async throws -> BackendUser {
-        let endpoint = "/users/search?username=\(username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? username)"
-        return try await makeRequest(endpoint: endpoint, responseType: BackendUser.self)
+        print("[FriendService] 🔍 Searching for user: '\(username)'")
+        print("[FriendService] 🔑 Auth token present: \(authToken != nil)")
+        
+        let endpoint = "/users/search?query=\(username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? username)"
+        print("[FriendService] 📡 Request URL: \(baseURL)\(endpoint)")
+        
+        do {
+            // Backend returns an array of users
+            let users = try await makeRequest(endpoint: endpoint, responseType: [BackendUser].self)
+            print("[FriendService] 📦 Received \(users.count) user(s) in response")
+            
+            // Return the first user if available
+            guard let firstUser = users.first else {
+                print("[FriendService] ❌ No users found in response")
+                throw FriendServiceError.userNotFound
+            }
+            
+            print("[FriendService] ✅ User search response: \(firstUser)")
+            return firstUser
+        } catch {
+            print("[FriendService] ❌ User search failed with error: \(error)")
+            throw error
+        }
     }
     
-    /// Search for users by partial username (returns multiple results)
-    func searchUsersByPartialUsername(_ username: String) async throws -> [BackendUser] {
-        let endpoint = "/users/search-partial?username=\(username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? username)"
-        return try await makeRequest(endpoint: endpoint, responseType: [BackendUser].self)
-    }
-    
-    /// Search for users by email
-    func searchUser(byEmail email: String) async throws -> BackendUser {
-        let endpoint = "/users/search?email=\(email.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? email)"
-        return try await makeRequest(endpoint: endpoint, responseType: BackendUser.self)
+    /// Search for users by username (returns all matching users)
+    func searchUsers(byUsername username: String) async throws -> [BackendUser] {
+        print("[FriendService] 🔍 Searching for users matching: '\(username)'")
+        
+        let endpoint = "/users/search?query=\(username.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? username)"
+        
+        do {
+            let users = try await makeRequest(endpoint: endpoint, responseType: [BackendUser].self)
+            print("[FriendService] 📦 Found \(users.count) matching user(s)")
+            return users
+        } catch {
+            print("[FriendService] ❌ User search failed with error: \(error)")
+            throw error
+        }
     }
     
     // MARK: - Friend Management
@@ -120,7 +155,7 @@ class FriendService: ObservableObject {
             throw FriendServiceError.notAuthenticated
         }
         
-        let endpoint = "/friendships/request"
+        let endpoint = "/friends/request"
         let body = [
             "fromUser": currentUserId,
             "toUser": user.user_id
@@ -146,7 +181,7 @@ class FriendService: ObservableObject {
             throw FriendServiceError.notAuthenticated
         }
         
-        let endpoint = "/friendships/\(currentUserId)"
+        let endpoint = "/friends/\(currentUserId)"
         friends = try await makeRequest(endpoint: endpoint, responseType: [BackendUser].self)
     }
     
@@ -156,7 +191,7 @@ class FriendService: ObservableObject {
             throw FriendServiceError.notAuthenticated
         }
         
-        let endpoint = "/friendships/requests/\(currentUserId)"
+        let endpoint = "/friends/requests/\(currentUserId)"
         let response: FriendRequestsResponse = try await makeRequest(endpoint: endpoint, responseType: FriendRequestsResponse.self)
         
         friendRequests = response.requests
@@ -168,7 +203,7 @@ class FriendService: ObservableObject {
             throw FriendServiceError.notAuthenticated
         }
         
-        let endpoint = "/friendships/sent-requests/\(currentUserId)"
+        let endpoint = "/friends/sent-requests/\(currentUserId)"
         sentRequests = try await makeRequest(endpoint: endpoint, responseType: [BackendUser].self)
     }
     
@@ -178,7 +213,7 @@ class FriendService: ObservableObject {
             throw FriendServiceError.notAuthenticated
         }
         
-        let endpoint = "/friendships/accept"
+        let endpoint = "/friends/accept"
         let body = [
             "fromUser": user.user_id,
             "toUser": currentUserId
@@ -208,7 +243,7 @@ class FriendService: ObservableObject {
             throw FriendServiceError.notAuthenticated
         }
         
-        let endpoint = "/friendships/decline"
+        let endpoint = "/friends/decline"
         let body = [
             "fromUser": user.user_id,
             "toUser": currentUserId
@@ -237,7 +272,7 @@ class FriendService: ObservableObject {
             throw FriendServiceError.notAuthenticated
         }
         
-        let endpoint = "/friendships/ignore"
+        let endpoint = "/friends/ignore"
         let body = [
             "fromUser": user.user_id,
             "toUser": currentUserId
@@ -266,7 +301,7 @@ class FriendService: ObservableObject {
             throw FriendServiceError.notAuthenticated
         }
         
-        let endpoint = "/friendships/remove"
+        let endpoint = "/friends/remove"
         let body = [
             "fromUser": currentUserId,
             "toUser": user.user_id
@@ -295,7 +330,7 @@ class FriendService: ObservableObject {
             throw FriendServiceError.notAuthenticated
         }
         
-        let endpoint = "/friendships/decline"
+        let endpoint = "/friends/decline"
         let body = [
             "fromUser": currentUserId,
             "toUser": user.user_id

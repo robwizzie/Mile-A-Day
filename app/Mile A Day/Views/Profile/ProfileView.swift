@@ -257,9 +257,7 @@ struct ProfileView: View {
         .onAppear {
             // Load current profile image on appear
             currentProfileImage = getCustomProfileImage() ?? getAppleProfileImage()
-            
-            // Log user data when profile view appears
-            logUserData()
+
         }
     }
     
@@ -394,8 +392,7 @@ struct ProfileView: View {
                 Divider()
                 
                 Button(action: {
-                    // Log user data for testing
-                    logUserData()
+
                     showingLogoutConfirmation = true
                 }) {
                     MADSettingsRow(
@@ -440,10 +437,7 @@ struct ProfileView: View {
     
     // Helper function for pace formatting
     private func formatPace(_ pace: TimeInterval) -> String {
-        print("[ProfileView] formatPace called with value: \(pace)")
-        
         guard pace > 0 else { 
-            print("[ProfileView] Returning 'Not yet recorded'")
             return "Not yet recorded" 
         }
         
@@ -451,7 +445,6 @@ struct ProfileView: View {
         let minutes = Int(totalMinutes)
         let seconds = Int((totalMinutes - Double(minutes)) * 60)
         let formatted = String(format: "%d:%02d /mi", minutes, seconds)
-        print("[ProfileView] Formatted pace: \(formatted)")
         return formatted
     }
     
@@ -477,23 +470,7 @@ struct ProfileView: View {
         }
     }
     
-    // Helper function to log user data
-    private func logUserData() {
-        print("🔍 Current User Data:")
-        print("  - Name: \(userManager.currentUser.name)")
-        print("  - Username: \(userManager.currentUser.username ?? "nil")")
-        print("  - Bio: \(userManager.currentUser.bio ?? "nil")")
-        print("  - Email: \(userManager.currentUser.email ?? "nil")")
-        print("  - Apple ID: \(userManager.currentUser.appleId ?? "nil")")
-        print("  - Backend User ID: \(userManager.currentUser.backendUserId ?? "nil")")
-        print("  - Auth Token: \(userManager.authToken ?? "nil")")
-        print("  - Streak: \(userManager.currentUser.streak)")
-        print("  - Total Miles: \(userManager.currentUser.totalMiles)")
-        print("  - Auth Provider: \(userManager.currentUser.authProvider)")
-        print("  - Has Username: \(userManager.currentUser.hasUsername)")
-        print("  - Custom Profile Image: \(getCustomProfileImage() != nil ? "Yes" : "No")")
-        print("  - Apple Profile Image: \(getAppleProfileImage() != nil ? "Yes" : "No")")
-    }
+
     
     // Helper function to update username
     private func updateUsername(_ username: String) {
@@ -513,7 +490,6 @@ struct ProfileView: View {
             } catch {
                 await MainActor.run {
                     // Handle error - could show an alert
-                    print("Failed to update username: \(error)")
                 }
             }
         }
@@ -526,10 +502,9 @@ struct ProfileView: View {
                 if let authToken = userManager.authToken,
                    let backendUserId = userManager.currentUser.backendUserId {
                     try await BioService.updateBio(bio, userId: backendUserId, authToken: authToken)
-                    print("✅ Bio synced to backend successfully")
                 }
             } catch {
-                print("❌ Failed to sync bio to backend: \(error)")
+                // Failed to sync bio to backend
             }
         }
     }

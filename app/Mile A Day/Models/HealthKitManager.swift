@@ -100,9 +100,7 @@ class HealthKitManager: ObservableObject {
         if cachedRetroactiveStreak > 0 {
             retroactiveStreak = cachedRetroactiveStreak
         }
-        
-        print("[HealthKit] Loaded cached data - Fastest pace: \(cachedFastestMilePace), Most miles: \(cachedMostMilesInOneDay), Total miles: \(cachedTotalLifetimeMiles), Streak: \(cachedRetroactiveStreak), Latest workout: \(cachedLatestWorkoutDate?.description ?? "None"), Workout count: \(cachedWorkoutCount)")
-    }
+            }
     
     /// Saves current data to cache
     private func saveCachedData() {
@@ -147,8 +145,6 @@ class HealthKitManager: ObservableObject {
                 self.lastWorkoutCacheUpdate = Date()
             }
         }
-        
-        print("[HealthKit] Saved cached data - Fastest pace: \(fastestMilePace), Most miles: \(mostMilesInOneDay), Total miles: \(totalLifetimeMiles), Streak: \(retroactiveStreak), Latest workout: \(cachedLatestWorkoutDate?.description ?? "None"), Workout count: \(cachedWorkoutCount)")
     }
     
     /// Checks if cache is still valid and if we need to fetch new workouts
@@ -167,12 +163,10 @@ class HealthKitManager: ObservableObject {
         guard let lastUpdate = lastWorkoutCacheUpdate else { return true }
         let threeDaysAgo = Date().addingTimeInterval(-3 * 24 * 3600) // 3 days
         if lastUpdate < threeDaysAgo {
-            print("[HealthKit] Cache is older than 3 days, need to fetch new workouts")
             return true
         }
         
         // If we have recent cache, we're good
-        print("[HealthKit] Cache is recent, no need to fetch new workouts")
         return false
     }
     
@@ -225,9 +219,8 @@ class HealthKitManager: ObservableObject {
         
         healthStore.enableBackgroundDelivery(for: workoutType, frequency: .immediate) { success, error in
             if success {
-                print("[HealthKit] Background delivery enabled for workouts")
             } else {
-                print("[HealthKit] Failed to enable background delivery: \(error?.localizedDescription ?? "Unknown error")")
+                // Background delivery failed
             }
         }
     }
@@ -389,7 +382,6 @@ class HealthKitManager: ObservableObject {
                 if let latestWorkout = workouts.max(by: { $0.endDate < $1.endDate }) {
                     self.cachedLatestWorkoutDate = latestWorkout.endDate
                 }
-                print("[HealthKit] Populated cachedWorkouts with \(workouts.count) workouts")
             }
             
             // Track most miles in a day
@@ -398,31 +390,23 @@ class HealthKitManager: ObservableObject {
             
             // Group workouts by day using location-aware time zones if enabled
             if self.useLocationBasedTimezone {
-                // For large datasets, only process recent workouts with location-aware logic
-                if workouts.count > 100 {
-                    print("[HealthKit] Large dataset (\(workouts.count) workouts) - using hybrid approach")
-                    
-                    // Split into recent (last 30 days) and older workouts
-                    let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-                    let recentWorkouts = workouts.filter { $0.endDate >= thirtyDaysAgo }
-                    let olderWorkouts = workouts.filter { $0.endDate < thirtyDaysAgo }
-                    
-                    print("[HealthKit] Processing \(recentWorkouts.count) recent workouts with location-aware timezone")
-                    print("[HealthKit] Processing \(olderWorkouts.count) older workouts with device timezone")
-                    
-                    // TEMPORARY: Use device timezone for all until we fix the deadlock
-                    print("[HealthKit] Temporarily using device timezone for all workouts to prevent deadlock")
-                    let allWorkoutsByDay = self.groupWorkoutsByDeviceDay(workouts: workouts)
-                    self.processWorkoutsByDay(allWorkoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
-                } else {
-                    // TEMPORARY: Use device timezone even for small datasets to prevent deadlock
-                    print("[HealthKit] Small dataset (\(workouts.count) workouts) - temporarily using device timezone")
-                    let workoutsByDay = self.groupWorkoutsByDeviceDay(workouts: workouts)
-                    self.processWorkoutsByDay(workoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
-                }
+                    // For large datasets, only process recent workouts with location-aware logic
+                    if workouts.count > 100 {                    
+                        // Split into recent (last 30 days) and older workouts
+                        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
+                        let recentWorkouts = workouts.filter { $0.endDate >= thirtyDaysAgo }
+                        let olderWorkouts = workouts.filter { $0.endDate < thirtyDaysAgo }
+                        
+                        // TEMPORARY: Use device timezone for all until we fix the deadlock
+                        let allWorkoutsByDay = self.groupWorkoutsByDeviceDay(workouts: workouts)
+                        self.processWorkoutsByDay(allWorkoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
+                    } else {
+                        // TEMPORARY: Use device timezone even for small datasets to prevent deadlock
+                        let workoutsByDay = self.groupWorkoutsByDeviceDay(workouts: workouts)
+                        self.processWorkoutsByDay(workoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
+                    }
             } else {
                 // Legacy behavior: group by device timezone (safer for large datasets)
-                print("[HealthKit] Using device timezone grouping (\(workouts.count) workouts)")
                 let workoutsByDay = self.groupWorkoutsByDeviceDay(workouts: workouts)
                 self.processWorkoutsByDay(workoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
             }
@@ -435,18 +419,14 @@ class HealthKitManager: ObservableObject {
     func fetchFastestMilePace() {
         // Use smart approach if we have cached workouts
         if !cachedWorkouts.isEmpty {
-            print("[HealthKit] Using smart fastest mile calculation with cached workouts")
             fetchFastestMilePaceSmartly()
             return
         }
         
         // Fallback to full fetch if no cached workouts
         guard isAuthorized else { 
-            print("[HealthKit] Not authorized for fastest mile calculation")
             return 
         }
-        
-        print("[HealthKit] Starting fastest mile pace calculation with split times priority...")
         
         // Get all running and walking workouts
         let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
@@ -460,21 +440,16 @@ class HealthKitManager: ObservableObject {
             sortDescriptors: nil
         ) { [weak self] _, samples, error in
             guard let self = self else { 
-                print("[HealthKit] Self is nil in fastest mile calculation")
                 return 
             }
             
             if let error = error {
-                print("[HealthKit] Error fetching workouts for fastest mile: \(error.localizedDescription)")
                 return
             }
             
             guard let workouts = samples as? [HKWorkout] else {
-                print("[HealthKit] No workouts found for fastest mile calculation")
                 return
             }
-            
-            print("[HealthKit] Found \(workouts.count) workouts to analyze for fastest mile")
             
             var fastestPace: TimeInterval = .infinity
             var processedWorkouts = 0
@@ -489,8 +464,6 @@ class HealthKitManager: ObservableObject {
                 return false
             }
             
-            print("[HealthKit] Processing \(qualifyingWorkouts.count) qualifying workouts for fastest mile")
-            
             // Process each qualifying workout to get the fastest mile time
             for workout in qualifyingWorkouts {
                 dispatchGroup.enter()
@@ -502,7 +475,6 @@ class HealthKitManager: ObservableObject {
                         processedWorkouts += 1
                         if mileTime < fastestPace {
                             fastestPace = mileTime
-                            print("[HealthKit] New fastest mile time found: \(self.formatPace(minutesPerMile: mileTime)) from workout on \(workout.endDate)")
                         }
                     }
                 }
@@ -512,15 +484,11 @@ class HealthKitManager: ObservableObject {
             dispatchGroup.notify(queue: .main) {
                 let calculatedPace = fastestPace == .infinity ? 0.0 : fastestPace
                 
-                print("[HealthKit] Updating fastestMilePace on main thread: \(calculatedPace)")
                 self.fastestMilePace = calculatedPace
                 
                 if calculatedPace > 0 {
-                    print("[HealthKit] Fastest mile pace calculated: \(self.formatPace(minutesPerMile: calculatedPace)) from \(processedWorkouts) qualifying workouts")
                     // Find workouts that achieved this fastest mile pace
                     self.findFastestMileWorkouts()
-                } else {
-                    print("[HealthKit] No qualifying workouts found for fastest mile pace calculation")
                 }
                 
                 // Save to cache after calculating fastest pace
@@ -535,12 +503,10 @@ class HealthKitManager: ObservableObject {
     
     /// Processes workouts grouped by day to calculate statistics and streaks
     private func processWorkoutsByDay(_ workoutsByDay: [Date: [HKWorkout]], mostMilesInDay: Double, mostMilesWorkouts: [HKWorkout]) {
-        print("[HealthKit] Processing workouts by day for statistics...")
-        
         var finalMostMilesInDay = mostMilesInDay
         var finalMostMilesWorkouts = mostMilesWorkouts
         
-        // Calculate most miles in a day WITH DEBUG INFO
+        // Calculate most miles in a day
         for (date, dayWorkouts) in workoutsByDay {
             var totalMilesForDay: Double = 0.0
             
@@ -551,24 +517,9 @@ class HealthKitManager: ObservableObject {
                 }
             }
             
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateStyle = .short
-            
-            // Log any day with unusually high mileage for debugging
-            if totalMilesForDay > 10.0 {
-                print("[HealthKit] ⚠️ HIGH MILEAGE DAY: \(dateFormatter.string(from: date)) = \(String(format: "%.2f", totalMilesForDay)) miles (\(dayWorkouts.count) workouts)")
-                for (index, workout) in dayWorkouts.enumerated() {
-                    if let distance = workout.totalDistance {
-                        let miles = distance.doubleValue(for: HKUnit.mile())
-                        print("[HealthKit]   Workout \(index + 1): \(String(format: "%.2f", miles)) miles at \(workout.endDate)")
-                    }
-                }
-            }
-            
             if totalMilesForDay > finalMostMilesInDay {
                 finalMostMilesInDay = totalMilesForDay
                 finalMostMilesWorkouts = dayWorkouts
-                print("[HealthKit] New record day: \(dateFormatter.string(from: date)) with \(String(format: "%.2f", totalMilesForDay)) miles")
             }
         }
         
@@ -581,11 +532,8 @@ class HealthKitManager: ObservableObject {
             if !self.useLocationBasedTimezone {
                 self.mostMilesInOneDay = finalMostMilesInDay
                 self.mostMilesWorkouts = finalMostMilesWorkouts
-                print("[HealthKit] Updated most miles (device timezone): \(String(format: "%.2f", finalMostMilesInDay))")
             }
             self.retroactiveStreak = streak
-            
-            print("[HealthKit] Final stats - Most miles: \(String(format: "%.2f", finalMostMilesInDay)), Streak: \(streak)")
             
             // Save to cache after processing
             self.saveCachedData()
@@ -659,7 +607,6 @@ class HealthKitManager: ObservableObject {
         let dispatchGroup = DispatchGroup()
         let processQueue = DispatchQueue(label: "com.mileaday.workout-processing", qos: .userInitiated)
         
-        print("[HealthKit] Grouping \(workouts.count) workouts by local time zones...")
         
         // Limit concurrent operations to prevent overwhelming the system
         let maxConcurrentOperations = min(workouts.count, 10)
@@ -687,15 +634,8 @@ class HealthKitManager: ObservableObject {
                             workoutsByDay[localDate]?.append(workout)
                         }
                         
-                        // Log timezone info for debugging
-                        let formatter = DateFormatter()
-                        formatter.dateStyle = .medium
-                        formatter.timeStyle = .short
-                        formatter.timeZone = calendar.timeZone
-                        
-                        print("[HealthKit] Workout on \(workout.endDate) grouped to local date \(formatter.string(from: localDate)) (timezone: \(calendar.timeZone.identifier))")
                     } else {
-                        print("[HealthKit] Warning: Could not create local date for workout on \(workout.endDate)")
+                        // Could not create local date for workout
                     }
                 }
             }
@@ -704,7 +644,6 @@ class HealthKitManager: ObservableObject {
         // Use notify instead of wait to avoid blocking
         dispatchGroup.notify(queue: .main) {
             let debugInfo = "Grouped \(workouts.count) workouts into \(workoutsByDay.count) distinct days using location-aware timezones"
-            print("[HealthKit] \(debugInfo)")
             self.timezoneDebugInfo = debugInfo
             completion(workoutsByDay)
         }
@@ -722,7 +661,6 @@ class HealthKitManager: ObservableObject {
             return workoutDate == today
         }
         
-        print("[HealthKit] Found \(todaysWorkouts.count) workouts that occurred today (using device timezone for safety).")
         completion(todaysWorkouts)
     }
     
@@ -737,7 +675,6 @@ class HealthKitManager: ObservableObject {
             return workoutDate == targetDateStart
         }
         
-        print("[HealthKit] Found \(targetDateWorkouts.count) workouts for target date (using device timezone for safety).")
         completion(targetDateWorkouts)
     }
     
@@ -796,7 +733,6 @@ class HealthKitManager: ObservableObject {
         if workoutHour >= 0 && workoutHour <= 5 {
             // This is a very basic heuristic - in a production app, you'd want more sophisticated logic
             // based on user's travel patterns, app usage history, etc.
-            print("[HealthKit] Workout at unusual hour (\(workoutHour):00), but cannot determine alternate timezone without more data")
         }
         
         return nil // Return nil to use device timezone as final fallback
@@ -890,7 +826,6 @@ class HealthKitManager: ObservableObject {
     
     // Helper to calculate retroactive streak from workout data with timezone awareness
     private func calculateRetroactiveStreak(workoutsByDay: [Date: [HKWorkout]]) -> Int {
-        print("[HealthKit] Calculating streak with timezone-aware adjustments...")
         
         // STEP 1: Apply timezone corrections for ALL workouts (not just recent ones)
         // This ensures that past trips to different timezones (like Hawaii) are properly handled
@@ -907,14 +842,8 @@ class HealthKitManager: ObservableObject {
                 // Check if this workout might have a timezone issue based on timing
                 let workoutHour = calendar.component(.hour, from: workout.endDate)
                 
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateStyle = .short
-                dateFormatter.timeStyle = .short
-                print("[HealthKit] Checking workout on \(dateFormatter.string(from: deviceDate)) at hour \(workoutHour)")
-                
                 // If workout was at unusual hours (late night/early morning), it might be timezone shifted
                 if workoutHour <= 5 || workoutHour >= 22 {
-                    print("[HealthKit] → Unusual hour \(workoutHour), checking for timezone correction...")
                     // Quick timezone check for Hawaii and other common travel destinations
                     let _ = 0.0 // We don't have exact location, but we can infer
                     let _ = 0.0
@@ -933,7 +862,6 @@ class HealthKitManager: ObservableObject {
                             
                             // Check if this results in a more reasonable workout time (6 AM - 10 PM HST)
                             if hawaiiHour >= 6 && hawaiiHour <= 22 && correctedDay != deviceDate {
-                                print("[HealthKit] ✅ Correcting HAWAII workout \(workout.endDate) from \(deviceDate) to \(correctedDay)")
                                 pendingCorrections.append((originalDate: deviceDate, correctedDate: correctedDay, workouts: [workout]))
                             }
                         }
@@ -947,7 +875,6 @@ class HealthKitManager: ObservableObject {
                             
                             // Check if this results in a reasonable workout time (6 AM - 10 PM PST)
                             if pacificHour >= 6 && pacificHour <= 22 && correctedDay != deviceDate {
-                                print("[HealthKit] ✅ Correcting PACIFIC workout \(workout.endDate) from \(deviceDate) to \(correctedDay)")
                                 pendingCorrections.append((originalDate: deviceDate, correctedDate: correctedDay, workouts: [workout]))
                             }
                         }
@@ -956,7 +883,6 @@ class HealthKitManager: ObservableObject {
             }
         }
         
-        print("[HealthKit] Found \(pendingCorrections.count) workouts needing timezone correction")
         
         // Apply corrections SAFELY to prevent workout duplication
         for correction in pendingCorrections {
@@ -969,7 +895,6 @@ class HealthKitManager: ObservableObject {
                 }
                 if originalWorkouts.isEmpty {
                     correctedWorkoutsByDay.removeValue(forKey: correction.originalDate)
-                    print("[HealthKit] Removed empty day: \(correction.originalDate)")
                 } else {
                     correctedWorkoutsByDay[correction.originalDate] = originalWorkouts
                 }
@@ -987,14 +912,10 @@ class HealthKitManager: ObservableObject {
             
             if !existsInCorrectedDate {
                 correctedWorkoutsByDay[correction.correctedDate]?.append(workoutToMove)
-                print("[HealthKit] Moved workout to \(correction.correctedDate)")
-            } else {
-                print("[HealthKit] ⚠️ Workout already exists in corrected date, skipping")
             }
         }
         
         // STEP 2: Calculate streak with corrected data
-        print("[HealthKit] Calculating qualifying workout days from corrected data...")
         let daysWithQualifyingWorkouts = correctedWorkoutsByDay.compactMap { (date, workouts) -> Date? in
             let totalMilesForDay = workouts.reduce(0.0) { total, workout in
                 if let distance = workout.totalDistance {
@@ -1003,20 +924,14 @@ class HealthKitManager: ObservableObject {
                 return total
             }
             
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateStyle = .short
-            
             if totalMilesForDay >= 0.95 {
-                print("[HealthKit] ✅ \(dateFormatter.string(from: date)): \(String(format: "%.2f", totalMilesForDay)) miles (\(workouts.count) workouts)")
                 return date
             } else {
-                print("[HealthKit] ❌ \(dateFormatter.string(from: date)): \(String(format: "%.2f", totalMilesForDay)) miles (not qualifying)")
                 return nil
             }
         }.sorted(by: >)
         
         guard !daysWithQualifyingWorkouts.isEmpty else { 
-            print("[HealthKit] No qualifying workout days found")
             return 0 
         }
         
@@ -1035,26 +950,17 @@ class HealthKitManager: ObservableObject {
             if totalMilesForDay > correctedMostMilesInDay {
                 correctedMostMilesInDay = totalMilesForDay
                 correctedMostMilesWorkouts = workouts
-                
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateStyle = .short
-                print("[HealthKit] New corrected record day: \(dateFormatter.string(from: date)) with \(String(format: "%.2f", totalMilesForDay)) miles")
             }
         }
         
         // Update the mostMilesInOneDay with timezone-corrected value
         DispatchQueue.main.async {
-            print("[HealthKit] 🔄 UPDATING mostMilesInOneDay from \(String(format: "%.2f", self.mostMilesInOneDay)) to \(String(format: "%.2f", correctedMostMilesInDay))")
             self.mostMilesInOneDay = correctedMostMilesInDay
             self.mostMilesWorkouts = correctedMostMilesWorkouts
-            print("[HealthKit] ✅ mostMilesInOneDay updated. Current value: \(String(format: "%.2f", self.mostMilesInOneDay))")
             
             // Update calendar data with timezone-corrected workout grouping
             self.updateCalendarWithTimezoneCorrectedData(correctedWorkoutsByDay: correctedWorkoutsByDay)
         }
-        
-        print("[HealthKit] Found \(daysWithQualifyingWorkouts.count) days with qualifying workouts")
-        print("[HealthKit] Recent qualifying days: \(daysWithQualifyingWorkouts.prefix(5).map { calendar.dateComponents([.month, .day], from: $0) })")
         
         // Calculate current streak
         var currentStreak = 0
@@ -1063,7 +969,6 @@ class HealthKitManager: ObservableObject {
         // Check if today has qualifying workouts
         if daysWithQualifyingWorkouts.contains(today) {
             currentStreak += 1
-            print("[HealthKit] Today (\(today)) has qualifying workout - streak: \(currentStreak)")
         }
         
         // Check previous days
@@ -1072,25 +977,17 @@ class HealthKitManager: ObservableObject {
         while true {
             if daysWithQualifyingWorkouts.contains(checkDate) {
                 currentStreak += 1
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateStyle = .short
-                print("[HealthKit] Day \(dateFormatter.string(from: checkDate)) has qualifying workout - streak: \(currentStreak)")
                 checkDate = calendar.date(byAdding: .day, value: -1, to: checkDate)!
             } else {
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateStyle = .short
-                print("[HealthKit] Day \(dateFormatter.string(from: checkDate)) has NO qualifying workout - streak ends at: \(currentStreak)")
                 break
             }
             
             // Safety break to avoid infinite loops
             if currentStreak > 1000 {
-                print("[HealthKit] Safety break - streak calculation exceeded 1000 days")
                 break
             }
         }
         
-        print("[HealthKit] Final calculated streak: \(currentStreak)")
         return currentStreak
     }
     
@@ -1103,15 +1000,12 @@ class HealthKitManager: ObservableObject {
         fetchMonthlyStepsData()
         
         // Always calculate personal records to populate cachedWorkouts
-        print("[HealthKit] Calculating personal records to populate cache...")
         calculatePersonalRecords()
         
         // Smart caching: only fetch if we need new workout data
         if needsNewWorkoutFetch() {
-            print("[HealthKit] Need to fetch new workout data, starting smart fetch...")
             fetchWorkoutsSmartly()
         } else {
-            print("[HealthKit] Using cached data for historical stats")
             // Data is already loaded from cache in init()
         }
     }
@@ -1120,7 +1014,6 @@ class HealthKitManager: ObservableObject {
     private func performInitialWorkoutFetch() {
         guard isAuthorized else { return }
         
-        print("[HealthKit] Starting initial workout fetch to populate cache...")
         
         // Look for both running and walking workouts
         let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
@@ -1138,16 +1031,12 @@ class HealthKitManager: ObservableObject {
             guard let self = self else { return }
             
             if let error = error {
-                print("[HealthKit] Error fetching initial workouts: \(error.localizedDescription)")
                 return
             }
             
             guard let workouts = samples as? [HKWorkout] else {
-                print("[HealthKit] No workouts found for initial fetch")
                 return
             }
-            
-            print("[HealthKit] Found \(workouts.count) workouts for initial cache")
             
             // Update on main thread to avoid publishing changes from background threads
             DispatchQueue.main.async {
@@ -1161,8 +1050,6 @@ class HealthKitManager: ObservableObject {
                 
                 // Update workout count
                 self.cachedWorkoutCount = workouts.count
-                
-                print("[HealthKit] Initial cache populated with \(workouts.count) workouts")
                 
                 // Now recalculate all stats with the populated cache
                 self.recalculateStatsWithAllWorkouts()
@@ -1179,7 +1066,6 @@ class HealthKitManager: ObservableObject {
         let startDate = getWorkoutFetchStartDate()
         let endDate = Date()
         
-        print("[HealthKit] Smart fetch: Getting workouts from \(startDate?.description ?? "beginning") to \(endDate.description)")
         
         // Look for both running and walking workouts
         let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
@@ -1204,16 +1090,12 @@ class HealthKitManager: ObservableObject {
             guard let self = self else { return }
             
             if let error = error {
-                print("[HealthKit] Error fetching new workouts: \(error.localizedDescription)")
                 return
             }
             
             guard let newWorkouts = samples as? [HKWorkout] else {
-                print("[HealthKit] No new workouts found")
                 return
             }
-            
-            print("[HealthKit] Found \(newWorkouts.count) new workouts since last cache")
             
             // Update cached workout data
             self.updateCachedWorkoutData(with: newWorkouts)
@@ -1237,13 +1119,10 @@ class HealthKitManager: ObservableObject {
         
         // Update workout count
         cachedWorkoutCount = cachedWorkouts.count
-        
-        print("[HealthKit] Updated cached workout data - Total workouts: \(cachedWorkoutCount), Latest: \(cachedLatestWorkoutDate?.description ?? "None")")
     }
     
     /// Recalculates all stats using cached + new workouts
     private func recalculateStatsWithAllWorkouts() {
-        print("[HealthKit] Recalculating stats with \(cachedWorkouts.count) total workouts")
         
         // Calculate total lifetime miles
         var totalMiles: Double = 0.0
@@ -1284,8 +1163,6 @@ class HealthKitManager: ObservableObject {
             self.mostMilesWorkouts = mostMilesWorkouts
             self.retroactiveStreak = streak
             
-            print("[HealthKit] Updated stats - Total miles: \(totalMiles), Most miles: \(mostMilesInDay), Streak: \(streak)")
-            
             // Save to cache
             self.saveCachedData()
             
@@ -1297,27 +1174,20 @@ class HealthKitManager: ObservableObject {
     /// Recalculates streak using current timezone settings
     /// Call this after changing useLocationBasedTimezone to refresh calculations
     func recalculateStreakWithCurrentSettings() {
-        print("[HealthKit] Recalculating streak with location-based timezone: \(useLocationBasedTimezone)")
         timezoneDebugInfo = "Recalculating streak..."
         calculatePersonalRecords()
     }
     
     /// Debug method to analyze specific workout timezone handling
     func debugWorkoutTimezones() {
-        print("[HealthKit] === WORKOUT TIMEZONE DEBUG ===")
-        
         // Look for ANY recent workouts (last 30 days) to debug
         let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
         let now = Date()
         
         getWorkoutsForDateRange(start: thirtyDaysAgo, end: now) { workouts in
-            print("[HealthKit] Found \(workouts.count) workouts in last 30 days")
-            
             if workouts.isEmpty {
-                print("[HealthKit] No recent workouts found. Checking all workouts...")
                 // If no recent workouts, check all workouts
                 self.getAllWorkouts { allWorkouts in
-                    print("[HealthKit] Found \(allWorkouts.count) total workouts")
                     // Just analyze the 5 most recent ones
                     let recentFive = Array(allWorkouts.prefix(5))
                     for workout in recentFive {
@@ -1334,41 +1204,15 @@ class HealthKitManager: ObservableObject {
     
     /// Analyzes a single workout's timezone information
     private func analyzeWorkoutTimezone(_ workout: HKWorkout) {
-        print("[HealthKit] --- Analyzing Workout ---")
-        print("[HealthKit] Raw endDate: \(workout.endDate)")
-        print("[HealthKit] Raw startDate: \(workout.startDate)")
-        
-        // Show in current device timezone
-        let deviceFormatter = DateFormatter()
-        deviceFormatter.dateStyle = .full
-        deviceFormatter.timeStyle = .full
-        deviceFormatter.timeZone = TimeZone.current
-        print("[HealthKit] Device timezone (\(TimeZone.current.identifier)): \(deviceFormatter.string(from: workout.endDate))")
-        
         // Try to determine workout's local timezone
         getLocalCalendar(for: workout) { calendar in
-            let localFormatter = DateFormatter()
-            localFormatter.dateStyle = .full
-            localFormatter.timeStyle = .full
-            localFormatter.timeZone = calendar.timeZone
-            
-            print("[HealthKit] Workout local timezone (\(calendar.timeZone.identifier)): \(localFormatter.string(from: workout.endDate))")
-            
             // Show what day it falls on in each timezone
             let deviceDay = Calendar.current.startOfDay(for: workout.endDate)
             let localDay = calendar.startOfDay(for: workout.endDate)
             
-            let dayFormatter = DateFormatter()
-            dayFormatter.dateStyle = .medium
-            dayFormatter.timeZone = TimeZone.current
-            print("[HealthKit] Device timezone day: \(dayFormatter.string(from: deviceDay))")
-            
-            dayFormatter.timeZone = calendar.timeZone
-            print("[HealthKit] Local timezone day: \(dayFormatter.string(from: localDay))")
-            
             // Check if this affects streak calculation
             if deviceDay != localDay {
-                print("[HealthKit] ⚠️ TIMEZONE MISMATCH! This workout appears on different days depending on timezone")
+                // Timezone mismatch detected
             }
         }
     }
@@ -1389,11 +1233,8 @@ class HealthKitManager: ObservableObject {
     /// Smart fastest mile pace calculation using cached workouts
     func fetchFastestMilePaceSmartly() {
         guard isAuthorized else { 
-            print("[HealthKit] Not authorized for fastest mile calculation")
             return 
         }
-        
-        print("[HealthKit] Starting smart fastest mile pace calculation with \(cachedWorkouts.count) cached workouts...")
         
         var fastestPace: TimeInterval = .infinity
         var processedWorkouts = 0
@@ -1408,7 +1249,6 @@ class HealthKitManager: ObservableObject {
             return false
         }
         
-        print("[HealthKit] Processing \(qualifyingWorkouts.count) qualifying workouts for fastest mile")
         
         // Process each qualifying workout to get the fastest mile time
         for workout in qualifyingWorkouts {
@@ -1417,13 +1257,12 @@ class HealthKitManager: ObservableObject {
             self.calculateFastestMileTime(from: workout) { mileTime in
                 defer { dispatchGroup.leave() }
                 
-                if let mileTime = mileTime {
-                    processedWorkouts += 1
-                    if mileTime < fastestPace {
-                        fastestPace = mileTime
-                        print("[HealthKit] New fastest mile time found: \(self.formatPace(minutesPerMile: mileTime)) from workout on \(workout.endDate)")
+                    if let mileTime = mileTime {
+                        processedWorkouts += 1
+                        if mileTime < fastestPace {
+                            fastestPace = mileTime
+                        }
                     }
-                }
             }
         }
         
@@ -1431,15 +1270,11 @@ class HealthKitManager: ObservableObject {
         dispatchGroup.notify(queue: .main) {
             let calculatedPace = fastestPace == .infinity ? 0.0 : fastestPace
             
-            print("[HealthKit] Updating fastestMilePace on main thread: \(calculatedPace)")
             self.fastestMilePace = calculatedPace
             
             if calculatedPace > 0 {
-                print("[HealthKit] Fastest mile pace calculated: \(self.formatPace(minutesPerMile: calculatedPace)) from \(processedWorkouts) qualifying workouts")
                 // Find workouts that achieved this fastest mile pace
                 self.findFastestMileWorkouts()
-            } else {
-                print("[HealthKit] No qualifying workouts found for fastest mile pace calculation")
             }
             
             // Save to cache after calculating fastest pace
@@ -1451,7 +1286,6 @@ class HealthKitManager: ObservableObject {
     /// Returns split times in minutes per mile, or nil if no splits available
     private func fetchWorkoutSplits(for workout: HKWorkout, completion: @escaping ([TimeInterval]?) -> Void) {
         guard let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else {
-            print("[HealthKit] Distance type not available")
             completion(nil)
             return
         }
@@ -1471,18 +1305,14 @@ class HealthKitManager: ObservableObject {
             }
             
             if let error = error {
-                print("[HealthKit] Error fetching distance samples: \(error.localizedDescription)")
                 completion(nil)
                 return
             }
             
             guard let distanceSamples = results as? [HKQuantitySample], !distanceSamples.isEmpty else {
-                print("[HealthKit] No distance samples found for workout")
                 completion(nil)
                 return
             }
-            
-            print("[HealthKit] Found \(distanceSamples.count) distance samples for workout")
             
             // Calculate mile splits from distance samples
             var mileSplits: [TimeInterval] = []
@@ -1509,7 +1339,6 @@ class HealthKitManager: ObservableObject {
                         // Validate the split time (between 3:00 and 20:00 per mile)
                         if minutesPerMile >= 3.0 && minutesPerMile <= 20.0 {
                             mileSplits.append(minutesPerMile)
-                            print("[HealthKit] Mile split: \(self.formatPace(minutesPerMile: minutesPerMile))")
                         }
                         
                         // Reset for next mile
@@ -1527,12 +1356,10 @@ class HealthKitManager: ObservableObject {
     
     /// Calculates the fastest mile time from split times or falls back to average pace
     func calculateFastestMileTime(from workout: HKWorkout, completion: @escaping (TimeInterval?) -> Void) {
-        print("[HealthKit] Calculating fastest mile time for workout on \(workout.endDate)")
         
         // First try to get split times
         fetchWorkoutSplits(for: workout) { [weak self] splitTimes in
             guard let self = self else {
-                print("[HealthKit] Self is nil in calculateFastestMileTime")
                 completion(nil)
                 return
             }
@@ -1540,10 +1367,8 @@ class HealthKitManager: ObservableObject {
             if let splitTimes = splitTimes, !splitTimes.isEmpty {
                 // Use the fastest split time
                 let fastestSplit = splitTimes.min() ?? 0
-                print("[HealthKit] Using fastest split time: \(self.formatPace(minutesPerMile: fastestSplit)) from \(splitTimes.count) splits")
                 completion(fastestSplit)
             } else {
-                print("[HealthKit] No split times available, falling back to average pace")
                 // Fallback to average pace calculation
                 if let distance = workout.totalDistance {
                     let miles = distance.doubleValue(for: HKUnit.mile())
@@ -1552,18 +1377,14 @@ class HealthKitManager: ObservableObject {
                         
                         // Validate the average pace (between 3:00 and 20:00 per mile)
                         if avgPaceMinutesPerMile >= 3.0 && avgPaceMinutesPerMile <= 20.0 {
-                            print("[HealthKit] Using average pace fallback: \(self.formatPace(minutesPerMile: avgPaceMinutesPerMile))")
                             completion(avgPaceMinutesPerMile)
                         } else {
-                            print("[HealthKit] Average pace \(avgPaceMinutesPerMile) is outside valid range (3.0-20.0)")
                             completion(nil)
                         }
                     } else {
-                        print("[HealthKit] Workout distance \(miles) is below minimum (0.95 miles)")
                         completion(nil)
                     }
                 } else {
-                    print("[HealthKit] No distance data available for workout")
                     completion(nil)
                 }
             }
@@ -1574,24 +1395,18 @@ class HealthKitManager: ObservableObject {
     
     // Calculate current streak stats (total miles, most miles, fastest pace during current streak)
     func calculateCurrentStreakStats() -> (totalMiles: Double, mostMiles: Double, fastestPace: TimeInterval, streakDays: Int) {
-        print("[HealthKit] Calculating current streak stats...")
         
         let currentStreakDays = retroactiveStreak
         guard currentStreakDays > 0 else {
-            print("[HealthKit] No current streak, returning zero stats")
             return (0.0, 0.0, 0.0, 0)
         }
         
         // Check if we can use cached data
         if canUseCurrentStreakCache(streakDays: currentStreakDays) {
-            print("[HealthKit] Using cached current streak stats")
             return cachedCurrentStreakStats
         }
         
-        print("[HealthKit] Cache invalid or streak changed, recalculating...")
-        
         let streakWorkouts = getWorkoutsForCurrentStreak()
-        print("[HealthKit] Found \(streakWorkouts.count) workouts in current streak")
         
         // Calculate total miles and most miles (these are fast)
         let totalMiles = streakWorkouts.reduce(0.0) { total, workout in
@@ -1632,43 +1447,36 @@ class HealthKitManager: ObservableObject {
             self.findCurrentStreakFastestMileWorkouts()
         }
         
-        print("[HealthKit] Current streak stats calculated and cached")
         return newStats
     }
     
     private func canUseCurrentStreakCache(streakDays: Int) -> Bool {
         // If streak days changed, we need to recalculate
         guard cachedCurrentStreakStats.streakDays == streakDays else {
-            print("[HealthKit] Streak days changed (\(cachedCurrentStreakStats.streakDays) -> \(streakDays)), need to recalculate")
             return false
         }
         
         // If cache is older than 1 hour, recalculate
         guard let lastUpdate = lastCurrentStreakStatsUpdate else {
-            print("[HealthKit] No previous current streak cache, need to calculate")
             return false
         }
         
         let oneHourAgo = Date().addingTimeInterval(-3600)
         guard lastUpdate > oneHourAgo else {
-            print("[HealthKit] Current streak cache is stale, need to recalculate")
             return false
         }
         
         // If we don't have the fastest mile workouts cached, we need to recalculate
         guard !currentStreakFastestMileWorkouts.isEmpty else {
-            print("[HealthKit] No cached fastest mile workouts, need to recalculate")
             return false
         }
         
-        print("[HealthKit] Current streak cache is valid")
         return true
     }
     
     private func calculateSmartCurrentStreakFastestPace(streakWorkouts: [HKWorkout]) -> TimeInterval {
         // OPTIMIZATION 1: Check if All Time fastest mile is within current streak
         if findWorkoutWithAllTimeFastestMile(in: streakWorkouts) != nil {
-            print("[HealthKit] All Time fastest mile is within current streak, using cached value: \(formatPace(minutesPerMile: fastestMilePace))")
             return fastestMilePace
         }
         
@@ -1676,13 +1484,11 @@ class HealthKitManager: ObservableObject {
         if cachedCurrentStreakFastestPace > 0 && cachedCurrentStreakStats.streakDays == retroactiveStreak {
             // Check if any new qualifying workouts have been added since last calculation
             if !hasNewQualifyingWorkoutsSinceLastStreakCalculation(streakWorkouts: streakWorkouts) {
-                print("[HealthKit] No new qualifying workouts since last streak calculation, using cached fastest pace: \(formatPace(minutesPerMile: cachedCurrentStreakFastestPace))")
                 return cachedCurrentStreakFastestPace
             }
         }
         
         // FALLBACK: Calculate from scratch using actual split times
-        print("[HealthKit] Calculating fastest mile for current streak from scratch using split times...")
         return calculateFastestMileForWorkouts(streakWorkouts)
     }
     
@@ -1701,7 +1507,6 @@ class HealthKitManager: ObservableObject {
                     let avgPace = workout.duration / 60.0 / miles
                     // If average pace is close to all-time fastest, this workout likely contains it
                     if abs(avgPace - fastestMilePace) <= tolerance {
-                        print("[HealthKit] Found likely workout containing all-time fastest mile: \(workout.endDate)")
                         return workout
                     }
                 }
@@ -1726,7 +1531,6 @@ class HealthKitManager: ObservableObject {
         }
         
         if !newQualifyingWorkouts.isEmpty {
-            print("[HealthKit] Found \(newQualifyingWorkouts.count) new qualifying workouts since last calculation")
             return true
         }
         
@@ -1754,7 +1558,6 @@ class HealthKitManager: ObservableObject {
                 
                 if let mileTime = mileTime, mileTime < fastestPace {
                     fastestPace = mileTime
-                    print("[HealthKit] New fastest mile in current streak: \(self?.formatPace(minutesPerMile: mileTime) ?? "Unknown")")
                 }
             }
         }
@@ -1842,11 +1645,9 @@ class HealthKitManager: ObservableObject {
         let today = calendar.startOfDay(for: Date())
         let streakStartDate = calendar.date(byAdding: .day, value: -retroactiveStreak, to: today) ?? today
         
-        print("[HealthKit] Getting workouts for current streak from \(streakStartDate) to \(today)")
         
         // If cachedWorkouts is empty, we need to fetch workouts directly
         if cachedWorkouts.isEmpty {
-            print("[HealthKit] No cached workouts available, need to fetch streak period workouts directly")
             // For now, return empty array and let the calling code handle this
             // In a production app, you might want to make this async and use a completion handler
             return []
@@ -1858,7 +1659,6 @@ class HealthKitManager: ObservableObject {
             return workoutDay >= streakStartDate && workoutDay <= today
         }
         
-        print("[HealthKit] Found \(streakWorkouts.count) workouts in streak period")
         return streakWorkouts
     }
     
@@ -1874,7 +1674,6 @@ class HealthKitManager: ObservableObject {
         let today = calendar.startOfDay(for: Date())
         let streakStartDate = calendar.date(byAdding: .day, value: -retroactiveStreak, to: today) ?? today
         
-        print("[HealthKit] Fetching workouts for current streak period from \(streakStartDate) to \(today)")
         
         // Look for both running and walking workouts
         let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
@@ -1894,13 +1693,11 @@ class HealthKitManager: ObservableObject {
             sortDescriptors: [sortDescriptor]
         ) { _, samples, error in
             if let error = error {
-                print("[HealthKit] Error fetching streak period workouts: \(error.localizedDescription)")
                 completion([])
                 return
             }
             
             let workouts = samples as? [HKWorkout] ?? []
-            print("[HealthKit] Fetched \(workouts.count) workouts for current streak period")
             completion(workouts)
         }
         
@@ -1932,7 +1729,6 @@ class HealthKitManager: ObservableObject {
                 } else {
                     self.todaysSteps = 0
                 }
-                print("[HealthKit] Today's steps: \(self.todaysSteps)")
             }
         }
         
@@ -1941,7 +1737,6 @@ class HealthKitManager: ObservableObject {
     
     // Update calendar data with timezone-corrected workout grouping
     private func updateCalendarWithTimezoneCorrectedData(correctedWorkoutsByDay: [Date: [HKWorkout]]) {
-        print("[HealthKit] 📅 UPDATING CALENDAR with \(correctedWorkoutsByDay.count) workout days")
         
         // Target Hawaii dates to specifically track
         let calendar = Calendar.current
@@ -1964,14 +1759,12 @@ class HealthKitManager: ObservableObject {
             
             let dateString = dateFormatter.string(from: date)
             if totalMiles >= 0.95 {
-                print("[HealthKit] 📅 Calendar: \(dateString) = \(String(format: "%.2f", totalMiles)) miles ✅")
-                
                 // Special logging for Hawaii target dates
                 if targetDates.contains(dateString) {
-                    print("[HealthKit] 🏝️ HAWAII TARGET DATE FOUND: \(dateString) with \(String(format: "%.2f", totalMiles)) miles!")
+                    // Hawaii target date found
                 }
             } else if targetDates.contains(dateString) {
-                print("[HealthKit] ⚠️ HAWAII TARGET DATE \(dateString) has only \(String(format: "%.2f", totalMiles)) miles")
+                // Hawaii target date not completed
             }
         }
         
@@ -1986,14 +1779,12 @@ class HealthKitManager: ObservableObject {
         self.dailyMileGoals = updatedMileGoals
         let newCount = updatedMileGoals.filter { $0.value }.count
         
-        print("[HealthKit] 📅 Calendar update complete: \(originalCount) → \(newCount) qualifying days")
-        
         // Verify Hawaii target dates are now completed
         for targetDate in targetDates {
             if let date = dateFormatter.date(from: targetDate) {
                 let startOfDay = calendar.startOfDay(for: date)
                 let isCompleted = self.dailyMileGoals[startOfDay] ?? false
-                print("[HealthKit] 🎯 Final check - \(targetDate): \(isCompleted ? "✅ COMPLETED" : "❌ STILL MISSING")")
+                // Hawaii target date status checked
             }
         }
     }

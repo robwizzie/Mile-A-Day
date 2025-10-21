@@ -242,8 +242,6 @@ struct DashboardView: View {
         
         // Force widget updates
         WidgetCenter.shared.reloadAllTimelines()
-        
-        print("[Dashboard] Synced widget data - Miles: \(state.distance), Goal: \(state.goal), Progress: \(state.progress * 100)%, Streak: \(userManager.currentUser.streak)")
     }
     
     private func refreshData() {
@@ -1255,7 +1253,6 @@ struct UnifiedStatsGrid: View {
                 onSave: { newGoal in
                     // Note: This will need to be handled by the parent view
                     // since we don't have access to userManager here
-                    print("[UI] Goal change requested: \(newGoal)")
                 }
             )
             .presentationDetents([.height(300)])
@@ -1271,7 +1268,6 @@ struct UnifiedStatsGrid: View {
             DispatchQueue.main.async {
                 self.statsData = stats
                 self.isCalculating = false
-                print("[UI] Current streak stats updated: \(stats)")
             }
         }
     }

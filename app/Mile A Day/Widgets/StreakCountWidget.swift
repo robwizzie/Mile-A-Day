@@ -36,9 +36,7 @@ struct StreakCountProvider: TimelineProvider {
         
         // Calculate time until reset if not completed
         let timeUntilReset = calculateTimeUntilReset(isCompleted: isGoalCompleted)
-        
-        print("[Streak Widget] Snapshot - Streak: \(streak), Progress: \(progress * 100)%, Completed: \(isGoalCompleted), At Risk: \(isAtRisk)")
-        
+                
         completion(StreakCountEntry(
             date: Date(), 
             streak: streak, 
@@ -63,9 +61,7 @@ struct StreakCountProvider: TimelineProvider {
         
         // Calculate time until reset if not completed
         let timeUntilReset = calculateTimeUntilReset(isCompleted: isGoalCompleted)
-        
-        print("[Streak Widget] Timeline - Streak: \(streak), Progress: \(progress * 100)%, Completed: \(isGoalCompleted), At Risk: \(isAtRisk)")
-        
+                
         let entry = StreakCountEntry(
             date: Date(), 
             streak: streak, 

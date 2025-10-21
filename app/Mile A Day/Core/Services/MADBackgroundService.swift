@@ -43,9 +43,8 @@ final class MADBackgroundService: NSObject, ObservableObject {
         
         do {
             try BGTaskScheduler.shared.submit(request)
-            print("[Background] Scheduled background refresh")
         } catch {
-            print("[Background] Failed to schedule background refresh: \(error)")
+            // Failed to schedule background refresh
         }
     }
     
@@ -59,12 +58,9 @@ final class MADBackgroundService: NSObject, ObservableObject {
         
         healthStore.enableBackgroundDelivery(for: workoutType, frequency: .immediate) { [weak self] success, error in
             if success {
-                print("[Background] HealthKit background delivery enabled")
                 Task { @MainActor in
                     self?.setupWorkoutObserver()
                 }
-            } else {
-                print("[Background] Failed to enable HealthKit background delivery: \(error?.localizedDescription ?? "Unknown error")")
             }
         }
     }
@@ -77,12 +73,9 @@ final class MADBackgroundService: NSObject, ObservableObject {
         let query = HKObserverQuery(sampleType: workoutType, predicate: nil) { [weak self] query, completionHandler, error in
             
             if let error = error {
-                print("[Background] Workout observer error: \(error)")
                 completionHandler()
                 return
             }
-            
-            print("[Background] New workout detected")
             
             // Fetch the latest workout data in background
             Task { [weak self] in
@@ -97,14 +90,11 @@ final class MADBackgroundService: NSObject, ObservableObject {
     // MARK: - Background Processing
     
     private func handleBackgroundRefresh(task: BGAppRefreshTask) {
-        print("[Background] Background refresh task started")
-        
         // Schedule the next background refresh
         scheduleBackgroundRefresh()
         
         // Set expiration handler
         task.expirationHandler = {
-            print("[Background] Background task expired")
             task.setTaskCompleted(success: false)
         }
         
@@ -119,7 +109,6 @@ final class MADBackgroundService: NSObject, ObservableObject {
     private func handleNewWorkoutData() async {
         // Check authorization first
         guard await requestHealthKitAuthorizationIfNeeded() else {
-            print("[Background] HealthKit not authorized")
             return
         }
         
@@ -128,8 +117,6 @@ final class MADBackgroundService: NSObject, ObservableObject {
     
     @MainActor
     private func performBackgroundWork() async {
-        print("[Background] Performing background work...")
-        
         // Fetch latest workout data
         let success = await fetchLatestWorkoutData()
         
@@ -139,10 +126,6 @@ final class MADBackgroundService: NSObject, ObservableObject {
             
             // Update widgets
             updateWidgets()
-            
-            print("[Background] Background work completed successfully")
-        } else {
-            print("[Background] Background work failed")
         }
     }
     
@@ -202,8 +185,6 @@ final class MADBackgroundService: NSObject, ObservableObject {
         
         // Check if user just completed their goal
         if todaysDistance >= goalMiles {
-            print("[Background] Mile goal reached! Distance: \(todaysDistance), Goal: \(goalMiles)")
-            
             // Send completion notification only if conditions are met
             if notificationService.shouldSendCompletionNotification(
                 currentMiles: todaysDistance,
@@ -211,9 +192,6 @@ final class MADBackgroundService: NSObject, ObservableObject {
                 previousMiles: 0.0 // We don't have previous value in background, let the method handle it
             ) {
                 notificationService.sendMileCompletedNotification()
-                print("[Background] Sent completion notification")
-            } else {
-                print("[Background] Skipped completion notification (already sent or conditions not met)")
             }
             
             // Update user completion status
@@ -243,8 +221,6 @@ final class MADBackgroundService: NSObject, ObservableObject {
         // Update widget data
         WidgetDataStore.save(todayMiles: miles, goal: user.goalMiles)
         WidgetDataStore.save(streak: user.streak)
-        
-        print("[Background] Widgets updated - Miles: \(miles), Goal: \(user.goalMiles), Streak: \(user.streak)")
     }
 }
 
