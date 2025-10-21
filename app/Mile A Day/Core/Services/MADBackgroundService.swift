@@ -174,14 +174,18 @@ final class MADBackgroundService: NSObject, ObservableObject {
             // Fetch all workout data
             self.healthManager.fetchAllWorkoutData()
             
-            // Give HealthKit queries time to complete
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            // Give HealthKit queries more time to complete (increased from 2.0 to 3.0 seconds)
+            // This ensures the retroactiveStreak calculation finishes before we read it
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
                 guard let self = self else {
                     continuation.resume(returning: false)
                     return
                 }
                 
+                print("[Background] Updating user with HealthKit data - Streak: \(self.healthManager.retroactiveStreak), Miles: \(self.healthManager.todaysDistance)")
+                
                 // Update user data with new HealthKit data
+                // This now includes saveUserData() call to persist the streak
                 self.userManager.updateUserWithHealthKitData(
                     retroactiveStreak: self.healthManager.retroactiveStreak,
                     currentMiles: self.healthManager.todaysDistance,
@@ -189,6 +193,8 @@ final class MADBackgroundService: NSObject, ObservableObject {
                     fastestPace: self.healthManager.fastestMilePace,
                     mostMilesInDay: self.healthManager.mostMilesInOneDay
                 )
+                
+                print("[Background] User updated and saved - Current streak now: \(self.userManager.currentUser.streak)")
                 
                 continuation.resume(returning: true)
             }

@@ -43,7 +43,10 @@ struct DashboardView: View {
                         didComplete: currentState.isCompleted,
                         onRefresh: refreshData,
                         isRefreshing: isRefreshing,
-                        user: userManager.currentUser
+                        user: userManager.currentUser,
+                        fastestPace: healthManager.fastestMilePace,
+                        mostMiles: healthManager.mostMilesInOneDay,
+                        totalMiles: healthManager.totalLifetimeMiles
                     )
                     
                     // Streak card with simplified progress
@@ -54,7 +57,11 @@ struct DashboardView: View {
                         user: userManager.currentUser,
                         progress: currentState.progress,
                         isGoalCompleted: currentState.isCompleted,
-                        isRefreshing: isRefreshing
+                        isRefreshing: isRefreshing,
+                        currentDistance: currentState.distance,
+                        fastestPace: healthManager.fastestMilePace,
+                        mostMiles: healthManager.mostMilesInOneDay,
+                        totalMiles: healthManager.totalLifetimeMiles
                     )
                     
                     // Stats grid
@@ -110,6 +117,33 @@ struct DashboardView: View {
                 refreshData()
                 // Always sync widget data when the dashboard appears - multiple times for reliability
                 syncWidgetData()
+                
+                // PHASE 1: Listen for workout index completion
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("WorkoutIndexReady"),
+                    object: nil,
+                    queue: .main
+                ) { [weak userManager, weak healthManager] _ in
+                    guard let userManager = userManager, let healthManager = healthManager else { return }
+                    
+                    print("[Dashboard] 🔔 Workout index ready, updating user data and syncing widgets")
+                    
+                    // Update user manager with correct streak from index
+                    userManager.updateUserWithHealthKitData(
+                        retroactiveStreak: healthManager.retroactiveStreak,
+                        currentMiles: healthManager.todaysDistance,
+                        totalMiles: healthManager.totalLifetimeMiles,
+                        fastestPace: healthManager.fastestMilePace,
+                        mostMilesInDay: healthManager.mostMilesInOneDay
+                    )
+                    
+                    // Sync widgets with correct data
+                    WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: 1.0)
+                    WidgetDataStore.save(streak: userManager.currentUser.streak)
+                    WidgetCenter.shared.reloadAllTimelines()
+                    
+                    print("[Dashboard] ✅ User data and widgets updated with streak: \(userManager.currentUser.streak)")
+                }
                 
                 // Ensure fastest mile data is fresh and reliable
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -252,13 +286,23 @@ struct DashboardView: View {
         // Fetch data in order to ensure consistency
         healthManager.fetchAllWorkoutData()
         
-        // Allow time for HealthKit data to process, then sync widgets multiple times for reliability
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        // Allow time for HealthKit data to process
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            // CRITICAL FIX: Update user manager with fresh HealthKit data
+            // This ensures the streak count is properly synced when refreshing
+            userManager.updateUserWithHealthKitData(
+                retroactiveStreak: healthManager.retroactiveStreak,
+                currentMiles: healthManager.todaysDistance,
+                totalMiles: healthManager.totalLifetimeMiles,
+                fastestPace: healthManager.fastestMilePace,
+                mostMilesInDay: healthManager.mostMilesInOneDay
+            )
+            
             syncWidgetData()
         }
         
         // Additional sync after a longer delay to ensure data consistency
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             syncWidgetData()
             isRefreshing = false
         }
@@ -270,12 +314,22 @@ struct DashboardView: View {
             healthManager.fetchAllWorkoutData()
             
             // Allow time for HealthKit data to process
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                // CRITICAL FIX: Update user manager with fresh HealthKit data
+                // This ensures the streak count is properly synced when refreshing
+                userManager.updateUserWithHealthKitData(
+                    retroactiveStreak: healthManager.retroactiveStreak,
+                    currentMiles: healthManager.todaysDistance,
+                    totalMiles: healthManager.totalLifetimeMiles,
+                    fastestPace: healthManager.fastestMilePace,
+                    mostMilesInDay: healthManager.mostMilesInOneDay
+                )
+                
                 syncWidgetData()
             }
             
             // Additional sync for reliability
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                 syncWidgetData()
                 isRefreshing = false
                 continuation.resume()
@@ -503,10 +557,12 @@ struct StreakCard: View {
     let progress: Double
     let isGoalCompleted: Bool
     let isRefreshing: Bool
+    let currentDistance: Double
+    let fastestPace: TimeInterval
+    let mostMiles: Double
+    let totalMiles: Double
     @State private var animateStreak = false
     @State private var showingShareSheet = false
-    @State private var streakImage: UIImage?
-    @State private var progressImage: UIImage?
     @State private var isPressed = false
     
     // Dynamic colors based on streak status
@@ -650,27 +706,37 @@ struct StreakCard: View {
                 )
                 .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
         )
-        .scaleEffect(isPressed ? 0.98 : 1.0)
+        .scaleEffect(isPressed ? 0.97 : 1.0)
         .animation(.easeInOut(duration: 0.1), value: isPressed)
-        .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 50) {
-            generateShareImage(theme: colorScheme)
-        } onPressingChanged: { pressing in
-            withAnimation(.easeInOut(duration: 0.1)) {
-                isPressed = pressing
-            }
-            
-            if pressing {
-                // Light haptic feedback when press starts
-                let impact = UIImpactFeedbackGenerator(style: .light)
-                impact.impactOccurred()
-            } else {
-                // Medium haptic feedback when released/completed
-                let impact = UIImpactFeedbackGenerator(style: .medium)
-                impact.impactOccurred()
-            }
+        .onTapGesture {
+            // Haptic feedback
+            let impact = UIImpactFeedbackGenerator(style: .medium)
+            impact.impactOccurred()
+            showingShareSheet = true
         }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    withAnimation(.easeInOut(duration: 0.1)) {
+                        isPressed = true
+                    }
+                }
+                .onEnded { _ in
+                    withAnimation(.easeInOut(duration: 0.1)) {
+                        isPressed = false
+                    }
+                }
+        )
         .sheet(isPresented: $showingShareSheet) {
-            SharePreviewView(streakImage: streakImage, progressImage: progressImage, title: "Share", initialTab: 0, user: user, progress: progress, isGoalCompleted: isGoalCompleted)
+            EnhancedShareView(
+                user: user,
+                currentDistance: currentDistance,
+                progress: progress,
+                isGoalCompleted: isGoalCompleted,
+                fastestPace: fastestPace,
+                mostMiles: mostMiles,
+                totalMiles: totalMiles
+            )
         }
         .onAppear {
             // Start pulsing animation for streaks at risk (but not while refreshing)
@@ -694,37 +760,6 @@ struct StreakCard: View {
             }
         }
     }
-    
-    @Environment(\.colorScheme) private var colorScheme
-    
-    private func generateShareImage(theme: ColorScheme = .light) {
-        // Generate streak image that matches dashboard exactly
-        let streakRenderer = ImageRenderer(content: StreakCardShareView(
-            streak: streak,
-            isActiveToday: isActiveToday,
-            isAtRisk: isAtRisk,
-            user: user,
-            progress: progress,
-            isGoalCompleted: isGoalCompleted
-        ).environment(\.colorScheme, theme))
-        streakRenderer.scale = 3.0 // High resolution for Instagram
-        
-        // Generate progress image that matches dashboard exactly
-        let progressRenderer = ImageRenderer(content: TodayProgressCardShareView(
-            currentDistance: progress * user.goalMiles,
-            goalDistance: user.goalMiles,
-            progress: progress,
-            didComplete: isGoalCompleted,
-            totalMiles: user.totalMiles
-        ).environment(\.colorScheme, theme))
-        progressRenderer.scale = 3.0 // High resolution for Instagram
-        
-        if let streakImg = streakRenderer.uiImage, let progressImg = progressRenderer.uiImage {
-            streakImage = streakImg
-            progressImage = progressImg
-            showingShareSheet = true
-        }
-    }
 }
 
 struct TodayProgressCard: View {
@@ -735,14 +770,14 @@ struct TodayProgressCard: View {
     let onRefresh: () -> Void
     let isRefreshing: Bool
     let user: User
+    let fastestPace: TimeInterval
+    let mostMiles: Double
+    let totalMiles: Double
     @State private var animateProgress = false
     @State private var animateNumbers = false
     @State private var animateBar = false
     @State private var showingShareSheet = false
-    @State private var streakImage: UIImage?
-    @State private var progressImage: UIImage?
     @State private var isPressed = false
-    @Environment(\.colorScheme) private var colorScheme
     
     var body: some View {
         VStack(spacing: 12) {
@@ -842,7 +877,7 @@ struct TodayProgressCard: View {
                 )
                 .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
         )
-        .scaleEffect(isPressed ? 0.98 : 1.0)
+        .scaleEffect(isPressed ? 0.97 : 1.0)
         .animation(.easeInOut(duration: 0.1), value: isPressed)
         .onAppear {
             withAnimation(.easeInOut(duration: 0.5).delay(0.2)) {
@@ -859,54 +894,35 @@ struct TodayProgressCard: View {
                 }
             }
         }
-        .onLongPressGesture(minimumDuration: 0.5, maximumDistance: 50) {
-            generateShareImage(theme: colorScheme)
-        } onPressingChanged: { pressing in
-            withAnimation(.easeInOut(duration: 0.1)) {
-                isPressed = pressing
-            }
-            
-            if pressing {
-                // Light haptic feedback when press starts
-                let impact = UIImpactFeedbackGenerator(style: .light)
-                impact.impactOccurred()
-            } else {
-                // Medium haptic feedback when released/completed
-                let impact = UIImpactFeedbackGenerator(style: .medium)
-                impact.impactOccurred()
-            }
-        }
-        .sheet(isPresented: $showingShareSheet) {
-            SharePreviewView(streakImage: streakImage, progressImage: progressImage, title: "Share", initialTab: 1, user: user, progress: progress, isGoalCompleted: didComplete)
-        }
-    }
-    
-    private func generateShareImage(theme: ColorScheme = .light) {
-        // Generate progress image that matches dashboard exactly
-        let progressRenderer = ImageRenderer(content: TodayProgressCardShareView(
-            currentDistance: currentDistance,
-            goalDistance: goalDistance,
-            progress: progress,
-            didComplete: didComplete,
-            totalMiles: user.totalMiles
-        ).environment(\.colorScheme, theme))
-        progressRenderer.scale = 3.0 // High resolution for Instagram
-        
-        // Generate streak image that matches dashboard exactly
-        let streakRenderer = ImageRenderer(content: StreakCardShareView(
-            streak: user.streak,
-            isActiveToday: user.isStreakActiveToday,
-            isAtRisk: user.isStreakAtRisk,
-            user: user,
-            progress: progress,
-            isGoalCompleted: didComplete
-        ).environment(\.colorScheme, theme))
-        streakRenderer.scale = 3.0 // High resolution for Instagram
-        
-        if let progressImg = progressRenderer.uiImage, let streakImg = streakRenderer.uiImage {
-            progressImage = progressImg
-            streakImage = streakImg
+        .onTapGesture {
+            // Haptic feedback
+            let impact = UIImpactFeedbackGenerator(style: .medium)
+            impact.impactOccurred()
             showingShareSheet = true
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    withAnimation(.easeInOut(duration: 0.1)) {
+                        isPressed = true
+                    }
+                }
+                .onEnded { _ in
+                    withAnimation(.easeInOut(duration: 0.1)) {
+                        isPressed = false
+                    }
+                }
+        )
+        .sheet(isPresented: $showingShareSheet) {
+            EnhancedShareView(
+                user: user,
+                currentDistance: currentDistance,
+                progress: progress,
+                isGoalCompleted: didComplete,
+                fastestPace: fastestPace,
+                mostMiles: mostMiles,
+                totalMiles: totalMiles
+            )
         }
     }
 }
@@ -1422,6 +1438,17 @@ struct WorkoutDetailView: View {
     @State private var calories: Double?
     @State private var splitTimes: [TimeInterval]?
     @State private var isLoadingSplits = false
+    @EnvironmentObject var healthManager: HealthKitManager
+    
+    // Timezone-corrected times from index
+    private var correctedEndTime: Date {
+        healthManager.getCorrectedLocalTime(for: workout)
+    }
+    
+    private var correctedStartTime: Date {
+        let endTime = correctedEndTime
+        return endTime.addingTimeInterval(-workout.duration)
+    }
     
     var body: some View {
         NavigationStack {
@@ -1433,7 +1460,7 @@ struct WorkoutDetailView: View {
                             .font(.headline)
                             .foregroundColor(.secondary)
                         
-                        Text(workout.formattedDate)
+                        Text(correctedEndTime.formattedDate)
                             .font(.title)
                             .fontWeight(.bold)
                         
@@ -1463,8 +1490,9 @@ struct WorkoutDetailView: View {
                         Text("Workout Details")
                             .font(.headline)
                         
-                        DetailRow(title: "Start Time", value: workout.startDate.formattedTime)
-                        DetailRow(title: "End Time", value: workout.endDate.formattedTime)
+                        // Use timezone-corrected times from index
+                        DetailRow(title: "Start Time", value: correctedStartTime.formattedTime)
+                        DetailRow(title: "End Time", value: correctedEndTime.formattedTime)
                         DetailRow(title: "Total Time", value: workout.formattedDuration)
                         DetailRow(title: "Distance", value: workout.formattedDistance)
                         DetailRow(title: "Average Pace", value: workout.pace)
