@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import userRoutes from './routes/usersRoutes.js';
 import friendRoutes from './routes/friendshipsRoutes.js';
 import authRoutes from './routes/authRoutes.js';
+import devRoutes from './routes/devRoutes.js';
 import { authenticateToken } from './middleware/auth.js';
 import { webcrypto } from 'node:crypto';
 
@@ -26,6 +27,7 @@ app.get('/test-signin.html', (req, res) => {
 });
 
 app.use('/auth', authRoutes);
+app.use('/dev', devRoutes);
 
 app.use(authenticateToken);
 app.use('/users', userRoutes);

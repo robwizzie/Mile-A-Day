@@ -41,7 +41,8 @@ export function requireOwnership(req: AuthenticatedRequest, res: Response, next:
 
 export function requireSelfAccess(paramName: string = 'userId') {
 	return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-		const resourceUserId = req.params[paramName];
+		const keys = { ...req.query, ...req.body, ...req.params };
+		const resourceUserId = keys[paramName];
 
 		if (!req.userId) {
 			return res.status(401).json({ error: 'Authentication required' });
