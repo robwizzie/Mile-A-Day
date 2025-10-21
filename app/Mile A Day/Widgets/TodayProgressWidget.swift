@@ -22,7 +22,6 @@ struct TodayProgressProvider: TimelineProvider {
 
     func getSnapshot(in context: Context, completion: @escaping (TodayProgressEntry) -> Void) {
         let data = WidgetDataStore.load()
-        print("[Widget] Snapshot - Miles: \(data.miles), Goal: \(data.goal), Progress: \(data.progress * 100)%")
         completion(TodayProgressEntry(
             date: Date(), 
             milesCompleted: data.miles, 

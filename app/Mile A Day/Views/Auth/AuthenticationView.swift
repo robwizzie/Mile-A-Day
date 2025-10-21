@@ -222,13 +222,10 @@ struct AuthenticationView: View {
     private func handleAppleSignIn() {
         Task {
             do {
-                print("Starting Apple Sign In...")
                 let (profile, backendResponse) = try await appleSignInManager.signIn()
-                print("Apple Sign In successful, updating user manager...")
                 
                 // Update user manager with Apple authentication data
                 userManager.handleAppleSignIn(profile: profile, backendResponse: backendResponse)
-                print("User manager updated successfully")
                 
                 await MainActor.run {
                     withAnimation(MADTheme.Animation.standard) {
@@ -236,7 +233,6 @@ struct AuthenticationView: View {
                     }
                 }
             } catch {
-                print("Apple Sign In failed with error: \(error)")
                 await MainActor.run {
                     appleSignInManager.errorMessage = error.localizedDescription
                     appleSignInManager.isLoading = false

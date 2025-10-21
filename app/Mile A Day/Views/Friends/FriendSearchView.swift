@@ -249,27 +249,23 @@ struct FriendSearchView: View {
     private func performSearch() {
         guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        print("[FriendSearchView] 🔍 Starting search for: '\(trimmedSearch)'")
+        
         isLoading = true
         errorMessage = nil
         
         Task {
             do {
-                // First try exact match
-                do {
-                    let user = try await friendService.searchUser(byUsername: searchText.trimmingCharacters(in: .whitespacesAndNewlines))
-                    await MainActor.run {
-                        searchResults = [user]
-                        isLoading = false
-                    }
-                } catch {
-                    // If exact match fails, try partial search
-                    let users = try await friendService.searchUsersByPartialUsername(searchText.trimmingCharacters(in: .whitespacesAndNewlines))
-                    await MainActor.run {
-                        searchResults = users
-                        isLoading = false
-                    }
+                let users = try await friendService.searchUsers(byUsername: trimmedSearch)
+                print("[FriendSearchView] ✅ Search successful, found \(users.count) user(s)")
+                await MainActor.run {
+                    searchResults = users
+                    isLoading = false
                 }
             } catch {
+                print("[FriendSearchView] ❌ Search failed with error: \(error)")
+                print("[FriendSearchView] 📝 Error localized description: \(error.localizedDescription)")
                 await MainActor.run {
                     errorMessage = error.localizedDescription
                     searchResults = []

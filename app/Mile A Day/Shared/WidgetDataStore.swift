@@ -11,7 +11,6 @@ struct WidgetDataStore {
     /// Ensures progress never exceeds 100% and maintains accurate sync
     static func save(todayMiles: Double, goal: Double) {
         guard let defaults = UserDefaults(suiteName: suiteName) else { 
-            print("[WidgetDataStore] ERROR: Could not access App Group UserDefaults")
             return 
         }
         
@@ -21,8 +20,6 @@ struct WidgetDataStore {
         // Calculate progress and cap at 100%
         let progress = min(todayMiles / safeGoal, 1.0)
         let isCompleted = todayMiles >= safeGoal
-        
-        print("[WidgetDataStore] Saving - Miles: \(todayMiles), Goal: \(safeGoal), Progress: \(progress * 100)%, Completed: \(isCompleted)")
         
         // Save all values with proper synchronization
         defaults.set(todayMiles, forKey: milesKey)
@@ -48,7 +45,6 @@ struct WidgetDataStore {
     /// Loads today's progress data
     static func load() -> (miles: Double, goal: Double, streakCompleted: Bool, progress: Double) {
         guard let defaults = UserDefaults(suiteName: suiteName) else {
-            print("[WidgetDataStore] Failed to access App Group UserDefaults")
             return (0, 1, false, 0)
         }
         
@@ -57,18 +53,15 @@ struct WidgetDataStore {
         let streakCompleted = defaults.bool(forKey: "streak_completed_today")
         let progress = defaults.double(forKey: "current_progress")
         
-        print("[WidgetDataStore] Loading - Miles: \(miles), Goal: \(goal), Progress: \(progress * 100)%, Completed: \(streakCompleted)")
         return (miles, goal, streakCompleted, progress)
     }
 
     // MARK: - Streak helpers
     static func save(streak: Int) {
         guard let defaults = UserDefaults(suiteName: suiteName) else { 
-            print("[WidgetDataStore] ERROR: Could not access App Group UserDefaults for streak")
             return 
         }
         
-        print("[WidgetDataStore] Saving streak: \(streak)")
         defaults.set(streak, forKey: streakKey)
         defaults.synchronize()
         
@@ -85,7 +78,6 @@ struct WidgetDataStore {
 
     static func loadStreak() -> Int {
         guard let defaults = UserDefaults(suiteName: suiteName) else {
-            print("[WidgetDataStore] Failed to access App Group UserDefaults for streak")
             return 0
         }
         return defaults.integer(forKey: streakKey)

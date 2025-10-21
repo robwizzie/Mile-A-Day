@@ -274,29 +274,19 @@ class UsernameService {
     
     static func checkAvailability(_ username: String) async throws -> Bool {
         guard let url = URL(string: "\(backendURL)/users/check-username?username=\(username)") else {
-            print("❌ UsernameService: Invalid URL")
             throw UsernameError.invalidURL
         }
-        
-        print("🔍 UsernameService: Checking availability for '\(username)'")
         
         do {
             let (data, response) = try await URLSession.shared.data(from: url)
             
             guard let httpResponse = response as? HTTPURLResponse else {
-                print("❌ UsernameService: Invalid response type")
                 throw UsernameError.networkError
             }
             
-            print("📡 UsernameService: Response status: \(httpResponse.statusCode)")
-            
             guard httpResponse.statusCode == 200 else {
-                let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-                print("❌ UsernameService: Server error \(httpResponse.statusCode): \(errorMessage)")
-                
                 // If it's a 404, it means username is available (not found)
                 if httpResponse.statusCode == 404 {
-                    print("✅ UsernameService: 404 means username is available")
                     return true
                 }
                 
@@ -304,10 +294,8 @@ class UsernameService {
             }
             
             let result = try JSONDecoder().decode(UsernameAvailabilityResponse.self, from: data)
-            print("✅ UsernameService: Username '\(username)' available: \(result.available)")
             return result.available
         } catch {
-            print("❌ UsernameService: Network error: \(error.localizedDescription)")
             throw error
         }
     }
@@ -364,7 +352,7 @@ enum UsernameError: Error, LocalizedError {
 #Preview {
     UsernameInputView(
         username: .constant(""),
-        onSubmit: { print("Submit") },
-        onCancel: { print("Cancel") }
+        onSubmit: { },
+        onCancel: { }
     )
 }

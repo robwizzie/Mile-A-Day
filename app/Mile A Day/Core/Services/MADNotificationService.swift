@@ -50,7 +50,6 @@ final class MADNotificationService: NSObject, ObservableObject {
             authorizationStatus = granted ? .authorized : .denied
         } catch {
             authorizationStatus = .denied
-            print("[Notifications] Authorization request failed: \(error)")
         }
     }
 
@@ -69,7 +68,6 @@ final class MADNotificationService: NSObject, ObservableObject {
         // Check if we already sent a notification today
         if let lastDate = lastCompletionNotificationDate,
            Calendar.current.isDate(lastDate, inSameDayAs: Date()) {
-            print("[Notifications] Already sent completion notification today, skipping")
             return
         }
         
@@ -83,8 +81,6 @@ final class MADNotificationService: NSObject, ObservableObject {
         // Track that we sent a notification today
         lastCompletionNotificationDate = Date()
         userDefaults.set(lastCompletionNotificationDate, forKey: lastNotificationKey)
-        
-        print("[Notifications] Sent mile completion notification")
     }
 
     /// Sends a local push announcing a friend's mile completion.
@@ -108,8 +104,6 @@ final class MADNotificationService: NSObject, ObservableObject {
         // Remove any pending daily reminder first
         center.removePendingNotificationRequests(withIdentifiers: [Identifier.dailyReminder])
         
-        print("[Notifications] Updating daily reminder - Completed: \(isCompleted), Miles: \(currentMiles)/\(goalMiles)")
-        
         var dateComponents = DateComponents()
         dateComponents.hour = hour
         dateComponents.calendar = Calendar.current
@@ -123,12 +117,10 @@ final class MADNotificationService: NSObject, ObservableObject {
             // Congratulatory message - only schedule for tomorrow and beyond
             content.title = "Way to go!"
             content.body = "You crushed your mile today. See you tomorrow at the start line!"
-            print("[Notifications] Scheduled congratulatory daily reminder")
         } else {
             // Motivational reminder - only fires if not completed
             content.title = "Mile still waiting…"
             content.body = "Don't forget to log your daily mile! Lace up and get moving."
-            print("[Notifications] Scheduled motivational daily reminder")
         }
 
         schedule(content: content, trigger: .calendar(trigger), identifier: Identifier.dailyReminder)
@@ -160,8 +152,6 @@ final class MADNotificationService: NSObject, ObservableObject {
         
         let shouldSend = justCompleted && !alreadySentToday
         
-        print("[Notifications] Should send completion? \(shouldSend) (current: \(currentMiles), goal: \(goalMiles), previous: \(previousMiles), sent today: \(alreadySentToday))")
-        
         return shouldSend
     }
     
@@ -171,7 +161,6 @@ final class MADNotificationService: NSObject, ObservableObject {
            !Calendar.current.isDate(lastDate, inSameDayAs: Date()) {
             lastCompletionNotificationDate = nil
             userDefaults.removeObject(forKey: lastNotificationKey)
-            print("[Notifications] Reset daily notification tracking for new day")
         }
     }
 
@@ -197,9 +186,7 @@ final class MADNotificationService: NSObject, ObservableObject {
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: notificationTrigger)
 
         center.add(request) { error in
-            if let error {
-                print("[Notifications] Failed to schedule: \(error)")
-            }
+            // Notification scheduling completed
         }
     }
 }
@@ -229,7 +216,6 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             let isCompleted = widgetData.miles >= widgetData.goal
             
             if isCompleted {
-                print("[Notifications] Suppressing daily reminder - goal already completed")
                 return [] // Don't show notification
             }
         }

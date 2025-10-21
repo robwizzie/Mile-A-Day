@@ -168,16 +168,8 @@ class AppleSignInManager: NSObject, ObservableObject {
 
         do {
             let backendResponse = try JSONDecoder().decode(BackendAuthResponse.self, from: data)
-            print("✅ Successfully decoded backend response")
             return backendResponse
         } catch {
-            print("❌ Failed to decode backend response:")
-            print("❌ Error: \(error)")
-            if let responseString = String(data: data, encoding: .utf8) {
-                print("❌ Response body: \(responseString)")
-            } else {
-                print("❌ Could not convert response to string")
-            }
             throw AppleSignInError.decodingError
         }
     }
