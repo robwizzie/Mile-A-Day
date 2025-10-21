@@ -145,6 +145,7 @@ extension HKWorkout {
         
         // For the average pace display, we use the workout's total duration and distance
         // This gives us the average pace for the entire workout, which is appropriate for workout summaries
+        // NOTE: For fastest mile calculations, use HealthKitManager.getWorkoutSplitTimes() to get per-mile splits
         let minutesPerMile = duration / 60.0 / miles
         
         guard minutesPerMile > 0 && minutesPerMile < 60 else { return "N/A" } // Sanity check

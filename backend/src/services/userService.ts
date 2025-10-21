@@ -57,3 +57,32 @@ export async function createUser({ email, apple_sub }: { email: string; apple_su
 		email
 	};
 }
+
+export async function updateUsername({ userId, username }: { userId: string; username: string }) {
+	const existingUser = await db.query('SELECT user_id FROM users WHERE username = $1 AND user_id != $2', [username, userId]);
+
+	if (existingUser.length > 0) {
+		throw new Error('Username already taken');
+	}
+
+	await db.query('UPDATE users SET username = $1 WHERE user_id = $2', [username, userId]);
+
+	return { success: true };
+}
+
+export async function updateBio({ userId, bio }: { userId: string; bio: string }) {
+	await db.query('UPDATE users SET bio = $1 WHERE user_id = $2', [bio, userId]);
+
+	return { success: true };
+}
+
+export async function updateProfileImage({ userId, profileImageUrl }: { userId: string; profileImageUrl: string }) {
+	await db.query('UPDATE users SET profile_image_url = $1 WHERE user_id = $2', [profileImageUrl, userId]);
+
+	return { success: true };
+}
+
+export async function checkUsernameAvailability(username: string): Promise<boolean> {
+	const existingUser = await db.query('SELECT user_id FROM users WHERE username = $1', [username]);
+	return existingUser.length === 0;
+}

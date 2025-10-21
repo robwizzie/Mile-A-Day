@@ -15,6 +15,7 @@ class AppleSignInManager: NSObject, ObservableObject {
         let id: String
         let email: String?
         let fullName: PersonNameComponents?
+        let profileImage: UIImage?
     }
 
     struct BackendAuthResponse: Codable {
@@ -24,12 +25,11 @@ class AppleSignInManager: NSObject, ObservableObject {
 
     struct BackendUser: Codable {
         let user_id: String
-        let username: String
+        let username: String?
         let email: String
         let first_name: String?
         let last_name: String?
         let apple_id: String?
-        let auth_provider: String?
     }
 
     func signIn() async throws -> (AppleUserProfile, BackendAuthResponse) {
@@ -46,16 +46,20 @@ class AppleSignInManager: NSObject, ObservableObject {
             group.addTask {
                 try await withCheckedThrowingContinuation { continuation in
                     let controller = ASAuthorizationController(authorizationRequests: [request])
-                    let delegate = AppleSignInDelegate { [weak self] result in
-                        self?.currentDelegate = nil  // Clear the delegate reference
-                        continuation.resume(with: result)
-                    }
+                    
+                    // Create delegate on main actor
+                    Task { @MainActor in
+                        let delegate = AppleSignInDelegate { [weak self] result in
+                            self?.currentDelegate = nil  // Clear the delegate reference
+                            continuation.resume(with: result)
+                        }
 
-                    // Retain the delegate to prevent it from being deallocated
-                    self.currentDelegate = delegate
-                    controller.delegate = delegate
-                    controller.presentationContextProvider = delegate
-                    controller.performRequests()
+                        // Retain the delegate to prevent it from being deallocated
+                        self.currentDelegate = delegate
+                        controller.delegate = delegate
+                        controller.presentationContextProvider = delegate
+                        controller.performRequests()
+                    }
                 }
             }
 
@@ -73,10 +77,12 @@ class AppleSignInManager: NSObject, ObservableObject {
             throw AppleSignInError.invalidCredential
         }
 
+        // Apple doesn't provide profile images through Sign in with Apple
         let profile = AppleUserProfile(
             id: appleIDCredential.user,
             email: appleIDCredential.email,
-            fullName: appleIDCredential.fullName
+            fullName: appleIDCredential.fullName,
+            profileImage: nil
         )
 
         // Send to backend
@@ -110,10 +116,28 @@ class AppleSignInManager: NSObject, ObservableObject {
                 "Cannot connect to backend server: \(error.localizedDescription)")
         }
 
+        // Convert identity token from Data to String
+        let identityTokenString: String
+        if let identityTokenData = credential.identityToken,
+           let tokenString = String(data: identityTokenData, encoding: .utf8) {
+            identityTokenString = tokenString
+        } else {
+            throw AppleSignInError.backendError("Failed to convert identity token to string")
+        }
+        
+        // Convert authorization code from Data to String
+        let authorizationCodeString: String
+        if let authCodeData = credential.authorizationCode,
+           let codeString = String(data: authCodeData, encoding: .utf8) {
+            authorizationCodeString = codeString
+        } else {
+            throw AppleSignInError.backendError("Failed to convert authorization code to string")
+        }
+        
         let authData = [
             "user_id": profile.id,
-            "identity_token": credential.identityToken?.base64EncodedString() ?? "",
-            "authorization_code": credential.authorizationCode?.base64EncodedString() ?? "",
+            "identity_token": identityTokenString,
+            "authorization_code": authorizationCodeString,
             "email": profile.email ?? "",
         ]
 
@@ -144,8 +168,16 @@ class AppleSignInManager: NSObject, ObservableObject {
 
         do {
             let backendResponse = try JSONDecoder().decode(BackendAuthResponse.self, from: data)
+            print("✅ Successfully decoded backend response")
             return backendResponse
         } catch {
+            print("❌ Failed to decode backend response:")
+            print("❌ Error: \(error)")
+            if let responseString = String(data: data, encoding: .utf8) {
+                print("❌ Response body: \(responseString)")
+            } else {
+                print("❌ Could not convert response to string")
+            }
             throw AppleSignInError.decodingError
         }
     }
@@ -187,6 +219,7 @@ class AppleSignInManager: NSObject, ObservableObject {
 }
 
 // Delegate to handle Apple Sign In callbacks
+@MainActor
 class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate,
     ASAuthorizationControllerPresentationContextProviding
 {

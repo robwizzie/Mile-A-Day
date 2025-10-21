@@ -4,7 +4,9 @@ export type User = {
 	email: string;
 	first_name?: string;
 	last_name?: string;
-	apple_id?: string; // Apple's unique user identifier
+	bio?: string;
+	profile_image_url?: string;
+	apple_id?: string;
 	auth_provider?: 'apple' | 'google' | 'guest';
 };
 
@@ -15,7 +17,7 @@ export type Friendship = {
 };
 
 export type AppleAuthRequest = {
-	user_id: string; // Apple's user ID
+	user_id: string;
 	identity_token: string;
 	authorization_code: string;
 	email?: string;
@@ -24,5 +26,5 @@ export type AppleAuthRequest = {
 
 export type AppleAuthResponse = {
 	user: User;
-	token: string; // Your app's JWT token
+	token: string;
 };

@@ -28,11 +28,20 @@ struct RootView: View {
                         removal: .move(edge: .top).combined(with: .opacity)
                     ))
                 
+            case .usernameSetup:
+                UsernameSetupView()
+                    .environmentObject(userManager)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+                
             case .main:
                 MainTabView()
                     .environmentObject(healthManager)
                     .environmentObject(userManager)
                     .environmentObject(notificationService)
+                    .environment(\.appStateManager, appStateManager)
                     .transition(.asymmetric(
                         insertion: .scale.combined(with: .opacity),
                         removal: .opacity

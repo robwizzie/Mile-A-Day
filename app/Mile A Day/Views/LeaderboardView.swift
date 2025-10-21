@@ -125,7 +125,7 @@ struct LeaderboardList: View {
             if let user = selectedUser {
                 switch valueType {
                 case .fastestPace:
-                    FastestPaceDetailView(pace: user.fastestMilePace)
+                    FastestPaceDetailView(healthManager: healthManager)
                 case .mostMilesInDay:
                     MostMilesDetailView(miles: user.mostMilesInOneDay, healthManager: healthManager)
                 default:
