@@ -117,30 +117,40 @@ struct UserProfileDetailView: View {
     
     // MARK: - Helper Methods
     private func loadUserData() {
-        // For now, we'll simulate loading stats and badges
-        // In a real implementation, you'd make API calls to get this data
         isLoadingStats = true
-        
-        // Load data immediately without delay for better UX
+
         Task {
-            // Simulate a brief loading state
-            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-            
-            await MainActor.run {
-                // Mock data - replace with actual API calls
-                userStats = UserStats(
-                    streak: 15,
-                    totalMiles: 45.2,
-                    fastestMilePace: 7.5,
-                    mostMilesInOneDay: 3.2
-                )
-                
-                userBadges = [
-                    Badge(id: "streak_7", name: "Week Warrior", description: "7 day streak!", dateAwarded: Date()),
-                    Badge(id: "miles_50", name: "50 Mile Club", description: "Ran 50 total miles!", dateAwarded: Date())
-                ]
-                
-                isLoadingStats = false
+            do {
+                // Fetch real user stats from backend
+                let response = try await StatsService.shared.fetchUserStats(userId: user.user_id)
+
+                await MainActor.run {
+                    // Convert backend stats to UserStats model
+                    userStats = UserStats(from: response.stats)
+
+                    // Convert backend badges to Badge model
+                    let dateFormatter = ISO8601DateFormatter()
+                    userBadges = response.badges.map { badgeData in
+                        Badge(
+                            id: badgeData.badge_key,
+                            name: badgeData.name,
+                            description: badgeData.description,
+                            dateAwarded: dateFormatter.date(from: badgeData.date_awarded) ?? Date(),
+                            isNew: badgeData.is_new,
+                            isLocked: false
+                        )
+                    }
+
+                    isLoadingStats = false
+                }
+            } catch {
+                print("Error loading user stats: \(error)")
+                await MainActor.run {
+                    // On error, show empty stats
+                    userStats = nil
+                    userBadges = []
+                    isLoadingStats = false
+                }
             }
         }
     }

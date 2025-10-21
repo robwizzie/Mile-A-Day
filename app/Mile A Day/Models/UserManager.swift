@@ -151,13 +151,16 @@ class UserManager: ObservableObject {
             mostMilesInDay: mostMilesInDay,
             date: Date()
         )
-        
+
         // Check for retroactive badges after updating stats
         checkForRetroactiveBadges()
-        
+
         // CRITICAL FIX: Save data to persist streak update
         // Without this, streak updates are only in memory and revert when app reopens
         saveUserData()
+
+        // Sync stats to backend if user is authenticated
+        syncStatsToBackend()
     }
     
     // Legacy method for backward compatibility
@@ -231,5 +234,23 @@ class UserManager: ObservableObject {
         // Force a badge check with current stats
         currentUser.checkForMilestoneBadges()
         saveUserData()
+    }
+
+    // Sync stats and badges to backend
+    private func syncStatsToBackend() {
+        guard let userId = currentUser.backendUserId else {
+            // User not authenticated, skip sync
+            return
+        }
+
+        Task {
+            do {
+                try await StatsService.shared.syncAllUserData(userId: userId, user: currentUser)
+                print("Successfully synced user stats to backend")
+            } catch {
+                print("Failed to sync stats to backend: \(error)")
+                // Don't show error to user - sync will retry next time stats update
+            }
+        }
     }
 } 
