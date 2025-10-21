@@ -154,6 +154,10 @@ class UserManager: ObservableObject {
         
         // Check for retroactive badges after updating stats
         checkForRetroactiveBadges()
+        
+        // CRITICAL FIX: Save data to persist streak update
+        // Without this, streak updates are only in memory and revert when app reopens
+        saveUserData()
     }
     
     // Legacy method for backward compatibility

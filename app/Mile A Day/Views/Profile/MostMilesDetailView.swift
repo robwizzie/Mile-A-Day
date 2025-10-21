@@ -193,6 +193,13 @@ struct StatBox: View {
 // Workout row component
 struct WorkoutRow: View {
     let workout: HKWorkout
+    @EnvironmentObject var healthManager: HealthKitManager
+    
+    // Timezone-corrected time for display
+    private var correctedStartTime: Date {
+        let correctedEndTime = healthManager.getCorrectedLocalTime(for: workout)
+        return correctedEndTime.addingTimeInterval(-workout.duration)
+    }
     
     private var workoutDistance: String {
         if let distance = workout.totalDistance {
@@ -243,7 +250,7 @@ struct WorkoutRow: View {
             
             Spacer()
             
-            Text(DateFormatter.shortTime.string(from: workout.startDate))
+            Text(DateFormatter.shortTime.string(from: correctedStartTime))
                 .font(MADTheme.Typography.caption)
                 .foregroundColor(MADTheme.Colors.secondaryText)
         }
