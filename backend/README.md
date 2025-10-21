@@ -47,13 +47,54 @@ Whenever an error occurs, the API will respond with an error code as well as an 
 
 ## 🔐 Authentication
 
-All protected endpoints require authentication via a JWT Bearer token in the Authorization header:
+Most endpoints require authentication via a JWT Bearer token in the Authorization header:
 
 ```
 Authorization: Bearer <your_jwt_token>
 ```
 
-Obtain an authentication token using the Sign In endpoint below.
+If you attempt to access a resource you don't own, you'll receive a 403 error:
+
+```json
+{
+	"error": "Access denied - can only access your own data"
+}
+```
+
+### Development Testing
+
+For development and staging environments, you can generate test tokens without Apple Sign-In:
+
+**POST** `/dev/test-token`
+
+#### Parameters
+
+| Name   | Type   | Description                       | Required |
+| :----- | :----- | :-------------------------------- | :------: |
+| userId | String | The user ID to generate token for |    ✅    |
+
+#### Example
+
+```bash
+curl --location 'http://localhost:3000/dev/test-token' \
+--header 'Content-Type: application/json' \
+--data '{
+    "userId": "peter"
+}'
+```
+
+#### Response
+
+```json
+{
+	"token": "eyJhbGciOiJIUzI1NiJ9...",
+	"userId": "peter",
+	"expiresIn": "30d",
+	"environment": "development"
+}
+```
+
+**Note:** This endpoint is only available in development and staging environments. It will return a 403 error in production.
 
 <a name="sign-in"></a>
 
@@ -65,12 +106,12 @@ Authenticates users via Apple Sign-In and returns a JWT token for accessing prot
 
 #### Parameters
 
-| Name               | Type   | Description                                    | Required |
-| :----------------- | :----- | :--------------------------------------------- | :------: |
-| user_id            | String | The Apple user identifier                      |    ✅    |
-| identity_token     | String | The JWT identity token from Apple Sign-In     |    ✅    |
-| authorization_code | String | The authorization code from Apple Sign-In     |    ✅    |
-| email              | String | User's email (fallback if not in token)       |    ✖️    |
+| Name               | Type   | Description                               | Required |
+| :----------------- | :----- | :---------------------------------------- | :------: |
+| user_id            | String | The Apple user identifier                 |    ✅    |
+| identity_token     | String | The JWT identity token from Apple Sign-In |    ✅    |
+| authorization_code | String | The authorization code from Apple Sign-In |    ✅    |
+| email              | String | User's email (fallback if not in token)   |    ✖️    |
 
 #### Examples
 
@@ -219,7 +260,6 @@ _**Note: one of email or username is required**_
 
 <br/><br/>
 
-
 <a name="update-user"></a>
 
 ### Update User
@@ -268,10 +308,10 @@ _**Note: fields that are not included in the response will not be updated**_
 > ```
 > curl --location --request PATCH 'https://mad.mindgoblin.tech/users/peter' \
 > --header 'Content-Type: application/json' \
-> --data '    {
->         "first_name": "PJ"
->     }
-> '
+> --header 'Authorization: Bearer <your_jwt_token>' \
+> --data '{
+>     "first_name": "PJ"
+> }'
 > ```
 
 </details>
@@ -308,7 +348,8 @@ _**Note: fields that are not included in the response will not be updated**_
 > ##### Full cURL Example
 >
 > ```
-> curl --location --request DELETE 'https://mad.mindgoblin.tech/users/peter'
+> curl --location --request DELETE 'https://mad.mindgoblin.tech/users/peter' \
+> --header 'Authorization: Bearer <your_jwt_token>'
 > ```
 
 </details>
@@ -329,9 +370,9 @@ Returns all accepted friends for a user.
 
 #### Parameters
 
-| Name   | Type           | Description                                    | Required |
-| :----- | :------------- | :--------------------------------------------- | :------: |
-| userId | Path Parameter | The ID of the user to get friends for          |    ✅    |
+| Name   | Type           | Description                           | Required |
+| :----- | :------------- | :------------------------------------ | :------: |
+| userId | Path Parameter | The ID of the user to get friends for |    ✅    |
 
 #### Examples
 
@@ -375,9 +416,9 @@ Returns all pending friend requests received by a user.
 
 #### Parameters
 
-| Name   | Type           | Description                                           | Required |
-| :----- | :------------- | :---------------------------------------------------- | :------: |
-| userId | Path Parameter | The ID of the user to get friend requests for        |    ✅    |
+| Name   | Type           | Description                                   | Required |
+| :----- | :------------- | :-------------------------------------------- | :------: |
+| userId | Path Parameter | The ID of the user to get friend requests for |    ✅    |
 
 #### Examples
 
@@ -392,7 +433,7 @@ Returns all pending friend requests received by a user.
 > [
 >     {
 >         "user_id": "jane",
->         "username": "JaneDoe", 
+>         "username": "JaneDoe",
 >         "email": "jane@example.com",
 >         "first_name": "Jane",
 >         "last_name": "Doe"
@@ -421,9 +462,9 @@ Returns all friend requests sent by a user that are still pending.
 
 #### Parameters
 
-| Name   | Type           | Description                                       | Required |
-| :----- | :------------- | :------------------------------------------------ | :------: |
-| userId | Path Parameter | The ID of the user to get sent requests for      |    ✅    |
+| Name   | Type           | Description                                 | Required |
+| :----- | :------------- | :------------------------------------------ | :------: |
+| userId | Path Parameter | The ID of the user to get sent requests for |    ✅    |
 
 #### Examples
 
@@ -439,7 +480,7 @@ Returns all friend requests sent by a user that are still pending.
 >     {
 >         "user_id": "bob",
 >         "username": "BobSmith",
->         "email": "bob@example.com", 
+>         "email": "bob@example.com",
 >         "first_name": "Bob",
 >         "last_name": "Smith"
 >     }
@@ -522,10 +563,10 @@ Accepts a pending friend request.
 
 #### Parameters
 
-| Name     | Type   | Description                                    | Required |
-| :------- | :----- | :--------------------------------------------- | :------: |
-| fromUser | String | The ID of the user who sent the request       |    ✅    |
-| toUser   | String | The ID of the user accepting the request      |    ✅    |
+| Name     | Type   | Description                              | Required |
+| :------- | :----- | :--------------------------------------- | :------: |
+| fromUser | String | The ID of the user who sent the request  |    ✅    |
+| toUser   | String | The ID of the user accepting the request |    ✅    |
 
 #### Examples
 
@@ -558,7 +599,7 @@ Accepts a pending friend request.
 > --header 'Content-Type: application/json' \
 > --header 'Authorization: Bearer <your_jwt_token>' \
 > --data '{
->     "fromUser": "john", 
+>     "fromUser": "john",
 >     "toUser": "peter"
 > }'
 > ```
@@ -577,10 +618,10 @@ Ignores a pending friend request without declining it.
 
 #### Parameters
 
-| Name     | Type   | Description                                  | Required |
-| :------- | :----- | :------------------------------------------- | :------: |
-| fromUser | String | The ID of the user who sent the request     |    ✅    |
-| toUser   | String | The ID of the user ignoring the request     |    ✅    |
+| Name     | Type   | Description                             | Required |
+| :------- | :----- | :-------------------------------------- | :------: |
+| fromUser | String | The ID of the user who sent the request |    ✅    |
+| toUser   | String | The ID of the user ignoring the request |    ✅    |
 
 #### Examples
 
@@ -614,7 +655,7 @@ Ignores a pending friend request without declining it.
 > --header 'Authorization: Bearer <your_jwt_token>' \
 > --data '{
 >     "fromUser": "john",
->     "toUser": "peter" 
+>     "toUser": "peter"
 > }'
 > ```
 
@@ -632,10 +673,10 @@ Declines a pending friend request.
 
 #### Parameters
 
-| Name     | Type   | Description                                   | Required |
-| :------- | :----- | :-------------------------------------------- | :------: |
-| fromUser | String | The ID of the user who sent the request      |    ✅    |
-| toUser   | String | The ID of the user declining the request     |    ✅    |
+| Name     | Type   | Description                              | Required |
+| :------- | :----- | :--------------------------------------- | :------: |
+| fromUser | String | The ID of the user who sent the request  |    ✅    |
+| toUser   | String | The ID of the user declining the request |    ✅    |
 
 #### Examples
 
@@ -687,8 +728,8 @@ Removes an existing friendship.
 
 #### Parameters
 
-| Name     | Type   | Description                                 | Required |
-| :------- | :----- | :------------------------------------------ | :------: |
+| Name     | Type   | Description                                | Required |
+| :------- | :----- | :----------------------------------------- | :------: |
 | fromUser | String | The ID of one user in the friendship       |    ✅    |
 | toUser   | String | The ID of the other user in the friendship |    ✅    |
 
