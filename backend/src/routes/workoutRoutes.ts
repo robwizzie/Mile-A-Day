@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getRecentWorkouts, getStreak, getWorkoutRange, uploadWorkouts } from '../controllers/workoutController';
+import { getRecentWorkouts, getStreak, getWorkoutRange, uploadWorkouts } from '../controllers/workoutController.js';
 import { requireSelfAccess } from '../middleware/auth';
 
 const router = Router();
