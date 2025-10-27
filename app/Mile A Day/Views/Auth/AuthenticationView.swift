@@ -12,59 +12,102 @@ struct AuthenticationView: View {
     
     var body: some View {
         ZStack {
-            // Background gradient
+            // Soft gradient background - more subtle
             LinearGradient(
                 colors: [
-                    MADTheme.Colors.madWhite,
-                    MADTheme.Colors.secondaryBackground
+                    Color(red: 0.25, green: 0.25, blue: 0.3),
+                    Color(red: 0.2, green: 0.2, blue: 0.25),
+                    Color(red: 0.15, green: 0.15, blue: 0.2)
                 ],
-                startPoint: .top,
-                endPoint: .bottom
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
+            
+            // Running-themed decorative elements
+            GeometryReader { geometry in
+                // Footprint pattern
+                ForEach(0..<4, id: \.self) { index in
+                    Group {
+                        // Left footprint
+                        Path { path in
+                            path.move(to: CGPoint(x: 0, y: 0))
+                            path.addQuadCurve(to: CGPoint(x: 8, y: 15), control: CGPoint(x: 4, y: 5))
+                            path.addQuadCurve(to: CGPoint(x: 16, y: 0), control: CGPoint(x: 12, y: 5))
+                        }
+                        .fill(Color(red: 0.85, green: 0.25, blue: 0.35).opacity(0.12))
+                        .frame(width: 16, height: 15)
+                        .offset(
+                            x: CGFloat(index * 100) + geometry.size.width * 0.2,
+                            y: CGFloat(index * 120) + geometry.size.height * 0.1
+                        )
+                        
+                        // Right footprint
+                        Path { path in
+                            path.move(to: CGPoint(x: 0, y: 0))
+                            path.addQuadCurve(to: CGPoint(x: 8, y: 15), control: CGPoint(x: 4, y: 5))
+                            path.addQuadCurve(to: CGPoint(x: 16, y: 0), control: CGPoint(x: 12, y: 5))
+                        }
+                        .fill(Color(red: 0.85, green: 0.25, blue: 0.35).opacity(0.1))
+                        .frame(width: 16, height: 15)
+                        .offset(
+                            x: CGFloat(index * 100 + 25) + geometry.size.width * 0.2,
+                            y: CGFloat(index * 120 + 15) + geometry.size.height * 0.1
+                        )
+                    }
+                }
+            }
             
             VStack(spacing: MADTheme.Spacing.xxxl) {
                 Spacer()
                 
-                // Logo and title section
+                // Logo and title section with liquid glass
                 VStack(spacing: MADTheme.Spacing.xl) {
-                    // MAD Logo - Replace "mad-logo" with your image name
-                    Image("mad-logo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 120, height: 120)
-                        .scaleEffect(logoScale)
-                        .shadow(
-                            color: MADTheme.Colors.madRed.opacity(0.3),
-                            radius: 20,
-                            x: 0,
-                            y: 8
-                        )
+                    // MAD Logo with subtle glow
+                    ZStack {
+                        Circle()
+                            .fill(Color(red: 0.85, green: 0.25, blue: 0.35).opacity(0.15))
+                            .frame(width: 160, height: 160)
+                            .blur(radius: 30)
+                        
+                        Image("mad-logo")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 120, height: 120)
+                            .scaleEffect(logoScale)
+                            .shadow(
+                                color: Color(red: 0.85, green: 0.25, blue: 0.35).opacity(0.3),
+                                radius: 25,
+                                x: 0,
+                                y: 10
+                            )
+                    }
                     
                     VStack(spacing: MADTheme.Spacing.sm) {
                         Text("Welcome to")
-                            .font(MADTheme.Typography.title3)
-                            .foregroundColor(MADTheme.Colors.secondaryText)
+                            .font(.system(size: 20, weight: .semibold, design: .default))
+                            .foregroundColor(.white.opacity(0.9))
                         
                         Text("MILE A DAY")
-                            .font(MADTheme.Typography.title1)
-                            .fontWeight(.black)
-                            .foregroundColor(MADTheme.Colors.madRed)
-                            .tracking(1)
+                            .font(.system(size: 32, weight: .black, design: .default))
+                            .foregroundColor(.white)
+                            .tracking(2)
+                            .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
                         
-                        Text("Your daily fitness companion")
-                            .font(MADTheme.Typography.body)
-                            .foregroundColor(MADTheme.Colors.secondaryText)
+                        Text("Your daily fitness adventure!")
+                            .font(.system(size: 17, weight: .regular, design: .default))
+                            .foregroundColor(.white.opacity(0.85))
                             .multilineTextAlignment(.center)
+                            .shadow(color: Color.black.opacity(0.2), radius: 2, x: 0, y: 1)
                     }
                 }
                 .opacity(contentOpacity)
                 
                 Spacer()
                 
-                // Authentication buttons
+                // Sleek authentication buttons with glass
                 VStack(spacing: MADTheme.Spacing.lg) {
-                    // Sign in with Apple
+                    // Sign in with Apple - glass effect
                     Button(action: {
                         handleAppleSignIn()
                     }) {
@@ -75,121 +118,76 @@ struct AuthenticationView: View {
                                     .scaleEffect(0.8)
                             } else {
                                 Image(systemName: "applelogo")
-                                    .font(.system(size: 20, weight: .medium))
+                                    .font(.system(size: 22, weight: .medium, design: .default))
                                     .foregroundColor(.white)
                             }
                             
                             Text(appleSignInManager.isLoading ? "Signing in..." : "Continue with Apple")
-                                .font(MADTheme.Typography.headline)
+                                .font(.system(size: 17, weight: .semibold, design: .default))
                                 .foregroundColor(.white)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, MADTheme.Spacing.md + 2)
+                        .padding(.vertical, MADTheme.Spacing.md + 4)
                         .background(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                .fill(Color.black)
+                            ZStack {
+                                // Black background
+                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                    .fill(Color.black)
+                                
+                                // Glass overlay
+                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                    .fill(.ultraThinMaterial.opacity(0.1))
+                            }
                         )
                         .shadow(
-                            color: MADTheme.Shadow.medium.color,
-                            radius: MADTheme.Shadow.medium.radius,
-                            x: MADTheme.Shadow.medium.x,
-                            y: MADTheme.Shadow.medium.y
+                            color: Color.black.opacity(0.4),
+                            radius: 15,
+                            x: 0,
+                            y: 8
                         )
                     }
                     .disabled(appleSignInManager.isLoading)
                     .scaleEffect(contentOpacity)
                     
-                    // Commented out Google Sign In
-                    /*
-                    // Sign in with Google
-                    Button(action: {
-                        // TODO: Implement Google Sign In
-                        handleGoogleSignIn()
-                    }) {
-                        HStack(spacing: MADTheme.Spacing.md) {
-                            // Google logo placeholder
-                            GoogleLogoView()
-                                .frame(width: 20, height: 20)
-                            
-                            Text("Continue with Google")
-                                .font(MADTheme.Typography.headline)
-                                .foregroundColor(MADTheme.Colors.primaryText)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, MADTheme.Spacing.md + 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                .fill(MADTheme.Colors.cardBackground)
-                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                        )
-                        .shadow(
-                            color: MADTheme.Shadow.small.color,
-                            radius: MADTheme.Shadow.small.radius,
-                            x: MADTheme.Shadow.small.x,
-                            y: MADTheme.Shadow.small.y
-                        )
-                    }
-                    .scaleEffect(contentOpacity)
-                    */
-                    
-                    // Commented out Guest Sign In
-                    /*
-                    // Alternative sign-in options
-                    VStack(spacing: MADTheme.Spacing.md) {
-                        HStack {
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(height: 1)
-                            
-                            Text("OR")
-                                .font(MADTheme.Typography.caption)
-                                .foregroundColor(MADTheme.Colors.secondaryText)
-                                .padding(.horizontal, MADTheme.Spacing.md)
-                            
-                            Rectangle()
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(height: 1)
-                        }
-                        
-                        Button("Continue as Guest") {
-                            handleGuestSignIn()
-                        }
-                        .madTertiaryButton()
-                    }
-                    .opacity(contentOpacity)
-                    */
+                    // Subtle encouragement text
+                    Text("Sign in to start your journey")
+                        .font(.system(size: 14, weight: .medium, design: .default))
+                        .foregroundColor(.white.opacity(0.7))
+                        .padding(.top, MADTheme.Spacing.xs)
                 }
                 .padding(.horizontal, MADTheme.Spacing.lg)
                 .offset(y: buttonsOffset)
                 
                 Spacer()
                 
-                // Terms and privacy
+                // Terms and privacy - clean style
                 VStack(spacing: MADTheme.Spacing.xs) {
                     Text("By continuing, you agree to our")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(MADTheme.Colors.secondaryText)
+                        .font(.system(size: 12, weight: .regular, design: .default))
+                        .foregroundColor(.white.opacity(0.6))
                     
                     HStack(spacing: MADTheme.Spacing.xs) {
                         Button("Terms of Service") {
                             // TODO: Show terms
                         }
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(MADTheme.Colors.madRed)
+                        .font(.system(size: 12, weight: .regular, design: .default))
+                        .foregroundColor(.white)
+                        .underline()
                         
                         Text("and")
-                            .font(MADTheme.Typography.caption)
-                            .foregroundColor(MADTheme.Colors.secondaryText)
+                            .font(.system(size: 12, weight: .regular, design: .default))
+                            .foregroundColor(.white.opacity(0.6))
                         
                         Button("Privacy Policy") {
                             // TODO: Show privacy policy
                         }
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(MADTheme.Colors.madRed)
+                        .font(.system(size: 12, weight: .regular, design: .default))
+                        .foregroundColor(.white)
+                        .underline()
                     }
                 }
                 .opacity(contentOpacity)
-                .padding(.bottom, MADTheme.Spacing.lg)
+                .padding(.bottom, MADTheme.Spacing.xl)
             }
         }
         .onAppear {
@@ -237,58 +235,6 @@ struct AuthenticationView: View {
                     appleSignInManager.errorMessage = error.localizedDescription
                     appleSignInManager.isLoading = false
                 }
-            }
-        }
-    }
-    
-    // Commented out Google Sign In
-    /*
-    private func handleGoogleSignIn() {
-        // Simulate Google Sign In for UI purposes
-        withAnimation(MADTheme.Animation.standard) {
-            // TODO: Replace with actual Google Sign In implementation
-            appStateManager.completeAuthentication()
-        }
-    }
-    */
-    
-    // Commented out Guest Sign In
-    /*
-    private func handleGuestSignIn() {
-        // Allow guest access
-        withAnimation(MADTheme.Animation.standard) {
-            appStateManager.completeAuthentication()
-        }
-    }
-    */
-}
-
-/// Google Logo Recreation
-struct GoogleLogoView: View {
-    var body: some View {
-        ZStack {
-            // Simplified Google logo colors
-            HStack(spacing: 0) {
-                // G shape using colored rectangles to simulate the logo
-                VStack(spacing: 0) {
-                    HStack(spacing: 0) {
-                        Rectangle()
-                            .fill(Color.blue)
-                            .frame(width: 7, height: 7)
-                        Rectangle()
-                            .fill(Color.red)
-                            .frame(width: 7, height: 7)
-                    }
-                    HStack(spacing: 0) {
-                        Rectangle()
-                            .fill(Color.green)
-                            .frame(width: 7, height: 7)
-                        Rectangle()
-                            .fill(Color.yellow)
-                            .frame(width: 7, height: 7)
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 2))
             }
         }
     }

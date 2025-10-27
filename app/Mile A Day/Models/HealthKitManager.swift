@@ -353,7 +353,7 @@ class HealthKitManager: ObservableObject {
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
             predicate: compoundPredicate,
-            limit: 10,
+            limit: 50, // Increased for testing workout uploads
             sortDescriptors: [sortDescriptor]
         ) { [weak self] query, samples, error in
             guard let self = self, let workouts = samples as? [HKWorkout] else { return }
