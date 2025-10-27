@@ -94,7 +94,7 @@ class WorkoutService: ObservableObject {
             
             if allWorkouts.isEmpty {
                 await MainActor.run {
-                    workoutService.errorMessage = "No workouts found to upload"
+                    self.errorMessage = "No workouts found to upload"
                 }
                 return
             }
@@ -279,7 +279,7 @@ class WorkoutService: ObservableObject {
     
     /// Fetch all workouts from HealthKit (for testing purposes)
     private func fetchAllWorkoutsFromHealthKit() async throws -> [HKWorkout] {
-        return await withCheckedThrowingContinuation { continuation in
+        return try await withCheckedThrowingContinuation { continuation in
             guard HKHealthStore.isHealthDataAvailable() else {
                 continuation.resume(throwing: WorkoutServiceError.networkError("HealthKit not available"))
                 return
