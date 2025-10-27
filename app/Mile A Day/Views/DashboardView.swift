@@ -7,6 +7,7 @@ struct DashboardView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     @EnvironmentObject var notificationService: MADNotificationService
+    @StateObject private var workoutService = WorkoutService()
     
     @State private var showConfetti = false
     @State private var showGoalSheet = false
@@ -14,6 +15,7 @@ struct DashboardView: View {
     @State private var isRefreshing = false
     @State private var showInstructions = false
     @State private var showCelebration = false
+    @State private var showWorkoutUploadAlert = false
     @AppStorage("lastGoalCompletionDate") private var lastGoalCompletionDate: Date = Date.distantPast
     
     // Simplified state calculation
@@ -100,6 +102,28 @@ struct DashboardView: View {
                             Image(systemName: "star.fill")
                                 .foregroundColor(.yellow)
                         }
+                        
+                        // Test workout upload button (only in debug)
+                        Button {
+                            Task {
+                                await uploadWorkouts()
+                            }
+                        } label: {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .foregroundColor(.green)
+                        }
+                        .disabled(workoutService.isLoading)
+                        
+                        // Test upload ALL workouts button (only in debug)
+                        Button {
+                            Task {
+                                await uploadAllWorkouts()
+                            }
+                        } label: {
+                            Image(systemName: "arrow.up.circle")
+                                .foregroundColor(.blue)
+                        }
+                        .disabled(workoutService.isLoading)
                         #endif
                     }
                 }
@@ -179,6 +203,17 @@ struct DashboardView: View {
                     }
             .sheet(isPresented: $showInstructions) {
                 InstructionsView()
+            }
+            .alert("Workout Upload", isPresented: $showWorkoutUploadAlert) {
+                Button("OK") { }
+            } message: {
+                if let status = workoutService.lastUploadStatus {
+                    Text(status)
+                } else if let error = workoutService.errorMessage {
+                    Text("Error: \(error)")
+                } else {
+                    Text("Upload completed")
+                }
             }
             .onChange(of: currentState.isCompleted) { oldValue, newValue in
                 if newValue && !oldValue {
@@ -339,6 +374,51 @@ struct DashboardView: View {
         showConfetti = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             showConfetti = false
+        }
+    }
+    
+    // MARK: - Workout Upload Test Functions
+    private func uploadWorkouts() async {
+        do {
+            // Get recent workouts from HealthKit
+            let workouts = healthManager.recentWorkouts
+            
+            if workouts.isEmpty {
+                await MainActor.run {
+                    workoutService.errorMessage = "No workouts found to upload"
+                }
+                return
+            }
+            
+            // Upload workouts
+            try await workoutService.uploadWorkouts(workouts)
+            
+            // Show success alert
+            await MainActor.run {
+                showWorkoutUploadAlert = true
+            }
+            
+        } catch {
+            await MainActor.run {
+                workoutService.errorMessage = error.localizedDescription
+            }
+        }
+    }
+    
+    private func uploadAllWorkouts() async {
+        do {
+            // Upload all workouts from HealthKit
+            try await workoutService.uploadAllWorkouts()
+            
+            // Show success alert
+            await MainActor.run {
+                showWorkoutUploadAlert = true
+            }
+            
+        } catch {
+            await MainActor.run {
+                workoutService.errorMessage = error.localizedDescription
+            }
         }
     }
 }
