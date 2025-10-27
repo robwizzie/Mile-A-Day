@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
-import { PostgresService } from '../services/DbService';
-import hasRequiredKeys from '../utils/hasRequiredKeys';
+import { PostgresService } from '../services/DbService.js';
+import hasRequiredKeys from '../utils/hasRequiredKeys.js';
 
 const db = PostgresService.getInstance();
 
