@@ -34,10 +34,11 @@ export async function uploadWorkouts(req: Request, res: Response) {
         total_duration
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      ON CONFLICT (user_id, workout_id) 
+      ON CONFLICT (user_id, workout_id)
       DO UPDATE SET
         distance = EXCLUDED.distance,
         local_date = EXCLUDED.local_date,
+        date = EXCLUDED.date,
         timezone_offset = EXCLUDED.timezone_offset,
         workout_type = EXCLUDED.workout_type,
         device_end_date = EXCLUDED.device_end_date,
