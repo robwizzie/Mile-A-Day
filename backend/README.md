@@ -18,6 +18,9 @@
     -   **[Ignore Friend Request](#ignore-friend-request)**
     -   **[Decline Friend Request](#decline-friend-request)**
     -   **[Remove Friend](#remove-friend)**
+-   **[Workouts](#workouts)**
+    -   **[Upload Workouts](#upload-workouts)**
+    -   **[Get Streak](#get-streak)**
 
 ## API Domain
 
@@ -769,6 +772,140 @@ Removes an existing friendship.
 >     "fromUser": "peter",
 >     "toUser": "john"
 > }'
+> ```
+
+</details>
+
+<br/><br/>
+
+---
+
+<a name="workouts"></a>
+
+## 🏃 Workouts
+
+<a name="upload-workouts"></a>
+
+### Upload Workouts
+
+**POST** `/workouts/{userId}/upload`
+
+Uploads one or more workout records for a user. Each workout includes distance, duration, calories, split times, and other metadata. The endpoint uses an upsert operation, updating existing workouts if they already exist.
+
+#### Parameters
+
+| Name   | Type           | Description                            | Required |
+| :----- | :------------- | :------------------------------------- | :------: |
+| userId | Path Parameter | The ID of the user uploading workouts  |    ✅    |
+
+#### Request Body
+
+An array of workout objects with the following structure:
+
+| Field          | Type     | Description                                    | Required |
+| :------------- | :------- | :--------------------------------------------- | :------: |
+| workoutId      | String   | Unique identifier for the workout              |    ✅    |
+| distance       | Number   | Distance in miles                              |    ✅    |
+| localDate      | String   | Date of workout in local timezone (YYYY-MM-DD) |    ✅    |
+| timezoneOffset | Number   | Timezone offset in minutes                     |    ✅    |
+| workoutType    | String   | Type of workout (e.g., "running", "walking")   |    ✅    |
+| deviceEndDate  | String   | End timestamp from device                      |    ✅    |
+| calories       | Number   | Calories burned                                |    ✅    |
+| totalDuration  | Number   | Total duration in seconds                      |    ✅    |
+| splitTimes     | Number[] | Array of split times in seconds                |    ✅    |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **POST** `/workouts/peter/upload`
+>
+> ##### Example Body
+>
+> ```json
+> [
+>     {
+>         "workoutId": "ABC123",
+>         "distance": 1.25,
+>         "localDate": "2025-10-26",
+>         "timezoneOffset": -240,
+>         "workoutType": "running",
+>         "deviceEndDate": "2025-10-26T08:30:00Z",
+>         "calories": 150,
+>         "totalDuration": 720,
+>         "splitTimes": [360, 360]
+>     }
+> ]
+> ```
+>
+> ##### Example Response
+>
+> ```json
+> {
+>     "message": "Successfully uploaded workouts."
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location 'https://mad.mindgoblin.tech/workouts/peter/upload' \
+> --header 'Content-Type: application/json' \
+> --header 'Authorization: Bearer <your_jwt_token>' \
+> --data '[
+>     {
+>         "workoutId": "ABC123",
+>         "distance": 1.25,
+>         "localDate": "2025-10-26",
+>         "timezoneOffset": -240,
+>         "workoutType": "running",
+>         "deviceEndDate": "2025-10-26T08:30:00Z",
+>         "calories": 150,
+>         "totalDuration": 720,
+>         "splitTimes": [360, 360]
+>     }
+> ]'
+> ```
+
+</details>
+
+<br/><br/>
+
+<a name="get-streak"></a>
+
+### Get Streak
+
+**GET** `/workouts/{userId}/streak`
+
+Calculates the current workout streak for a user. A streak is the number of consecutive days (starting from the most recent day) where the user completed at least 0.95 miles of workouts.
+
+#### Parameters
+
+| Name   | Type           | Description                            | Required |
+| :----- | :------------- | :------------------------------------- | :------: |
+| userId | Path Parameter | The ID of the user to get streak for   |    ✅    |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **GET** `/workouts/peter/streak`
+>
+> ##### Example Response
+>
+> ```json
+> {
+>     "streak": 42
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location 'https://mad.mindgoblin.tech/workouts/peter/streak' \
+> --header 'Authorization: Bearer <your_jwt_token>'
 > ```
 
 </details>
