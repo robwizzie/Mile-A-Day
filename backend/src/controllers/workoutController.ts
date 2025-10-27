@@ -8,6 +8,7 @@ type Workout = {
 	workoutId: string;
 	distance: number;
 	localDate: string;
+	date: string;
 	timezoneOffset: number;
 	workoutType: string;
 	deviceEndDate: string;
@@ -25,13 +26,14 @@ export async function uploadWorkouts(req: Request, res: Response) {
         workout_id,
         distance, 
         local_date, 
+        date,
         timezone_offset, 
         workout_type, 
         device_end_date, 
         calories, 
         total_duration
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       ON CONFLICT (user_id, workout_id) 
       DO UPDATE SET
         distance = EXCLUDED.distance,
@@ -66,6 +68,7 @@ export async function uploadWorkouts(req: Request, res: Response) {
 							workout.workoutId,
 							workout.distance,
 							workout.localDate,
+							workout.date,
 							workout.timezoneOffset,
 							workout.workoutType,
 							workout.deviceEndDate,
