@@ -20,6 +20,7 @@ export async function getUser(req: Request, res: Response) {
 	res.json(results[0]);
 }
 
+// TODO user should be excluded from their own results
 export async function searchUsers(req: Request, res: Response) {
 	if (!hasRequiredKeys(['query'], req, res)) return;
 

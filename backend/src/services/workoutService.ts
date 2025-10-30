@@ -81,6 +81,7 @@ export async function getActiveStreak(userId: string) {
 	const LIMIT = 100;
 	let index = 0;
 	let streak = 0;
+	let streakStartDay;
 	while (true) {
 		const results = await db.query(dayDistanceQuery, [userId, LIMIT, index * LIMIT]);
 
@@ -90,15 +91,81 @@ export async function getActiveStreak(userId: string) {
 
 		for (const row of results) {
 			if (row.total_distance < 0.95) {
-				return streak;
+				return { streak, start: streakStartDay };
 			}
+			streakStartDay = row.local_date;
 			streak++;
 		}
 
 		index++;
 	}
 
-	return streak;
+	return { streak, start: streakStartDay };
+}
+
+export async function getTotalMiles(userId: string, startDate?: string) {
+	let distanceQuery = `
+    SELECT SUM(distance) FROM workouts
+    WHERE user_id = $1
+    `;
+
+	const params: (string | number)[] = [userId];
+
+	if (startDate) {
+		distanceQuery += ` AND local_date >= $2`;
+		params.push(startDate);
+	}
+
+	return (await db.query(distanceQuery, params))[0]?.sum;
+}
+
+export async function getBestMilesDay(userId: string, startDate?: string) {
+	let bestDayQuery = `
+    SELECT local_date, SUM(distance) as total_distance FROM workouts
+    WHERE user_id = $1
+    `;
+
+	const params: (string | number)[] = [userId];
+
+	if (startDate) {
+		bestDayQuery += ` AND local_date >= $2`;
+		params.push(startDate);
+	}
+
+	bestDayQuery += `
+    GROUP BY local_date
+    ORDER BY total_distance DESC
+    LIMIT 1
+    `;
+
+	return (await db.query(bestDayQuery, params))[0];
+}
+
+export async function getBestSplit(userId: string, startDate?: string) {
+	let bestSplitQuery = `
+    SELECT 
+      ws.split_time AS best_split_time,
+      w.*
+    FROM workout_splits ws
+    JOIN workouts w ON ws.workout_id = w.workout_id
+    WHERE w.user_id = $1
+	`;
+
+	const params: (string | number)[] = [userId];
+
+	if (startDate) {
+		bestSplitQuery += ` AND w.local_date >= $2`;
+		params.push(startDate);
+	}
+
+	bestSplitQuery += `
+    ORDER BY ws.split_time ASC
+    LIMIT 1
+	`;
+
+	const { best_split_time, ...workout } = (await db.query(bestSplitQuery, params))[0] || {};
+
+	return { best_split_time, workout };
 }
 
 export async function getRecentWorkouts(userId: string, limit: number | null = 10) {
