@@ -21,6 +21,7 @@
 -   **[Workouts](#workouts)**
     -   **[Upload Workouts](#upload-workouts)**
     -   **[Get Streak](#get-streak)**
+    -   **[Get Recent Workouts](#get-recent-workouts)**
 
 ## API Domain
 
@@ -905,6 +906,70 @@ Calculates the current workout streak for a user. A streak is the number of cons
 >
 > ```bash
 > curl --location 'https://mad.mindgoblin.tech/workouts/peter/streak' \
+> --header 'Authorization: Bearer <your_jwt_token>'
+> ```
+
+</details>
+
+<br/><br/>
+
+<a name="get-recent-workouts"></a>
+
+### Get Recent Workouts
+
+**GET** `/workouts/{userId}/recent`
+
+Retrieves the most recent workouts for a user, ordered by device end date (newest first). By default, returns the 10 most recent workouts, but can be customized with the limit query parameter.
+
+#### Parameters
+
+| Name   | Type            | Description                                      | Required |
+| :----- | :-------------- | :----------------------------------------------- | :------: |
+| userId | Path Parameter  | The ID of the user to get recent workouts for    |    ✅    |
+| limit  | Query Parameter | Maximum number of workouts to return (default: 10)|    ✖️    |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **GET** `/workouts/peter/recent?limit=5`
+>
+> ##### Example Response
+>
+> ```json
+> [
+>     {
+>         "user_id": "peter",
+>         "workout_id": "ABC123",
+>         "distance": 1.25,
+>         "local_date": "2025-10-26",
+>         "date": "2025-10-26T08:30:00Z",
+>         "timezone_offset": -240,
+>         "workout_type": "running",
+>         "device_end_date": "2025-10-26T08:30:00Z",
+>         "calories": 150,
+>         "total_duration": 720
+>     },
+>     {
+>         "user_id": "peter",
+>         "workout_id": "DEF456",
+>         "distance": 1.0,
+>         "local_date": "2025-10-25",
+>         "date": "2025-10-25T07:15:00Z",
+>         "timezone_offset": -240,
+>         "workout_type": "walking",
+>         "device_end_date": "2025-10-25T07:15:00Z",
+>         "calories": 100,
+>         "total_duration": 900
+>     }
+> ]
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location 'https://mad.mindgoblin.tech/workouts/peter/recent?limit=5' \
 > --header 'Authorization: Bearer <your_jwt_token>'
 > ```
 
