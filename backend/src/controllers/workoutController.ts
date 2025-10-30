@@ -143,4 +143,25 @@ export async function getStreak(req: Request, res: Response) {
 
 export async function getWorkoutRange() {}
 
-export async function getRecentWorkouts() {}
+export async function getRecentWorkouts(req: Request, res: Response) {
+	if (!hasRequiredKeys(['userId'], req, res)) return;
+
+	const resultLimit = req.query.limit || 10;
+
+	const recentWorkoutsQuery = `
+	SELECT * FROM workouts
+	WHERE user_id = $1
+	ORDER BY device_end_date DESC
+	LIMIT $2
+	`;
+
+	try {
+		const results = await db.query(recentWorkoutsQuery, [req.params.userId, resultLimit]);
+
+		return res.status(200).json(results);
+	} catch (error) {
+		return res.status(500).json({
+			error: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+}
