@@ -22,6 +22,7 @@
     -   **[Upload Workouts](#upload-workouts)**
     -   **[Get Streak](#get-streak)**
     -   **[Get Recent Workouts](#get-recent-workouts)**
+    -   **[Get User Stats](#get-user-stats)**
 
 ## API Domain
 
@@ -970,6 +971,109 @@ Retrieves the most recent workouts for a user, ordered by device end date (newes
 >
 > ```bash
 > curl --location 'https://mad.mindgoblin.tech/workouts/peter/recent?limit=5' \
+> --header 'Authorization: Bearer <your_jwt_token>'
+> ```
+
+</details>
+
+<br/><br/>
+
+<a name="get-user-stats"></a>
+
+### Get User Stats
+
+**GET** `/workouts/{userId}/stats`
+
+Retrieves comprehensive workout statistics for a user, including their current streak, total miles, best performance metrics, and recent workouts. Optionally, you can limit statistics to only the current streak period.
+
+#### Parameters
+
+| Name           | Type            | Description                                                          | Required |
+| :------------- | :-------------- | :------------------------------------------------------------------- | :------: |
+| userId         | Path Parameter  | The ID of the user to get stats for                                  |    ✅    |
+| current_streak | Query Parameter | If "true", limits stats to current streak period only (default: false)|    ✖️    |
+
+#### Response Fields
+
+| Field            | Type     | Description                                              |
+| :--------------- | :------- | :------------------------------------------------------- |
+| streak           | Number   | Current consecutive days with at least 0.95 miles        |
+| start_date       | String   | Date when the current streak started (YYYY-MM-DD)        |
+| total_miles      | Number   | Total distance across all workouts (or current streak)   |
+| best_miles_day   | Number   | Most miles completed in a single day                     |
+| best_split_time  | Number   | Fastest mile split time in seconds                       |
+| recent_workouts  | Array    | Array of the 10 most recent workout objects              |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **GET** `/workouts/peter/stats`
+>
+> ##### Example Response (All-Time Stats)
+>
+> ```json
+> {
+>     "streak": 42,
+>     "start_date": "2025-09-15",
+>     "total_miles": 125.5,
+>     "best_miles_day": 5.2,
+>     "best_split_time": 420,
+>     "recent_workouts": [
+>         {
+>             "user_id": "peter",
+>             "workout_id": "ABC123",
+>             "distance": 1.25,
+>             "local_date": "2025-10-26",
+>             "date": "2025-10-26T08:30:00Z",
+>             "timezone_offset": -240,
+>             "workout_type": "running",
+>             "device_end_date": "2025-10-26T08:30:00Z",
+>             "calories": 150,
+>             "total_duration": 720
+>         }
+>     ]
+> }
+> ```
+>
+> **GET** `/workouts/peter/stats?current_streak=true`
+>
+> ##### Example Response (Current Streak Stats Only)
+>
+> ```json
+> {
+>     "streak": 42,
+>     "start_date": "2025-09-15",
+>     "total_miles": 52.3,
+>     "best_miles_day": 3.5,
+>     "best_split_time": 450,
+>     "recent_workouts": [
+>         {
+>             "user_id": "peter",
+>             "workout_id": "ABC123",
+>             "distance": 1.25,
+>             "local_date": "2025-10-26",
+>             "date": "2025-10-26T08:30:00Z",
+>             "timezone_offset": -240,
+>             "workout_type": "running",
+>             "device_end_date": "2025-10-26T08:30:00Z",
+>             "calories": 150,
+>             "total_duration": 720
+>         }
+>     ]
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> # Get all-time stats
+> curl --location 'https://mad.mindgoblin.tech/workouts/peter/stats' \
+> --header 'Authorization: Bearer <your_jwt_token>'
+>
+> # Get current streak stats only
+> curl --location 'https://mad.mindgoblin.tech/workouts/peter/stats?current_streak=true' \
 > --header 'Authorization: Bearer <your_jwt_token>'
 > ```
 
