@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PostgresService } from '../services/DbService.js';
 import hasRequiredKeys from '../utils/hasRequiredKeys.js';
+import { getUser } from '../services/userService.js';
 
 const db = PostgresService.getInstance();
 
@@ -59,6 +60,13 @@ export async function uploadWorkouts(req: Request, res: Response) {
 			});
 		}
 
+		const userId = req.params.userId;
+
+		const user = await getUser({ userId });
+		if (!user) {
+			return res.status(400).send({ error: `No user found with ID ${userId}` });
+		}
+
 		await db.transaction(
 			req.body.flatMap((workout: Workout) => {
 				return [
@@ -113,6 +121,13 @@ export async function getStreak(req: Request, res: Response) {
   `;
 
 	try {
+		const userId = req.params.userId;
+
+		const user = await getUser({ userId });
+		if (!user) {
+			return res.status(400).send({ error: `No user found with ID ${userId}` });
+		}
+
 		const LIMIT = 100;
 		let index = 0;
 		let streak = 0;
@@ -156,6 +171,13 @@ export async function getRecentWorkouts(req: Request, res: Response) {
 	`;
 
 	try {
+		const userId = req.params.userId;
+
+		const user = await getUser({ userId });
+		if (!user) {
+			return res.status(400).send({ error: `No user found with ID ${userId}` });
+		}
+
 		const results = await db.query(recentWorkoutsQuery, [req.params.userId, resultLimit]);
 
 		return res.status(200).json(results);
