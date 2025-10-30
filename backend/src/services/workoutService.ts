@@ -1,5 +1,5 @@
-import { Workout } from '../types/workouts';
-import { PostgresService } from './DbService';
+import { Workout } from '../types/workouts.js';
+import { PostgresService } from './DbService.js';
 
 const db = PostgresService.getInstance();
 
