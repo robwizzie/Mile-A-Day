@@ -11,6 +11,7 @@ class AppStateManager: ObservableObject {
         case onboarding
         case authentication
         case usernameSetup
+        case workoutSync
         case main
     }
     
@@ -80,12 +81,17 @@ class AppStateManager: ObservableObject {
     func completeAuthentication(userManager: UserManager) {
         userDefaults.set(true, forKey: isAuthenticatedKey)
         isAuthenticated = true
-        
+
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 // Check if user already has a username
                 if userManager.currentUser.hasUsername {
-                    self.currentState = .main
+                    // Check if first-time workout sync is needed
+                    if WorkoutSyncService.shared.isFirstTimeSync() {
+                        self.currentState = .workoutSync
+                    } else {
+                        self.currentState = .main
+                    }
                 } else {
                     self.currentState = .usernameSetup
                 }
@@ -93,8 +99,22 @@ class AppStateManager: ObservableObject {
         }
     }
     
-    /// Complete username setup and move to main app
+    /// Complete username setup and check if workout sync is needed
     func completeUsernameSetup() {
+        DispatchQueue.main.async {
+            withAnimation(MADTheme.Animation.standard) {
+                // Check if first-time workout sync is needed
+                if WorkoutSyncService.shared.isFirstTimeSync() {
+                    self.currentState = .workoutSync
+                } else {
+                    self.currentState = .main
+                }
+            }
+        }
+    }
+
+    /// Complete workout sync and move to main app
+    func completeWorkoutSync() {
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 self.currentState = .main
