@@ -139,7 +139,9 @@ struct UserProfileDetailView: View {
                         streak: stats.currentStreak,
                         totalMiles: stats.totalMiles,
                         fastestMilePace: stats.averagePace ?? 0.0,
-                        mostMilesInOneDay: 0.0 // API doesn't provide this yet
+                        mostMilesInOneDay: 0.0, // API doesn't provide this yet
+                        hasCompletedGoalToday: false, // API doesn't provide this yet
+                        goalMiles: 1.0 // Default goal miles (API doesn't provide this yet)
                     )
 
                     friendWorkouts = workouts

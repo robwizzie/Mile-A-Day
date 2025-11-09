@@ -8,6 +8,171 @@
 import SwiftUI
 import HealthKit
 
+// MARK: - Liquid Glass Background Component
+
+struct LiquidGlassBackground: View {
+    let accentColor: Color
+    let isDarkMode: Bool
+    
+    var body: some View {
+        ZStack {
+            // Base gradient background
+            LinearGradient(
+                colors: isDarkMode ? [
+                    Color.black,
+                    Color(red: 0.1, green: 0.1, blue: 0.1),
+                    Color(red: 0.05, green: 0.05, blue: 0.05)
+                ] : [
+                    Color.white,
+                    Color(red: 0.98, green: 0.98, blue: 0.98),
+                    Color(red: 0.95, green: 0.95, blue: 0.95)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            
+            // Accent color gradient overlay
+            LinearGradient(
+                colors: [
+                    accentColor.opacity(0.15),
+                    accentColor.opacity(0.05),
+                    Color.clear
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            
+            // Glass reflection effect
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(isDarkMode ? 0.1 : 0.3),
+                    Color.clear,
+                    Color.clear
+                ],
+                startPoint: .topLeading,
+                endPoint: .center
+            )
+            
+            // Subtle highlight overlay
+            RoundedRectangle(cornerRadius: 24)
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(isDarkMode ? 0.2 : 0.4),
+                            Color.clear,
+                            Color.clear,
+                            Color.black.opacity(isDarkMode ? 0.3 : 0.1)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        }
+    }
+}
+
+// MARK: - Sticker Background (compact, high-contrast, no glow)
+
+struct StickerBackground: View {
+    let accentColor: Color
+    let isDarkMode: Bool
+    
+    var body: some View {
+        ZStack {
+            // Simple high-contrast base
+            RoundedRectangle(cornerRadius: 24)
+                .fill(isDarkMode ? Color.black.opacity(0.9) : Color.white)
+            
+            // Subtle accent edge
+            RoundedRectangle(cornerRadius: 24)
+                .stroke(accentColor.opacity(0.35), lineWidth: 2)
+        }
+    }
+}
+
+// MARK: - MAD Branding Component
+
+struct MADBrandingHeader: View {
+    let accentColor: Color
+    let isDarkMode: Bool
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Actual MAD Logo from assets
+            Image("mad-logo")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 32, height: 32)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text("MILE A DAY")
+                    .font(.system(size: 16, weight: .semibold, design: .default))
+                    .fontWidth(.condensed)
+                    .foregroundColor(isDarkMode ? .white : .black)
+                    .tracking(1)
+                
+                Text("Stay Active. Stay Motivated.")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
+            }
+            
+            Spacer()
+        }
+    }
+}
+
+// MARK: - Compact Branding Footer (icon + slogan)
+
+struct MADBrandingFooter: View {
+    let isDarkMode: Bool
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image("mad-logo")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 18, height: 18)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Mile A Day")
+                    .font(.system(size: 11, weight: .semibold, design: .default))
+                    .foregroundColor(isDarkMode ? .white : .black)
+                Text("Stay Active. Stay Motivated.")
+                    .font(.system(size: 10, weight: .regular, design: .default))
+                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+// MARK: - Shared Sticker Card Container (dashboard-like)
+
+struct ShareStickerCardContainer: ViewModifier {
+    let accentColor: Color
+    let isDarkMode: Bool
+    
+    func body(content: Content) -> some View {
+        content
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(.systemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(accentColor.opacity(0.25), lineWidth: 1)
+                    )
+            )
+            .frame(width: 280)
+    }
+}
+
+extension View {
+    func shareStickerCard(accentColor: Color, isDarkMode: Bool) -> some View {
+        modifier(ShareStickerCardContainer(accentColor: accentColor, isDarkMode: isDarkMode))
+    }
+}
+
 // MARK: - Share Card Types
 
 enum ShareCardType: String, CaseIterable, Identifiable {
@@ -117,8 +282,7 @@ struct EnhancedShareView: View {
                             .aspectRatio(contentMode: .fit)
                             .frame(maxHeight: 420)
                             .cornerRadius(20)
-                            .shadow(color: selectedCard.color.opacity(0.4), radius: 20, x: 0, y: 10)
-                            .shadow(color: selectedCard.color.opacity(0.2), radius: 40, x: 0, y: 20)
+                            
                     } else {
                         ProgressView()
                             .frame(height: 420)
@@ -188,7 +352,7 @@ struct EnhancedShareView: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
-                        .tint(showingCopiedFeedback ? .green : .blue)
+                        .tint(showingCopiedFeedback ? Color.green : Color.blue)
                         
                         Button {
                             if let image = generatedImage {
@@ -203,7 +367,7 @@ struct EnhancedShareView: View {
                 }
                 .padding(.horizontal)
                 
-                Spacer()
+                // compact layout: no vertical spacers
             }
             .navigationTitle("Share")
             .navigationBarTitleDisplayMode(.inline)
@@ -316,6 +480,7 @@ struct EnhancedShareView: View {
         }
         
         renderer.scale = 3.0
+        renderer.isOpaque = false
         generatedImage = renderer.uiImage
     }
 }
@@ -360,76 +525,65 @@ struct StreakShareCard: View {
     let streak: Int
     let isActiveToday: Bool
     let isAtRisk: Bool
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var isDarkMode: Bool {
+        colorScheme == .dark
+    }
     
     var body: some View {
-        VStack(spacing: 12) {
-            // Header
-            HStack(spacing: 5) {
-                Image(systemName: "flame.fill")
-                    .font(.subheadline)
-                    .foregroundColor(.orange)
-                Text("Mile A Day")
-                    .font(.subheadline)
-                    .fontWeight(.bold)
-            }
-            
-            // Main content
-            VStack(spacing: 8) {
-                Text("\(streak)")
-                    .font(.system(size: 70, weight: .bold, design: .rounded))
-                    .foregroundColor(.orange)
-                
-                Text("Day Streak")
-                    .font(.callout)
-                    .fontWeight(.semibold)
-                
-                if isActiveToday {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.caption2)
-                            .foregroundColor(.green)
-                        Text("Active Today!")
-                            .font(.caption2)
-                            .fontWeight(.medium)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Color.green.opacity(0.15))
-                    .cornerRadius(10)
-                } else if isAtRisk {
-                    HStack(spacing: 4) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.caption2)
-                            .foregroundColor(.red)
-                        Text("At Risk")
-                            .font(.caption2)
-                            .fontWeight(.medium)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Color.red.opacity(0.15))
-                    .cornerRadius(10)
+        VStack(spacing: 10) {
+            Text("Current Streak")
+                .font(.system(size: 18, weight: .semibold, design: .default))
+                .fontWidth(.condensed)
+                .foregroundColor(isDarkMode ? .white : .black)
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.black.opacity(0.75), Color.black.opacity(0.6)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(Circle().stroke(Color.black.opacity(0.7), lineWidth: 6))
+                Circle()
+                    .inset(by: 6)
+                    .stroke(Color.green, lineWidth: 14)
+                VStack(spacing: 6) {
+                    Text("\(streak)")
+                        .font(.system(size: 64, weight: .heavy, design: .default))
+                        .fontWidth(.condensed)
+                        .foregroundColor(Color.green)
+                    Text("days")
+                        .font(.system(size: 16, weight: .regular, design: .default))
+                        .foregroundColor(isDarkMode ? .white.opacity(0.8) : .black.opacity(0.7))
                 }
             }
-            
-            // Footer
-            Text("Keep the streak alive!")
-                .font(.caption2)
-                .fontWeight(.medium)
-                .foregroundColor(.secondary)
+            .frame(width: 220, height: 220)
+            if isActiveToday {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Goal completed!")
+                        .font(.system(size: 16, weight: .semibold, design: .default))
+                        .foregroundColor(Color.green)
+                }
+            } else if isAtRisk {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.yellow)
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("At risk")
+                        .font(.system(size: 16, weight: .semibold, design: .default))
+                        .foregroundColor(.yellow)
+                }
+            }
+            // Branding footer
+            MADBrandingFooter(isDarkMode: isDarkMode)
         }
-        .padding(.vertical, 18)
-        .padding(.horizontal, 24)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.orange.opacity(0.2), lineWidth: 1)
-        )
-        .shadow(color: .orange.opacity(0.4), radius: 20, x: 0, y: 8)
-        .shadow(color: .orange.opacity(0.2), radius: 40, x: 0, y: 16)
+        .shareStickerCard(accentColor: .green, isDarkMode: isDarkMode)
     }
 }
 
@@ -438,97 +592,59 @@ struct TodaysProgressShareCard: View {
     let goalDistance: Double
     let progress: Double
     let didComplete: Bool
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var isDarkMode: Bool {
+        colorScheme == .dark
+    }
     
     var body: some View {
-        VStack(spacing: 12) {
-            // Header
-            HStack(spacing: 5) {
-                Image(systemName: "figure.run")
-                    .font(.subheadline)
-                    .foregroundColor(.blue)
-                Text("Mile A Day")
-                    .font(.subheadline)
-                    .fontWeight(.bold)
-            }
-            
-            // Main content
-            VStack(spacing: 8) {
-                Text("Today's Progress")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                
-                // Distance
+        VStack(spacing: 10) {
+            Text("Today's Progress")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(isDarkMode ? .white : .black)
+            HStack(alignment: .lastTextBaseline, spacing: 6) {
                 Text(String(format: "%.2f", currentDistance))
-                    .font(.system(size: 60, weight: .bold, design: .rounded))
+                    .font(.system(size: 44, weight: .heavy))
                     .foregroundColor(.blue)
-                + Text(" / \(String(format: "%.1f", goalDistance))")
-                    .font(.system(size: 28, weight: .medium, design: .rounded))
-                    .foregroundColor(.secondary)
-                
-                Text("miles")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                
-                // Progress bar
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.secondary.opacity(0.2))
-                            .frame(height: 10)
-                        
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(didComplete ? Color.green : Color.blue)
-                            .frame(width: geometry.size.width * progress, height: 10)
-                    }
-                }
-                .frame(height: 10)
-                .padding(.horizontal, 12)
-                
-                // Status
-                if didComplete {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.caption2)
-                            .foregroundColor(.green)
-                        Text("Goal Completed! 🎉")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Color.green.opacity(0.15))
-                    .cornerRadius(10)
-                } else {
-                    Text("\(Int(progress * 100))% Complete")
-                        .font(.caption2)
-                        .fontWeight(.medium)
-                        .foregroundColor(.secondary)
+                Text("/ \(String(format: "%.1f", goalDistance))")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(isDarkMode ? .white.opacity(0.75) : .black.opacity(0.65))
+            }
+            Text("miles")
+                .font(.system(size: 12))
+                .foregroundColor(isDarkMode ? .white.opacity(0.75) : .black.opacity(0.65))
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isDarkMode ? Color.white.opacity(0.12) : Color.black.opacity(0.12))
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(didComplete ? Color.green : Color.blue)
+                        .frame(width: geometry.size.width * progress)
                 }
             }
-            
-            // Footer
-            Text("One mile at a time")
-                .font(.caption2)
-                .fontWeight(.medium)
-                .foregroundColor(.secondary)
+            .frame(height: 10)
+            if didComplete {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                    Text("Goal completed!").font(.system(size: 14, weight: .semibold)).foregroundColor(.green)
+                }
+            } else {
+                Text("\(Int(progress * 100))% complete").font(.system(size: 13)).foregroundColor(isDarkMode ? .white.opacity(0.75) : .black.opacity(0.65))
+            }
+            MADBrandingFooter(isDarkMode: isDarkMode)
         }
-        .padding(.vertical, 18)
-        .padding(.horizontal, 24)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.blue.opacity(0.2), lineWidth: 1)
-        )
-        .shadow(color: .blue.opacity(0.4), radius: 20, x: 0, y: 8)
-        .shadow(color: .blue.opacity(0.2), radius: 40, x: 0, y: 16)
+        .shareStickerCard(accentColor: .blue, isDarkMode: isDarkMode)
     }
 }
 
 struct FastestPaceShareCard: View {
     let fastestPace: TimeInterval
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var isDarkMode: Bool {
+        colorScheme == .dark
+    }
     
     private var paceString: String {
         let minutes = Int(fastestPace)
@@ -537,174 +653,120 @@ struct FastestPaceShareCard: View {
     }
     
     var body: some View {
-        VStack(spacing: 20) {
-            // Header
-            HStack(spacing: 8) {
-                Image(systemName: "hare.fill")
-                    .font(.title2)
-                    .foregroundColor(.green)
-                Text("Mile A Day")
-                    .font(.title3)
-                    .fontWeight(.bold)
-            }
-            
-            // Main content
-            VStack(spacing: 12) {
-                Text("Fastest Mile")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                
-                Text(paceString)
-                    .font(.system(size: 90, weight: .bold, design: .rounded))
-                    .foregroundColor(.green)
-                
-                Text("per mile")
-                    .font(.title2)
-                    .foregroundColor(.secondary)
-                
-                let mph = 60.0 / fastestPace
-                Text(String(format: "%.1f mph", mph))
-                    .font(.title3)
-                    .fontWeight(.medium)
-                    .foregroundColor(.green)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
-                    .background(Color.green.opacity(0.15))
-                    .cornerRadius(16)
-            }
-            
-            // Footer
-            Text("Personal Record")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundColor(.secondary)
+        VStack(spacing: 10) {
+            Text("Fastest Mile").font(.system(size: 18, weight: .semibold)).foregroundColor(isDarkMode ? .white : .black)
+            Text(paceString).font(.system(size: 56, weight: .heavy)).foregroundColor(.green)
+            Text("per mile").font(.system(size: 12)).foregroundColor(isDarkMode ? .white.opacity(0.75) : .black.opacity(0.65))
+            let mph = 60.0 / fastestPace
+            Text(String(format: "%.1f mph", mph)).font(.system(size: 14, weight: .semibold)).foregroundColor(.green)
+            MADBrandingFooter(isDarkMode: isDarkMode)
         }
-        .frame(width: 400, height: 600)
-        .padding(32)
+        .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 24)
-                .fill(Color(.systemBackground))
-                .shadow(color: .green.opacity(0.3), radius: 30, x: 0, y: 15)
+            RoundedRectangle(cornerRadius: 22)
+                .fill(isDarkMode ? Color.black.opacity(0.85) : Color.white)
+                .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.green.opacity(0.3), lineWidth: 1))
         )
+        .frame(width: 280)
     }
 }
 
 struct MostMilesShareCard: View {
     let mostMiles: Double
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var isDarkMode: Bool {
+        colorScheme == .dark
+    }
     
     var body: some View {
-        VStack(spacing: 20) {
-            // Header
-            HStack(spacing: 8) {
-                Image(systemName: "star.fill")
-                    .font(.title2)
-                    .foregroundColor(.purple)
-                Text("Mile A Day")
-                    .font(.title3)
-                    .fontWeight(.bold)
-            }
-            
-            // Main content
-            VStack(spacing: 12) {
-                Text("Most Miles")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                
-                Text("in a Single Day")
-                    .font(.callout)
-                    .foregroundColor(.secondary)
-                
-                Text(String(format: "%.2f", mostMiles))
-                    .font(.system(size: 90, weight: .bold, design: .rounded))
-                    .foregroundColor(.purple)
-                
-                Text("miles")
-                    .font(.title2)
-                    .foregroundColor(.secondary)
-                
-                let hours = mostMiles / 3.5
-                Text("~\(String(format: "%.1f", hours)) hours of running")
-                    .font(.callout)
-                    .fontWeight(.medium)
-                    .foregroundColor(.purple)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 8)
-                    .background(Color.purple.opacity(0.15))
-                    .cornerRadius(16)
-            }
-            
-            // Footer
-            Text("Daily Record")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundColor(.secondary)
+        VStack(spacing: 10) {
+            Text("Most Miles")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(isDarkMode ? .white : .black)
+            Text("in a single day")
+                .font(.system(size: 12))
+                .foregroundColor(isDarkMode ? .white.opacity(0.75) : .black.opacity(0.65))
+            Text(String(format: "%.2f", mostMiles))
+                .font(.system(size: 56, weight: .heavy))
+                .foregroundColor(.purple)
+            Text("miles")
+                .font(.system(size: 12))
+                .foregroundColor(isDarkMode ? .white.opacity(0.75) : .black.opacity(0.65))
+            MADBrandingFooter(isDarkMode: isDarkMode)
         }
-        .frame(width: 400, height: 600)
-        .padding(32)
-        .background(
-            RoundedRectangle(cornerRadius: 24)
-                .fill(Color(.systemBackground))
-                .shadow(color: .purple.opacity(0.3), radius: 30, x: 0, y: 15)
-        )
+        .shareStickerCard(accentColor: .purple, isDarkMode: isDarkMode)
     }
 }
 
 struct TotalMilesShareCard: View {
     let totalMiles: Double
     let streak: Int
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var isDarkMode: Bool {
+        colorScheme == .dark
+    }
     
     var body: some View {
-        VStack(spacing: 20) {
-            // Header
-            HStack(spacing: 8) {
-                Image(systemName: "map.fill")
-                    .font(.title2)
-                    .foregroundColor(.red)
-                Text("Mile A Day")
-                    .font(.title3)
-                    .fontWeight(.bold)
-            }
+        ZStack {
+            // Sticker background (compact, high-contrast)
+            StickerBackground(accentColor: .red, isDarkMode: isDarkMode)
             
-            // Main content
             VStack(spacing: 12) {
-                Text("Total Distance")
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                
-                Text(String(format: "%.1f", totalMiles))
-                    .font(.system(size: 80, weight: .bold, design: .rounded))
-                    .foregroundColor(.red)
-                
-                Text("lifetime miles")
-                    .font(.callout)
-                    .foregroundColor(.secondary)
-                
-                // Fun facts
-                VStack(spacing: 10) {
-                    let marathons = totalMiles / 26.2
-                    StatRow(icon: "flag.fill", text: "\(String(format: "%.1f", marathons)) marathons", color: .red)
+                // Main content
+                VStack(spacing: 20) {
+                    Text("TOTAL DISTANCE")
+                        .font(.system(size: 16, weight: .semibold, design: .default))
+                        .fontWidth(.condensed)
+                        .foregroundColor(isDarkMode ? .white : .black)
                     
-                    let avgPerDay = totalMiles / Double(max(streak, 1))
-                    StatRow(icon: "chart.line.uptrend.xyaxis", text: "\(String(format: "%.2f", avgPerDay)) mi/day avg", color: .red)
+                    // Miles display with subtle glow effect
+                    VStack(spacing: 12) {
+                        ZStack {
+                            Text(String(format: "%.1f", totalMiles))
+                                .font(.system(size: 72, weight: .heavy, design: .default))
+                                .fontWidth(.condensed)
+                                .foregroundColor(.red)
+                                
+                            
+                            Text(String(format: "%.1f", totalMiles))
+                                .font(.system(size: 72, weight: .heavy, design: .default))
+                                .fontWidth(.condensed)
+                                .foregroundColor(.red)
+                        }
+                        
+                        Text("lifetime miles")
+                            .font(.system(size: 16, weight: .medium, design: .rounded))
+                            .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
+                    }
+                    
+                    // Fun facts with glass effect
+                    VStack(spacing: 12) {
+                        let marathons = totalMiles / 26.2
+                        GlassStatRow(icon: "flag.fill", text: "\(String(format: "%.1f", marathons)) marathons", color: .red, isDarkMode: isDarkMode)
+                        
+                        let avgPerDay = totalMiles / Double(max(streak, 1))
+                        GlassStatRow(icon: "chart.line.uptrend.xyaxis", text: "\(String(format: "%.2f", avgPerDay)) mi/day avg", color: .red, isDarkMode: isDarkMode)
+                    }
+                    .padding(20)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color.red.opacity(0.15))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .stroke(Color.red.opacity(0.2), lineWidth: 1)
+                            )
+                    )
                 }
-                .padding(16)
-                .background(Color.red.opacity(0.1))
-                .cornerRadius(16)
+                
+                // Branding footer
+                MADBrandingFooter(isDarkMode: isDarkMode)
             }
-            
-            // Footer
-            Text("Keep moving forward!")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundColor(.secondary)
+            .padding(16)
         }
-        .frame(width: 400, height: 600)
-        .padding(32)
-        .background(
-            RoundedRectangle(cornerRadius: 24)
-                .fill(Color(.systemBackground))
-                .shadow(color: .red.opacity(0.3), radius: 30, x: 0, y: 15)
-        )
+        .frame(width: 280)
+        
     }
 }
 
@@ -713,6 +775,11 @@ struct WeekSummaryShareCard: View {
     let totalMiles: Double
     let streak: Int
     let fastestPace: TimeInterval
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var isDarkMode: Bool {
+        colorScheme == .dark
+    }
     
     private var paceString: String {
         let minutes = Int(fastestPace)
@@ -721,48 +788,68 @@ struct WeekSummaryShareCard: View {
     }
     
     var body: some View {
-        VStack(spacing: 20) {
-            // Header
-            HStack(spacing: 8) {
-                Image(systemName: "calendar.badge.clock")
-                    .font(.title2)
-                    .foregroundColor(.cyan)
-                Text("Mile A Day")
-                    .font(.title3)
-                    .fontWeight(.bold)
-            }
+        ZStack {
+            // Sticker background (compact, high-contrast)
+            StickerBackground(accentColor: .cyan, isDarkMode: isDarkMode)
             
-            // Main content
-            VStack(spacing: 16) {
-                Text("My Stats")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                
-                // Stats grid
-                VStack(spacing: 12) {
-                    StatRow(icon: "flame.fill", text: "\(streak) Day Streak", color: .orange)
-                    StatRow(icon: "figure.run", text: "\(String(format: "%.2f", currentDistance)) mi Today", color: .blue)
-                    StatRow(icon: "map.fill", text: "\(String(format: "%.1f", totalMiles)) mi Total", color: .red)
-                    StatRow(icon: "hare.fill", text: "\(paceString) /mi Best", color: .green)
+            VStack(spacing: 12) {
+                // Main content
+                VStack(spacing: 20) {
+                    Text("MY STATS")
+                        .font(.system(size: 16, weight: .semibold, design: .default))
+                        .fontWidth(.condensed)
+                        .foregroundColor(isDarkMode ? .white : .black)
+                    
+                    // Stats grid with glass effect
+                    VStack(spacing: 16) {
+                        GlassStatRow(icon: "flame.fill", text: "\(streak) Day Streak", color: .orange, isDarkMode: isDarkMode)
+                        GlassStatRow(icon: "figure.run", text: "\(String(format: "%.2f", currentDistance)) mi Today", color: .blue, isDarkMode: isDarkMode)
+                        GlassStatRow(icon: "map.fill", text: "\(String(format: "%.1f", totalMiles)) mi Total", color: .red, isDarkMode: isDarkMode)
+                        GlassStatRow(icon: "hare.fill", text: "\(paceString) /mi Best", color: .green, isDarkMode: isDarkMode)
+                    }
+                    .padding(24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(Color.cyan.opacity(0.15))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .stroke(Color.cyan.opacity(0.2), lineWidth: 1)
+                            )
+                    )
                 }
-                .padding(20)
-                .background(Color.cyan.opacity(0.1))
-                .cornerRadius(16)
+                
+                // Branding footer
+                MADBrandingFooter(isDarkMode: isDarkMode)
             }
-            
-            // Footer
-            Text("Powered by consistency")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundColor(.secondary)
+            .padding(16)
         }
-        .frame(width: 400, height: 600)
-        .padding(32)
-        .background(
-            RoundedRectangle(cornerRadius: 24)
-                .fill(Color(.systemBackground))
-                .shadow(color: .cyan.opacity(0.3), radius: 30, x: 0, y: 15)
-        )
+        .frame(width: 280)
+        
+    }
+}
+
+// MARK: - Glass Stat Row Component
+
+struct GlassStatRow: View {
+    let icon: String
+    let text: String
+    let color: Color
+    let isDarkMode: Bool
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(color)
+                .frame(width: 24)
+            
+            Text(text)
+                .font(.system(size: 14, weight: .medium, design: .default))
+                .foregroundColor(isDarkMode ? .white : .black)
+            
+            Spacer()
+        }
+        .padding(.vertical, 4)
     }
 }
 
@@ -777,78 +864,78 @@ struct CustomShareCardView: View {
     let fastestPace: TimeInterval
     let mostMiles: Double
     let totalMiles: Double
+    @Environment(\.colorScheme) var colorScheme
+    
+    private var isDarkMode: Bool {
+        colorScheme == .dark
+    }
     
     var body: some View {
-        VStack(spacing: 20) {
-            // Header
-            HStack(spacing: 8) {
-                Image(systemName: "star.circle.fill")
-                    .font(.title2)
-                    .foregroundColor(config.color)
-                Text("Mile A Day")
-                    .font(.title3)
-                    .fontWeight(.bold)
-            }
+        ZStack {
+            // Sticker background (compact, high-contrast)
+            StickerBackground(accentColor: config.color, isDarkMode: isDarkMode)
             
-            // Main content
-            VStack(spacing: 16) {
-                Text(config.name)
-                    .font(.title3)
-                    .fontWeight(.bold)
-                
-                VStack(spacing: 12) {
-                    ForEach(config.elements, id: \.self) { element in
-                        elementView(for: element)
+            VStack(spacing: 12) {
+                // Main content
+                VStack(spacing: 20) {
+                    Text(config.name.uppercased())
+                        .font(.system(size: 16, weight: .semibold, design: .default))
+                        .fontWidth(.condensed)
+                        .foregroundColor(isDarkMode ? .white : .black)
+                    
+                    VStack(spacing: 16) {
+                        ForEach(config.elements, id: \.self) { element in
+                            elementView(for: element)
+                        }
                     }
+                    .padding(24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(config.color.opacity(0.15))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .stroke(config.color.opacity(0.2), lineWidth: 1)
+                            )
+                    )
                 }
-                .padding(20)
-                .background(config.color.opacity(0.1))
-                .cornerRadius(16)
+                
+                // Branding footer
+                MADBrandingFooter(isDarkMode: isDarkMode)
             }
-            
-            // Footer
-            Text("Custom card")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundColor(.secondary)
+            .padding(16)
         }
-        .frame(width: 400, height: 600)
-        .padding(32)
-        .background(
-            RoundedRectangle(cornerRadius: 24)
-                .fill(Color(.systemBackground))
-                .shadow(color: config.color.opacity(0.3), radius: 30, x: 0, y: 15)
-        )
+        .frame(width: 280)
+        
     }
     
     @ViewBuilder
     private func elementView(for element: ShareCardElement) -> some View {
         switch element {
         case .streak:
-            StatRow(icon: element.icon, text: "\(user.streak) Day Streak", color: element.color)
+            GlassStatRow(icon: element.icon, text: "\(user.streak) Day Streak", color: element.color, isDarkMode: isDarkMode)
         case .todaysDistance:
-            StatRow(icon: element.icon, text: "\(String(format: "%.2f", currentDistance)) mi Today", color: element.color)
+            GlassStatRow(icon: element.icon, text: "\(String(format: "%.2f", currentDistance)) mi Today", color: element.color, isDarkMode: isDarkMode)
         case .todaysProgress:
-            StatRow(icon: element.icon, text: "\(Int(progress * 100))% Complete", color: element.color)
+            GlassStatRow(icon: element.icon, text: "\(Int(progress * 100))% Complete", color: element.color, isDarkMode: isDarkMode)
         case .goalStatus:
             if isGoalCompleted {
-                StatRow(icon: element.icon, text: "Goal Completed!", color: .green)
+                GlassStatRow(icon: element.icon, text: "Goal Completed!", color: .green, isDarkMode: isDarkMode)
             }
         case .fastestPace:
             let minutes = Int(fastestPace)
             let seconds = Int((fastestPace - Double(minutes)) * 60)
             let paceStr = String(format: "%d:%02d", minutes, seconds)
-            StatRow(icon: element.icon, text: "\(paceStr) /mi Best", color: element.color)
+            GlassStatRow(icon: element.icon, text: "\(paceStr) /mi Best", color: element.color, isDarkMode: isDarkMode)
         case .mostMiles:
-            StatRow(icon: element.icon, text: "\(String(format: "%.2f", mostMiles)) mi Record", color: element.color)
+            GlassStatRow(icon: element.icon, text: "\(String(format: "%.2f", mostMiles)) mi Record", color: element.color, isDarkMode: isDarkMode)
         case .totalMiles:
-            StatRow(icon: element.icon, text: "\(String(format: "%.1f", totalMiles)) mi Total", color: element.color)
+            GlassStatRow(icon: element.icon, text: "\(String(format: "%.1f", totalMiles)) mi Total", color: element.color, isDarkMode: isDarkMode)
         case .averagePerDay:
             let avg = totalMiles / Double(max(user.streak, 1))
-            StatRow(icon: element.icon, text: "\(String(format: "%.2f", avg)) mi/day avg", color: element.color)
+            GlassStatRow(icon: element.icon, text: "\(String(format: "%.2f", avg)) mi/day avg", color: element.color, isDarkMode: isDarkMode)
         case .marathonEquivalent:
             let marathons = totalMiles / 26.2
-            StatRow(icon: element.icon, text: "\(String(format: "%.1f", marathons)) marathons", color: element.color)
+            GlassStatRow(icon: element.icon, text: "\(String(format: "%.1f", marathons)) marathons", color: element.color, isDarkMode: isDarkMode)
         }
     }
 }

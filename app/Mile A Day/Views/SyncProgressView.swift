@@ -191,8 +191,8 @@ struct SyncProgressView: View {
             return "Uploading workouts to cloud"
         case .complete:
             return "Sync complete!"
-        case .error(let error):
-            return "Error: \(error.localizedDescription)"
+        case .error(let errorDescription):
+            return "Error: \(errorDescription)"
         }
     }
 

@@ -222,6 +222,10 @@ struct FriendStatsView: View {
             }
             
             if let stats = stats {
+                // Today's Goal Status Card (Prominent)
+                todayGoalCard(stats: stats)
+                
+                // Stats Grid
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: MADTheme.Spacing.md) {
                     FriendStatCard(title: "Streak", value: "\(stats.streak)", icon: "flame.fill", color: .orange)
                     FriendStatCard(title: "Total Miles", value: String(format: "%.1f", stats.totalMiles), icon: "figure.run", color: MADTheme.Colors.madRed)
@@ -238,6 +242,31 @@ struct FriendStatsView: View {
         }
         .padding(MADTheme.Spacing.md)
         .madCard()
+    }
+    
+    @ViewBuilder
+    private func todayGoalCard(stats: UserStats) -> some View {
+        VStack(spacing: MADTheme.Spacing.sm) {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: stats.hasCompletedGoalToday ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundColor(stats.hasCompletedGoalToday ? MADTheme.Colors.success : MADTheme.Colors.secondaryText)
+                
+                Text(stats.hasCompletedGoalToday ? "Goal Completed Today!" : "Goal Today")
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundColor(MADTheme.Colors.primaryText)
+            }
+            
+            Text("Daily goal: \(String(format: "%.1f", stats.goalMiles)) mi")
+                .font(MADTheme.Typography.caption)
+                .foregroundColor(MADTheme.Colors.secondaryText)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                .fill(stats.hasCompletedGoalToday ? MADTheme.Colors.success.opacity(0.1) : MADTheme.Colors.secondaryBackground)
+        )
     }
     
     private func formatPace(_ pace: TimeInterval) -> String {
@@ -416,4 +445,46 @@ struct UserStats: Codable {
     let totalMiles: Double
     let fastestMilePace: TimeInterval
     let mostMilesInOneDay: Double
+    let hasCompletedGoalToday: Bool
+    let goalMiles: Double
+}
+
+// MARK: - Recent Workout Model (API Response)
+struct RecentWorkout: Codable {
+    let userId: String
+    let workoutId: String
+    let distance: Double
+    let localDate: String
+    let date: String
+    let timezoneOffset: Int
+    let workoutType: String
+    let deviceEndDate: String
+    let calories: Double
+    let totalDuration: TimeInterval
+    
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case workoutId = "workout_id"
+        case distance
+        case localDate = "local_date"
+        case date
+        case timezoneOffset = "timezone_offset"
+        case workoutType = "workout_type"
+        case deviceEndDate = "device_end_date"
+        case calories
+        case totalDuration = "total_duration"
+    }
+    
+    /// Extracts just the date part (yyyy-MM-dd) from the local_date string
+    var dateOnly: String {
+        // local_date comes as ISO format like "2025-10-26T00:00:00.000Z"
+        // Extract just the date part
+        let components = localDate.components(separatedBy: "T")
+        return components.first ?? localDate
+    }
+}
+
+// MARK: - Streak Response Model
+struct StreakResponse: Codable {
+    let streak: Int
 }

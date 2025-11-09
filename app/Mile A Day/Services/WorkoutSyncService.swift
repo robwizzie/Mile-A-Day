@@ -12,16 +12,20 @@ import HealthKit
 // MARK: - Sync Progress Models
 
 /// Represents the current state of a sync operation
-enum SyncPhase {
+enum SyncPhase: Equatable {
     case idle
     case fetchingFromHealthKit
     case uploadingToBackend
     case complete
-    case error(Error)
+    case error(String) // Store error description instead of Error for Equatable conformance
+    
+    init(_ error: Error) {
+        self = .error(error.localizedDescription)
+    }
 }
 
 /// Progress update for sync operations
-struct SyncProgress {
+struct SyncProgress: Equatable {
     let phase: SyncPhase
     let fetchedCount: Int
     let totalToFetch: Int
@@ -276,7 +280,7 @@ class WorkoutSyncService: ObservableObject {
             print("[WorkoutSyncService] ❌ Initial sync failed: \(error)")
 
             let progress = SyncProgress(
-                phase: .error(error),
+                phase: SyncPhase(error),
                 fetchedCount: 0,
                 totalToFetch: 0,
                 uploadedCount: 0,
