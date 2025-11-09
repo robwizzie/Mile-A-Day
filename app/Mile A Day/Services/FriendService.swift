@@ -414,6 +414,32 @@ class FriendService: ObservableObject {
         }
         return nil
     }
+
+    // MARK: - Friend Workout Data
+
+    /// Fetch recent workouts for a friend
+    func fetchRecentWorkouts(for friendId: String, limit: Int = 20) async throws -> [FriendWorkout] {
+        let endpoint = "/workouts/\(friendId)/recent?limit=\(limit)"
+
+        let response: [FriendWorkout] = try await makeRequest(
+            endpoint: endpoint,
+            responseType: [FriendWorkout].self
+        )
+
+        return response
+    }
+
+    /// Fetch stats for a friend
+    func fetchFriendStats(for friendId: String) async throws -> FriendStats {
+        let endpoint = "/workouts/\(friendId)/stats"
+
+        let response: FriendStats = try await makeRequest(
+            endpoint: endpoint,
+            responseType: FriendStats.self
+        )
+
+        return response
+    }
 }
 
 // MARK: - HTTP Methods
@@ -422,6 +448,66 @@ enum HTTPMethod: String {
     case POST = "POST"
     case PATCH = "PATCH"
     case DELETE = "DELETE"
+}
+
+// MARK: - Friend Workout Models
+
+/// Workout data for a friend
+struct FriendWorkout: Codable, Identifiable {
+    let id: String
+    let date: String
+    let distance: Double
+    let totalDuration: Double
+    let workoutType: String
+    let deviceEndDate: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "workoutId"
+        case date = "localDate"
+        case distance
+        case totalDuration
+        case workoutType
+        case deviceEndDate
+    }
+
+    var formattedDate: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        if let parsedDate = formatter.date(from: date) {
+            formatter.dateFormat = "MMM d, yyyy"
+            return formatter.string(from: parsedDate)
+        }
+        return date
+    }
+
+    var formattedDistance: String {
+        return String(format: "%.2f mi", distance)
+    }
+
+    var formattedDuration: String {
+        let minutes = Int(totalDuration / 60)
+        let seconds = Int(totalDuration.truncatingRemainder(dividingBy: 60))
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+/// Stats data for a friend
+struct FriendStats: Codable {
+    let totalWorkouts: Int
+    let totalMiles: Double
+    let currentStreak: Int
+    let longestStreak: Int
+    let averagePace: Double?
+    let recentWorkouts: [FriendWorkout]?
+
+    enum CodingKeys: String, CodingKey {
+        case totalWorkouts = "total_workouts"
+        case totalMiles = "total_miles"
+        case currentStreak = "current_streak"
+        case longestStreak = "longest_streak"
+        case averagePace = "average_pace"
+        case recentWorkouts = "recent_workouts"
+    }
 }
 
 // MARK: - Error Types
@@ -435,7 +521,7 @@ enum FriendServiceError: LocalizedError {
     case serverError(Int)
     case networkError(String)
     case apiError(String)
-    
+
     var errorDescription: String? {
         switch self {
         case .invalidURL:

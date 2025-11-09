@@ -417,13 +417,28 @@ struct ProfileView: View {
                 .fontWeight(.bold)
                 .foregroundColor(MADTheme.Colors.primaryText)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            
+
             VStack(spacing: MADTheme.Spacing.sm) {
+                NavigationLink(destination: DeveloperSettingsView()) {
+                    HStack {
+                        Image(systemName: "wrench.and.screwdriver")
+                            .foregroundColor(MADTheme.Colors.madRed)
+                        Text("Developer Settings")
+                            .foregroundColor(MADTheme.Colors.primaryText)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(MADTheme.Colors.secondaryText)
+                    }
+                    .padding()
+                    .background(MADTheme.Colors.primaryBackground)
+                    .cornerRadius(MADTheme.CornerRadius.medium)
+                }
+
                 Button("Reset Onboarding") {
                     appStateManager.resetAppState()
                 }
                 .madSecondaryButton(fullWidth: true)
-                
+
                 Button("Sign Out") {
                     showingLogoutConfirmation = true
                 }

@@ -8,6 +8,7 @@ struct UserProfileDetailView: View {
     
     @State private var userStats: UserStats?
     @State private var userBadges: [Badge] = []
+    @State private var friendWorkouts: [FriendWorkout] = []
     @State private var isLoadingStats = false
     @State private var isPrivate = false
     @State private var actionInProgress = false
@@ -28,6 +29,11 @@ struct UserProfileDetailView: View {
                 // Badges Section
                 if !isPrivate && !userBadges.isEmpty {
                     FriendBadgesView(badges: userBadges)
+                }
+
+                // Recent Workouts Section
+                if !isPrivate && !friendWorkouts.isEmpty {
+                    FriendWorkoutsSection(workouts: friendWorkouts)
                 }
             }
             .padding(MADTheme.Spacing.md)
@@ -117,30 +123,41 @@ struct UserProfileDetailView: View {
     
     // MARK: - Helper Methods
     private func loadUserData() {
-        // For now, we'll simulate loading stats and badges
-        // In a real implementation, you'd make API calls to get this data
         isLoadingStats = true
-        
-        // Load data immediately without delay for better UX
+
         Task {
-            // Simulate a brief loading state
-            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
-            
-            await MainActor.run {
-                // Mock data - replace with actual API calls
-                userStats = UserStats(
-                    streak: 15,
-                    totalMiles: 45.2,
-                    fastestMilePace: 7.5,
-                    mostMilesInOneDay: 3.2
-                )
-                
-                userBadges = [
-                    Badge(id: "streak_7", name: "Week Warrior", description: "7 day streak!", dateAwarded: Date()),
-                    Badge(id: "miles_50", name: "50 Mile Club", description: "Ran 50 total miles!", dateAwarded: Date())
-                ]
-                
-                isLoadingStats = false
+            do {
+                // Fetch friend stats from API
+                let stats = try await friendService.fetchFriendStats(for: user.user_id)
+
+                // Fetch recent workouts from API
+                let workouts = try await friendService.fetchRecentWorkouts(for: user.user_id, limit: 10)
+
+                await MainActor.run {
+                    // Convert FriendStats to UserStats
+                    userStats = UserStats(
+                        streak: stats.currentStreak,
+                        totalMiles: stats.totalMiles,
+                        fastestMilePace: stats.averagePace ?? 0.0,
+                        mostMilesInOneDay: 0.0, // API doesn't provide this yet
+                        hasCompletedGoalToday: false, // API doesn't provide this yet
+                        goalMiles: 1.0 // Default goal miles (API doesn't provide this yet)
+                    )
+
+                    friendWorkouts = workouts
+
+                    // Mock badges for now - replace with actual badge API when available
+                    userBadges = []
+
+                    isLoadingStats = false
+                }
+
+            } catch {
+                await MainActor.run {
+                    print("[UserProfileDetailView] ❌ Failed to load user data: \(error)")
+                    // If loading fails, keep mock data or show error
+                    isLoadingStats = false
+                }
             }
         }
     }

@@ -35,7 +35,16 @@ struct RootView: View {
                         insertion: .move(edge: .trailing).combined(with: .opacity),
                         removal: .move(edge: .leading).combined(with: .opacity)
                     ))
-                
+
+            case .workoutSync:
+                SyncProgressView(onComplete: {
+                    appStateManager.completeWorkoutSync()
+                })
+                .transition(.asymmetric(
+                    insertion: .scale.combined(with: .opacity),
+                    removal: .opacity
+                ))
+
             case .main:
                 MainTabView()
                     .environmentObject(healthManager)

@@ -119,13 +119,49 @@ final class MADBackgroundService: NSObject, ObservableObject {
     private func performBackgroundWork() async {
         // Fetch latest workout data
         let success = await fetchLatestWorkoutData()
-        
+
         if success {
             // Check if user completed their mile goal
             checkForMileCompletion()
-            
+
             // Update widgets
             updateWidgets()
+
+            // Sync workouts to backend (background mode)
+            await syncWorkoutsInBackground()
+        }
+    }
+
+    /// Sync workouts to backend in background (limited batch size)
+    @MainActor
+    private func syncWorkoutsInBackground() async {
+        // Only sync if user is authenticated
+        guard UserDefaults.standard.string(forKey: "authToken") != nil,
+              UserDefaults.standard.string(forKey: "backendUserId") != nil else {
+            print("[Background] Skipping workout sync - user not authenticated")
+            return
+        }
+
+        do {
+            let syncService = WorkoutSyncService.shared
+            let unsyncedCount = await syncService.getUnsyncedCount()
+
+            guard unsyncedCount > 0 else {
+                print("[Background] No workouts to sync")
+                return
+            }
+
+            print("[Background] Syncing \(unsyncedCount) workouts in background...")
+
+            // In background, only sync a small batch to avoid timeout
+            // Background tasks have limited execution time (~30 seconds)
+            try await syncService.syncNewWorkouts()
+
+            print("[Background] ✅ Workout sync complete")
+
+        } catch {
+            print("[Background] ❌ Workout sync failed: \(error)")
+            // Don't crash on sync failure - workouts will sync on next opportunity
         }
     }
     
@@ -238,14 +274,17 @@ extension MADBackgroundService {
         scheduleBackgroundRefresh()
     }
     
-    /// Call this from App's sceneWillEnterForeground  
+    /// Call this from App's sceneWillEnterForeground
     func appWillEnterForeground() {
         // Cancel any pending background tasks when app becomes active
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.backgroundTaskIdentifier)
-        
+
         // Perform immediate refresh when app becomes active
         Task { [weak self] in
             await self?.performBackgroundWork()
+
+            // Also check for new workouts to sync on foreground
+            await AppLaunchSyncHandler.shared.checkAndSyncOnForeground()
         }
     }
 } 
