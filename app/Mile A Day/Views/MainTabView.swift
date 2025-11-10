@@ -164,7 +164,7 @@ struct TabBarItem: View {
     var body: some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
+                .font(.system(size: isSelected ? 24 : 22, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(
                     isSelected ?
                         LinearGradient(
@@ -178,14 +178,17 @@ struct TabBarItem: View {
                             endPoint: .bottom
                         )
                 )
-                .scaleEffect(isSelected ? 1.1 : 1.0)
 
-            Text(label)
-                .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
-                .foregroundColor(isSelected ? Color(red: 217/255, green: 64/255, blue: 63/255) : .secondary)
+            if isSelected {
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(Color(red: 217/255, green: 64/255, blue: 63/255))
+                    .transition(.scale.combined(with: .opacity))
+            }
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
     }
 }
 

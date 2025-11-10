@@ -11,9 +11,19 @@ struct WeekAtAGlanceCard: View {
 
     private var last7Days: [Date] {
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        return (0..<7).reversed().map { offset in
-            calendar.date(byAdding: .day, value: -offset, to: today)!
+        let today = Date()
+
+        // Get the start of the current week (Sunday)
+        let weekday = calendar.component(.weekday, from: today)
+        let daysFromSunday = weekday - 1 // Sunday is 1, so this gives us offset
+
+        guard let startOfWeek = calendar.date(byAdding: .day, value: -daysFromSunday, to: calendar.startOfDay(for: today)) else {
+            return []
+        }
+
+        // Generate Sunday through Saturday
+        return (0..<7).compactMap { offset in
+            calendar.date(byAdding: .day, value: offset, to: startOfWeek)
         }
     }
 
