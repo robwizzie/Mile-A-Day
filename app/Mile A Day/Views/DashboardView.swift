@@ -36,7 +36,7 @@ struct DashboardView: View {
                     InstructionsBanner(
                         showInstructions: $showInstructions
                     )
-                    
+
                     // Today's progress with static data
                     TodayProgressCard(
                         currentDistance: currentState.distance,
@@ -50,10 +50,16 @@ struct DashboardView: View {
                         mostMiles: healthManager.mostMilesInOneDay,
                         totalMiles: healthManager.totalLifetimeMiles
                     )
-                    
+
+                    // Week at a glance - NEW
+                    WeekAtAGlanceCard(
+                        healthManager: healthManager,
+                        userManager: userManager
+                    )
+
                     // Streak card with simplified progress
                     StreakCard(
-                        streak: userManager.currentUser.streak, 
+                        streak: userManager.currentUser.streak,
                         isActiveToday: userManager.currentUser.isStreakActiveToday,
                         isAtRisk: userManager.currentUser.isStreakAtRisk,
                         user: userManager.currentUser,
@@ -65,10 +71,24 @@ struct DashboardView: View {
                         mostMiles: healthManager.mostMilesInOneDay,
                         totalMiles: healthManager.totalLifetimeMiles
                     )
-                    
+
+                    // Quick access cards - NEW
+                    HStack(spacing: 16) {
+                        CalendarPreviewCard(
+                            healthManager: healthManager,
+                            userManager: userManager
+                        )
+                        .frame(maxWidth: .infinity)
+
+                        BadgesPreviewCard(
+                            userManager: userManager
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+
                     // Stats grid
                     StatsGridView(user: userManager.currentUser, healthManager: healthManager)
-                    
+
                     // Recent workouts
                     RecentWorkoutsView(workouts: healthManager.recentWorkouts)
                 }
@@ -771,19 +791,11 @@ struct StreakCard: View {
                     }
                 }
             }
-            
+
 
         }
         .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemBackground))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color(.systemGray4), lineWidth: 1)
-                )
-                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
-        )
+        .liquidGlassCard(accentColor: streakColor)
         .scaleEffect(isPressed ? 0.97 : 1.0)
         .animation(.easeInOut(duration: 0.1), value: isPressed)
         .onTapGesture {
@@ -942,19 +954,11 @@ struct TodayProgressCard: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
-            
+
 
         }
         .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemBackground))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color(.systemGray4), lineWidth: 1)
-                )
-                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
-        )
+        .liquidGlassCard(accentColor: didComplete ? .green : Color(red: 217/255, green: 64/255, blue: 63/255))
         .scaleEffect(isPressed ? 0.97 : 1.0)
         .animation(.easeInOut(duration: 0.1), value: isPressed)
         .onAppear {
