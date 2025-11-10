@@ -68,6 +68,8 @@ class WorkoutSyncService: ObservableObject {
     private let maxRetries = 3
     private let retryDelay: TimeInterval = 2.0 // seconds
 
+    private let healthStore = HKHealthStore()
+
     private var authToken: String? {
         UserDefaults.standard.string(forKey: "authToken")
     }
@@ -419,7 +421,7 @@ class WorkoutSyncService: ObservableObject {
         let requestBody = try JSONSerialization.data(withJSONObject: workoutData)
         request.httpBody = requestBody
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (_, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SyncError.invalidResponse
@@ -449,7 +451,7 @@ class WorkoutSyncService: ObservableObject {
             let deviceEndDate = isoFormatter.string(from: workout.endDate)
 
             let workoutType = getWorkoutType(from: workout.workoutActivityType)
-            let calories = workout.totalEnergyBurned?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
+            let calories = await activeEnergyKilocalories(for: workout)
             let distance = workout.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
 
             let workoutDict: [String: Any] = [
@@ -483,6 +485,35 @@ class WorkoutSyncService: ObservableObject {
             return "hiking"
         default:
             return "other"
+        }
+    }
+
+    private func activeEnergyKilocalories(for workout: HKWorkout) async -> Double {
+        if #available(iOS 18.0, *) {
+            guard HKHealthStore.isHealthDataAvailable(),
+                  let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) else {
+                return 0
+            }
+            
+            return await withCheckedContinuation { continuation in
+                let predicate = HKQuery.predicateForObjects(from: workout)
+                let query = HKStatisticsQuery(
+                    quantityType: energyType,
+                    quantitySamplePredicate: predicate,
+                    options: .cumulativeSum
+                ) { _, statistics, error in
+                    if let error = error {
+                        print("[WorkoutSyncService] ⚠️ Active energy query failed: \(error.localizedDescription)")
+                    }
+                    
+                    let value = statistics?.sumQuantity()?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
+                    continuation.resume(returning: value)
+                }
+                
+                healthStore.execute(query)
+            }
+        } else {
+            return workout.totalEnergyBurned?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
         }
     }
 

@@ -15,6 +15,7 @@ final class MADBackgroundService: NSObject, ObservableObject {
     private let userManager = UserManager()
     private let notificationService = MADNotificationService.shared
     // Live workout functionality removed
+    private func log(_ message: String) {}
     
     // Background task identifier
     private static let backgroundTaskIdentifier = "com.mileaday.background-refresh"
@@ -69,11 +70,17 @@ final class MADBackgroundService: NSObject, ObservableObject {
     private func setupWorkoutObserver() {
         let workoutType = HKObjectType.workoutType()
         
-        // Create observer query for new workouts
-        let query = HKObserverQuery(sampleType: workoutType, predicate: nil) { [weak self] query, completionHandler, error in
-            
-            if let error = error {
+        let query = HKObserverQuery(sampleType: workoutType, predicate: nil) { [weak self] _, completionHandler, error in
+            guard let self else {
                 completionHandler()
+                return
+            }
+            
+            if let error {
+                Task { @MainActor in
+                    self.log("[MADBackgroundService] ❌ Workout observer error: \(error.localizedDescription)")
+                    completionHandler()
+                }
                 return
             }
             
@@ -138,7 +145,7 @@ final class MADBackgroundService: NSObject, ObservableObject {
         // Only sync if user is authenticated
         guard UserDefaults.standard.string(forKey: "authToken") != nil,
               UserDefaults.standard.string(forKey: "backendUserId") != nil else {
-            print("[Background] Skipping workout sync - user not authenticated")
+            log("[Background] Skipping workout sync - user not authenticated")
             return
         }
 
@@ -147,20 +154,20 @@ final class MADBackgroundService: NSObject, ObservableObject {
             let unsyncedCount = await syncService.getUnsyncedCount()
 
             guard unsyncedCount > 0 else {
-                print("[Background] No workouts to sync")
+                log("[Background] No workouts to sync")
                 return
             }
 
-            print("[Background] Syncing \(unsyncedCount) workouts in background...")
+            log("[Background] Syncing \(unsyncedCount) workouts in background...")
 
             // In background, only sync a small batch to avoid timeout
             // Background tasks have limited execution time (~30 seconds)
             try await syncService.syncNewWorkouts()
 
-            print("[Background] ✅ Workout sync complete")
+            log("[Background] ✅ Workout sync complete")
 
         } catch {
-            print("[Background] ❌ Workout sync failed: \(error)")
+            log("[Background] ❌ Workout sync failed: \(error)")
             // Don't crash on sync failure - workouts will sync on next opportunity
         }
     }
@@ -201,7 +208,7 @@ final class MADBackgroundService: NSObject, ObservableObject {
                     return
                 }
                 
-                print("[Background] Updating user with HealthKit data - Streak: \(self.healthManager.retroactiveStreak), Miles: \(self.healthManager.todaysDistance)")
+                log("[Background] Updating user with HealthKit data - Streak: \(self.healthManager.retroactiveStreak), Miles: \(self.healthManager.todaysDistance)")
                 
                 // Update user data with new HealthKit data
                 // This now includes saveUserData() call to persist the streak
@@ -213,7 +220,7 @@ final class MADBackgroundService: NSObject, ObservableObject {
                     mostMilesInDay: self.healthManager.mostMilesInOneDay
                 )
                 
-                print("[Background] User updated and saved - Current streak now: \(self.userManager.currentUser.streak)")
+                log("[Background] User updated and saved - Current streak now: \(self.userManager.currentUser.streak)")
                 
                 continuation.resume(returning: true)
             }

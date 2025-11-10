@@ -355,9 +355,8 @@ struct EnhancedShareView: View {
                         .tint(showingCopiedFeedback ? Color.green : Color.blue)
                         
                         Button {
-                            if let image = generatedImage {
-                                showingShareSheet = true
-                            }
+                            guard generatedImage != nil else { return }
+                            showingShareSheet = true
                         } label: {
                             Label("Share", systemImage: "square.and.arrow.up")
                                 .frame(maxWidth: .infinity)
