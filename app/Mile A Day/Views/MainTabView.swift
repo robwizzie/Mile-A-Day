@@ -7,68 +7,44 @@ struct MainTabView: View {
     @StateObject private var healthManager = HealthKitManager()
     @StateObject private var userManager = UserManager()
     @StateObject private var notificationService = MADNotificationService.shared
-    
+    @State private var selectedTab = 0
+
     var body: some View {
-        TabView {
-            NavigationStack {
-                DashboardView(healthManager: healthManager, userManager: userManager)
-                    .environmentObject(notificationService)
-            }
-            .tabItem {
-                Label("Dashboard", systemImage: "house.fill")
-            }
+        ZStack {
+            TabView(selection: $selectedTab) {
+                NavigationStack {
+                    DashboardView(healthManager: healthManager, userManager: userManager)
+                        .environmentObject(notificationService)
+                }
+                .tag(0)
 
-            NavigationStack {
-                FriendsListView()
-            }
-            .tabItem {
-                Label("Friends", systemImage: "person.2.fill")
-            }
+                NavigationStack {
+                    FriendsListView()
+                }
+                .tag(1)
 
-            NavigationStack {
-                CompetitionsView()
-            }
-            .tabItem {
-                Label("Competitions", systemImage: "trophy.fill")
-            }
+                NavigationStack {
+                    CompetitionsView()
+                }
+                .tag(2)
 
-            NavigationStack {
-                ProfileView(userManager: userManager, healthManager: healthManager)
-                    .environment(\.appStateManager, appStateManager)
+                NavigationStack {
+                    ProfileView(userManager: userManager, healthManager: healthManager)
+                        .environment(\.appStateManager, appStateManager)
+                }
+                .tag(3)
             }
-            .tabItem {
-                Label("Profile", systemImage: "person.fill")
+            .toolbar(.hidden, for: .tabBar) // Hide default tab bar
+
+            // Custom floating tab bar
+            VStack {
+                Spacer()
+                FloatingTabBar(selectedTab: $selectedTab)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
             }
         }
-        .accentColor(Color(red: 217/255, green: 64/255, blue: 63/255)) // MAD Red accent
         .onAppear {
-            // Configure navigation bar appearance for dark mode
-            let appearance = UINavigationBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = UIColor.systemBackground
-            appearance.titleTextAttributes = [.foregroundColor: UIColor.label]
-            appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.label]
-
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().compactAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
-
-            // Configure tab bar with liquid glass effect
-            let tabBarAppearance = UITabBarAppearance()
-            tabBarAppearance.configureWithTransparentBackground()
-
-            // Create blur effect for liquid glass
-            let blurEffect = UIBlurEffect(style: .systemUltraThinMaterial)
-            tabBarAppearance.backgroundEffect = blurEffect
-
-            // Add subtle shadow
-            tabBarAppearance.shadowColor = UIColor.black.withAlphaComponent(0.1)
-
-            UITabBar.appearance().standardAppearance = tabBarAppearance
-            if #available(iOS 15.0, *) {
-                UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
-            }
-
             // Reset daily notification tracking for new day
             notificationService.resetDailyNotificationTracking()
 
@@ -101,6 +77,115 @@ struct MainTabView: View {
             WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles)
             WidgetDataStore.save(streak: userManager.currentUser.streak)
         }
+    }
+}
+
+// MARK: - Floating Tab Bar
+
+struct FloatingTabBar: View {
+    @Binding var selectedTab: Int
+    @Environment(\.colorScheme) var colorScheme
+
+    let tabs: [(icon: String, label: String)] = [
+        ("house.fill", "Dashboard"),
+        ("person.2.fill", "Friends"),
+        ("trophy.fill", "Competitions"),
+        ("person.fill", "Profile")
+    ]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(0..<tabs.count, id: \.self) { index in
+                TabBarItem(
+                    icon: tabs[index].icon,
+                    label: tabs[index].label,
+                    isSelected: selectedTab == index
+                )
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        selectedTab = index
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.vertical, 12)
+        .background(
+            ZStack {
+                // Liquid glass material
+                RoundedRectangle(cornerRadius: 24)
+                    .fill(.ultraThinMaterial)
+
+                // Subtle gradient overlay
+                RoundedRectangle(cornerRadius: 24)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.05 : 0.1),
+                                Color.clear
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+
+                // Border stroke
+                RoundedRectangle(cornerRadius: 24)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
+                                Color.white.opacity(colorScheme == .dark ? 0.1 : 0.15)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.5
+                    )
+            }
+        )
+        .shadow(color: .black.opacity(0.15), radius: 20, x: 0, y: 10)
+        .overlay(
+            // Inner shadow for depth
+            RoundedRectangle(cornerRadius: 24)
+                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+                .blur(radius: 1)
+                .offset(y: 1)
+                .mask(RoundedRectangle(cornerRadius: 24))
+        )
+    }
+}
+
+struct TabBarItem: View {
+    let icon: String
+    let label: String
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: isSelected ? .semibold : .regular))
+                .foregroundStyle(
+                    isSelected ?
+                        LinearGradient(
+                            colors: [Color(red: 217/255, green: 64/255, blue: 63/255), Color(red: 217/255, green: 64/255, blue: 63/255).opacity(0.8)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ) :
+                        LinearGradient(
+                            colors: [.secondary, .secondary],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                )
+                .scaleEffect(isSelected ? 1.1 : 1.0)
+
+            Text(label)
+                .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                .foregroundColor(isSelected ? Color(red: 217/255, green: 64/255, blue: 63/255) : .secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
     }
 }
 

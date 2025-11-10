@@ -132,15 +132,22 @@ struct DayProgressView: View {
         return healthManager.dailyMileGoals[dateKey] ?? false
     }
 
-    private var hasActivity: Bool {
+    private var stepCount: Int {
         let calendar = Calendar.current
         let dateKey = calendar.startOfDay(for: date)
-        let steps = healthManager.dailyStepsData[dateKey] ?? 0
-        return steps > 0
+        return healthManager.dailyStepsData[dateKey] ?? 0
+    }
+
+    private var hasActivity: Bool {
+        return stepCount > 0
+    }
+
+    private var reachedStepGoal: Bool {
+        return stepCount >= 10000
     }
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             Text(dayLetter)
                 .font(.caption2)
                 .fontWeight(.medium)
@@ -152,6 +159,7 @@ struct DayProgressView: View {
                     .frame(width: 36, height: 36)
 
                 if completedGoal {
+                    // Mile goal completed - green circle with running man
                     Circle()
                         .fill(
                             LinearGradient(
@@ -162,15 +170,17 @@ struct DayProgressView: View {
                         )
                         .frame(width: 36, height: 36)
 
-                    Image(systemName: "checkmark")
-                        .font(.caption)
+                    Image(systemName: "figure.run")
+                        .font(.system(size: 14))
                         .fontWeight(.bold)
                         .foregroundColor(.white)
                 } else if hasActivity {
+                    // Has activity but didn't reach mile goal
                     Circle()
                         .fill(Color.orange.opacity(0.3))
                         .frame(width: 36, height: 36)
 
+                    // Small dot for partial activity
                     Circle()
                         .fill(Color.orange.opacity(0.6))
                         .frame(width: 12, height: 12)
@@ -181,6 +191,18 @@ struct DayProgressView: View {
                         .stroke(Color(red: 217/255, green: 64/255, blue: 63/255), lineWidth: 2)
                         .frame(width: 40, height: 40)
                 }
+            }
+
+            // Step goal indicator (like calendar)
+            if reachedStepGoal {
+                Image(systemName: "figure.walk")
+                    .font(.system(size: 8))
+                    .foregroundColor(.blue)
+            } else {
+                // Placeholder to maintain spacing
+                Image(systemName: "figure.walk")
+                    .font(.system(size: 8))
+                    .foregroundColor(.clear)
             }
 
             Text(dayNumber)
