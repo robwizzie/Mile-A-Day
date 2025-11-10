@@ -37,8 +37,8 @@ struct DashboardView: View {
                         showInstructions: $showInstructions
                     )
 
-                    // SECTION: Today's Overview (side by side)
-                    HStack(spacing: 12) {
+                    // SECTION: Today's Overview
+                    VStack(spacing: 12) {
                         TodayProgressCard(
                             currentDistance: currentState.distance,
                             goalDistance: currentState.goal,
@@ -51,7 +51,6 @@ struct DashboardView: View {
                             mostMiles: healthManager.mostMilesInOneDay,
                             totalMiles: healthManager.totalLifetimeMiles
                         )
-                        .frame(maxWidth: .infinity)
 
                         StreakCard(
                             streak: userManager.currentUser.streak,
@@ -66,7 +65,6 @@ struct DashboardView: View {
                             mostMiles: healthManager.mostMilesInOneDay,
                             totalMiles: healthManager.totalLifetimeMiles
                         )
-                        .frame(maxWidth: .infinity)
                     }
 
                     // SECTION: Activity Overview
@@ -700,15 +698,69 @@ struct StreakCard: View {
     }
     
     var body: some View {
-        VStack(spacing: 12) {
-            // Title
-            Text("Current Streak")
-                .font(.headline)
-                .fontWeight(.semibold)
-            
-            // Streak circle with fire icon (matching widget design)
+        HStack(spacing: 16) {
+            // Left side: Streak info
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "flame.fill")
+                        .foregroundColor(streakColor)
+                        .font(.title3)
+
+                    Text("Current Streak")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                }
+
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(streak)")
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .foregroundColor(streakColor)
+                        .scaleEffect(animateStreak && !isRefreshing ? 1.05 : 1.0)
+                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateStreak)
+                        .opacity(isRefreshing ? 0.6 : 1.0)
+
+                    Text(streak == 1 ? "day" : "days")
+                        .font(.title3)
+                        .foregroundColor(.secondary)
+                        .opacity(isRefreshing ? 0.6 : 1.0)
+                }
+
+                // Status message
+                if isGoalCompleted {
+                    Label("Goal completed!", systemImage: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                } else if isAtRisk {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Streak at risk!", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundColor(.red)
+                            .font(.caption)
+                            .fontWeight(.medium)
+
+                        Text(user.formattedTimeUntilReset)
+                            .font(.caption2)
+                            .foregroundColor(streakColor.opacity(0.8))
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Keep it going!")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        if !isActiveToday, user.timeUntilStreakReset != nil {
+                            Text(user.formattedTimeUntilReset)
+                                .font(.caption2)
+                                .foregroundColor(streakColor.opacity(0.8))
+                        }
+                    }
+                }
+            }
+
+            Spacer()
+
+            // Right side: Compact progress ring
             ZStack {
-                // Background circle
                 Circle()
                     .fill(
                         LinearGradient(
@@ -717,87 +769,39 @@ struct StreakCard: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 120, height: 120)
-                    .scaleEffect(isPressed ? 0.95 : 1.0)
-                
-                // Progress ring - now changes color with streak status
+                    .frame(width: 80, height: 80)
+
                 Circle()
-                    .stroke(Color.gray.opacity(0.2), lineWidth: 5)
-                    .frame(width: 130, height: 130)
-                
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 4)
+                    .frame(width: 88, height: 88)
+
                 Circle()
                     .trim(from: 0, to: progress)
-                    .stroke(streakColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
-                    .frame(width: 130, height: 130)
+                    .stroke(streakColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .frame(width: 88, height: 88)
                     .rotationEffect(.degrees(-90))
                     .animation(.easeInOut(duration: 0.8), value: progress)
-                
-                // Loading indicator overlay when refreshing
+
                 if isRefreshing {
                     Circle()
                         .stroke(Color.blue.opacity(0.3), lineWidth: 2)
-                        .frame(width: 140, height: 140)
+                        .frame(width: 96, height: 96)
                         .rotationEffect(.degrees(-90))
                         .overlay(
                             Circle()
                                 .trim(from: 0, to: 0.25)
                                 .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                                .frame(width: 140, height: 140)
+                                .frame(width: 96, height: 96)
                                 .rotationEffect(.degrees(animateStreak ? 360 : 0))
                                 .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: animateStreak)
                         )
                 }
-                
-                // Center content
-                VStack(spacing: 4) {
-                    Text("\(streak)")
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .foregroundColor(streakColor)
-                        .scaleEffect(animateStreak && !isRefreshing ? 1.1 : 1.0)
-                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateStreak)
-                        .opacity(isRefreshing ? 0.6 : 1.0)
-                    
-                    Text(streak == 1 ? "day" : "days")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(streakColor.opacity(0.8))
-                        .opacity(isRefreshing ? 0.6 : 1.0)
-                }
-            }
-            
-            // Status message with time until streak reset
-            VStack(spacing: 4) {
-                if isGoalCompleted {
-                    Label("Goal completed!", systemImage: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                } else if isAtRisk {
-                    Label("Streak at risk!", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundColor(.red)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                    
-                    // Show time until streak ends - use same color as streak
-                    Text(user.formattedTimeUntilReset)
-                        .font(.caption2)
-                        .foregroundColor(streakColor.opacity(0.8))
-                        .fontWeight(.medium)
-                } else {
-                    Text("Keep it going!")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    // Show time until streak is at risk if not completed - use same color as streak
-                    if !isActiveToday, user.timeUntilStreakReset != nil {
-                        Text(user.formattedTimeUntilReset)
-                            .font(.caption2)
-                            .foregroundColor(streakColor.opacity(0.8))
-                    }
-                }
-            }
 
-
+                Text("\(Int(progress * 100))%")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(streakColor)
+                    .opacity(isRefreshing ? 0.6 : 1.0)
+            }
         }
         .padding()
         .liquidGlassCard(accentColor: streakColor)

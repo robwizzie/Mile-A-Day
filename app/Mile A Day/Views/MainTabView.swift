@@ -85,6 +85,7 @@ struct MainTabView: View {
 struct FloatingTabBar: View {
     @Binding var selectedTab: Int
     @Environment(\.colorScheme) var colorScheme
+    @Namespace private var tabSelection
 
     let tabs: [(icon: String, label: String)] = [
         ("house.fill", "Dashboard"),
@@ -94,34 +95,35 @@ struct FloatingTabBar: View {
     ]
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 4) {
             ForEach(0..<tabs.count, id: \.self) { index in
-                TabBarItem(
+                TabSegmentItem(
                     icon: tabs[index].icon,
                     label: tabs[index].label,
-                    isSelected: selectedTab == index
+                    isSelected: selectedTab == index,
+                    namespace: tabSelection
                 )
                 .onTapGesture {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                         selectedTab = index
                     }
                 }
                 .frame(maxWidth: .infinity)
             }
         }
-        .padding(.vertical, 12)
+        .padding(6)
         .background(
             ZStack {
-                // Liquid glass material
-                RoundedRectangle(cornerRadius: 24)
+                // Liquid glass material background
+                Capsule()
                     .fill(.ultraThinMaterial)
 
                 // Subtle gradient overlay
-                RoundedRectangle(cornerRadius: 24)
+                Capsule()
                     .fill(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(colorScheme == .dark ? 0.05 : 0.1),
+                                Color.white.opacity(colorScheme == .dark ? 0.03 : 0.08),
                                 Color.clear
                             ],
                             startPoint: .top,
@@ -130,12 +132,12 @@ struct FloatingTabBar: View {
                     )
 
                 // Border stroke
-                RoundedRectangle(cornerRadius: 24)
+                Capsule()
                     .strokeBorder(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
-                                Color.white.opacity(colorScheme == .dark ? 0.1 : 0.15)
+                                Color.white.opacity(colorScheme == .dark ? 0.15 : 0.25),
+                                Color.white.opacity(colorScheme == .dark ? 0.08 : 0.12)
                             ],
                             startPoint: .top,
                             endPoint: .bottom
@@ -144,51 +146,60 @@ struct FloatingTabBar: View {
                     )
             }
         )
-        .shadow(color: .black.opacity(0.15), radius: 20, x: 0, y: 10)
+        .shadow(color: .black.opacity(0.12), radius: 16, x: 0, y: 8)
         .overlay(
             // Inner shadow for depth
-            RoundedRectangle(cornerRadius: 24)
-                .stroke(Color.black.opacity(0.05), lineWidth: 1)
-                .blur(radius: 1)
+            Capsule()
+                .stroke(Color.black.opacity(0.04), lineWidth: 1)
+                .blur(radius: 0.5)
                 .offset(y: 1)
-                .mask(RoundedRectangle(cornerRadius: 24))
+                .mask(Capsule())
         )
     }
 }
 
-struct TabBarItem: View {
+struct TabSegmentItem: View {
     let icon: String
     let label: String
     let isSelected: Bool
+    let namespace: Namespace.ID
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: isSelected ? 24 : 22, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(
-                    isSelected ?
-                        LinearGradient(
-                            colors: [Color(red: 217/255, green: 64/255, blue: 63/255), Color(red: 217/255, green: 64/255, blue: 63/255).opacity(0.8)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ) :
-                        LinearGradient(
-                            colors: [.secondary, .secondary],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                )
-
+        ZStack {
+            // Sliding background indicator for selected tab
             if isSelected {
-                Text(label)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(Color(red: 217/255, green: 64/255, blue: 63/255))
-                    .transition(.scale.combined(with: .opacity))
+                Capsule()
+                    .fill(
+                        colorScheme == .dark ?
+                            Color.white.opacity(0.15) :
+                            Color.white.opacity(0.8)
+                    )
+                    .matchedGeometryEffect(id: "selectedTab", in: namespace)
+                    .shadow(color: .black.opacity(0.08), radius: 4, x: 0, y: 2)
             }
+
+            // Tab content
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: isSelected ? .semibold : .medium))
+                    .foregroundColor(
+                        isSelected ?
+                            Color(red: 217/255, green: 64/255, blue: 63/255) :
+                            (colorScheme == .dark ? .white.opacity(0.6) : .black.opacity(0.6))
+                    )
+
+                if isSelected {
+                    Text(label)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color(red: 217/255, green: 64/255, blue: 63/255))
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+            .padding(.horizontal, isSelected ? 16 : 12)
+            .padding(.vertical, 10)
         }
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
+        .contentShape(Capsule())
     }
 }
 
