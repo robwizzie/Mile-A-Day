@@ -31,68 +31,71 @@ struct DashboardView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
                     // Instructions banner
                     InstructionsBanner(
                         showInstructions: $showInstructions
                     )
 
-                    // Today's progress with static data
-                    TodayProgressCard(
-                        currentDistance: currentState.distance,
-                        goalDistance: currentState.goal,
-                        progress: currentState.progress,
-                        didComplete: currentState.isCompleted,
-                        onRefresh: refreshData,
-                        isRefreshing: isRefreshing,
-                        user: userManager.currentUser,
-                        fastestPace: healthManager.fastestMilePace,
-                        mostMiles: healthManager.mostMilesInOneDay,
-                        totalMiles: healthManager.totalLifetimeMiles
-                    )
+                    // SECTION: Today's Overview
+                    VStack(spacing: 12) {
+                        TodayProgressCard(
+                            currentDistance: currentState.distance,
+                            goalDistance: currentState.goal,
+                            progress: currentState.progress,
+                            didComplete: currentState.isCompleted,
+                            onRefresh: refreshData,
+                            isRefreshing: isRefreshing,
+                            user: userManager.currentUser,
+                            fastestPace: healthManager.fastestMilePace,
+                            mostMiles: healthManager.mostMilesInOneDay,
+                            totalMiles: healthManager.totalLifetimeMiles
+                        )
 
-                    // Week at a glance - NEW
-                    WeekAtAGlanceCard(
-                        healthManager: healthManager,
-                        userManager: userManager
-                    )
+                        StreakCard(
+                            streak: userManager.currentUser.streak,
+                            isActiveToday: userManager.currentUser.isStreakActiveToday,
+                            isAtRisk: userManager.currentUser.isStreakAtRisk,
+                            user: userManager.currentUser,
+                            progress: currentState.progress,
+                            isGoalCompleted: currentState.isCompleted,
+                            isRefreshing: isRefreshing,
+                            currentDistance: currentState.distance,
+                            fastestPace: healthManager.fastestMilePace,
+                            mostMiles: healthManager.mostMilesInOneDay,
+                            totalMiles: healthManager.totalLifetimeMiles
+                        )
+                    }
 
-                    // Streak card with simplified progress
-                    StreakCard(
-                        streak: userManager.currentUser.streak,
-                        isActiveToday: userManager.currentUser.isStreakActiveToday,
-                        isAtRisk: userManager.currentUser.isStreakAtRisk,
-                        user: userManager.currentUser,
-                        progress: currentState.progress,
-                        isGoalCompleted: currentState.isCompleted,
-                        isRefreshing: isRefreshing,
-                        currentDistance: currentState.distance,
-                        fastestPace: healthManager.fastestMilePace,
-                        mostMiles: healthManager.mostMilesInOneDay,
-                        totalMiles: healthManager.totalLifetimeMiles
-                    )
-
-                    // Quick access cards - NEW
-                    HStack(spacing: 16) {
-                        CalendarPreviewCard(
+                    // SECTION: Activity Overview
+                    VStack(spacing: 12) {
+                        WeekAtAGlanceCard(
                             healthManager: healthManager,
                             userManager: userManager
                         )
-                        .frame(maxWidth: .infinity)
 
-                        BadgesPreviewCard(
-                            userManager: userManager
-                        )
-                        .frame(maxWidth: .infinity)
+                        VStack(spacing: 12) {
+                            CalendarPreviewCard(
+                                healthManager: healthManager,
+                                userManager: userManager
+                            )
+
+                            BadgesPreviewCard(
+                                userManager: userManager
+                            )
+                        }
                     }
 
-                    // Stats grid
-                    StatsGridView(user: userManager.currentUser, healthManager: healthManager)
+                    // SECTION: Statistics & History
+                    VStack(spacing: 12) {
+                        StatsGridView(user: userManager.currentUser, healthManager: healthManager)
 
-                    // Recent workouts
-                    RecentWorkoutsView(workouts: healthManager.recentWorkouts)
+                        RecentWorkoutsView(workouts: healthManager.recentWorkouts)
+                    }
                 }
-                .padding()
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 100) // Extra padding for floating navbar
             }
             .refreshable {
                 await refreshDataAsync()
