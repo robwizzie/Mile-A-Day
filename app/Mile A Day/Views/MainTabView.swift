@@ -17,28 +17,21 @@ struct MainTabView: View {
             .tabItem {
                 Label("Dashboard", systemImage: "house.fill")
             }
-            
+
             NavigationStack {
                 FriendsListView()
             }
             .tabItem {
                 Label("Friends", systemImage: "person.2.fill")
             }
-            
+
             NavigationStack {
-                BadgesView(userManager: userManager)
+                CompetitionsView()
             }
             .tabItem {
-                Label("Badges", systemImage: "trophy.fill")
+                Label("Competitions", systemImage: "trophy.fill")
             }
-            
-            NavigationStack {
-                StepsView(healthManager: healthManager, userManager: userManager)
-            }
-            .tabItem {
-                Label("Calendar", systemImage: "calendar")
-            }
-            
+
             NavigationStack {
                 ProfileView(userManager: userManager, healthManager: healthManager)
                     .environment(\.appStateManager, appStateManager)
@@ -47,8 +40,7 @@ struct MainTabView: View {
                 Label("Profile", systemImage: "person.fill")
             }
         }
-        .accentColor(nil) // Use the app's default accent color
-        .background(Color(.systemBackground)) // Ensure background adapts to dark mode
+        .accentColor(Color(red: 217/255, green: 64/255, blue: 63/255)) // MAD Red accent
         .onAppear {
             // Configure navigation bar appearance for dark mode
             let appearance = UINavigationBarAppearance()
@@ -56,38 +48,47 @@ struct MainTabView: View {
             appearance.backgroundColor = UIColor.systemBackground
             appearance.titleTextAttributes = [.foregroundColor: UIColor.label]
             appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.label]
-            
+
             UINavigationBar.appearance().standardAppearance = appearance
             UINavigationBar.appearance().compactAppearance = appearance
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
-            
-            // Configure tab bar appearance for dark mode
+
+            // Configure tab bar with liquid glass effect
             let tabBarAppearance = UITabBarAppearance()
-            tabBarAppearance.configureWithOpaqueBackground()
-            tabBarAppearance.backgroundColor = UIColor.systemBackground
-            
+            tabBarAppearance.configureWithTransparentBackground()
+
+            // Create blur effect for liquid glass
+            let blurEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+            tabBarAppearance.backgroundEffect = blurEffect
+
+            // Add subtle shadow
+            tabBarAppearance.shadowColor = UIColor.black.withAlphaComponent(0.1)
+
             UITabBar.appearance().standardAppearance = tabBarAppearance
-            UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
+            if #available(iOS 15.0, *) {
+                UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
+            }
+
             // Reset daily notification tracking for new day
             notificationService.resetDailyNotificationTracking()
-            
+
             // Request HealthKit permissions when app launches
             healthManager.requestAuthorization { success in
                 if success {
                     healthManager.fetchAllWorkoutData()
-                    
+
                     // Check for retroactive badges after data is loaded
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                         userManager.checkForRetroactiveBadges()
                     }
                 }
             }
-            
+
             // Request notification permissions and schedule smart daily reminder
             Task {
                 await notificationService.requestAuthorization()
             }
-            
+
             // Use smart daily reminder with completion status
             let isCompleted = healthManager.todaysDistance >= userManager.currentUser.goalMiles
             notificationService.updateDailyReminder(
@@ -95,7 +96,7 @@ struct MainTabView: View {
                 currentMiles: healthManager.todaysDistance,
                 goalMiles: userManager.currentUser.goalMiles
             )
-            
+
             // Debug: Force widget data update
             WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles)
             WidgetDataStore.save(streak: userManager.currentUser.streak)

@@ -5,13 +5,10 @@ import HealthKit
 
 // View extension for common modifiers
 extension View {
-    // Card style for uniform appearance with dark mode support
+    // Card style for uniform appearance with dark mode support - now with liquid glass
     func cardStyle() -> some View {
         self
-            .padding()
-            .background(Color(.systemBackground))
-            .cornerRadius(15)
-            .shadow(color: Color.primary.opacity(0.1), radius: 5, x: 0, y: 2)
+            .liquidGlassCard()
     }
     
     // Streak badge style
