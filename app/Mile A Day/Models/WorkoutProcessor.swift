@@ -9,6 +9,8 @@
 import Foundation
 import HealthKit
 
+#if !os(watchOS)
+
 /// Processes HKWorkouts and applies timezone corrections
 /// Results are cached in WorkoutIndex so corrections only happen once per workout
 class WorkoutProcessor {
@@ -171,4 +173,5 @@ class WorkoutProcessor {
         return Set(milesByDate.filter { $0.value >= 0.95 }.keys)
     }
 }
+#endif
 

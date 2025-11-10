@@ -9,6 +9,10 @@
 import Foundation
 import HealthKit
 
+#if !os(watchOS)
+
+private func workoutIndexLog(_ message: String) {}
+
 /// ARCHITECTURAL IMPROVEMENT: Single Source of Truth for Workout Data
 /// This index pre-computes and caches workout data to eliminate:
 /// - Race conditions and data inconsistencies
@@ -97,6 +101,7 @@ struct WorkoutIndex: Codable {
         return formatter.date(from: key)
     }
 }
+#endif
 
 /// Lightweight workout record with pre-computed timezone correction
 struct WorkoutRecord: Codable, Identifiable {
@@ -195,16 +200,16 @@ extension WorkoutIndex {
         do {
             let data = try encoder.encode(self)
             UserDefaults.standard.set(data, forKey: Self.indexKey)
-            print("[WorkoutIndex] ✅ Saved index: \(totalWorkouts) workouts, \(currentStreak) day streak")
+            workoutIndexLog("[WorkoutIndex] ✅ Saved index: \(totalWorkouts) workouts, \(currentStreak) day streak")
         } catch {
-            print("[WorkoutIndex] ❌ Failed to save index: \(error)")
+            workoutIndexLog("[WorkoutIndex] ❌ Failed to save index: \(error)")
         }
     }
     
     /// Load index from persistent storage
     static func load() -> WorkoutIndex? {
         guard let data = UserDefaults.standard.data(forKey: indexKey) else {
-            print("[WorkoutIndex] No cached index found")
+            workoutIndexLog("[WorkoutIndex] No cached index found")
             return nil
         }
         
@@ -213,10 +218,10 @@ extension WorkoutIndex {
         
         do {
             let index = try decoder.decode(WorkoutIndex.self, from: data)
-            print("[WorkoutIndex] ✅ Loaded index: \(index.totalWorkouts) workouts, \(index.currentStreak) day streak")
+            workoutIndexLog("[WorkoutIndex] ✅ Loaded index: \(index.totalWorkouts) workouts, \(index.currentStreak) day streak")
             return index
         } catch {
-            print("[WorkoutIndex] ❌ Failed to load index: \(error)")
+            workoutIndexLog("[WorkoutIndex] ❌ Failed to load index: \(error)")
             return nil
         }
     }
@@ -224,7 +229,7 @@ extension WorkoutIndex {
     /// Clear the cached index (for testing/reset)
     static func clear() {
         UserDefaults.standard.removeObject(forKey: indexKey)
-        print("[WorkoutIndex] 🗑️ Cleared cached index")
+        workoutIndexLog("[WorkoutIndex] 🗑️ Cleared cached index")
     }
 }
 

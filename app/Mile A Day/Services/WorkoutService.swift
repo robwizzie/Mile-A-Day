@@ -13,6 +13,7 @@ class WorkoutService: ObservableObject {
     // MARK: - Private Properties
     private let baseURL = "https://mad.mindgoblin.tech"
     private var authToken: String?
+    private let healthStore = HKHealthStore()
     
     // MARK: - Initialization
     init() {
@@ -38,7 +39,7 @@ class WorkoutService: ObservableObject {
             throw WorkoutServiceError.notAuthenticated
         }
         
-        guard let token = authToken else {
+        guard authToken != nil else {
             throw WorkoutServiceError.notAuthenticated
         }
         
@@ -81,7 +82,7 @@ class WorkoutService: ObservableObject {
             throw WorkoutServiceError.notAuthenticated
         }
         
-        guard let token = authToken else {
+        guard authToken != nil else {
             throw WorkoutServiceError.notAuthenticated
         }
         
@@ -214,28 +215,10 @@ class WorkoutService: ObservableObject {
             let isoFormatter = ISO8601DateFormatter()
             let deviceEndDate = isoFormatter.string(from: workout.endDate)
             
-            // Also create ISO date format for potential database compatibility
-            let isoDateFormatter = ISO8601DateFormatter()
-            let isoDate = isoDateFormatter.string(from: workout.startDate)
-            
             // Determine workout type
             let workoutType = getWorkoutType(from: workout.workoutActivityType)
             
-            // Get calories (convert from kilocalories to calories if needed)
-            // Note: totalEnergyBurned is deprecated in iOS 18.0, but still functional
-            // TODO: Migrate to statisticsForType API when HealthStore context is available
-            let calories: Double
-            #if swift(>=5.9)
-            if #available(iOS 18.0, *) {
-                // For iOS 18+, we still use the deprecated API as the new API requires HealthStore
-                // This will show a deprecation warning but the code will work
-                calories = workout.totalEnergyBurned?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
-            } else {
-                calories = workout.totalEnergyBurned?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
-            }
-            #else
-            calories = workout.totalEnergyBurned?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
-            #endif
+            let calories = await activeEnergyKilocalories(for: workout)
             
             let workoutDict: [String: Any] = [
                 "workoutId": workout.uuid.uuidString,
@@ -364,6 +347,36 @@ class WorkoutService: ObservableObject {
             }
             
             healthStore.execute(query)
+        }
+    }
+    
+    /// Compute active energy for a workout using HealthKit statistics queries.
+    private func activeEnergyKilocalories(for workout: HKWorkout) async -> Double {
+        if #available(iOS 18.0, *) {
+            guard HKHealthStore.isHealthDataAvailable(),
+                  let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) else {
+                return 0
+            }
+            
+            return await withCheckedContinuation { continuation in
+                let predicate = HKQuery.predicateForObjects(from: workout)
+                let query = HKStatisticsQuery(
+                    quantityType: energyType,
+                    quantitySamplePredicate: predicate,
+                    options: .cumulativeSum
+                ) { _, statistics, error in
+                    if let error = error {
+                        print("[WorkoutService] ⚠️ Active energy query failed: \(error.localizedDescription)")
+                    }
+                    
+                    let value = statistics?.sumQuantity()?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
+                    continuation.resume(returning: value)
+                }
+                
+                healthStore.execute(query)
+            }
+        } else {
+            return workout.totalEnergyBurned?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
         }
     }
     

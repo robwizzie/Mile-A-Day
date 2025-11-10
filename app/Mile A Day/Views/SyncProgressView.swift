@@ -76,7 +76,7 @@ struct SyncProgressView: View {
         .onAppear {
             startSync()
         }
-        .onChange(of: syncService.currentProgress) { newProgress in
+        .onChange(of: syncService.currentProgress) { _, newProgress in
             if let progress = newProgress, progress.isComplete {
                 // Delay completion to show 100% state
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {

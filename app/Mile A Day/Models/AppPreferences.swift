@@ -1,5 +1,7 @@
 import Foundation
 
+#if !os(watchOS)
+
 struct AppPreferences: Codable {
     var useLocationBasedTimezone: Bool = false // Temporarily disabled due to performance issues
     var showTimezoneDebugInfo: Bool = false
@@ -28,3 +30,4 @@ extension AppPreferences {
         }
     }
 }
+#endif
