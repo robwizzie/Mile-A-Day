@@ -199,10 +199,11 @@ struct BadgesPreviewCard: View {
     @Environment(\.colorScheme) var colorScheme
 
     private var recentBadges: [Badge] {
-        Array(userManager.currentUser.badges
-            .filter { !$0.isLocked }
-            .sorted { ($0.dateEarned ?? Date.distantPast) > ($1.dateEarned ?? Date.distantPast) }
-            .prefix(3))
+        let earnedBadges = userManager.currentUser.badges.filter { !$0.isLocked }
+        let sortedBadges = earnedBadges.sorted { badge1, badge2 in
+            (badge1.dateAwarded) > (badge2.dateAwarded)
+        }
+        return Array(sortedBadges.prefix(3))
     }
 
     private var earnedCount: Int {
@@ -269,12 +270,12 @@ struct BadgesPreviewCard: View {
                             VStack(spacing: 6) {
                                 ZStack {
                                     Circle()
-                                        .fill(badge.rarityColor.opacity(0.2))
+                                        .fill(badge.rarity.color.opacity(0.2))
                                         .frame(width: 50, height: 50)
 
-                                    Image(systemName: badge.icon)
+                                    Image(systemName: badgeIcon(for: badge))
                                         .font(.title3)
-                                        .foregroundColor(badge.rarityColor)
+                                        .foregroundColor(badge.rarity.color)
                                 }
 
                                 Text(badge.name)
@@ -325,6 +326,23 @@ struct BadgesPreviewCard: View {
             .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
         }
         .buttonStyle(PlainButtonStyle())
+    }
+
+    // Helper to get appropriate icon for badge
+    private func badgeIcon(for badge: Badge) -> String {
+        if badge.id.starts(with: "streak_") {
+            return "flame.fill"
+        } else if badge.id.starts(with: "miles_") {
+            return "figure.run"
+        } else if badge.id.starts(with: "pace_") {
+            return "bolt.fill"
+        } else if badge.id.starts(with: "daily_") {
+            return "figure.run.circle.fill"
+        } else if badge.id.starts(with: "consistency_") {
+            return "calendar.badge.clock"
+        } else {
+            return "star.fill"
+        }
     }
 }
 
