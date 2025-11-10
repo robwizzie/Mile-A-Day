@@ -37,8 +37,8 @@ struct DashboardView: View {
                         showInstructions: $showInstructions
                     )
 
-                    // SECTION: Today's Overview
-                    VStack(spacing: 12) {
+                    // SECTION: Today's Overview (side by side)
+                    HStack(spacing: 12) {
                         TodayProgressCard(
                             currentDistance: currentState.distance,
                             goalDistance: currentState.goal,
@@ -51,6 +51,7 @@ struct DashboardView: View {
                             mostMiles: healthManager.mostMilesInOneDay,
                             totalMiles: healthManager.totalLifetimeMiles
                         )
+                        .frame(maxWidth: .infinity)
 
                         StreakCard(
                             streak: userManager.currentUser.streak,
@@ -65,6 +66,7 @@ struct DashboardView: View {
                             mostMiles: healthManager.mostMilesInOneDay,
                             totalMiles: healthManager.totalLifetimeMiles
                         )
+                        .frame(maxWidth: .infinity)
                     }
 
                     // SECTION: Activity Overview
@@ -2569,7 +2571,8 @@ struct StreakCardShareView: View {
     let user: User
     let progress: Double
     let isGoalCompleted: Bool
-    
+    @Environment(\.colorScheme) var colorScheme
+
     // Dynamic colors based on streak status
     var streakColor: Color {
         if isGoalCompleted {
@@ -2580,17 +2583,7 @@ struct StreakCardShareView: View {
             return .orange
         }
     }
-    
-    var backgroundColor: Color {
-        if isGoalCompleted {
-            return .green.opacity(0.1)
-        } else if isAtRisk {
-            return .red.opacity(0.1)
-        } else {
-            return .orange.opacity(0.1)
-        }
-    }
-    
+
     var gradientColors: [Color] {
         if isGoalCompleted {
             return [.green.opacity(0.3), .green.opacity(0.1)]
@@ -2600,94 +2593,124 @@ struct StreakCardShareView: View {
             return [.orange.opacity(0.3), .orange.opacity(0.1)]
         }
     }
-    
+
     var body: some View {
-        VStack(spacing: 12) {
-            // Title
-            Text("Current Streak")
-                .font(.headline)
-                .fontWeight(.semibold)
-            
-            // Streak circle with fire icon (matching widget design)
-            ZStack {
-                // Background circle
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: gradientColors),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 120, height: 120)
-                
-                // Progress ring - now changes color with streak status
-                Circle()
-                    .stroke(Color.gray.opacity(0.2), lineWidth: 5)
-                    .frame(width: 130, height: 130)
-                
-                Circle()
-                    .trim(from: 0, to: progress)
-                    .stroke(streakColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
-                    .frame(width: 130, height: 130)
-                    .rotationEffect(.degrees(-90))
-                
-                // Center content
-                VStack(spacing: 4) {
-                    Text("\(streak)")
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .foregroundColor(streakColor)
-                    
-                    Text(streak == 1 ? "day" : "days")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(streakColor.opacity(0.8))
-                }
-            }
-            
-            // Status message with time until streak reset
-            VStack(spacing: 4) {
-                if isGoalCompleted {
-                    Label("Goal completed!", systemImage: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                } else if isAtRisk {
-                    Label("Streak at risk!", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundColor(.red)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                    
-                    // Show time until streak ends - use same color as streak
-                    Text(user.formattedTimeUntilReset)
-                        .font(.caption2)
-                        .foregroundColor(streakColor.opacity(0.8))
-                        .fontWeight(.medium)
-                } else {
-                    Text("Keep it going!")
-                        .font(.caption)
+        VStack(spacing: 0) {
+            // MAD Branding Header
+            HStack(spacing: 8) {
+                Image("mad-logo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 24, height: 24)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("MILE A DAY")
+                        .font(.system(size: 14, weight: .bold))
+                        .tracking(0.5)
+
+                    Text("Stay Active. Stay Motivated.")
+                        .font(.system(size: 9, weight: .medium))
                         .foregroundColor(.secondary)
-                    
-                    // Show time until streak is at risk if not completed - use same color as streak
-                    if !isActiveToday, user.timeUntilStreakReset != nil {
-                        Text(user.formattedTimeUntilReset)
-                            .font(.caption2)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+
+            VStack(spacing: 10) {
+                // Title
+                Text("Current Streak")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+
+                // Streak circle
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                gradient: Gradient(colors: gradientColors),
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 100, height: 100)
+
+                    Circle()
+                        .stroke(Color.gray.opacity(0.2), lineWidth: 4)
+                        .frame(width: 108, height: 108)
+
+                    Circle()
+                        .trim(from: 0, to: progress)
+                        .stroke(streakColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        .frame(width: 108, height: 108)
+                        .rotationEffect(.degrees(-90))
+
+                    VStack(spacing: 2) {
+                        Text("\(streak)")
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundColor(streakColor)
+
+                        Text(streak == 1 ? "day" : "days")
+                            .font(.caption)
+                            .fontWeight(.medium)
                             .foregroundColor(streakColor.opacity(0.8))
                     }
                 }
+
+                // Status message
+                VStack(spacing: 2) {
+                    if isGoalCompleted {
+                        Label("Goal completed!", systemImage: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    } else if isAtRisk {
+                        Label("Streak at risk!", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundColor(.red)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    } else {
+                        Text("Keep it going!")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
+            .padding(16)
         }
-        .padding()
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemBackground))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color(.systemGray4), lineWidth: 1)
+            ZStack {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.ultraThinMaterial)
+
+                LinearGradient(
+                    colors: [
+                        streakColor.opacity(0.05),
+                        Color.clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
                 )
-                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
         )
-        .frame(width: 300, height: 400) // Fixed size for consistent sharing
+        .shadow(color: .black.opacity(0.15), radius: 15, x: 0, y: 8)
+        .frame(width: 300, height: 380)
     }
 }
 
@@ -2697,87 +2720,133 @@ struct TodayProgressCardShareView: View {
     let progress: Double
     let didComplete: Bool
     let totalMiles: Double
-    
+    @Environment(\.colorScheme) var colorScheme
+
     var body: some View {
-        VStack(spacing: 12) {
-            // Header
-            HStack {
-                Image(systemName: "figure.run")
-                    .foregroundColor(.primary)
-                Text("Today's Progress")
-                    .font(.headline)
-                    .fontWeight(.semibold)
+        VStack(spacing: 0) {
+            // MAD Branding Header
+            HStack(spacing: 8) {
+                Image("mad-logo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 24, height: 24)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("MILE A DAY")
+                        .font(.system(size: 14, weight: .bold))
+                        .tracking(0.5)
+
+                    Text("Stay Active. Stay Motivated.")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+
                 Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+
+            VStack(spacing: 12) {
+                // Header
+                HStack {
+                    Image(systemName: "figure.run")
+                        .foregroundColor(.primary)
+                    Text("Today's Progress")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                    Spacer()
+                    if didComplete {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                    }
+                }
+
+                // Progress Bar
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.gray.opacity(0.2))
+                            .frame(height: 14)
+
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(didComplete ? Color.green : Color(red: 217/255, green: 64/255, blue: 63/255))
+                            .frame(width: progress * geometry.size.width, height: 14)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .frame(height: 14)
+
+                // Distance Display
+                HStack {
+                    Text(String(format: "%.2f", currentDistance))
+                        .font(.title2)
+                        .fontWeight(.bold)
+
+                    Text("of")
+                        .font(.subheadline)
+
+                    Text(String(format: "%.1f mi", goalDistance))
+                        .font(.title2)
+                        .fontWeight(.bold)
+                }
+
+                // Status or remaining distance
                 if didComplete {
-                    Image(systemName: "checkmark.circle.fill")
+                    Label("Goal Complete!", systemImage: "star.fill")
                         .foregroundColor(.green)
+                        .font(.caption)
+                } else {
+                    let remaining = max(goalDistance - currentDistance, 0.0)
+                    Text(String(format: "%.2f mi to go", remaining))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                // Total miles display
+                HStack {
+                    Image(systemName: "trophy.fill")
+                        .foregroundColor(.orange)
+                        .font(.caption)
+                    Text(String(format: "Total Miles: %.1f", totalMiles))
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
                 }
             }
-            
-            // Progress Bar
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(height: 16)
-                    
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(didComplete ? Color.green : Color("appPrimary"))
-                        .frame(width: progress * geometry.size.width, height: 16)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-            .frame(height: 16)
-            
-            // Distance Display
-            HStack {
-                Text(String(format: "%.2f", currentDistance))
-                    .font(.title2)
-                    .fontWeight(.bold)
-                
-                Text("of")
-                    .font(.subheadline)
-                
-                Text(String(format: "%.1f mi", goalDistance))
-                    .font(.title2)
-                    .fontWeight(.bold)
-            }
-            
-            // Status or remaining distance
-            if didComplete {
-                Label("Goal Complete!", systemImage: "star.fill")
-                    .foregroundColor(.green)
-                    .font(.caption)
-            } else {
-                let remaining = max(goalDistance - currentDistance, 0.0)
-                Text(String(format: "%.2f mi to go", remaining))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            
-            // Total miles display
-            HStack {
-                Image(systemName: "trophy.fill")
-                    .foregroundColor(.orange)
-                    .font(.caption)
-                Text(String(format: "Total Miles: %.1f", totalMiles))
-                    .font(.caption)
-                    .fontWeight(.medium)
-                    .foregroundColor(.primary)
-            }
-            .padding(.top, 4)
+            .padding(16)
         }
-        .padding()
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color(.systemBackground))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color(.systemGray4), lineWidth: 1)
+            ZStack {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.ultraThinMaterial)
+
+                LinearGradient(
+                    colors: [
+                        (didComplete ? Color.green : Color(red: 217/255, green: 64/255, blue: 63/255)).opacity(0.05),
+                        Color.clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
                 )
-                .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 4)
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
         )
-        .frame(width: 300, height: 320) // Fixed size for consistent sharing
+        .shadow(color: .black.opacity(0.15), radius: 15, x: 0, y: 8)
+        .frame(width: 300, height: 350)
     }
 }
 
