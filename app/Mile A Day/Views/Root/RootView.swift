@@ -75,22 +75,8 @@ struct RootView: View {
     }
     
     private func configureNavigationAppearance() {
-        // Configure navigation bar appearance to match MAD theme
-        let navBarAppearance = UINavigationBarAppearance()
-        navBarAppearance.configureWithOpaqueBackground()
-        navBarAppearance.backgroundColor = UIColor(MADTheme.Colors.primaryBackground)
-        navBarAppearance.titleTextAttributes = [
-            .foregroundColor: UIColor(MADTheme.Colors.primaryText),
-            .font: UIFont.systemFont(ofSize: 18, weight: .semibold)
-        ]
-        navBarAppearance.largeTitleTextAttributes = [
-            .foregroundColor: UIColor(MADTheme.Colors.primaryText),
-            .font: UIFont.systemFont(ofSize: 32, weight: .bold)
-        ]
-        
-        UINavigationBar.appearance().standardAppearance = navBarAppearance
-        UINavigationBar.appearance().scrollEdgeAppearance = navBarAppearance
-        UINavigationBar.appearance().compactAppearance = navBarAppearance
+        // Don't configure navigation bar appearance globally
+        // Each view will configure its own navigation bar to prevent extension issues
         
         // Configure tab bar appearance
         let tabBarAppearance = UITabBarAppearance()

@@ -69,28 +69,33 @@ final class MADBackgroundService: NSObject, ObservableObject {
     private func setupWorkoutObserver() {
         let workoutType = HKObjectType.workoutType()
         
-        let query = HKObserverQuery(sampleType: workoutType, predicate: nil) { [weak self] _, completionHandler, error in
-            guard let self else {
-                completionHandler()
-                return
-            }
-            
+        let query = HKObserverQuery(sampleType: workoutType, predicate: nil) { _, completionHandler, error in
             if let error {
                 Task { @MainActor in
-                    self.log("[MADBackgroundService] ❌ Workout observer error: \(error.localizedDescription)")
+                    Self.handleWorkoutObserverError(error.localizedDescription)
                     completionHandler()
                 }
                 return
             }
             
             // Fetch the latest workout data in background
-            Task { [weak self] in
-                await self?.handleNewWorkoutData()
+            Task { @MainActor in
+                await Self.handleNewWorkoutDataStatic()
                 completionHandler()
             }
         }
         
         healthStore.execute(query)
+    }
+    
+    @MainActor
+    private static func handleWorkoutObserverError(_ message: String) {
+        shared.log("[MADBackgroundService] ❌ Workout observer error: \(message)")
+    }
+    
+    @MainActor
+    private static func handleNewWorkoutDataStatic() async {
+        await shared.handleNewWorkoutData()
     }
     
     // MARK: - Background Processing
@@ -190,40 +195,41 @@ final class MADBackgroundService: NSObject, ObservableObject {
     }
     
     private func fetchLatestWorkoutData() async -> Bool {
-        return await withCheckedContinuation { [weak self] continuation in
-            guard let self = self else {
-                continuation.resume(returning: false)
-                return
-            }
-            
-            // Fetch all workout data
-            self.healthManager.fetchAllWorkoutData()
-            
-            // Give HealthKit queries more time to complete (increased from 2.0 to 3.0 seconds)
-            // This ensures the retroactiveStreak calculation finishes before we read it
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-                guard let self = self else {
-                    continuation.resume(returning: false)
-                    return
-                }
-                
-                log("[Background] Updating user with HealthKit data - Streak: \(self.healthManager.retroactiveStreak), Miles: \(self.healthManager.todaysDistance)")
-                
-                // Update user data with new HealthKit data
-                // This now includes saveUserData() call to persist the streak
-                self.userManager.updateUserWithHealthKitData(
-                    retroactiveStreak: self.healthManager.retroactiveStreak,
-                    currentMiles: self.healthManager.todaysDistance,
-                    totalMiles: self.healthManager.totalLifetimeMiles,
-                    fastestPace: self.healthManager.fastestMilePace,
-                    mostMilesInDay: self.healthManager.mostMilesInOneDay
-                )
-                
-                log("[Background] User updated and saved - Current streak now: \(self.userManager.currentUser.streak)")
-                
-                continuation.resume(returning: true)
+        return await withCheckedContinuation { continuation in
+            // Fetch all workout data using static method to avoid sendable capture issues
+            Task { @MainActor in
+                let result = await Self.fetchLatestWorkoutDataStatic()
+                continuation.resume(returning: result)
             }
         }
+    }
+    
+    @MainActor
+    private static func fetchLatestWorkoutDataStatic() async -> Bool {
+        let service = shared
+        
+        // Fetch all workout data
+        service.healthManager.fetchAllWorkoutData()
+        
+        // Give HealthKit queries more time to complete (increased from 2.0 to 3.0 seconds)
+        // This ensures the retroactiveStreak calculation finishes before we read it
+        try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
+        
+        service.log("[Background] Updating user with HealthKit data - Streak: \(service.healthManager.retroactiveStreak), Miles: \(service.healthManager.todaysDistance)")
+        
+        // Update user data with new HealthKit data
+        // This now includes saveUserData() call to persist the streak
+        service.userManager.updateUserWithHealthKitData(
+            retroactiveStreak: service.healthManager.retroactiveStreak,
+            currentMiles: service.healthManager.todaysDistance,
+            totalMiles: service.healthManager.totalLifetimeMiles,
+            fastestPace: service.healthManager.fastestMilePace,
+            mostMilesInDay: service.healthManager.mostMilesInOneDay
+        )
+        
+        service.log("[Background] User updated and saved - Current streak now: \(service.userManager.currentUser.streak)")
+        
+        return true
     }
     
     private func checkForMileCompletion() {
