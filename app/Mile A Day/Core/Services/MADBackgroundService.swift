@@ -6,7 +6,6 @@ import UserNotifications
 
 /// Service that handles background processing and HealthKit background delivery
 /// Enables live tracking when the app is closed/backgrounded
-@MainActor
 final class MADBackgroundService: NSObject, ObservableObject {
     static let shared = MADBackgroundService()
     
