@@ -97,7 +97,7 @@ struct DashboardView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
-                .padding(.bottom, 100) // Extra padding for floating navbar
+                .padding(.bottom, 16) // Standard padding for native tab bar
             }
             .refreshable {
                 await refreshDataAsync()
@@ -164,9 +164,9 @@ struct DashboardView: View {
             }
             .onAppear {
                 refreshData()
-                // Always sync widget data when the dashboard appears - multiple times for reliability
+                // Sync widget data immediately
                 syncWidgetData()
-                
+
                 // PHASE 1: Listen for workout index completion
                 NotificationCenter.default.addObserver(
                     forName: NSNotification.Name("WorkoutIndexReady"),
@@ -174,9 +174,9 @@ struct DashboardView: View {
                     queue: .main
                 ) { [weak userManager, weak healthManager] _ in
                     guard let userManager = userManager, let healthManager = healthManager else { return }
-                    
+
                     print("[Dashboard] 🔔 Workout index ready, updating user data and syncing widgets")
-                    
+
                     // Update user manager with correct streak from index
                     userManager.updateUserWithHealthKitData(
                         retroactiveStreak: healthManager.retroactiveStreak,
@@ -185,32 +185,29 @@ struct DashboardView: View {
                         fastestPace: healthManager.fastestMilePace,
                         mostMilesInDay: healthManager.mostMilesInOneDay
                     )
-                    
+
                     // Sync widgets with correct data
                     WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: 1.0)
                     WidgetDataStore.save(streak: userManager.currentUser.streak)
                     WidgetCenter.shared.reloadAllTimelines()
-                    
+
                     print("[Dashboard] ✅ User data and widgets updated with streak: \(userManager.currentUser.streak)")
                 }
-                
-                // Ensure fastest mile data is fresh and reliable
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+
+                // Fetch fastest mile data immediately in background
+                Task {
                     healthManager.fetchFastestMilePace()
                 }
-                
-                // Additional widget sync after a delay to ensure consistency
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                    syncWidgetData()
-                }
-                
+
                 // Check if this is the first time opening the app after completing today's goal
                 let today = Calendar.current.startOfDay(for: Date())
                 let lastCompletion = Calendar.current.startOfDay(for: lastGoalCompletionDate)
-                
+
                 if currentState.isCompleted && today != lastCompletion {
                     // This is the first time opening after completing today's goal
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    // Show celebration with minimal delay for smooth UX
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
                         showCelebration = true
                         lastGoalCompletionDate = Date()
                     }
@@ -340,14 +337,16 @@ struct DashboardView: View {
     
     private func refreshData() {
         isRefreshing = true
-        
+
         // Fetch data in order to ensure consistency
         healthManager.fetchAllWorkoutData()
-        
-        // Allow time for HealthKit data to process
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-            // CRITICAL FIX: Update user manager with fresh HealthKit data
-            // This ensures the streak count is properly synced when refreshing
+
+        // Use Task for better performance than DispatchQueue
+        Task { @MainActor in
+            // Reduced delay for faster UI responsiveness (from 2.5s to 1s)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+
+            // Update user manager with fresh HealthKit data
             userManager.updateUserWithHealthKitData(
                 retroactiveStreak: healthManager.retroactiveStreak,
                 currentMiles: healthManager.todaysDistance,
@@ -355,49 +354,44 @@ struct DashboardView: View {
                 fastestPace: healthManager.fastestMilePace,
                 mostMilesInDay: healthManager.mostMilesInOneDay
             )
-            
+
             syncWidgetData()
-        }
-        
-        // Additional sync after a longer delay to ensure data consistency
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+
+            // Shorter additional delay (from 3s total to 1.5s total)
+            try? await Task.sleep(nanoseconds: 500_000_000)
             syncWidgetData()
             isRefreshing = false
         }
     }
     
     private func refreshDataAsync() async {
-        await withCheckedContinuation { continuation in
-            isRefreshing = true
-            healthManager.fetchAllWorkoutData()
-            
-            // Allow time for HealthKit data to process
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                // CRITICAL FIX: Update user manager with fresh HealthKit data
-                // This ensures the streak count is properly synced when refreshing
-                userManager.updateUserWithHealthKitData(
-                    retroactiveStreak: healthManager.retroactiveStreak,
-                    currentMiles: healthManager.todaysDistance,
-                    totalMiles: healthManager.totalLifetimeMiles,
-                    fastestPace: healthManager.fastestMilePace,
-                    mostMilesInDay: healthManager.mostMilesInOneDay
-                )
-                
-                syncWidgetData()
-            }
-            
-            // Additional sync for reliability
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                syncWidgetData()
-                isRefreshing = false
-                continuation.resume()
-            }
-        }
+        isRefreshing = true
+        healthManager.fetchAllWorkoutData()
+
+        // Reduced delay for faster UI responsiveness (from 2.5s to 1s)
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+
+        // Update user manager with fresh HealthKit data
+        userManager.updateUserWithHealthKitData(
+            retroactiveStreak: healthManager.retroactiveStreak,
+            currentMiles: healthManager.todaysDistance,
+            totalMiles: healthManager.totalLifetimeMiles,
+            fastestPace: healthManager.fastestMilePace,
+            mostMilesInDay: healthManager.mostMilesInOneDay
+        )
+
+        syncWidgetData()
+
+        // Shorter additional delay (from 3s total to 1.5s total)
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        syncWidgetData()
+        isRefreshing = false
     }
     
     private func triggerConfetti() {
         showConfetti = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
             showConfetti = false
         }
     }
@@ -1211,9 +1205,10 @@ struct UnifiedStatsGrid: View {
                         // Manual refresh of fastest mile data
                         isRefreshingFastestPace = true
                         healthManager.fetchFastestMilePace()
-                        
+
                         // Set a timeout to stop refreshing indicator
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                        Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds (reduced from 2s)
                             isRefreshingFastestPace = false
                         }
                     }
@@ -2931,7 +2926,8 @@ struct SharePreviewView: View {
                     }
                     .onChange(of: showingCopiedFeedback) { _, newValue in
                         if newValue {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                            Task { @MainActor in
+                                try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
                                 copyButtonText = "Copy"
                                 showingCopiedFeedback = false
                             }
