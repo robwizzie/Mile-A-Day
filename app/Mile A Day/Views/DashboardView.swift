@@ -747,8 +747,7 @@ struct StreakCard: View {
                     Text("\(streak)")
                         .font(.system(size: 40, weight: .bold, design: .rounded))
                         .foregroundColor(streakColor)
-                        .scaleEffect(animateStreak && !isRefreshing ? 1.1 : 1.0)
-                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateStreak)
+                        .contentTransition(.numericText()) // Smooth number transitions
                         .opacity(isRefreshing ? 0.6 : 1.0)
                     
                     Text(streak == 1 ? "day" : "days")
