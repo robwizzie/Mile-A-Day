@@ -97,7 +97,7 @@ struct DashboardView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
-                .padding(.bottom, 16) // Standard padding for native tab bar
+                .padding(.bottom, 90) // Extra padding for floating tab bar
             }
             .refreshable {
                 await refreshDataAsync()

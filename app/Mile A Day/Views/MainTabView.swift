@@ -10,81 +10,44 @@ struct MainTabView: View {
     @State private var selectedTab = 0
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            NavigationStack {
-                DashboardView(healthManager: healthManager, userManager: userManager)
-                    .environmentObject(notificationService)
-            }
-            .tabItem {
-                Label("Dashboard", systemImage: "house.fill")
-            }
-            .tag(0)
+        ZStack(alignment: .bottom) {
+            TabView(selection: $selectedTab) {
+                NavigationStack {
+                    DashboardView(healthManager: healthManager, userManager: userManager)
+                        .environmentObject(notificationService)
+                }
+                .tag(0)
 
-            NavigationStack {
-                FriendsListView()
-            }
-            .tabItem {
-                Label("Friends", systemImage: "person.2.fill")
-            }
-            .tag(1)
+                NavigationStack {
+                    FriendsListView()
+                }
+                .tag(1)
 
-            NavigationStack {
-                CompetitionsView()
-            }
-            .tabItem {
-                Label("Competitions", systemImage: "trophy.fill")
-            }
-            .tag(2)
+                NavigationStack {
+                    CompetitionsView()
+                }
+                .tag(2)
 
-            NavigationStack {
-                ProfileView(userManager: userManager, healthManager: healthManager)
-                    .environment(\.appStateManager, appStateManager)
+                NavigationStack {
+                    ProfileView(userManager: userManager, healthManager: healthManager)
+                        .environment(\.appStateManager, appStateManager)
+                }
+                .tag(3)
             }
-            .tabItem {
-                Label("Profile", systemImage: "person.fill")
-            }
-            .tag(3)
+            .tabViewStyle(.page(indexDisplayMode: .never))
+
+            // Apple HIG Floating Liquid Glass Tab Bar
+            FloatingTabBar(selectedTab: $selectedTab)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
         }
-        // Apply liquid glass material to tab bar (iOS 18+ HIG)
-        .toolbarBackground(.ultraThinMaterial, for: .tabBar)
-        .toolbarBackground(.visible, for: .tabBar)
-        .toolbarColorScheme(.dark, for: .tabBar)
-        .tint(Color(red: 217/255, green: 64/255, blue: 63/255)) // MAD red for selected items
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .onAppear {
-            configureTabBarAppearance()
             initializeApp()
         }
     }
 
     // MARK: - Configuration
-
-    private func configureTabBarAppearance() {
-        // Configure UITabBar appearance for enhanced liquid glass effect
-        let appearance = UITabBarAppearance()
-        appearance.configureWithDefaultBackground()
-
-        // Apply subtle background effect
-        appearance.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.8)
-
-        // Selected item color (MAD red)
-        let selectedColor = UIColor(red: 217/255, green: 64/255, blue: 63/255, alpha: 1.0)
-        appearance.stackedLayoutAppearance.selected.iconColor = selectedColor
-        appearance.stackedLayoutAppearance.selected.titleTextAttributes = [
-            .foregroundColor: selectedColor,
-            .font: UIFont.systemFont(ofSize: 10, weight: .semibold)
-        ]
-
-        // Unselected item color (secondary gray)
-        let unselectedColor = UIColor.secondaryLabel
-        appearance.stackedLayoutAppearance.normal.iconColor = unselectedColor
-        appearance.stackedLayoutAppearance.normal.titleTextAttributes = [
-            .foregroundColor: unselectedColor,
-            .font: UIFont.systemFont(ofSize: 10, weight: .regular)
-        ]
-
-        UITabBar.appearance().standardAppearance = appearance
-        UITabBar.appearance().scrollEdgeAppearance = appearance
-    }
 
     private func initializeApp() {
         // Reset daily notification tracking for new day
@@ -124,6 +87,110 @@ struct MainTabView: View {
     private func syncWidgetData() {
         WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles)
         WidgetDataStore.save(streak: userManager.currentUser.streak)
+    }
+}
+
+// MARK: - Apple HIG Floating Liquid Glass Tab Bar
+
+struct FloatingTabBar: View {
+    @Binding var selectedTab: Int
+    @Environment(\.colorScheme) var colorScheme
+
+    let tabs: [(icon: String, label: String)] = [
+        ("house.fill", "Dashboard"),
+        ("person.2.fill", "Friends"),
+        ("trophy.fill", "Competitions"),
+        ("person.fill", "Profile")
+    ]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(0..<tabs.count, id: \.self) { index in
+                TabBarItem(
+                    icon: tabs[index].icon,
+                    label: tabs[index].label,
+                    isSelected: selectedTab == index
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        selectedTab = index
+                        // Haptic feedback for tab selection
+                        let impact = UIImpactFeedbackGenerator(style: .light)
+                        impact.impactOccurred()
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 12)
+        .background(
+            ZStack {
+                // Liquid glass material background
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(.ultraThinMaterial)
+
+                // Subtle highlight gradient
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.08 : 0.15),
+                                Color.white.opacity(colorScheme == .dark ? 0.02 : 0.05)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+
+                // Border for definition
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.25 : 0.4),
+                                Color.white.opacity(colorScheme == .dark ? 0.1 : 0.2)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.5
+                    )
+            }
+        )
+        .shadow(color: .black.opacity(0.1), radius: 12, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.05), radius: 1, x: 0, y: 1)
+    }
+}
+
+struct TabBarItem: View {
+    let icon: String
+    let label: String
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: isSelected ? 24 : 22, weight: isSelected ? .semibold : .medium))
+                .foregroundStyle(
+                    isSelected
+                        ? AnyShapeStyle(Color(red: 217/255, green: 64/255, blue: 63/255))
+                        : AnyShapeStyle(.secondary)
+                )
+                .symbolEffect(.bounce, value: isSelected)
+
+            // Only show label for selected tab (Apple HIG spec)
+            if isSelected {
+                Text(label)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(Color(red: 217/255, green: 64/255, blue: 63/255))
+                    .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 52) // Fixed height for consistent layout
+        .contentShape(Rectangle())
     }
 }
 
