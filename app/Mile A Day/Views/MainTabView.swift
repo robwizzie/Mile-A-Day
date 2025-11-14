@@ -180,17 +180,18 @@ struct TabBarItem: View {
                 )
                 .symbolEffect(.bounce, value: isSelected)
 
-            // Only show label for selected tab (Apple HIG spec)
-            if isSelected {
-                Text(label)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(Color(red: 217/255, green: 64/255, blue: 63/255))
-                    .transition(.scale.combined(with: .opacity))
-            }
+            // Always show label per Apple HIG guidelines
+            Text(label)
+                .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                .foregroundColor(
+                    isSelected
+                        ? Color(red: 217/255, green: 64/255, blue: 63/255)
+                        : .secondary
+                )
         }
         .frame(maxWidth: .infinity)
-        .frame(height: 52) // Fixed height for consistent layout
         .contentShape(Rectangle())
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
     }
 }
 
