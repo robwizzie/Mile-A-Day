@@ -118,7 +118,8 @@ struct OnboardingView: View {
                     }) {
                         HStack {
                             Text(currentPage < onboardingPages.count - 1 ? "Continue" : "Get Started")
-                                .font(.system(size: 17, weight: .semibold, design: .default))
+                                .font(MADTheme.Typography.headline)
+                                .fontWeight(.semibold)
                                 .foregroundColor(.white)
                             
                             if currentPage < onboardingPages.count - 1 {
@@ -131,20 +132,23 @@ struct OnboardingView: View {
                         .padding(.vertical, MADTheme.Spacing.md)
                         .background(
                             ZStack {
-                                // Gradient background
+                                // Gradient background using MAD red
                                 LinearGradient(
-                                    colors: onboardingPages[currentPage].gradientColors,
+                                    colors: [
+                                        MADTheme.Colors.madRed,
+                                        MADTheme.Colors.madRed.opacity(0.8)
+                                    ],
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
                                 
                                 // Glass overlay
                                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                                    .fill(.ultraThinMaterial.opacity(0.2))
+                                    .fill(.ultraThinMaterial.opacity(0.1))
                             }
                         )
                         .cornerRadius(MADTheme.CornerRadius.large)
-                        .shadow(color: onboardingPages[currentPage].accentColor.opacity(0.4), radius: 20, x: 0, y: 10)
+                        .shadow(color: MADTheme.Colors.madRed.opacity(0.3), radius: 12, x: 0, y: 6)
                     }
                     .padding(.horizontal, MADTheme.Spacing.xl)
                     .padding(.bottom, MADTheme.Spacing.xxl)
@@ -200,15 +204,38 @@ struct OnboardingPageView: View {
                 
                 // Icon container with liquid glass
                 ZStack {
-                    // White background with glass
+                    // Glass background
                     Circle()
                         .fill(.ultraThinMaterial)
                         .frame(width: 140, height: 140)
+                        .overlay(
+                            Circle()
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white.opacity(0.3),
+                                            Color.clear
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1
+                                )
+                        )
                         .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 10)
                     
                     Image(systemName: page.icon)
-                        .font(.system(size: 60, weight: .light, design: .default))
-                        .foregroundColor(page.accentColor)
+                        .font(.system(size: 60, weight: .medium, design: .rounded))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [
+                                    page.accentColor,
+                                    page.accentColor.opacity(0.8)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
                 }
                 .scaleEffect(iconScale)
                 .rotationEffect(.degrees(iconRotation))
@@ -216,23 +243,60 @@ struct OnboardingPageView: View {
             }
             .padding(.bottom, MADTheme.Spacing.xxxl)
             
-            // Sleek text content
-            VStack(spacing: MADTheme.Spacing.md) {
-                Text(page.title)
-                    .font(.system(size: 34, weight: .bold, design: .default))
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.center)
-                    .tracking(-0.5)
-                    .shadow(color: Color.black.opacity(0.2), radius: 4, x: 0, y: 2)
-                
-                Text(page.subtitle)
-                    .font(.system(size: 18, weight: .regular, design: .default))
-                    .foregroundColor(.white.opacity(0.9))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(nil)
-                    .padding(.horizontal, MADTheme.Spacing.xl)
-                    .lineSpacing(4)
-                    .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+            // Sleek text content with glass card
+            VStack(spacing: MADTheme.Spacing.lg) {
+                VStack(spacing: MADTheme.Spacing.md) {
+                    Text(page.title)
+                        .font(MADTheme.Typography.title1)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                        .shadow(color: Color.black.opacity(0.2), radius: 4, x: 0, y: 2)
+                    
+                    Text(page.subtitle)
+                        .font(MADTheme.Typography.body)
+                        .foregroundColor(.white.opacity(0.9))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(nil)
+                        .padding(.horizontal, MADTheme.Spacing.lg)
+                        .lineSpacing(4)
+                }
+                .padding(MADTheme.Spacing.xl)
+                .background(
+                    ZStack {
+                        // Liquid glass background
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(.ultraThinMaterial)
+                        
+                        // Subtle highlight gradient
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.1),
+                                        Color.white.opacity(0.05)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                        
+                        // Glass border
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.25),
+                                        Color.clear
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
+                    }
+                )
+                .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
             }
             .offset(y: contentOffset)
             .opacity(contentOpacity)

@@ -407,7 +407,7 @@ struct CalendarPreviewCard: View {
             VStack(alignment: .leading, spacing: 16) {
                 // Header
                 HStack {
-                    Image(systemName: "figure.walk")
+                    Image(systemName: "shoeprints.fill")
                         .font(.title2)
                         .foregroundStyle(
                             LinearGradient(
@@ -418,14 +418,10 @@ struct CalendarPreviewCard: View {
                         )
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Today's Steps")
+                        Text("Steps")
                             .font(.headline)
                             .fontWeight(.semibold)
                             .foregroundColor(.primary)
-
-                        Text("View full calendar")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
 
                     Spacer()

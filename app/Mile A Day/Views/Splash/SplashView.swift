@@ -41,17 +41,17 @@ struct SplashView: View {
                     )
                 
                 // App subtitle
-                VStack(spacing: MADTheme.Spacing.sm) {
-                                            Text("MILE A DAY")
-                            .font(MADTheme.Typography.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(MADTheme.Colors.madWhite)
-                            .tracking(2)
+                VStack(spacing: MADTheme.Spacing.md) {
+                    Text("MILE A DAY")
+                        .font(MADTheme.Typography.largeTitle)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                        .tracking(1.5)
                         .opacity(textOpacity)
                     
                     Text("Stay Active. Stay Motivated.")
-                        .font(MADTheme.Typography.callout)
-                        .foregroundColor(MADTheme.Colors.madWhite.opacity(0.8))
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.white.opacity(0.9))
                         .opacity(textOpacity)
                 }
             }

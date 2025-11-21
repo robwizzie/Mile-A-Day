@@ -119,7 +119,7 @@ struct DashboardView: View {
                         isRefreshing: isRefreshing,
                         currentDistance: currentState.distance,
                         fastestPace: healthManager.fastestMilePace,
-                        mostMiles: healthManager.mostMilesInOneDay,
+                        mostMiles: healthManager.cachedCurrentStreakStats.mostMiles > 0 ? healthManager.cachedCurrentStreakStats.mostMiles : healthManager.mostMilesInOneDay,
                         totalMiles: healthManager.totalLifetimeMiles
                     )
 
@@ -681,6 +681,8 @@ struct StreakCard: View {
     @State private var animateFire = false
     @State private var showingShareSheet = false
     @State private var isPressed = false
+    @State private var timeRemainingText: String = ""
+    @State private var timer: Timer?
 
     // Streak milestone milestones
     private let milestones = [3, 5, 7, 10, 14, 21, 30, 50, 60, 75, 90, 100, 150, 200, 250, 365, 500, 1000]
@@ -702,10 +704,11 @@ struct StreakCard: View {
             HStack(spacing: 20) {
                 // Left side: Streak info
                 VStack(alignment: .leading, spacing: 8) {
+                    // CURRENT STREAK header
                     Text("CURRENT STREAK")
                         .font(.caption)
                         .fontWeight(.semibold)
-                        .foregroundColor(.orange)
+                        .foregroundColor(statusColor)
                         .tracking(1.2)
 
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -720,82 +723,99 @@ struct StreakCard: View {
                             .foregroundColor(.white.opacity(0.8))
                     }
 
-                    // Status message
-                    HStack(spacing: 4) {
+                    // Status message - make completion status super obvious with consistent colors
+                    VStack(alignment: .leading, spacing: 6) {
                         if isGoalCompleted {
-                            Image(systemName: "flame.fill")
-                                .font(.caption)
-                                .foregroundColor(.orange)
-                            Text("You're on fire!")
-                                .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.9))
-                                .fontWeight(.medium)
-                        } else if isAtRisk {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.yellow)
-                            Text("Complete today's goal!")
-                                .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.9))
-                                .fontWeight(.medium)
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.subheadline)
+                                    .foregroundColor(statusColor)
+                                Text("Goal completed today!")
+                                    .font(.subheadline)
+                                    .foregroundColor(statusColor)
+                                    .fontWeight(.bold)
+                            }
                         } else {
-                            Text("\(String(format: "%.2f", user.goalMiles - currentDistance)) mi to go")
-                                .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.9))
-                                .fontWeight(.medium)
+                            HStack(spacing: 4) {
+                                Image(systemName: isAtRisk ? "exclamationmark.triangle.fill" : "exclamationmark.circle.fill")
+                                    .font(.subheadline)
+                                    .foregroundColor(statusColor)
+                                Text(isAtRisk ? "Streak at risk!" : "Goal not completed")
+                                    .font(.subheadline)
+                                    .foregroundColor(statusColor)
+                                    .fontWeight(.bold)
+                            }
+                            
+                            if !isAtRisk {
+                                Text("\(String(format: "%.2f", user.goalMiles - currentDistance)) mi to go")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.8))
+                            }
                         }
                     }
                 }
 
                 Spacer()
 
-                // Right side: Animated Flame icon
+                // Right side: Flame icon - consistent colors based on status
                 ZStack {
-                    // Outer glow
-                    Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [
-                                    Color.orange.opacity(0.5),
-                                    Color.orange.opacity(0.2),
-                                    Color.clear
-                                ],
-                                center: .center,
-                                startRadius: 20,
-                                endRadius: 45
+                    if isGoalCompleted {
+                        // Outer glow - green/orange when completed
+                        Circle()
+                            .fill(
+                                RadialGradient(
+                                    colors: [
+                                        statusColor.opacity(0.5),
+                                        statusColor.opacity(0.2),
+                                        Color.clear
+                                    ],
+                                    center: .center,
+                                    startRadius: 20,
+                                    endRadius: 45
+                                )
                             )
-                        )
-                        .frame(width: 90, height: 90)
-                        .scaleEffect(animateFire ? 1.15 : 0.95)
-                        .opacity(animateFire ? 0.9 : 0.5)
-                        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: animateFire)
+                            .frame(width: 90, height: 90)
+                            .scaleEffect(animateFire ? 1.15 : 0.95)
+                            .opacity(animateFire ? 0.9 : 0.5)
+                            .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: animateFire)
 
-                    // Inner circle background
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.orange.opacity(0.5),
-                                    Color.red.opacity(0.4)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                        // Inner circle background - green/orange when completed
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        statusColor.opacity(0.5),
+                                        statusColor.opacity(0.3)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
-                        )
-                        .frame(width: 70, height: 70)
+                            .frame(width: 70, height: 70)
 
-                    // Flame icon with animation
-                    Image(systemName: "flame.fill")
-                        .font(.system(size: 36))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.orange, .yellow, .red],
-                                startPoint: .top,
-                                endPoint: .bottom
+                        // Flame icon with animation - green/orange and pulsing when completed
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 36))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [statusColor, statusColor.opacity(0.8), statusColor.opacity(0.6)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
                             )
-                        )
-                        .scaleEffect(animateFire ? 1.15 : 1.0)
-                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateFire)
-                        .shadow(color: .orange.opacity(0.7), radius: animateFire ? 15 : 8)
+                            .scaleEffect(animateFire ? 1.15 : 1.0)
+                            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateFire)
+                            .shadow(color: statusColor.opacity(0.7), radius: animateFire ? 15 : 8)
+                    } else {
+                        // Consistent color when not completed - white if not at risk, red tint if at risk
+                        Circle()
+                            .fill(statusColor.opacity(0.1))
+                            .frame(width: 70, height: 70)
+                        
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 36))
+                            .foregroundColor(isAtRisk ? statusColor.opacity(0.8) : .white.opacity(0.7))
+                    }
                 }
             }
 
@@ -813,7 +833,7 @@ struct StreakCard: View {
                         Text("\(milestone.daysToGo) days to go")
                             .font(.subheadline)
                             .fontWeight(.medium)
-                            .foregroundColor(.orange)
+                            .foregroundColor(statusColor)
                     }
 
                     // Progress bar
@@ -839,17 +859,18 @@ struct StreakCard: View {
                 }
             }
         }
-        .padding(24)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 24)
         .background(
             ZStack {
                 // Liquid glass background
                 RoundedRectangle(cornerRadius: 16)
                     .fill(.ultraThinMaterial)
 
-                // Gradient overlay
+                // Gradient overlay - consistent with status color
                 LinearGradient(
                     colors: [
-                        Color.orange.opacity(0.05),
+                        statusColor.opacity(0.05),
                         Color.clear
                     ],
                     startPoint: .topLeading,
@@ -872,20 +893,57 @@ struct StreakCard: View {
                     )
             }
         )
+        .overlay(alignment: .topTrailing) {
+            // Time/check positioned at absolute top right edge
+            if isGoalCompleted {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(.green)
+                    .padding(.top, 24)
+                    .padding(.trailing, 24)
+            } else if !timeRemainingText.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "clock.fill")
+                        .font(.caption2)
+                        .foregroundColor(statusColor)
+                    Text(formattedTimeOnly)
+                        .font(.caption2)
+                        .foregroundColor(statusColor)
+                        .fontWeight(.medium)
+                }
+                .padding(.top, 24)
+                .padding(.trailing, 24)
+            }
+        }
         .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
         .scaleEffect(isPressed ? 0.98 : 1.0)
         .animation(.easeInOut(duration: 0.1), value: isPressed)
         .onAppear {
-            // Start fire animation
-            animateFire = true
+            updateTimeRemaining()
+            startTimer()
+            // Start fire animation only if goal is completed
+            if isGoalCompleted {
+                animateFire = true
+            } else {
+                animateFire = false
+            }
         }
         .onChange(of: isGoalCompleted) { oldValue, newValue in
+            updateTimeRemaining()
             if newValue && !oldValue {
-                // Extra fire animation when goal completed
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
-                    animateFire = true
-                }
+                // Start fire animation when goal completed
+                animateFire = true
+            } else if !newValue {
+                // Stop animation when goal not completed
+                animateFire = false
             }
+        }
+        .onChange(of: user.formattedTimeUntilReset) { _, _ in
+            updateTimeRemaining()
+        }
+        .onDisappear {
+            timer?.invalidate()
+            timer = nil
         }
         .onTapGesture {
             let impact = UIImpactFeedbackGenerator(style: .medium)
@@ -915,6 +973,48 @@ struct StreakCard: View {
                 mostMiles: mostMiles,
                 totalMiles: totalMiles
             )
+        }
+    }
+    
+    private func updateTimeRemaining() {
+        if !isGoalCompleted {
+            timeRemainingText = user.formattedTimeUntilReset
+        } else {
+            timeRemainingText = ""
+        }
+    }
+    
+    // Format time without "remaining" text
+    private var formattedTimeOnly: String {
+        guard let timeRemaining = user.timeUntilStreakReset else {
+            return ""
+        }
+        
+        let hours = Int(timeRemaining) / 3600
+        let minutes = Int(timeRemaining) % 3600 / 60
+        
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else {
+            return "\(minutes)m"
+        }
+    }
+    
+    private func startTimer() {
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: true) { _ in
+            updateTimeRemaining()
+        }
+    }
+    
+    // Consistent status color based on completion and risk
+    private var statusColor: Color {
+        if isGoalCompleted {
+            return .green  // Green when completed
+        } else if isAtRisk {
+            return .red    // Red when at risk (close to expiring)
+        } else {
+            return .orange  // Orange when not completed but not at risk
         }
     }
 }
@@ -1127,7 +1227,50 @@ struct UnifiedStatsGrid: View {
     }
     
     var mostMiles: Double {
-        statsType == .allTime ? user.mostMilesInOneDay : statsData.mostMiles
+        if statsType == .allTime {
+            // Calculate all-time most miles directly from all workouts to avoid timezone/caching issues
+            let allWorkouts = healthManager.cachedWorkouts.isEmpty ? healthManager.recentWorkouts : healthManager.cachedWorkouts
+            
+            // Group all workouts by day (using device timezone for all-time stats)
+            let calendar = Calendar.current
+            var workoutsByDay: [Date: [HKWorkout]] = [:]
+            
+            for workout in allWorkouts {
+                let dateComponents = calendar.dateComponents([.year, .month, .day], from: workout.endDate)
+                if let date = calendar.date(from: dateComponents) {
+                    if workoutsByDay[date] == nil {
+                        workoutsByDay[date] = []
+                    }
+                    workoutsByDay[date]?.append(workout)
+                }
+            }
+            
+            // Calculate most miles in a single day from all workouts
+            var maxMilesInDay: Double = 0.0
+            for (_, dayWorkouts) in workoutsByDay {
+                var totalMilesForDay: Double = 0.0
+                for workout in dayWorkouts {
+                    if let distance = workout.totalDistance {
+                        let miles = distance.doubleValue(for: HKUnit.mile())
+                        totalMilesForDay += miles
+                    }
+                }
+                if totalMilesForDay > maxMilesInDay {
+                    maxMilesInDay = totalMilesForDay
+                }
+            }
+            
+            // Return calculated value, with fallbacks
+            if maxMilesInDay > 0 {
+                return maxMilesInDay
+            } else if healthManager.mostMilesInOneDay > 0 {
+                return healthManager.mostMilesInOneDay
+            } else {
+                return user.mostMilesInOneDay
+            }
+        } else {
+            return statsData.mostMiles
+        }
     }
     
     var streakDays: Int {
