@@ -10,15 +10,70 @@ import SwiftUI
 
 struct DeveloperSettingsView: View {
     @StateObject private var syncService = WorkoutSyncService.shared
+    @StateObject private var workoutService = WorkoutService()
+    @StateObject private var healthManager = HealthKitManager()
+    @StateObject private var userManager = UserManager()
     @State private var showClearCacheConfirmation = false
     @State private var showResetSyncConfirmation = false
     @State private var showForceSync = false
     @State private var syncStatus: String = "Loading..."
     @State private var showSuccessAlert = false
     @State private var successMessage = ""
+    @State private var showCelebration = false
+    @State private var showWorkoutUploadAlert = false
 
     var body: some View {
         List {
+            // Quick Test Actions Section
+            Section(header: Text("Quick Test Actions"), footer: Text("Testing utilities for rapid development")) {
+                Button(action: {
+                    showCelebration = true
+                }) {
+                    HStack {
+                        Image(systemName: "star.fill")
+                            .foregroundColor(.yellow)
+                        Text("Test Celebration Animation")
+                        Spacer()
+                        Image(systemName: "wand.and.stars")
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Button(action: {
+                    Task {
+                        await uploadWorkouts()
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .foregroundColor(.green)
+                        Text("Upload Recent Workouts")
+                        Spacer()
+                        if workoutService.isLoading {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(workoutService.isLoading)
+
+                Button(action: {
+                    Task {
+                        await uploadAllWorkouts()
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.up.circle")
+                            .foregroundColor(.blue)
+                        Text("Upload ALL Workouts")
+                        Spacer()
+                        if workoutService.isLoading {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(workoutService.isLoading)
+            }
+
             // Sync Status Section
             Section(header: Text("Sync Status")) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -167,6 +222,18 @@ struct DeveloperSettingsView: View {
         } message: {
             Text(successMessage)
         }
+        .alert("Workout Upload", isPresented: $showWorkoutUploadAlert) {
+            Button("OK") { }
+        } message: {
+            if let status = workoutService.lastUploadStatus {
+                Text(status)
+            } else if let error = workoutService.errorMessage {
+                Text("Error: \(error)")
+            } else {
+                Text("Upload completed")
+            }
+        }
+        .confetti(isShowing: $showCelebration)
     }
 
     // MARK: - Subviews
@@ -284,6 +351,41 @@ struct DeveloperSettingsView: View {
         }
 
         await refreshSyncStatus()
+    }
+
+    private func uploadWorkouts() async {
+        do {
+            let user = userManager.currentUser
+            let workouts = healthManager.recentWorkouts
+
+            let workoutRecords = workouts.map { workout in
+                WorkoutRecord(from: workout, user: user)
+            }
+
+            try await workoutService.uploadWorkouts(workoutRecords, for: user.id)
+
+            await MainActor.run {
+                showWorkoutUploadAlert = true
+            }
+        } catch {
+            await MainActor.run {
+                showWorkoutUploadAlert = true
+            }
+        }
+    }
+
+    private func uploadAllWorkouts() async {
+        do {
+            try await workoutService.uploadAllWorkouts(for: userManager.currentUser.id, healthManager: healthManager)
+
+            await MainActor.run {
+                showWorkoutUploadAlert = true
+            }
+        } catch {
+            await MainActor.run {
+                showWorkoutUploadAlert = true
+            }
+        }
     }
 }
 

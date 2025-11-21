@@ -4,6 +4,34 @@ import WidgetKit
 import UIKit
 import CoreLocation
 
+// MARK: - Custom Navigation Bar Appearance for iOS 18 Liquid Glass
+
+extension View {
+    func liquidGlassNavigationBar() -> some View {
+        self.onAppear {
+            let appearance = UINavigationBarAppearance()
+
+            if #available(iOS 18.0, *) {
+                // iOS 18+ liquid glass effect
+                appearance.configureWithDefaultBackground()
+                appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+            } else {
+                // Fallback for iOS 17
+                appearance.configureWithOpaqueBackground()
+                appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+            }
+
+            // Make background semi-transparent to show gradient
+            appearance.backgroundColor = UIColor.clear
+            appearance.shadowColor = .clear
+
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+        }
+    }
+}
+
 struct DashboardView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
@@ -105,9 +133,9 @@ struct DashboardView: View {
                 await refreshDataAsync()
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.clear, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .liquidGlassNavigationBar()
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Image("mad-logo")
@@ -122,46 +150,15 @@ struct DashboardView: View {
                             showInstructions = true
                         } label: {
                             Image(systemName: "info.circle")
-                                .foregroundColor(.blue)
+                                .foregroundColor(.white)
                         }
-                        
-                    Button {
-                        showGoalSheet = true
-                    } label: {
-                        Image(systemName: "gear")
-                        }
-                        
-                        // Test celebration animation button (only in debug)
-                        #if DEBUG
+
                         Button {
-                            showCelebration = true
+                            showGoalSheet = true
                         } label: {
-                            Image(systemName: "star.fill")
-                                .foregroundColor(.yellow)
+                            Image(systemName: "gear")
+                                .foregroundColor(.white)
                         }
-                        
-                        // Test workout upload button (only in debug)
-                        Button {
-                            Task {
-                                await uploadWorkouts()
-                            }
-                        } label: {
-                            Image(systemName: "arrow.up.circle.fill")
-                                .foregroundColor(.green)
-                        }
-                        .disabled(workoutService.isLoading)
-                        
-                        // Test upload ALL workouts button (only in debug)
-                        Button {
-                            Task {
-                                await uploadAllWorkouts()
-                            }
-                        } label: {
-                            Image(systemName: "arrow.up.circle")
-                                .foregroundColor(.blue)
-                        }
-                        .disabled(workoutService.isLoading)
-                        #endif
                     }
                 }
                 
@@ -703,12 +700,12 @@ struct StreakCard: View {
 
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("\(streak)")
-                            .font(.system(size: 56, weight: .bold, design: .rounded))
+                            .font(.system(size: 44, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                             .contentTransition(.numericText())
 
                         Text(streak == 1 ? "day" : "days")
-                            .font(.title2)
+                            .font(.title3)
                             .fontWeight(.medium)
                             .foregroundColor(.white.opacity(0.8))
                     }
@@ -1025,8 +1022,8 @@ struct TodayProgressCard: View {
                             .fill(
                                 LinearGradient(
                                     colors: [
-                                        Color(red: 0.85, green: 0.25, blue: 0.35).opacity(0.5),
-                                        Color(red: 0.7, green: 0.2, blue: 0.3).opacity(0.7)
+                                        Color(red: 0.85, green: 0.25, blue: 0.35).opacity(0.25),
+                                        Color(red: 0.7, green: 0.2, blue: 0.3).opacity(0.35)
                                     ],
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing
