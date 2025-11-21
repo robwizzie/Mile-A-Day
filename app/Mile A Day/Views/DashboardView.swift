@@ -64,8 +64,12 @@ struct DashboardView: View {
     
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
+            ZStack {
+                // Gradient background for this view
+                Color.clear
+
+                ScrollView {
+                    VStack(spacing: 16) {
                     // Instructions banner
                     InstructionsBanner(
                         showInstructions: $showInstructions
@@ -138,7 +142,7 @@ struct DashboardView: View {
                 await refreshDataAsync()
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .liquidGlassNavigationBar()
             .toolbar {
@@ -843,21 +847,21 @@ struct StreakCard: View {
         .padding(24)
         .background(
             ZStack {
-                // Dark gradient background (glass effect)
+                // Liquid glass background
                 RoundedRectangle(cornerRadius: 20)
                     .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 0.3, green: 0.15, blue: 0.15).opacity(0.6),
-                                        Color(red: 0.2, green: 0.1, blue: 0.1).opacity(0.8)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
+
+                // Subtle highlight gradient for glass effect
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.1),
+                                Color.white.opacity(0.05)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
 
                 // Glass border
@@ -1025,21 +1029,21 @@ struct TodayProgressCard: View {
         .padding(20)
         .background(
             ZStack {
-                // Glass effect background
+                // Liquid glass background
                 RoundedRectangle(cornerRadius: 20)
                     .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 0.85, green: 0.25, blue: 0.35).opacity(0.25),
-                                        Color(red: 0.7, green: 0.2, blue: 0.3).opacity(0.35)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
+
+                // Subtle highlight gradient for glass effect
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.1),
+                                Color.white.opacity(0.05)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
 
                 // Glass border

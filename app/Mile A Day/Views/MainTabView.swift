@@ -21,18 +21,21 @@ struct MainTabView: View {
                         .environmentObject(notificationService)
                         .background(Color.clear)
                 }
+                .background(Color.clear)
                 .tag(0)
 
                 NavigationStack {
                     FriendsListView()
                         .background(Color.clear)
                 }
+                .background(Color.clear)
                 .tag(1)
 
                 NavigationStack {
                     CompetitionsView()
                         .background(Color.clear)
                 }
+                .background(Color.clear)
                 .tag(2)
 
                 NavigationStack {
@@ -40,6 +43,7 @@ struct MainTabView: View {
                         .environment(\.appStateManager, appStateManager)
                         .background(Color.clear)
                 }
+                .background(Color.clear)
                 .tag(3)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
