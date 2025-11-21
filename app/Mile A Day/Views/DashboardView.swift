@@ -104,12 +104,18 @@ struct DashboardView: View {
             .refreshable {
                 await refreshDataAsync()
             }
-            .navigationTitle("Mile A Day")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.clear, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Image("mad-logo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 32)
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
                         Button {
@@ -685,58 +691,9 @@ struct StreakCard: View {
 
     var body: some View {
         VStack(spacing: 16) {
+            // Top section: Streak info and fire icon
             HStack(spacing: 20) {
-                // Left side: Animated Flame icon
-                ZStack {
-                    // Outer glow
-                    Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [
-                                    Color.orange.opacity(0.4),
-                                    Color.orange.opacity(0.2),
-                                    Color.clear
-                                ],
-                                center: .center,
-                                startRadius: 20,
-                                endRadius: 50
-                            )
-                        )
-                        .frame(width: 100, height: 100)
-                        .scaleEffect(animateFire ? 1.1 : 0.9)
-                        .opacity(animateFire ? 0.8 : 0.4)
-                        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: animateFire)
-
-                    // Inner circle
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.orange.opacity(0.4),
-                                    Color.red.opacity(0.3)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 80, height: 80)
-
-                    // Flame icon with animation
-                    Image(systemName: "flame.fill")
-                        .font(.system(size: 40))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.orange, .yellow, .red],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .scaleEffect(animateFire ? 1.1 : 1.0)
-                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateFire)
-                        .shadow(color: .orange.opacity(0.6), radius: animateFire ? 15 : 8)
-                }
-
-                // Right side: Streak info
+                // Left side: Streak info
                 VStack(alignment: .leading, spacing: 8) {
                     Text("CURRENT STREAK")
                         .font(.caption)
@@ -746,12 +703,12 @@ struct StreakCard: View {
 
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("\(streak)")
-                            .font(.system(size: 48, weight: .bold, design: .rounded))
+                            .font(.system(size: 56, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                             .contentTransition(.numericText())
 
                         Text(streak == 1 ? "day" : "days")
-                            .font(.title3)
+                            .font(.title2)
                             .fontWeight(.medium)
                             .foregroundColor(.white.opacity(0.8))
                     }
@@ -759,8 +716,9 @@ struct StreakCard: View {
                     // Status message
                     HStack(spacing: 4) {
                         if isGoalCompleted {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundColor(.green)
+                            Image(systemName: "flame.fill")
+                                .font(.caption)
+                                .foregroundColor(.orange)
                             Text("You're on fire!")
                                 .font(.subheadline)
                                 .foregroundColor(.white.opacity(0.9))
@@ -782,74 +740,124 @@ struct StreakCard: View {
                 }
 
                 Spacer()
+
+                // Right side: Animated Flame icon
+                ZStack {
+                    // Outer glow
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [
+                                    Color.orange.opacity(0.5),
+                                    Color.orange.opacity(0.2),
+                                    Color.clear
+                                ],
+                                center: .center,
+                                startRadius: 20,
+                                endRadius: 45
+                            )
+                        )
+                        .frame(width: 90, height: 90)
+                        .scaleEffect(animateFire ? 1.15 : 0.95)
+                        .opacity(animateFire ? 0.9 : 0.5)
+                        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: animateFire)
+
+                    // Inner circle background
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.orange.opacity(0.5),
+                                    Color.red.opacity(0.4)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 70, height: 70)
+
+                    // Flame icon with animation
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 36))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.orange, .yellow, .red],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .scaleEffect(animateFire ? 1.15 : 1.0)
+                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateFire)
+                        .shadow(color: .orange.opacity(0.7), radius: animateFire ? 15 : 8)
+                }
             }
 
             // Milestone progress
             if let milestone = nextMilestone {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        Image(systemName: "trophy.fill")
-                            .font(.caption)
-                            .foregroundColor(.yellow)
-                        Text("Next Badge: \(milestone.value) days")
-                            .font(.caption)
+                        Text("Next Milestone: \(milestone.value) Days")
+                            .font(.subheadline)
                             .fontWeight(.semibold)
                             .foregroundColor(.white.opacity(0.9))
 
                         Spacer()
 
-                        Text("\(milestone.daysToGo) to go")
-                            .font(.caption)
+                        Text("\(milestone.daysToGo) days to go")
+                            .font(.subheadline)
                             .fontWeight(.medium)
-                            .foregroundColor(.white.opacity(0.7))
+                            .foregroundColor(.orange)
                     }
 
                     // Progress bar
                     GeometryReader { geometry in
                         ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.white.opacity(0.2))
-                                .frame(height: 6)
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.white.opacity(0.15))
+                                .frame(height: 8)
 
-                            RoundedRectangle(cornerRadius: 4)
+                            RoundedRectangle(cornerRadius: 8)
                                 .fill(
                                     LinearGradient(
-                                        colors: [.yellow, .orange],
+                                        colors: [.yellow, .orange, .red],
                                         startPoint: .leading,
                                         endPoint: .trailing
                                     )
                                 )
-                                .frame(width: milestone.progress * geometry.size.width, height: 6)
+                                .frame(width: milestone.progress * geometry.size.width, height: 8)
                                 .animation(.easeOut(duration: 0.8), value: milestone.progress)
                         }
                     }
-                    .frame(height: 6)
+                    .frame(height: 8)
                 }
-                .padding(.top, 8)
             }
         }
-        .padding(20)
+        .padding(24)
         .background(
             ZStack {
-                // Dark gradient background
+                // Dark gradient background (glass effect)
                 RoundedRectangle(cornerRadius: 20)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.3, green: 0.15, blue: 0.15),
-                                Color(red: 0.2, green: 0.1, blue: 0.1)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.3, green: 0.15, blue: 0.15).opacity(0.6),
+                                        Color(red: 0.2, green: 0.1, blue: 0.1).opacity(0.8)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
                     )
 
-                // Subtle glass overlay
+                // Glass border
                 RoundedRectangle(cornerRadius: 20)
                     .stroke(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(0.2),
+                                Color.white.opacity(0.25),
                                 Color.clear
                             ],
                             startPoint: .topLeading,
@@ -982,7 +990,7 @@ struct TodayProgressCard: View {
                 HStack(spacing: 8) {
                     Image(systemName: "play.fill")
                         .font(.title3)
-                    Text("Start Walking")
+                    Text("Start Mile")
                         .font(.headline)
                         .fontWeight(.semibold)
                 }
@@ -1009,20 +1017,24 @@ struct TodayProgressCard: View {
         .padding(20)
         .background(
             ZStack {
-                // Red gradient background
+                // Glass effect background
                 RoundedRectangle(cornerRadius: 20)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.85, green: 0.25, blue: 0.35),
-                                Color(red: 0.7, green: 0.2, blue: 0.3)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.85, green: 0.25, blue: 0.35).opacity(0.5),
+                                        Color(red: 0.7, green: 0.2, blue: 0.3).opacity(0.7)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
                     )
 
-                // Subtle glass overlay
+                // Glass border
                 RoundedRectangle(cornerRadius: 20)
                     .stroke(
                         LinearGradient(
