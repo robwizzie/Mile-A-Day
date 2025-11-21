@@ -13,21 +13,26 @@ extension View {
 
             if #available(iOS 18.0, *) {
                 // iOS 18+ liquid glass effect
-                appearance.configureWithDefaultBackground()
+                appearance.configureWithTransparentBackground()
                 appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
             } else {
                 // Fallback for iOS 17
-                appearance.configureWithOpaqueBackground()
+                appearance.configureWithTransparentBackground()
                 appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
             }
 
-            // Make background semi-transparent to show gradient
-            appearance.backgroundColor = UIColor.clear
+            // Fully transparent to show gradient everywhere
+            appearance.backgroundColor = .clear
             appearance.shadowColor = .clear
 
+            // Apply to all appearance states
             UINavigationBar.appearance().standardAppearance = appearance
             UINavigationBar.appearance().scrollEdgeAppearance = appearance
             UINavigationBar.appearance().compactAppearance = appearance
+            UINavigationBar.appearance().compactScrollEdgeAppearance = appearance
+
+            // Ensure navbar extends behind status bar and dynamic island
+            UINavigationBar.appearance().isTranslucent = true
         }
     }
 }
@@ -129,6 +134,7 @@ struct DashboardView: View {
                 .padding(.bottom, 90) // Extra padding for floating tab bar
             }
             .scrollContentBackground(.hidden)
+            .background(Color.clear)
             .refreshable {
                 await refreshDataAsync()
             }
@@ -137,11 +143,21 @@ struct DashboardView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .liquidGlassNavigationBar()
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Image("mad-logo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 32)
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: 12) {
+                        Image("mad-logo")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 40)
+
+                        if userManager.hasNewBadges {
+                            NavigationLink(destination: BadgesView(userManager: userManager)) {
+                                Image(systemName: "trophy.fill")
+                                    .foregroundColor(.yellow)
+                                    .font(.title3)
+                            }
+                        }
+                    }
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -151,6 +167,7 @@ struct DashboardView: View {
                         } label: {
                             Image(systemName: "info.circle")
                                 .foregroundColor(.white)
+                                .font(.title3)
                         }
 
                         Button {
@@ -158,15 +175,7 @@ struct DashboardView: View {
                         } label: {
                             Image(systemName: "gear")
                                 .foregroundColor(.white)
-                        }
-                    }
-                }
-                
-                ToolbarItem(placement: .topBarLeading) {
-                    if userManager.hasNewBadges {
-                        NavigationLink(destination: BadgesView(userManager: userManager)) {
-                            Image(systemName: "trophy.fill")
-                                .foregroundColor(.yellow)
+                                .font(.title3)
                         }
                     }
                 }
