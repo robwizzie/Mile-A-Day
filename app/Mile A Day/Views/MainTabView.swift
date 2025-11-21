@@ -11,9 +11,9 @@ struct MainTabView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // App-wide gradient background
+            // App-wide gradient background (extends to all edges including dynamic island)
             MADTheme.Colors.appBackgroundGradient
-                .ignoresSafeArea()
+                .ignoresSafeArea(.all, edges: .all)
 
             TabView(selection: $selectedTab) {
                 NavigationStack {
@@ -48,9 +48,10 @@ struct MainTabView: View {
             // Apple HIG Floating Liquid Glass Tab Bar
             FloatingTabBar(selectedTab: $selectedTab)
                 .padding(.horizontal, 8)
-                .padding(.bottom, 8)
+                .padding(.bottom, 20)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        .ignoresSafeArea(edges: .top)
         .preferredColorScheme(.dark)
         .onAppear {
             initializeApp()
@@ -190,13 +191,13 @@ struct TabBarItem: View {
     var body: some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: isSelected ? 24 : 22, weight: isSelected ? .semibold : .medium))
+                .font(.system(size: 24, weight: isSelected ? .semibold : .medium))
                 .foregroundStyle(
                     isSelected
                         ? AnyShapeStyle(Color(red: 217/255, green: 64/255, blue: 63/255))
                         : AnyShapeStyle(.secondary)
                 )
-                .symbolEffect(.bounce, value: isSelected)
+                .scaleEffect(isSelected ? 1.0 : 0.9)
 
             // Always show label per Apple HIG guidelines
             Text(label)
@@ -209,7 +210,7 @@ struct TabBarItem: View {
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
+        .animation(.easeInOut(duration: 0.2), value: isSelected)
     }
 }
 
