@@ -323,6 +323,7 @@ struct BadgesPreviewCard: View {
                 }
             }
             .padding()
+            .frame(minHeight: 180)
             .background(
                 ZStack {
                     // Liquid glass background
@@ -480,6 +481,7 @@ struct CalendarPreviewCard: View {
                 }
             }
             .padding()
+            .frame(minHeight: 180)
             .background(
                 ZStack {
                     // Liquid glass background

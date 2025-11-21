@@ -554,15 +554,22 @@ class HealthKitManager: ObservableObject {
         }
         
         // Define the types we want to read from HealthKit
-        let types: Set = [
+        let readTypes: Set = [
             HKObjectType.workoutType(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
             HKObjectType.quantityType(forIdentifier: .stepCount)!,
             HKSeriesType.workoutRoute()
         ]
-        
-        healthStore.requestAuthorization(toShare: nil, read: types) { success, error in
+
+        // Define the types we want to write to HealthKit (for workout tracking)
+        let writeTypes: Set = [
+            HKObjectType.workoutType(),
+            HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
+            HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
+        ]
+
+        healthStore.requestAuthorization(toShare: writeTypes, read: readTypes) { success, error in
             DispatchQueue.main.async {
                 self.isAuthorized = success
                 
