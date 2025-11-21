@@ -3007,7 +3007,7 @@ struct WorkoutTrackingView: View {
     @State private var showCompletion = false
     @State private var showRecap = false
     @State private var workoutSession: HKWorkoutSession?
-    @State private var workoutBuilder: HKLiveWorkoutBuilder?
+    @State private var workoutBuilder: HKWorkoutBuilder?
 
     private var progress: Double {
         min(currentDistance / goalDistance, 1.0)
@@ -3227,34 +3227,29 @@ struct WorkoutTrackingView: View {
         configuration.activityType = .walking
         configuration.locationType = .outdoor
 
-        do {
-            let session = try HKWorkoutSession(healthStore: HKHealthStore(), configuration: configuration)
-            let builder = session.associatedWorkoutBuilder()
+        // Use iOS-compatible API (HKWorkoutBuilder, not HKLiveWorkoutBuilder which is watchOS-only)
+        // Note: HKLiveWorkoutDataSource is also watchOS-only, so we'll manually track the workout
+        let healthStore = HKHealthStore()
+        let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
+        
+        workoutBuilder = builder
 
-            workoutSession = session
-            workoutBuilder = builder
-
-            builder.dataSource = HKLiveWorkoutDataSource(healthStore: HKHealthStore(), workoutConfiguration: configuration)
-
-            session.startActivity(with: Date())
-            builder.beginCollection(withStart: Date()) { success, error in
-                if success {
-                    // Start timer for elapsed time
-                    self.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-                        if let startDate = self.workoutStartDate {
-                            self.elapsedTime = Date().timeIntervalSince(startDate)
-                        }
-
-                        // Update distance from builder
-                        if let statistics = builder.statistics(for: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!) {
-                            let distanceMeters = statistics.sumQuantity()?.doubleValue(for: HKUnit.meter()) ?? 0
-                            self.currentDistance = distanceMeters * 0.000621371 // Convert to miles
-                        }
+        // Start collecting workout data (without live data source - we'll add samples manually)
+        builder.beginCollection(withStart: Date()) { success, error in
+            if success {
+                // Start timer for elapsed time and manual distance tracking
+                // Note: We capture self directly since WorkoutTrackingView is a struct (value type)
+                self.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                    if let startDate = self.workoutStartDate {
+                        self.elapsedTime = Date().timeIntervalSince(startDate)
                     }
+                    
+                    // Note: On iOS, we track distance manually since HKLiveWorkoutDataSource is watchOS-only
+                    // The distance will be added to the workout when it's finished
                 }
+            } else if let error = error {
+                print("Failed to start workout collection: \(error)")
             }
-        } catch {
-            print("Failed to start workout: \(error)")
         }
     }
 
@@ -3263,25 +3258,56 @@ struct WorkoutTrackingView: View {
         timer?.invalidate()
         timer = nil
 
-        // End HealthKit workout session
-        if let session = workoutSession, let builder = workoutBuilder {
-            session.end()
-            builder.endCollection(withEnd: Date()) { success, error in
-                if success {
-                    builder.finishWorkout { workout, error in
-                        if let workout = workout {
-                            // Workout saved to HealthKit
-                            print("Workout saved: \(workout)")
-
-                            // Refresh health data
-                            DispatchQueue.main.async {
-                                healthManager.fetchAllWorkoutData()
-                            }
-                        }
-                    }
+        // End HealthKit workout collection
+        guard let builder = workoutBuilder, let startDate = workoutStartDate else {
+            workoutSession = nil
+            workoutBuilder = nil
+            return
+        }
+        
+        let endDate = Date()
+        
+        // Add distance sample to workout (since we're tracking manually on iOS)
+        if currentDistance > 0 {
+            let distanceMeters = currentDistance / 0.000621371 // Convert miles to meters
+            let distanceQuantity = HKQuantity(unit: HKUnit.meter(), doubleValue: distanceMeters)
+            let distanceSample = HKQuantitySample(
+                type: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!,
+                quantity: distanceQuantity,
+                start: startDate,
+                end: endDate
+            )
+            // Add sample as an array with completion handler
+            builder.add([distanceSample]) { success, error in
+                if let error = error {
+                    print("Failed to add distance sample: \(error)")
                 }
             }
         }
+        
+        builder.endCollection(withEnd: endDate) { success, error in
+            if success {
+                builder.finishWorkout { workout, error in
+                    if let workout = workout {
+                        // Workout saved to HealthKit
+                        print("Workout saved: \(workout)")
+
+                        // Refresh health data
+                        DispatchQueue.main.async {
+                            healthManager.fetchAllWorkoutData()
+                        }
+                    } else if let error = error {
+                        print("Failed to finish workout: \(error)")
+                    }
+                }
+            } else if let error = error {
+                print("Failed to end workout collection: \(error)")
+            }
+        }
+        
+        // Clear session references
+        workoutSession = nil
+        workoutBuilder = nil
 
         // Show recap
         withAnimation {

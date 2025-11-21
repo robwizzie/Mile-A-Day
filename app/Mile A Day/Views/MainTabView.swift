@@ -130,45 +130,37 @@ struct FloatingTabBar: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 12)
         .background {
-            // iOS 18+ Liquid Glass Effect
-            if #available(iOS 18.0, *) {
+            // Liquid glass material background
+            ZStack {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(.ultraThinMaterial)
-                    .glassEffect(.regular)
-            } else {
-                // Fallback for iOS 17 and earlier
-                ZStack {
-                    // Liquid glass material background
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(.ultraThinMaterial)
 
-                    // Subtle highlight gradient
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(colorScheme == .dark ? 0.08 : 0.15),
-                                    Color.white.opacity(colorScheme == .dark ? 0.02 : 0.05)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
+                // Subtle highlight gradient
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.08 : 0.15),
+                                Color.white.opacity(colorScheme == .dark ? 0.02 : 0.05)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
                         )
+                    )
 
-                    // Border for definition
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(colorScheme == .dark ? 0.25 : 0.4),
-                                    Color.white.opacity(colorScheme == .dark ? 0.1 : 0.2)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 0.5
-                        )
-                }
+                // Border for definition
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.25 : 0.4),
+                                Color.white.opacity(colorScheme == .dark ? 0.1 : 0.2)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 0.5
+                    )
             }
         }
         .shadow(color: .black.opacity(0.1), radius: 12, x: 0, y: 4)
