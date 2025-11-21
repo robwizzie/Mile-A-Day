@@ -29,7 +29,19 @@ struct MADTheme {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
-        
+
+        // App-wide gradient background (matching logo)
+        static let appBackgroundGradient = LinearGradient(
+            colors: [
+                Color(red: 0.8, green: 0.25, blue: 0.35),  // Top: lighter red
+                Color(red: 0.6, green: 0.15, blue: 0.25),  // Mid-top
+                Color(red: 0.3, green: 0.08, blue: 0.15),  // Mid-bottom
+                Color(red: 0.1, green: 0.05, blue: 0.08)   // Bottom: dark maroon
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+
         // Text colors - adapt to dark mode
         static let primaryText = Color.primary
         static let secondaryText = Color.secondary

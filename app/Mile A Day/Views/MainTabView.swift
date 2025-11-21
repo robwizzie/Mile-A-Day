@@ -11,6 +11,10 @@ struct MainTabView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
+            // App-wide gradient background
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea()
+
             TabView(selection: $selectedTab) {
                 NavigationStack {
                     DashboardView(healthManager: healthManager, userManager: userManager)

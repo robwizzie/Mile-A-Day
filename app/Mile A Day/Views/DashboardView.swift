@@ -2,6 +2,7 @@ import SwiftUI
 import HealthKit
 import WidgetKit
 import UIKit
+import CoreLocation
 
 struct DashboardView: View {
     @ObservedObject var healthManager: HealthKitManager
@@ -37,56 +38,56 @@ struct DashboardView: View {
                         showInstructions: $showInstructions
                     )
 
-                    // SECTION: Today's Overview (side by side)
+                    // SECTION: Streak Counter (full width at top)
+                    StreakCard(
+                        streak: userManager.currentUser.streak,
+                        isActiveToday: userManager.currentUser.isStreakActiveToday,
+                        isAtRisk: userManager.currentUser.isStreakAtRisk,
+                        user: userManager.currentUser,
+                        progress: currentState.progress,
+                        isGoalCompleted: currentState.isCompleted,
+                        isRefreshing: isRefreshing,
+                        currentDistance: currentState.distance,
+                        fastestPace: healthManager.fastestMilePace,
+                        mostMiles: healthManager.mostMilesInOneDay,
+                        totalMiles: healthManager.totalLifetimeMiles
+                    )
+
+                    // SECTION: Today's Progress (full width with Start Mile button)
+                    TodayProgressCard(
+                        currentDistance: currentState.distance,
+                        goalDistance: currentState.goal,
+                        progress: currentState.progress,
+                        didComplete: currentState.isCompleted,
+                        onRefresh: refreshData,
+                        isRefreshing: isRefreshing,
+                        user: userManager.currentUser,
+                        fastestPace: healthManager.fastestMilePace,
+                        mostMiles: healthManager.mostMilesInOneDay,
+                        totalMiles: healthManager.totalLifetimeMiles,
+                        healthManager: healthManager,
+                        userManager: userManager
+                    )
+
+                    // SECTION: Steps and Badges (side by side)
                     HStack(spacing: 12) {
-                        TodayProgressCard(
-                            currentDistance: currentState.distance,
-                            goalDistance: currentState.goal,
-                            progress: currentState.progress,
-                            didComplete: currentState.isCompleted,
-                            onRefresh: refreshData,
-                            isRefreshing: isRefreshing,
-                            user: userManager.currentUser,
-                            fastestPace: healthManager.fastestMilePace,
-                            mostMiles: healthManager.mostMilesInOneDay,
-                            totalMiles: healthManager.totalLifetimeMiles
-                        )
-                        .frame(maxWidth: .infinity)
-
-                        StreakCard(
-                            streak: userManager.currentUser.streak,
-                            isActiveToday: userManager.currentUser.isStreakActiveToday,
-                            isAtRisk: userManager.currentUser.isStreakAtRisk,
-                            user: userManager.currentUser,
-                            progress: currentState.progress,
-                            isGoalCompleted: currentState.isCompleted,
-                            isRefreshing: isRefreshing,
-                            currentDistance: currentState.distance,
-                            fastestPace: healthManager.fastestMilePace,
-                            mostMiles: healthManager.mostMilesInOneDay,
-                            totalMiles: healthManager.totalLifetimeMiles
-                        )
-                        .frame(maxWidth: .infinity)
-                    }
-
-                    // SECTION: Activity Overview
-                    VStack(spacing: 12) {
-                        WeekAtAGlanceCard(
+                        CalendarPreviewCard(
                             healthManager: healthManager,
                             userManager: userManager
                         )
+                        .frame(maxWidth: .infinity)
 
-                        VStack(spacing: 12) {
-                            CalendarPreviewCard(
-                                healthManager: healthManager,
-                                userManager: userManager
-                            )
-
-                            BadgesPreviewCard(
-                                userManager: userManager
-                            )
-                        }
+                        BadgesPreviewCard(
+                            userManager: userManager
+                        )
+                        .frame(maxWidth: .infinity)
                     }
+
+                    // SECTION: Week at a Glance
+                    WeekAtAGlanceCard(
+                        healthManager: healthManager,
+                        userManager: userManager
+                    )
 
                     // SECTION: Statistics & History
                     VStack(spacing: 12) {
@@ -661,143 +662,117 @@ struct StreakCard: View {
     @State private var animateStreak = false
     @State private var showingShareSheet = false
     @State private var isPressed = false
-    
-    // Dynamic colors based on streak status
-    var streakColor: Color {
-        if isGoalCompleted {
-            return .green
-        } else if isAtRisk {
-            return .red
-        } else {
-            return .orange
-        }
-    }
-    
-    var backgroundColor: Color {
-        if isGoalCompleted {
-            return .green.opacity(0.1)
-        } else if isAtRisk {
-            return .red.opacity(0.1)
-        } else {
-            return .orange.opacity(0.1)
-        }
-    }
-    
-    var gradientColors: [Color] {
-        if isGoalCompleted {
-            return [.green.opacity(0.3), .green.opacity(0.1)]
-        } else if isAtRisk {
-            return [.red.opacity(0.3), .red.opacity(0.1)]
-        } else {
-            return [.orange.opacity(0.3), .orange.opacity(0.1)]
-        }
-    }
-    
+
     var body: some View {
-        VStack(spacing: 12) {
-            // Title
-            Text("Current Streak")
-                .font(.headline)
-                .fontWeight(.semibold)
-            
-            // Streak circle with fire icon (matching widget design)
+        HStack(spacing: 20) {
+            // Left side: Flame icon
             ZStack {
-                // Background circle
                 Circle()
                     .fill(
                         LinearGradient(
-                            gradient: Gradient(colors: gradientColors),
+                            colors: [
+                                Color.orange.opacity(0.3),
+                                Color.red.opacity(0.2)
+                            ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 120, height: 120)
-                    .scaleEffect(isPressed ? 0.95 : 1.0)
-                
-                // Progress ring - now changes color with streak status
-                Circle()
-                    .stroke(Color.gray.opacity(0.2), lineWidth: 5)
-                    .frame(width: 130, height: 130)
-                
-                Circle()
-                    .trim(from: 0, to: progress)
-                    .stroke(streakColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
-                    .frame(width: 130, height: 130)
-                    .rotationEffect(.degrees(-90))
-                    .animation(.easeInOut(duration: 0.8), value: progress)
-                
-                // Loading indicator overlay when refreshing
-                if isRefreshing {
-                    Circle()
-                        .stroke(Color.blue.opacity(0.3), lineWidth: 2)
-                        .frame(width: 140, height: 140)
-                        .rotationEffect(.degrees(-90))
-                        .overlay(
-                            Circle()
-                                .trim(from: 0, to: 0.25)
-                                .stroke(Color.blue, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                                .frame(width: 140, height: 140)
-                                .rotationEffect(.degrees(animateStreak ? 360 : 0))
-                                .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: animateStreak)
+                    .frame(width: 80, height: 80)
+
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 40))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.orange, .red],
+                            startPoint: .top,
+                            endPoint: .bottom
                         )
-                }
-                
-                // Center content
-                VStack(spacing: 4) {
-                    Text("\(streak)")
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .foregroundColor(streakColor)
-                        .contentTransition(.numericText()) // Smooth number transitions
-                        .opacity(isRefreshing ? 0.6 : 1.0)
-                    
-                    Text(streak == 1 ? "day" : "days")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(streakColor.opacity(0.8))
-                        .opacity(isRefreshing ? 0.6 : 1.0)
-                }
+                    )
             }
-            
-            // Status message with time until streak reset
-            VStack(spacing: 4) {
-                if isGoalCompleted {
-                    Label("Goal completed!", systemImage: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                        .font(.caption)
+
+            // Right side: Streak info
+            VStack(alignment: .leading, spacing: 8) {
+                Text("CURRENT STREAK")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white.opacity(0.7))
+                    .tracking(1.2)
+
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("\(streak)")
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .contentTransition(.numericText())
+
+                    Text(streak == 1 ? "day" : "days")
+                        .font(.title3)
                         .fontWeight(.medium)
-                } else if isAtRisk {
-                    Label("Streak at risk!", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundColor(.red)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                    
-                    // Show time until streak ends - use same color as streak
-                    Text(user.formattedTimeUntilReset)
-                        .font(.caption2)
-                        .foregroundColor(streakColor.opacity(0.8))
-                        .fontWeight(.medium)
-                } else {
-                    Text("Keep it going!")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    // Show time until streak is at risk if not completed - use same color as streak
-                    if !isActiveToday, user.timeUntilStreakReset != nil {
-                        Text(user.formattedTimeUntilReset)
-                            .font(.caption2)
-                            .foregroundColor(streakColor.opacity(0.8))
+                        .foregroundColor(.white.opacity(0.8))
+                }
+
+                // Status message
+                HStack(spacing: 4) {
+                    if isGoalCompleted {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Text("You're on fire")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                            .fontWeight(.medium)
+                    } else if isAtRisk {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.yellow)
+                        Text("Complete today's goal!")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                            .fontWeight(.medium)
+                    } else {
+                        Text("\(String(format: "%.2f", user.goalMiles - currentDistance)) mi to go")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                            .fontWeight(.medium)
                     }
                 }
             }
 
-
+            Spacer()
         }
-        .padding()
-        .liquidGlassCard(accentColor: streakColor)
-        .scaleEffect(isPressed ? 0.97 : 1.0)
+        .padding(20)
+        .background(
+            ZStack {
+                // Dark gradient background
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.3, green: 0.15, blue: 0.15),
+                                Color(red: 0.2, green: 0.1, blue: 0.1)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                // Subtle glass overlay
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.2),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
+        )
+        .shadow(color: .black.opacity(0.3), radius: 12, x: 0, y: 6)
+        .scaleEffect(isPressed ? 0.98 : 1.0)
         .animation(.easeInOut(duration: 0.1), value: isPressed)
         .onTapGesture {
-            // Haptic feedback
             let impact = UIImpactFeedbackGenerator(style: .medium)
             impact.impactOccurred()
             showingShareSheet = true
@@ -826,27 +801,6 @@ struct StreakCard: View {
                 totalMiles: totalMiles
             )
         }
-        .onAppear {
-            // Start pulsing animation for streaks at risk (but not while refreshing)
-            if isAtRisk && !isRefreshing {
-                animateStreak = true
-            }
-        }
-        .onChange(of: isRefreshing) { oldValue, newValue in
-            if newValue {
-                // Start loading animation
-                animateStreak = true
-            } else {
-                // Stop loading animation and start appropriate streak animation
-                if isAtRisk {
-                    // Keep animating for at-risk streaks
-                    animateStreak = true
-                } else {
-                    // Stop animation for normal streaks
-                    animateStreak = false
-                }
-            }
-        }
     }
 }
 
@@ -861,148 +815,129 @@ struct TodayProgressCard: View {
     let fastestPace: TimeInterval
     let mostMiles: Double
     let totalMiles: Double
+    @ObservedObject var healthManager: HealthKitManager
+    @ObservedObject var userManager: UserManager
     @State private var animateProgress = false
-    @State private var animateNumbers = false
-    @State private var animateBar = false
-    @State private var showingShareSheet = false
+    @State private var showWorkoutView = false
     @State private var isPressed = false
-    
+
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 16) {
             // Header
             HStack {
                 Image(systemName: "figure.run")
-                    .foregroundColor(.primary)
+                    .foregroundColor(.white)
+                    .font(.title3)
                 Text("Today's Progress")
                     .font(.headline)
                     .fontWeight(.semibold)
+                    .foregroundColor(.white)
                 Spacer()
                 if didComplete {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
-                }
-                if isRefreshing {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.title3)
-                            .foregroundColor(.blue)
-                            .rotationEffect(.degrees(360))
-                            .animation(.linear(duration: 1.0).repeatForever(autoreverses: false), value: isRefreshing)
-                        
-                        Text("Updating...")
-                            .font(.caption2)
-                            .foregroundColor(.blue)
-                    }
-                } else {
-                    Button(action: onRefresh) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.title3)
-                            .foregroundColor(.blue)
-                    }
+                        .font(.title3)
                 }
             }
-            
-            // Progress Bar
+
+            // Large progress display
+            VStack(spacing: 8) {
+                Text(String(format: "%.2f", currentDistance))
+                    .font(.system(size: 56, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .contentTransition(.numericText())
+
+                Text("of \(String(format: "%.1f", goalDistance)) mi")
+                    .font(.title3)
+                    .foregroundColor(.white.opacity(0.8))
+            }
+
+            // Progress bar
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(height: 16)
-                    
+                        .fill(Color.white.opacity(0.2))
+                        .frame(height: 12)
+
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(didComplete ? Color.green : Color("appPrimary"))
-                        .frame(width: animateProgress ? progress * geometry.size.width : 0, height: 16)
-                        .scaleEffect(y: animateBar ? 1.3 : 1.0)
-                        .shadow(color: animateBar ? (didComplete ? .green : .blue) : .clear, radius: animateBar ? 8 : 0)
-                        .animation(.easeInOut(duration: 1.2).delay(0.5), value: animateProgress)
-                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateBar)
+                        .fill(
+                            LinearGradient(
+                                colors: didComplete ? [.green, .green] : [.orange, .red],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: progress * geometry.size.width, height: 12)
+                        .animation(.easeOut(duration: 0.8), value: progress)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 8))
             }
-            .frame(height: 16)
-            
-            // Distance Display
-            HStack {
-                Text(String(format: "%.2f", currentDistance))
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .scaleEffect(animateNumbers ? 1.1 : 1.0)
-                    .animation(.easeInOut(duration: 0.6).delay(0.8), value: animateNumbers)
-                
-                Text("of")
-                    .font(.subheadline)
-                    .opacity(animateNumbers ? 1.0 : 0.0)
-                    .animation(.easeInOut(duration: 0.4).delay(1.0), value: animateNumbers)
-                
-                Text(String(format: "%.1f mi", goalDistance))
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .scaleEffect(animateNumbers ? 1.1 : 1.0)
-                    .animation(.easeInOut(duration: 0.6).delay(1.2), value: animateNumbers)
-            }
-            
-            // Status or remaining distance
-            if didComplete {
-                Label("Goal Complete!", systemImage: "star.fill")
-                    .foregroundColor(.green)
-                    .font(.caption)
-            } else {
-                let remaining = max(goalDistance - currentDistance, 0.0)
-                Text(String(format: "%.2f mi to go", remaining))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
+            .frame(height: 12)
 
+            // Start Mile button
+            Button(action: {
+                showWorkoutView = true
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "play.fill")
+                        .font(.title3)
+                    Text("Start Walking")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 217/255, green: 64/255, blue: 63/255),
+                                    Color(red: 180/255, green: 50/255, blue: 50/255)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                )
+                .shadow(color: Color(red: 217/255, green: 64/255, blue: 63/255).opacity(0.4), radius: 8, x: 0, y: 4)
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(20)
+        .background(
+            ZStack {
+                // Red gradient background
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.85, green: 0.25, blue: 0.35),
+                                Color(red: 0.7, green: 0.2, blue: 0.3)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
 
-        }
-        .padding()
-        .liquidGlassCard(accentColor: didComplete ? .green : Color(red: 217/255, green: 64/255, blue: 63/255))
-        .scaleEffect(isPressed ? 0.97 : 1.0)
-        .animation(.easeInOut(duration: 0.1), value: isPressed)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.5).delay(0.2)) {
-                animateProgress = true
+                // Subtle glass overlay
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.3),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
             }
-            withAnimation(.easeInOut(duration: 0.5).delay(0.4)) {
-                animateNumbers = true
-            }
-            
-            // Start bar pulsing animation if goal is completed
-            if didComplete {
-                withAnimation(.easeInOut(duration: 0.5).delay(1.5)) {
-                    animateBar = true
-                }
-            }
-        }
-        .onTapGesture {
-            // Haptic feedback
-            let impact = UIImpactFeedbackGenerator(style: .medium)
-            impact.impactOccurred()
-            showingShareSheet = true
-        }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    withAnimation(.easeInOut(duration: 0.1)) {
-                        isPressed = true
-                    }
-                }
-                .onEnded { _ in
-                    withAnimation(.easeInOut(duration: 0.1)) {
-                        isPressed = false
-                    }
-                }
         )
-        .sheet(isPresented: $showingShareSheet) {
-            EnhancedShareView(
-                user: user,
-                currentDistance: currentDistance,
-                progress: progress,
-                isGoalCompleted: didComplete,
-                fastestPace: fastestPace,
-                mostMiles: mostMiles,
-                totalMiles: totalMiles
-            )
+        .shadow(color: .black.opacity(0.3), radius: 12, x: 0, y: 6)
+        .fullScreenCover(isPresented: $showWorkoutView) {
+            WorkoutTrackingView(healthManager: healthManager, userManager: userManager, goalDistance: goalDistance)
         }
     }
 }
@@ -3050,6 +2985,443 @@ struct SharePreviewView: View {
         if let streakImg = streakRenderer.uiImage, let progressImg = progressRenderer.uiImage {
             regeneratedImages = (streak: streakImg, progress: progressImg)
             selectedImage = currentTab == 0 ? streakImg : progressImg
+        }
+    }
+}
+
+// MARK: - Workout Tracking View
+
+struct WorkoutTrackingView: View {
+    @ObservedObject var healthManager: HealthKitManager
+    @ObservedObject var userManager: UserManager
+    let goalDistance: Double
+    @Environment(\.dismiss) var dismiss
+
+    @State private var countdownNumber = 3
+    @State private var showCountdown = true
+    @State private var isTracking = false
+    @State private var elapsedTime: TimeInterval = 0
+    @State private var currentDistance: Double = 0.0
+    @State private var timer: Timer?
+    @State private var workoutStartDate: Date?
+    @State private var showCompletion = false
+    @State private var showRecap = false
+    @State private var workoutSession: HKWorkoutSession?
+    @State private var workoutBuilder: HKLiveWorkoutBuilder?
+
+    private var progress: Double {
+        min(currentDistance / goalDistance, 1.0)
+    }
+
+    private var formattedTime: String {
+        let minutes = Int(elapsedTime) / 60
+        let seconds = Int(elapsedTime) % 60
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+
+    var body: some View {
+        ZStack {
+            // Gradient background
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea()
+
+            if showCountdown {
+                // Countdown view
+                VStack {
+                    Text("\(countdownNumber)")
+                        .font(.system(size: 120, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .scaleEffect(countdownNumber > 0 ? 1.0 : 0.5)
+                        .opacity(countdownNumber > 0 ? 1.0 : 0.0)
+                        .animation(.spring(response: 0.5, dampingFraction: 0.6), value: countdownNumber)
+                }
+                .onAppear {
+                    startCountdown()
+                }
+            } else if showRecap {
+                WorkoutRecapView(
+                    distance: currentDistance,
+                    duration: elapsedTime,
+                    goalDistance: goalDistance,
+                    onDismiss: {
+                        dismiss()
+                    }
+                )
+            } else {
+                // Tracking view
+                VStack(spacing: 40) {
+                    Spacer()
+
+                    // Distance display
+                    VStack(spacing: 12) {
+                        Text("DISTANCE")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white.opacity(0.7))
+                            .tracking(1.5)
+
+                        Text(String(format: "%.2f", currentDistance))
+                            .font(.system(size: 80, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .contentTransition(.numericText())
+
+                        Text("miles")
+                            .font(.title2)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+
+                    // Progress ring
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.2), lineWidth: 12)
+                            .frame(width: 200, height: 200)
+
+                        Circle()
+                            .trim(from: 0, to: progress)
+                            .stroke(
+                                LinearGradient(
+                                    colors: progress >= 1.0 ? [.green, .green] : [.orange, .red],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                style: StrokeStyle(lineWidth: 12, lineCap: .round)
+                            )
+                            .frame(width: 200, height: 200)
+                            .rotationEffect(.degrees(-90))
+                            .animation(.easeOut(duration: 0.5), value: progress)
+
+                        VStack(spacing: 4) {
+                            Text("\(Int(progress * 100))%")
+                                .font(.system(size: 36, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+
+                            Text("of goal")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                    }
+
+                    // Time display
+                    VStack(spacing: 8) {
+                        Text("TIME")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white.opacity(0.7))
+                            .tracking(1.5)
+
+                        Text(formattedTime)
+                            .font(.system(size: 48, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                            .monospacedDigit()
+                    }
+
+                    Spacer()
+
+                    // Stop button
+                    Button(action: {
+                        stopWorkout()
+                    }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "stop.fill")
+                                .font(.title2)
+                            Text("Stop Workout")
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color.red.opacity(0.3))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .stroke(Color.red, lineWidth: 2)
+                                )
+                        )
+                    }
+                    .padding(.horizontal, 32)
+                    .padding(.bottom, 40)
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .opacity(showCompletion ? 0 : 1)
+                .overlay(
+                    // Completion celebration
+                    Group {
+                        if showCompletion {
+                            VStack(spacing: 24) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 100))
+                                    .foregroundStyle(
+                                        LinearGradient(
+                                            colors: [.green, .green.opacity(0.7)],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                                    .scaleEffect(showCompletion ? 1.0 : 0.5)
+                                    .animation(.spring(response: 0.6, dampingFraction: 0.6), value: showCompletion)
+
+                                Text("Goal Complete!")
+                                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+
+                                Text("You did it! Keep going or finish your workout.")
+                                    .font(.title3)
+                                    .foregroundColor(.white.opacity(0.9))
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 40)
+                            }
+                            .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+                )
+            }
+        }
+        .onChange(of: currentDistance) { oldValue, newValue in
+            if !showCompletion && newValue >= goalDistance {
+                // Show completion celebration
+                withAnimation {
+                    showCompletion = true
+                }
+
+                // Haptic feedback
+                let notification = UINotificationFeedbackGenerator()
+                notification.notificationOccurred(.success)
+
+                // Hide completion after 3 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    withAnimation {
+                        showCompletion = false
+                    }
+                }
+            }
+        }
+    }
+
+    private func startCountdown() {
+        // Haptic feedback for countdown
+        let impact = UIImpactFeedbackGenerator(style: .heavy)
+
+        Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
+            if countdownNumber > 1 {
+                countdownNumber -= 1
+                impact.impactOccurred()
+            } else {
+                timer.invalidate()
+                // Start workout
+                withAnimation {
+                    showCountdown = false
+                    isTracking = true
+                }
+                startWorkout()
+            }
+        }
+    }
+
+    private func startWorkout() {
+        workoutStartDate = Date()
+
+        // Start HealthKit workout session
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = .walking
+        configuration.locationType = .outdoor
+
+        do {
+            let session = try HKWorkoutSession(healthStore: HKHealthStore(), configuration: configuration)
+            let builder = session.associatedWorkoutBuilder()
+
+            workoutSession = session
+            workoutBuilder = builder
+
+            builder.dataSource = HKLiveWorkoutDataSource(healthStore: HKHealthStore(), workoutConfiguration: configuration)
+
+            session.startActivity(with: Date())
+            builder.beginCollection(withStart: Date()) { success, error in
+                if success {
+                    // Start timer for elapsed time
+                    self.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                        if let startDate = self.workoutStartDate {
+                            self.elapsedTime = Date().timeIntervalSince(startDate)
+                        }
+
+                        // Update distance from builder
+                        if let statistics = builder.statistics(for: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!) {
+                            let distanceMeters = statistics.sumQuantity()?.doubleValue(for: HKUnit.meter()) ?? 0
+                            self.currentDistance = distanceMeters * 0.000621371 // Convert to miles
+                        }
+                    }
+                }
+            }
+        } catch {
+            print("Failed to start workout: \(error)")
+        }
+    }
+
+    private func stopWorkout() {
+        // Stop timer
+        timer?.invalidate()
+        timer = nil
+
+        // End HealthKit workout session
+        if let session = workoutSession, let builder = workoutBuilder {
+            session.end()
+            builder.endCollection(withEnd: Date()) { success, error in
+                if success {
+                    builder.finishWorkout { workout, error in
+                        if let workout = workout {
+                            // Workout saved to HealthKit
+                            print("Workout saved: \(workout)")
+
+                            // Refresh health data
+                            DispatchQueue.main.async {
+                                healthManager.fetchAllWorkoutData()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Show recap
+        withAnimation {
+            showRecap = true
+        }
+    }
+}
+
+// MARK: - Workout Recap View
+
+struct WorkoutRecapView: View {
+    let distance: Double
+    let duration: TimeInterval
+    let goalDistance: Double
+    let onDismiss: () -> Void
+
+    private var formattedTime: String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private var pace: String {
+        guard distance > 0 else { return "--:--" }
+        let paceSeconds = duration / distance
+        let minutes = Int(paceSeconds) / 60
+        let seconds = Int(paceSeconds) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    var body: some View {
+        ZStack {
+            // Gradient background
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea()
+
+            VStack(spacing: 32) {
+                Spacer()
+
+                // Header
+                VStack(spacing: 12) {
+                    Image(systemName: distance >= goalDistance ? "checkmark.circle.fill" : "flag.checkered.circle.fill")
+                        .font(.system(size: 80))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: distance >= goalDistance ? [.green, .green] : [.orange, .red],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+
+                    Text(distance >= goalDistance ? "Workout Complete!" : "Great Work!")
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+
+                    if distance >= goalDistance {
+                        Text("You reached your goal!")
+                            .font(.title3)
+                            .foregroundColor(.white.opacity(0.9))
+                    }
+                }
+
+                // Stats
+                VStack(spacing: 20) {
+                    StatRow(icon: "figure.walk", label: "Distance", value: String(format: "%.2f mi", distance))
+                    StatRow(icon: "clock.fill", label: "Time", value: formattedTime)
+                    StatRow(icon: "speedometer", label: "Avg Pace", value: "\(pace) /mi")
+
+                    if distance >= goalDistance {
+                        StatRow(icon: "target", label: "Goal", value: "✓ Completed")
+                    } else {
+                        StatRow(icon: "target", label: "Goal Progress", value: String(format: "%.0f%%", (distance / goalDistance) * 100))
+                    }
+                }
+                .padding(24)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color.white.opacity(0.1))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 20)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        )
+                )
+                .padding(.horizontal, 32)
+
+                Spacer()
+
+                // Done button
+                Button(action: onDismiss) {
+                    Text("Done")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 217/255, green: 64/255, blue: 63/255),
+                                            Color(red: 180/255, green: 50/255, blue: 50/255)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                        )
+                        .shadow(color: Color(red: 217/255, green: 64/255, blue: 63/255).opacity(0.4), radius: 12, x: 0, y: 6)
+                }
+                .padding(.horizontal, 32)
+                .padding(.bottom, 40)
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+    }
+}
+
+struct StatRow: View {
+    let icon: String
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundColor(.white.opacity(0.7))
+                .frame(width: 32)
+
+            Text(label)
+                .font(.headline)
+                .foregroundColor(.white.opacity(0.9))
+
+            Spacer()
+
+            Text(value)
+                .font(.title3)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
         }
     }
 }
