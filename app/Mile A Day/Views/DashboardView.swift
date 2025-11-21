@@ -131,7 +131,6 @@ struct DashboardView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
-                .padding(.bottom, 90) // Extra padding for floating tab bar
             }
             .scrollContentBackground(.hidden)
             .background(Color.clear)

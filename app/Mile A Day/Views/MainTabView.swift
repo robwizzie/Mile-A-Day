@@ -13,7 +13,7 @@ struct MainTabView: View {
         ZStack(alignment: .bottom) {
             // App-wide gradient background (extends to all edges including dynamic island)
             MADTheme.Colors.appBackgroundGradient
-                .ignoresSafeArea(.all, edges: .all)
+                .ignoresSafeArea()
 
             TabView(selection: $selectedTab) {
                 NavigationStack {
@@ -44,14 +44,17 @@ struct MainTabView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .background(Color.clear)
+            .safeAreaInset(edge: .bottom) {
+                // Reserve space for floating tab bar
+                Color.clear.frame(height: 80)
+            }
 
             // Apple HIG Floating Liquid Glass Tab Bar
             FloatingTabBar(selectedTab: $selectedTab)
                 .padding(.horizontal, 8)
-                .padding(.bottom, 20)
+                .padding(.bottom, 8)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
-        .ignoresSafeArea(edges: .top)
         .preferredColorScheme(.dark)
         .onAppear {
             initializeApp()
@@ -134,52 +137,44 @@ struct FloatingTabBar: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 12)
         .padding(.vertical, 12)
         .background {
-            // iOS 18+ Liquid Glass Effect
-            if #available(iOS 18.0, *) {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
+            // Liquid glass material with blur
+            ZStack {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(.ultraThinMaterial)
-                    .glassEffect(.regular)
-            } else {
-                // Fallback for iOS 17 and earlier
-                ZStack {
-                    // Liquid glass material background
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(.ultraThinMaterial)
 
-                    // Subtle highlight gradient
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(colorScheme == .dark ? 0.08 : 0.15),
-                                    Color.white.opacity(colorScheme == .dark ? 0.02 : 0.05)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
+                // Subtle highlight gradient for glass effect
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.1),
+                                Color.white.opacity(0.05)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
                         )
+                    )
 
-                    // Border for definition
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(colorScheme == .dark ? 0.25 : 0.4),
-                                    Color.white.opacity(colorScheme == .dark ? 0.1 : 0.2)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 0.5
-                        )
-                }
+                // Border for definition
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.3),
+                                Color.white.opacity(0.1)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        ),
+                        lineWidth: 1
+                    )
             }
         }
-        .shadow(color: .black.opacity(0.1), radius: 12, x: 0, y: 4)
-        .shadow(color: .black.opacity(0.05), radius: 1, x: 0, y: 1)
+        .shadow(color: .black.opacity(0.2), radius: 16, x: 0, y: 8)
+        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
     }
 }
 
