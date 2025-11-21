@@ -51,6 +51,7 @@ struct MainTabView: View {
                 .padding(.bottom, 8)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        .preferredColorScheme(.dark)
         .onAppear {
             initializeApp()
         }
