@@ -30,13 +30,13 @@ struct MADTheme {
             endPoint: .bottomTrailing
         )
 
-        // App-wide gradient background (matching logo)
+        // App-wide gradient background (mostly black with slight red accents)
         static let appBackgroundGradient = LinearGradient(
             colors: [
-                Color(red: 0.8, green: 0.25, blue: 0.35),  // Top: lighter red
-                Color(red: 0.6, green: 0.15, blue: 0.25),  // Mid-top
-                Color(red: 0.3, green: 0.08, blue: 0.15),  // Mid-bottom
-                Color(red: 0.1, green: 0.05, blue: 0.08)   // Bottom: dark maroon
+                Color(red: 0.15, green: 0.08, blue: 0.1),   // Top: dark with slight red tint
+                Color(red: 0.12, green: 0.06, blue: 0.08),   // Mid-top: darker
+                Color(red: 0.08, green: 0.04, blue: 0.06),   // Mid-bottom: very dark
+                Color(red: 0.05, green: 0.02, blue: 0.04)    // Bottom: almost black
             ],
             startPoint: .top,
             endPoint: .bottom

@@ -11,7 +11,7 @@ struct SplashView: View {
     var body: some View {
         ZStack {
             // Background gradient
-            MADTheme.Colors.blackGradient
+            MADTheme.Colors.appBackgroundGradient
                 .ignoresSafeArea()
                 .opacity(backgroundOpacity)
             

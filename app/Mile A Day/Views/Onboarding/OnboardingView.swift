@@ -43,18 +43,9 @@ struct OnboardingView: View {
     
     var body: some View {
         ZStack {
-            // Sleek gradient background
-            LinearGradient(
-                colors: [
-                    onboardingPages[currentPage].gradientColors[0].opacity(0.3),
-                    onboardingPages[currentPage].gradientColors[1].opacity(0.2),
-                    onboardingPages[currentPage].gradientColors[2].opacity(0.15)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-            .animation(.easeInOut(duration: 0.5), value: currentPage)
+            // App gradient background
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea()
             
             // Minimal motion lines - much more subtle
             ForEach(0..<2, id: \.self) { index in

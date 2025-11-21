@@ -47,10 +47,6 @@ struct WeekAtAGlanceCard: View {
                             .font(.headline)
                             .fontWeight(.semibold)
                             .foregroundColor(.primary)
-
-                        Text("Tap to view full calendar")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
 
                     Spacer()
@@ -205,12 +201,12 @@ struct DayProgressView: View {
 
             // Step goal indicator (like calendar)
             if reachedStepGoal {
-                Image(systemName: "figure.walk")
+                Image(systemName: "shoeprints.fill")
                     .font(.system(size: 8))
                     .foregroundColor(.blue)
             } else {
                 // Placeholder to maintain spacing
-                Image(systemName: "figure.walk")
+                Image(systemName: "shoeprints.fill")
                     .font(.system(size: 8))
                     .foregroundColor(.clear)
             }
@@ -534,23 +530,25 @@ struct LiquidGlassCardModifier: ViewModifier {
                     RoundedRectangle(cornerRadius: 16)
                         .fill(.ultraThinMaterial)
 
-                    // Gradient overlay
-                    LinearGradient(
-                        colors: [
-                            accentColor.opacity(0.05),
-                            Color.clear
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    // Subtle highlight gradient for glass effect
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.1),
+                                    Color.white.opacity(0.05)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
 
                     // Glass border
                     RoundedRectangle(cornerRadius: 16)
                         .stroke(
                             LinearGradient(
                                 colors: [
-                                    Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
+                                    Color.white.opacity(colorScheme == .dark ? 0.25 : 0.3),
                                     Color.clear
                                 ],
                                 startPoint: .topLeading,

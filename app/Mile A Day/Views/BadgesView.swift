@@ -6,47 +6,53 @@ struct BadgesView: View {
     @State private var selectedFilter: BadgeFilter = .all
     
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // Badge count header
-                if !userManager.currentUser.badges.isEmpty {
-                    VStack(spacing: 12) {
-                        HStack {
-                            Text("Your Badges")
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                            Spacer()
-                            let earnedCount = filteredBadges.filter { !$0.isLocked }.count
-                            let totalCount = filteredBadges.count
-                            Text("\(earnedCount) of \(totalCount)")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        // Filter buttons
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(BadgeFilter.allCases, id: \.self) { filter in
-                                    FilterButton(
-                                        title: filter.title,
-                                        isSelected: selectedFilter == filter,
-                                        action: { selectedFilter = filter }
-                                    )
-                                }
+        ZStack {
+            // Gradient background
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea(.all)
+            
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Badge count header
+                    if !userManager.currentUser.badges.isEmpty {
+                        VStack(spacing: 12) {
+                            HStack {
+                                Text("Your Badges")
+                                    .font(.headline)
+                                    .fontWeight(.semibold)
+                                Spacer()
+                                let earnedCount = filteredBadges.filter { !$0.isLocked }.count
+                                let totalCount = filteredBadges.count
+                                Text("\(earnedCount) of \(totalCount)")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
                             }
-                            .padding(.horizontal)
+                            
+                            // Filter buttons
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 12) {
+                                    ForEach(BadgeFilter.allCases, id: \.self) { filter in
+                                        FilterButton(
+                                            title: filter.title,
+                                            isSelected: selectedFilter == filter,
+                                            action: { selectedFilter = filter }
+                                        )
+                                    }
+                                }
+                                .padding(.horizontal)
+                            }
                         }
+                        .padding(.horizontal)
                     }
-                    .padding(.horizontal)
+                    
+                    if userManager.currentUser.badges.isEmpty {
+                        emptyBadgesView
+                    } else {
+                        badgesGridView
+                    }
                 }
-                
-                if userManager.currentUser.badges.isEmpty {
-                    emptyBadgesView
-                } else {
-                    badgesGridView
-                }
+                .padding()
             }
-            .padding()
         }
         .navigationTitle("Your Badges")
         .navigationBarTitleDisplayMode(.inline)

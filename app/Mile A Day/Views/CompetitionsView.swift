@@ -2,56 +2,66 @@ import SwiftUI
 
 struct CompetitionsView: View {
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                // Coming soon header
-                VStack(spacing: 16) {
-                    Image(systemName: "trophy.circle.fill")
-                        .font(.system(size: 80))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color(red: 217/255, green: 64/255, blue: 63/255), .orange],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+        ZStack {
+            // Gradient background
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea(.all)
+            
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Coming soon header
+                    VStack(spacing: 16) {
+                        Image(systemName: "trophy.circle.fill")
+                            .font(.system(size: 80))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [Color(red: 217/255, green: 64/255, blue: 63/255), .orange],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
+                            .shadow(color: Color(red: 217/255, green: 64/255, blue: 63/255).opacity(0.3), radius: 20, x: 0, y: 10)
+
+                        Text("Competitions")
+                            .font(.system(size: 34, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+
+                        Text("Coming Soon")
+                            .font(.title2)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .padding(.top, 60)
+
+                    // Feature preview cards
+                    VStack(spacing: 16) {
+                        FeaturePreviewCard(
+                            icon: "person.2.fill",
+                            title: "Challenge Your Friends",
+                            description: "Compete with friends to see who can maintain the longest streak or run the most miles"
                         )
-                        .shadow(color: Color(red: 217/255, green: 64/255, blue: 63/255).opacity(0.3), radius: 20, x: 0, y: 10)
 
-                    Text("Competitions")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        FeaturePreviewCard(
+                            icon: "chart.bar.fill",
+                            title: "Leaderboards",
+                            description: "Climb the ranks and see how you stack up against other runners"
+                        )
 
-                    Text("Coming Soon")
-                        .font(.title2)
-                        .foregroundColor(.secondary)
+                        FeaturePreviewCard(
+                            icon: "medal.fill",
+                            title: "Weekly Challenges",
+                            description: "Join community challenges and earn exclusive badges"
+                        )
+                    }
+                    .padding(.horizontal)
                 }
-                .padding(.top, 60)
-
-                // Feature preview cards
-                VStack(spacing: 16) {
-                    FeaturePreviewCard(
-                        icon: "person.2.fill",
-                        title: "Challenge Your Friends",
-                        description: "Compete with friends to see who can maintain the longest streak or run the most miles"
-                    )
-
-                    FeaturePreviewCard(
-                        icon: "chart.bar.fill",
-                        title: "Leaderboards",
-                        description: "Climb the ranks and see how you stack up against other runners"
-                    )
-
-                    FeaturePreviewCard(
-                        icon: "medal.fill",
-                        title: "Weekly Challenges",
-                        description: "Join community challenges and earn exclusive badges"
-                    )
-                }
-                .padding(.horizontal)
+                .padding()
             }
-            .padding()
         }
         .navigationTitle("Competitions")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackgroundVisibility(.automatic, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
     }
 }
 
@@ -77,10 +87,11 @@ struct FeaturePreviewCard: View {
                 Text(title)
                     .font(.headline)
                     .fontWeight(.semibold)
+                    .foregroundColor(.white)
 
                 Text(description)
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.white.opacity(0.7))
                     .fixedSize(horizontal: false, vertical: true)
             }
 

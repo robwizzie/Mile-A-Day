@@ -17,28 +17,36 @@ struct ProfileView: View {
     @State private var showingPrivacySettings = false
     
     var body: some View {
-        ScrollView {
-            VStack(spacing: MADTheme.Spacing.xl) {
-                // Profile Header
-                profileHeader
-                
-                // Stats Summary
-                statsSection
-                
-                // Settings & Actions
-                settingsSection
-                
-                // Development Section (for testing)
-                #if DEBUG
-                developmentSection
-                #endif
+        ZStack {
+            // Gradient background
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea(.all)
+            
+            ScrollView {
+                VStack(spacing: MADTheme.Spacing.xl) {
+                    // Profile Header
+                    profileHeader
+                    
+                    // Stats Summary
+                    statsSection
+                    
+                    // Settings & Actions
+                    settingsSection
+                    
+                    // Development Section (for testing)
+                    #if DEBUG
+                    developmentSection
+                    #endif
+                }
+                .padding(MADTheme.Spacing.lg)
             }
-            .padding(MADTheme.Spacing.lg)
         }
-        .background(MADTheme.Colors.secondaryBackground)
         .preferredColorScheme(nil) // Allow system to control color scheme
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.large)
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackgroundVisibility(.automatic, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
         .sheet(isPresented: $showingMostMilesDetail) {
             MostMilesDetailView(miles: userManager.currentUser.mostMilesInOneDay, healthManager: healthManager)
         }
@@ -75,12 +83,10 @@ struct ProfileView: View {
                             .aspectRatio(contentMode: .fill)
                             .frame(width: 100, height: 100)
                             .clipShape(Circle())
-                            .transition(.scale.combined(with: .opacity))
                     } else {
                         Image(systemName: "person.fill")
                             .font(.system(size: 40, weight: .medium))
                             .foregroundColor(.white)
-                            .transition(.scale.combined(with: .opacity))
                     }
                     
                     // Edit overlay with animation
@@ -96,16 +102,12 @@ struct ProfileView: View {
                                         .font(.system(size: 14, weight: .medium))
                                         .foregroundColor(.white)
                                 )
-                                .scaleEffect(0.9)
-                                .animation(.easeInOut(duration: 0.2), value: currentProfileImage)
                         }
                     }
                     .frame(width: 100, height: 100)
                 }
             }
             .buttonStyle(.plain)
-            .scaleEffect(currentProfileImage != nil ? 1.0 : 0.95)
-            .animation(.easeInOut(duration: 0.3), value: currentProfileImage)
             .shadow(
                 color: MADTheme.Shadow.medium.color,
                 radius: MADTheme.Shadow.medium.radius,
@@ -246,10 +248,8 @@ struct ProfileView: View {
         }
         .onChange(of: selectedImage) { oldImage, newImage in
             if let image = newImage {
-                // Update UI immediately with animation
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    currentProfileImage = image
-                }
+                // Update UI immediately without animation
+                currentProfileImage = image
                 // Save to storage
                 saveCustomProfileImage(image)
             }

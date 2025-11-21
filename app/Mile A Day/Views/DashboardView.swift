@@ -11,19 +11,11 @@ extension View {
         self.onAppear {
             let appearance = UINavigationBarAppearance()
 
-            if #available(iOS 18.0, *) {
-                // iOS 18+ liquid glass effect
-                appearance.configureWithTransparentBackground()
-                appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
-            } else {
-                // Fallback for iOS 17
-                appearance.configureWithTransparentBackground()
-                appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
-            }
-
-            // Fully transparent to show gradient everywhere
+            // Fully transparent background with no blur effect
+            appearance.configureWithTransparentBackground()
             appearance.backgroundColor = .clear
             appearance.shadowColor = .clear
+            appearance.backgroundEffect = nil
 
             // Apply to all appearance states
             UINavigationBar.appearance().standardAppearance = appearance
@@ -66,10 +58,51 @@ struct DashboardView: View {
         NavigationStack {
             ZStack {
                 // Gradient background for this view
-                Color.clear
+                MADTheme.Colors.appBackgroundGradient
+                    .ignoresSafeArea(.all)
 
                 ScrollView {
                     VStack(spacing: 16) {
+                    // Custom navbar header (scrolls with content)
+                    HStack(spacing: 16) {
+                        Image("mad-logo")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 36)
+                        
+                        Spacer()
+                        
+                        if userManager.hasNewBadges {
+                            NavigationLink(destination: BadgesView(userManager: userManager)) {
+                                Image(systemName: "trophy.fill")
+                                    .foregroundColor(.yellow)
+                                    .font(.title2)
+                                    .symbolRenderingMode(.hierarchical)
+                            }
+                        }
+                        
+                        Button {
+                            showInstructions = true
+                        } label: {
+                            Image(systemName: "info.circle.fill")
+                                .foregroundColor(.white)
+                                .font(.title2)
+                                .symbolRenderingMode(.hierarchical)
+                        }
+                        
+                        Button {
+                            showGoalSheet = true
+                        } label: {
+                            Image(systemName: "gearshape.fill")
+                                .foregroundColor(.white)
+                                .font(.title2)
+                                .symbolRenderingMode(.hierarchical)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+                    
                     // Instructions banner
                     InstructionsBanner(
                         showInstructions: $showInstructions
@@ -134,58 +167,19 @@ struct DashboardView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 20)
+                .padding(.top, 8)
+            }
             }
             .scrollContentBackground(.hidden)
-            .background(Color.clear)
+            .background(MADTheme.Colors.appBackgroundGradient)
             .refreshable {
                 await refreshDataAsync()
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .liquidGlassNavigationBar()
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 16) {
-                        Image("mad-logo")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 36)
-
-                        if userManager.hasNewBadges {
-                            NavigationLink(destination: BadgesView(userManager: userManager)) {
-                                Image(systemName: "trophy.fill")
-                                    .foregroundColor(.yellow)
-                                    .font(.title2)
-                                    .symbolRenderingMode(.hierarchical)
-                            }
-                        }
-                    }
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 20) {
-                        Button {
-                            showInstructions = true
-                        } label: {
-                            Image(systemName: "info.circle.fill")
-                                .foregroundColor(.white)
-                                .font(.title2)
-                                .symbolRenderingMode(.hierarchical)
-                        }
-
-                        Button {
-                            showGoalSheet = true
-                        } label: {
-                            Image(systemName: "gearshape.fill")
-                                .foregroundColor(.white)
-                                .font(.title2)
-                                .symbolRenderingMode(.hierarchical)
-                        }
-                    }
-                }
-            }
             .onAppear {
                 refreshData()
                 // Sync widget data immediately
@@ -264,9 +258,9 @@ struct DashboardView: View {
             .onChange(of: currentState.isCompleted) { oldValue, newValue in
                 if newValue && !oldValue {
                     triggerConfetti()
+                }
             }
-        }
-                    .confetti(isShowing: $showConfetti)
+            .confetti(isShowing: $showConfetti)
             .confetti(isShowing: $showCelebration)
             .overlay(
                 // Celebration overlay
@@ -682,6 +676,7 @@ struct StreakCard: View {
     let fastestPace: TimeInterval
     let mostMiles: Double
     let totalMiles: Double
+    @Environment(\.colorScheme) var colorScheme
     @State private var animateStreak = false
     @State private var animateFire = false
     @State private var showingShareSheet = false
@@ -710,7 +705,7 @@ struct StreakCard: View {
                     Text("CURRENT STREAK")
                         .font(.caption)
                         .fontWeight(.semibold)
-                        .foregroundColor(.white.opacity(0.7))
+                        .foregroundColor(.orange)
                         .tracking(1.2)
 
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -848,28 +843,26 @@ struct StreakCard: View {
         .background(
             ZStack {
                 // Liquid glass background
-                RoundedRectangle(cornerRadius: 20)
+                RoundedRectangle(cornerRadius: 16)
                     .fill(.ultraThinMaterial)
 
-                // Subtle highlight gradient for glass effect
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.1),
-                                Color.white.opacity(0.05)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                // Gradient overlay
+                LinearGradient(
+                    colors: [
+                        Color.orange.opacity(0.05),
+                        Color.clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16))
 
                 // Glass border
-                RoundedRectangle(cornerRadius: 20)
+                RoundedRectangle(cornerRadius: 16)
                     .stroke(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(0.25),
+                                Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
                                 Color.clear
                             ],
                             startPoint: .topLeading,
@@ -879,7 +872,7 @@ struct StreakCard: View {
                     )
             }
         )
-        .shadow(color: .black.opacity(0.3), radius: 12, x: 0, y: 6)
+        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
         .scaleEffect(isPressed ? 0.98 : 1.0)
         .animation(.easeInOut(duration: 0.1), value: isPressed)
         .onAppear {
@@ -939,6 +932,7 @@ struct TodayProgressCard: View {
     let totalMiles: Double
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
+    @Environment(\.colorScheme) var colorScheme
     @State private var animateProgress = false
     @State private var showWorkoutView = false
     @State private var isPressed = false
@@ -1030,28 +1024,26 @@ struct TodayProgressCard: View {
         .background(
             ZStack {
                 // Liquid glass background
-                RoundedRectangle(cornerRadius: 20)
+                RoundedRectangle(cornerRadius: 16)
                     .fill(.ultraThinMaterial)
 
-                // Subtle highlight gradient for glass effect
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.1),
-                                Color.white.opacity(0.05)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                // Gradient overlay
+                LinearGradient(
+                    colors: [
+                        Color(red: 217/255, green: 64/255, blue: 63/255).opacity(0.05),
+                        Color.clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16))
 
                 // Glass border
-                RoundedRectangle(cornerRadius: 20)
+                RoundedRectangle(cornerRadius: 16)
                     .stroke(
                         LinearGradient(
                             colors: [
-                                Color.white.opacity(0.3),
+                                Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
                                 Color.clear
                             ],
                             startPoint: .topLeading,
@@ -1061,7 +1053,7 @@ struct TodayProgressCard: View {
                     )
             }
         )
-        .shadow(color: .black.opacity(0.3), radius: 12, x: 0, y: 6)
+        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
         .fullScreenCover(isPresented: $showWorkoutView) {
             WorkoutTrackingView(healthManager: healthManager, userManager: userManager, goalDistance: goalDistance)
         }
@@ -1437,6 +1429,7 @@ struct UnifiedStatsGrid: View {
 struct StatsGridView: View {
     let user: User
     @ObservedObject var healthManager: HealthKitManager
+    @Environment(\.colorScheme) var colorScheme
     @State private var selectedStatsView: UnifiedStatsGrid.StatsViewType = .allTime
     
     var body: some View {
@@ -1466,7 +1459,39 @@ struct StatsGridView: View {
             )
         }
         .padding()
-        .cardStyle()
+        .background(
+            ZStack {
+                // Liquid glass background
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+
+                // Gradient overlay
+                LinearGradient(
+                    colors: [
+                        Color.purple.opacity(0.05),
+                        Color.clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                // Glass border
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
+        )
+        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
     }
 }
 
@@ -1492,8 +1517,7 @@ struct StatCard: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.1))
-        .cornerRadius(10)
+        .liquidGlassCard()
     }
 }
 
@@ -3147,9 +3171,18 @@ struct WorkoutTrackingView: View {
 
     var body: some View {
         ZStack {
-            // Gradient background
-            MADTheme.Colors.appBackgroundGradient
-                .ignoresSafeArea()
+            // Red gradient background
+            LinearGradient(
+                colors: [
+                    Color(red: 0.85, green: 0.25, blue: 0.35),  // Top: lighter red
+                    Color(red: 0.7, green: 0.2, blue: 0.3),     // Mid-top
+                    Color(red: 0.5, green: 0.15, blue: 0.2),    // Mid-bottom
+                    Color(red: 0.3, green: 0.1, blue: 0.15)     // Bottom: darker red
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
 
             if showCountdown {
                 // Countdown view
@@ -3498,8 +3531,8 @@ struct WorkoutRecapView: View {
 
     var body: some View {
         ZStack {
-            // Gradient background
-            MADTheme.Colors.appBackgroundGradient
+            // Transparent background
+            Color.clear
                 .ignoresSafeArea()
 
             VStack(spacing: 32) {

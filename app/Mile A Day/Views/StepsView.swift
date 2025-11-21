@@ -9,27 +9,33 @@ struct StepsView: View {
     @State private var currentMonth = Date()
     
     var body: some View {
-        ScrollView {
-            VStack(spacing: 20) {
-                // Today's Steps Card
-                TodaysStepsCard(steps: healthManager.todaysSteps)
-                
-                // Calendar View
-                StepsCalendarView(
-                    dailyStepsData: healthManager.dailyStepsData,
-                    dailyMileGoals: healthManager.dailyMileGoals,
-                    selectedDate: $selectedDate,
-                    currentMonth: $currentMonth,
-                    onDateSelected: { date in
-                        selectedDate = date
-                        showingDateDetail = true
-                    }
-                )
-                
-                // Color Legend
-                StepsLegendView()
+        ZStack {
+            // Gradient background
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea(.all)
+            
+            ScrollView {
+                VStack(spacing: 20) {
+                    // Today's Steps Card
+                    TodaysStepsCard(steps: healthManager.todaysSteps)
+                    
+                    // Calendar View
+                    StepsCalendarView(
+                        dailyStepsData: healthManager.dailyStepsData,
+                        dailyMileGoals: healthManager.dailyMileGoals,
+                        selectedDate: $selectedDate,
+                        currentMonth: $currentMonth,
+                        onDateSelected: { date in
+                            selectedDate = date
+                            showingDateDetail = true
+                        }
+                    )
+                    
+                    // Color Legend
+                    StepsLegendView()
+                }
+                .padding()
             }
-            .padding()
         }
         .navigationTitle("Calendar")
         .navigationBarTitleDisplayMode(.large)
@@ -65,10 +71,10 @@ struct TodaysStepsCard: View {
     var body: some View {
         VStack(spacing: 16) {
             HStack {
-                Image(systemName: "figure.walk")
+                Image(systemName: "shoeprints.fill")
                     .font(.title2)
                     .foregroundColor(.primary)
-                Text("Today's Steps")
+                Text("Steps")
                     .font(.headline)
                     .fontWeight(.semibold)
                 Spacer()

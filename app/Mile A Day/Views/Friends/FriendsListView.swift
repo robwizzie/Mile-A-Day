@@ -8,7 +8,12 @@ struct FriendsListView: View {
     @State private var selectedUser: BackendUser?
     
     var body: some View {
-        VStack(spacing: 0) {
+        ZStack {
+            // Gradient background
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea(.all)
+            
+            VStack(spacing: 0) {
                 // Tab Selector
                 tabSelector
                 
@@ -28,8 +33,12 @@ struct FriendsListView: View {
                 }
                 .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
             }
-            .navigationTitle("Friends")
-            .navigationBarTitleDisplayMode(.inline)
+        }
+        .navigationTitle("Friends")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+        .toolbarBackgroundVisibility(.automatic, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
             .sheet(isPresented: $showingSearch) {
                 FriendSearchView()
             }
@@ -84,7 +93,7 @@ struct FriendsListView: View {
         }
         .padding(.horizontal, MADTheme.Spacing.md)
         .padding(.vertical, MADTheme.Spacing.sm)
-        .background(MADTheme.Colors.primaryBackground)
+        .background(Color.clear)
     }
     
     // MARK: - Friends Tab
