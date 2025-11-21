@@ -3109,7 +3109,7 @@ struct WorkoutTrackingView: View {
     @State private var showCompletion = false
     @State private var showRecap = false
     @State private var workoutSession: HKWorkoutSession?
-    @State private var workoutBuilder: HKLiveWorkoutBuilder?
+    @State private var workoutBuilder: HKWorkoutBuilder?
 
     private var progress: Double {
         min(currentDistance / goalDistance, 1.0)
@@ -3373,6 +3373,9 @@ struct WorkoutTrackingView: View {
                             }
                         }
                     }
+                    
+                    // Note: On iOS, we track distance manually since HKLiveWorkoutDataSource is watchOS-only
+                    // The distance will be added to the workout when it's finished
                 }
             } catch {
                 print("Failed to start workout: \(error)")
@@ -3422,6 +3425,8 @@ struct WorkoutTrackingView: View {
                                 self.showRecap = true
                             }
                         }
+                    } else if let error = error {
+                        print("Failed to finish workout: \(error)")
                     }
                 } else {
                     // Show recap anyway
@@ -3431,6 +3436,8 @@ struct WorkoutTrackingView: View {
                         }
                     }
                 }
+            } else if let error = error {
+                print("Failed to end workout collection: \(error)")
             }
         } else {
             // No active session, just show recap

@@ -939,28 +939,6 @@ struct CustomShareCardView: View {
     }
 }
 
-// MARK: - Helper Views
-
-struct StatRow: View {
-    let icon: String
-    let text: String
-    let color: Color
-    
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.body)
-                .foregroundColor(color)
-                .frame(width: 24)
-            Text(text)
-                .font(.callout)
-                .fontWeight(.medium)
-                .foregroundColor(.primary)
-            Spacer()
-        }
-    }
-}
-
 // MARK: - Activity View Controller
 
 struct ActivityViewController: UIViewControllerRepresentable {
