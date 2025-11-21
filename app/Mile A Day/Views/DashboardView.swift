@@ -130,7 +130,7 @@ struct DashboardView: View {
                     }
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 8)
+                .padding(.top, 20)
             }
             .scrollContentBackground(.hidden)
             .background(Color.clear)
@@ -143,38 +143,41 @@ struct DashboardView: View {
             .liquidGlassNavigationBar()
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 16) {
                         Image("mad-logo")
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(height: 40)
+                            .frame(height: 36)
 
                         if userManager.hasNewBadges {
                             NavigationLink(destination: BadgesView(userManager: userManager)) {
                                 Image(systemName: "trophy.fill")
                                     .foregroundColor(.yellow)
-                                    .font(.title3)
+                                    .font(.title2)
+                                    .symbolRenderingMode(.hierarchical)
                             }
                         }
                     }
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 16) {
+                    HStack(spacing: 20) {
                         Button {
                             showInstructions = true
                         } label: {
-                            Image(systemName: "info.circle")
+                            Image(systemName: "info.circle.fill")
                                 .foregroundColor(.white)
-                                .font(.title3)
+                                .font(.title2)
+                                .symbolRenderingMode(.hierarchical)
                         }
 
                         Button {
                             showGoalSheet = true
                         } label: {
-                            Image(systemName: "gear")
+                            Image(systemName: "gearshape.fill")
                                 .foregroundColor(.white)
-                                .font(.title3)
+                                .font(.title2)
+                                .symbolRenderingMode(.hierarchical)
                         }
                     }
                 }

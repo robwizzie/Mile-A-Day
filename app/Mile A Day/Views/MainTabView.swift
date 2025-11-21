@@ -11,9 +11,9 @@ struct MainTabView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // App-wide gradient background (extends to all edges including dynamic island)
+            // App-wide gradient background (extends to ALL edges including dynamic island)
             MADTheme.Colors.appBackgroundGradient
-                .ignoresSafeArea()
+                .ignoresSafeArea(.all)
 
             TabView(selection: $selectedTab) {
                 NavigationStack {
