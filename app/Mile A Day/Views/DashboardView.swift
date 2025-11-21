@@ -4,6 +4,34 @@ import WidgetKit
 import UIKit
 import CoreLocation
 
+// MARK: - Custom Navigation Bar Appearance for iOS 18 Liquid Glass
+
+extension View {
+    func liquidGlassNavigationBar() -> some View {
+        self.onAppear {
+            let appearance = UINavigationBarAppearance()
+
+            if #available(iOS 18.0, *) {
+                // iOS 18+ liquid glass effect
+                appearance.configureWithDefaultBackground()
+                appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+            } else {
+                // Fallback for iOS 17
+                appearance.configureWithOpaqueBackground()
+                appearance.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
+            }
+
+            // Make background semi-transparent to show gradient
+            appearance.backgroundColor = UIColor.clear
+            appearance.shadowColor = .clear
+
+            UINavigationBar.appearance().standardAppearance = appearance
+            UINavigationBar.appearance().scrollEdgeAppearance = appearance
+            UINavigationBar.appearance().compactAppearance = appearance
+        }
+    }
+}
+
 struct DashboardView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
@@ -105,9 +133,9 @@ struct DashboardView: View {
                 await refreshDataAsync()
             }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.clear, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .liquidGlassNavigationBar()
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Image("mad-logo")
