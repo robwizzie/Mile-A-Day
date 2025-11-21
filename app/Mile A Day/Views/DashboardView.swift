@@ -100,10 +100,15 @@ struct DashboardView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 90) // Extra padding for floating tab bar
             }
+            .scrollContentBackground(.hidden)
             .refreshable {
                 await refreshDataAsync()
             }
             .navigationTitle("Mile A Day")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbarBackground(.clear, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 16) {
@@ -660,83 +665,168 @@ struct StreakCard: View {
     let mostMiles: Double
     let totalMiles: Double
     @State private var animateStreak = false
+    @State private var animateFire = false
     @State private var showingShareSheet = false
     @State private var isPressed = false
 
-    var body: some View {
-        HStack(spacing: 20) {
-            // Left side: Flame icon
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.orange.opacity(0.3),
-                                Color.red.opacity(0.2)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 80, height: 80)
+    // Streak milestone milestones
+    private let milestones = [3, 5, 7, 10, 14, 21, 30, 50, 60, 75, 90, 100, 150, 200, 250, 365, 500, 1000]
 
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 40))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.orange, .red],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+    private var nextMilestone: (value: Int, progress: Double, daysToGo: Int)? {
+        for milestone in milestones {
+            if streak < milestone {
+                let progressToMilestone = Double(streak) / Double(milestone)
+                let daysToGo = milestone - streak
+                return (milestone, progressToMilestone, daysToGo)
             }
+        }
+        return nil
+    }
 
-            // Right side: Streak info
-            VStack(alignment: .leading, spacing: 8) {
-                Text("CURRENT STREAK")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white.opacity(0.7))
-                    .tracking(1.2)
+    var body: some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 20) {
+                // Left side: Animated Flame icon
+                ZStack {
+                    // Outer glow
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [
+                                    Color.orange.opacity(0.4),
+                                    Color.orange.opacity(0.2),
+                                    Color.clear
+                                ],
+                                center: .center,
+                                startRadius: 20,
+                                endRadius: 50
+                            )
+                        )
+                        .frame(width: 100, height: 100)
+                        .scaleEffect(animateFire ? 1.1 : 0.9)
+                        .opacity(animateFire ? 0.8 : 0.4)
+                        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: animateFire)
 
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\(streak)")
-                        .font(.system(size: 48, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .contentTransition(.numericText())
+                    // Inner circle
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.orange.opacity(0.4),
+                                    Color.red.opacity(0.3)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 80, height: 80)
 
-                    Text(streak == 1 ? "day" : "days")
-                        .font(.title3)
-                        .fontWeight(.medium)
-                        .foregroundColor(.white.opacity(0.8))
+                    // Flame icon with animation
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 40))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.orange, .yellow, .red],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .scaleEffect(animateFire ? 1.1 : 1.0)
+                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateFire)
+                        .shadow(color: .orange.opacity(0.6), radius: animateFire ? 15 : 8)
                 }
 
-                // Status message
-                HStack(spacing: 4) {
-                    if isGoalCompleted {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text("You're on fire")
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.9))
+                // Right side: Streak info
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("CURRENT STREAK")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white.opacity(0.7))
+                        .tracking(1.2)
+
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("\(streak)")
+                            .font(.system(size: 48, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .contentTransition(.numericText())
+
+                        Text(streak == 1 ? "day" : "days")
+                            .font(.title3)
                             .fontWeight(.medium)
-                    } else if isAtRisk {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.yellow)
-                        Text("Complete today's goal!")
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.9))
-                            .fontWeight(.medium)
-                    } else {
-                        Text("\(String(format: "%.2f", user.goalMiles - currentDistance)) mi to go")
-                            .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.9))
-                            .fontWeight(.medium)
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+
+                    // Status message
+                    HStack(spacing: 4) {
+                        if isGoalCompleted {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text("You're on fire!")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.9))
+                                .fontWeight(.medium)
+                        } else if isAtRisk {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.yellow)
+                            Text("Complete today's goal!")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.9))
+                                .fontWeight(.medium)
+                        } else {
+                            Text("\(String(format: "%.2f", user.goalMiles - currentDistance)) mi to go")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.9))
+                                .fontWeight(.medium)
+                        }
                     }
                 }
+
+                Spacer()
             }
 
-            Spacer()
+            // Milestone progress
+            if let milestone = nextMilestone {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Image(systemName: "trophy.fill")
+                            .font(.caption)
+                            .foregroundColor(.yellow)
+                        Text("Next Badge: \(milestone.value) days")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white.opacity(0.9))
+
+                        Spacer()
+
+                        Text("\(milestone.daysToGo) to go")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+
+                    // Progress bar
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.white.opacity(0.2))
+                                .frame(height: 6)
+
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.yellow, .orange],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: milestone.progress * geometry.size.width, height: 6)
+                                .animation(.easeOut(duration: 0.8), value: milestone.progress)
+                        }
+                    }
+                    .frame(height: 6)
+                }
+                .padding(.top, 8)
+            }
         }
         .padding(20)
         .background(
@@ -772,6 +862,18 @@ struct StreakCard: View {
         .shadow(color: .black.opacity(0.3), radius: 12, x: 0, y: 6)
         .scaleEffect(isPressed ? 0.98 : 1.0)
         .animation(.easeInOut(duration: 0.1), value: isPressed)
+        .onAppear {
+            // Start fire animation
+            animateFire = true
+        }
+        .onChange(of: isGoalCompleted) { oldValue, newValue in
+            if newValue && !oldValue {
+                // Extra fire animation when goal completed
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
+                    animateFire = true
+                }
+            }
+        }
         .onTapGesture {
             let impact = UIImpactFeedbackGenerator(style: .medium)
             impact.impactOccurred()
@@ -3222,33 +3324,61 @@ struct WorkoutTrackingView: View {
     private func startWorkout() {
         workoutStartDate = Date()
 
-        // Start HealthKit workout session
-        let configuration = HKWorkoutConfiguration()
-        configuration.activityType = .walking
-        configuration.locationType = .outdoor
+        // Request authorization first
+        healthManager.requestAuthorization { authorized in
+            guard authorized else {
+                print("HealthKit authorization denied")
+                return
+            }
 
-        // Use iOS-compatible API (HKWorkoutBuilder, not HKLiveWorkoutBuilder which is watchOS-only)
-        // Note: HKLiveWorkoutDataSource is also watchOS-only, so we'll manually track the workout
-        let healthStore = HKHealthStore()
-        let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
-        
-        workoutBuilder = builder
+            // Start HealthKit workout session
+            let configuration = HKWorkoutConfiguration()
+            configuration.activityType = .walking
+            configuration.locationType = .outdoor
 
-        // Start collecting workout data (without live data source - we'll add samples manually)
-        builder.beginCollection(withStart: Date()) { success, error in
-            if success {
-                // Start timer for elapsed time and manual distance tracking
-                // Note: We capture self directly since WorkoutTrackingView is a struct (value type)
-                self.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-                    if let startDate = self.workoutStartDate {
-                        self.elapsedTime = Date().timeIntervalSince(startDate)
+            do {
+                let healthStore = HKHealthStore()
+                let session = try HKWorkoutSession(healthStore: healthStore, configuration: configuration)
+                let builder = session.associatedWorkoutBuilder()
+
+                self.workoutSession = session
+                self.workoutBuilder = builder
+
+                builder.dataSource = HKLiveWorkoutDataSource(healthStore: healthStore, workoutConfiguration: configuration)
+
+                let startDate = Date()
+                session.startActivity(with: startDate)
+
+                builder.beginCollection(withStart: startDate) { success, error in
+                    if let error = error {
+                        print("Failed to start workout collection: \(error)")
+                        return
+                    }
+
+                    if success {
+                        // Start timer for elapsed time
+                        DispatchQueue.main.async {
+                            self.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                                if let startDate = self.workoutStartDate {
+                                    self.elapsedTime = Date().timeIntervalSince(startDate)
+                                }
+
+                                // Update distance from builder
+                                if let statistics = builder.statistics(for: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!) {
+                                    let distanceMeters = statistics.sumQuantity()?.doubleValue(for: HKUnit.meter()) ?? 0
+                                    DispatchQueue.main.async {
+                                        self.currentDistance = distanceMeters * 0.000621371 // Convert to miles
+                                    }
+                                }
+                            }
+                        }
                     }
                     
                     // Note: On iOS, we track distance manually since HKLiveWorkoutDataSource is watchOS-only
                     // The distance will be added to the workout when it's finished
                 }
-            } else if let error = error {
-                print("Failed to start workout collection: \(error)")
+            } catch {
+                print("Failed to start workout: \(error)")
             }
         }
     }
@@ -3258,60 +3388,62 @@ struct WorkoutTrackingView: View {
         timer?.invalidate()
         timer = nil
 
-        // End HealthKit workout collection
-        guard let builder = workoutBuilder, let startDate = workoutStartDate else {
-            workoutSession = nil
-            workoutBuilder = nil
-            return
-        }
-        
-        let endDate = Date()
-        
-        // Add distance sample to workout (since we're tracking manually on iOS)
-        if currentDistance > 0 {
-            let distanceMeters = currentDistance / 0.000621371 // Convert miles to meters
-            let distanceQuantity = HKQuantity(unit: HKUnit.meter(), doubleValue: distanceMeters)
-            let distanceSample = HKQuantitySample(
-                type: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!,
-                quantity: distanceQuantity,
-                start: startDate,
-                end: endDate
-            )
-            // Add sample as an array with completion handler
-            builder.add([distanceSample]) { success, error in
-                if let error = error {
-                    print("Failed to add distance sample: \(error)")
-                }
-            }
-        }
-        
-        builder.endCollection(withEnd: endDate) { success, error in
-            if success {
-                builder.finishWorkout { workout, error in
-                    if let workout = workout {
-                        // Workout saved to HealthKit
-                        print("Workout saved: \(workout)")
+        // End HealthKit workout session
+        if let session = workoutSession, let builder = workoutBuilder {
+            let endDate = Date()
+            session.end()
 
-                        // Refresh health data
+            builder.endCollection(withEnd: endDate) { success, error in
+                if let error = error {
+                    print("Failed to end workout collection: \(error)")
+                    // Show recap anyway
+                    DispatchQueue.main.async {
+                        withAnimation {
+                            self.showRecap = true
+                        }
+                    }
+                    return
+                }
+
+                if success {
+                    builder.finishWorkout { workout, error in
+                        if let error = error {
+                            print("Failed to finish workout: \(error)")
+                        } else if let workout = workout {
+                            // Workout saved to HealthKit
+                            print("Workout saved: \(workout)")
+
+                            // Refresh health data
+                            DispatchQueue.main.async {
+                                self.healthManager.fetchAllWorkoutData()
+                            }
+                        }
+
+                        // Show recap
                         DispatchQueue.main.async {
-                            healthManager.fetchAllWorkoutData()
+                            withAnimation {
+                                self.showRecap = true
+                            }
                         }
                     } else if let error = error {
                         print("Failed to finish workout: \(error)")
+                    }
+                } else {
+                    // Show recap anyway
+                    DispatchQueue.main.async {
+                        withAnimation {
+                            self.showRecap = true
+                        }
                     }
                 }
             } else if let error = error {
                 print("Failed to end workout collection: \(error)")
             }
-        }
-        
-        // Clear session references
-        workoutSession = nil
-        workoutBuilder = nil
-
-        // Show recap
-        withAnimation {
-            showRecap = true
+        } else {
+            // No active session, just show recap
+            withAnimation {
+                showRecap = true
+            }
         }
     }
 }

@@ -19,26 +19,31 @@ struct MainTabView: View {
                 NavigationStack {
                     DashboardView(healthManager: healthManager, userManager: userManager)
                         .environmentObject(notificationService)
+                        .background(Color.clear)
                 }
                 .tag(0)
 
                 NavigationStack {
                     FriendsListView()
+                        .background(Color.clear)
                 }
                 .tag(1)
 
                 NavigationStack {
                     CompetitionsView()
+                        .background(Color.clear)
                 }
                 .tag(2)
 
                 NavigationStack {
                     ProfileView(userManager: userManager, healthManager: healthManager)
                         .environment(\.appStateManager, appStateManager)
+                        .background(Color.clear)
                 }
                 .tag(3)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .background(Color.clear)
 
             // Apple HIG Floating Liquid Glass Tab Bar
             FloatingTabBar(selectedTab: $selectedTab)
