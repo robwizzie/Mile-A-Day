@@ -355,14 +355,9 @@ struct DeveloperSettingsView: View {
 
     private func uploadWorkouts() async {
         do {
-            let user = userManager.currentUser
             let workouts = healthManager.recentWorkouts
 
-            let workoutRecords = workouts.map { workout in
-                WorkoutRecord(from: workout, user: user)
-            }
-
-            try await workoutService.uploadWorkouts(workoutRecords, for: user.id)
+            try await workoutService.uploadWorkouts(workouts)
 
             await MainActor.run {
                 showWorkoutUploadAlert = true
@@ -376,7 +371,7 @@ struct DeveloperSettingsView: View {
 
     private func uploadAllWorkouts() async {
         do {
-            try await workoutService.uploadAllWorkouts(for: userManager.currentUser.id, healthManager: healthManager)
+            try await workoutService.uploadAllWorkouts()
 
             await MainActor.run {
                 showWorkoutUploadAlert = true
