@@ -3332,53 +3332,37 @@ struct WorkoutTrackingView: View {
             }
 
             // Start HealthKit workout session
+            // Use iOS-compatible API (HKWorkoutBuilder, not HKLiveWorkoutBuilder which is watchOS-only)
             let configuration = HKWorkoutConfiguration()
             configuration.activityType = .walking
             configuration.locationType = .outdoor
 
-            do {
-                let healthStore = HKHealthStore()
-                let session = try HKWorkoutSession(healthStore: healthStore, configuration: configuration)
-                let builder = session.associatedWorkoutBuilder()
+            let healthStore = HKHealthStore()
+            let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
+            
+            self.workoutBuilder = builder
 
-                self.workoutSession = session
-                self.workoutBuilder = builder
+            // Start collecting workout data (without live data source - we'll add samples manually)
+            let startDate = Date()
+            builder.beginCollection(withStart: startDate) { success, error in
+                if let error = error {
+                    print("Failed to start workout collection: \(error)")
+                    return
+                }
 
-                builder.dataSource = HKLiveWorkoutDataSource(healthStore: healthStore, workoutConfiguration: configuration)
-
-                let startDate = Date()
-                session.startActivity(with: startDate)
-
-                builder.beginCollection(withStart: startDate) { success, error in
-                    if let error = error {
-                        print("Failed to start workout collection: \(error)")
-                        return
-                    }
-
-                    if success {
-                        // Start timer for elapsed time
-                        DispatchQueue.main.async {
-                            self.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-                                if let startDate = self.workoutStartDate {
-                                    self.elapsedTime = Date().timeIntervalSince(startDate)
-                                }
-
-                                // Update distance from builder
-                                if let statistics = builder.statistics(for: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!) {
-                                    let distanceMeters = statistics.sumQuantity()?.doubleValue(for: HKUnit.meter()) ?? 0
-                                    DispatchQueue.main.async {
-                                        self.currentDistance = distanceMeters * 0.000621371 // Convert to miles
-                                    }
-                                }
+                if success {
+                    // Start timer for elapsed time and manual distance tracking
+                    DispatchQueue.main.async {
+                        self.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                            if let startDate = self.workoutStartDate {
+                                self.elapsedTime = Date().timeIntervalSince(startDate)
                             }
+                            
+                            // Note: On iOS, we track distance manually since HKLiveWorkoutDataSource is watchOS-only
+                            // The distance will be added to the workout when it's finished
                         }
                     }
-                    
-                    // Note: On iOS, we track distance manually since HKLiveWorkoutDataSource is watchOS-only
-                    // The distance will be added to the workout when it's finished
                 }
-            } catch {
-                print("Failed to start workout: \(error)")
             }
         }
     }
@@ -3388,63 +3372,81 @@ struct WorkoutTrackingView: View {
         timer?.invalidate()
         timer = nil
 
-        // End HealthKit workout session
-        if let session = workoutSession, let builder = workoutBuilder {
-            let endDate = Date()
-            session.end()
-
-            builder.endCollection(withEnd: endDate) { success, error in
-                if let error = error {
-                    print("Failed to end workout collection: \(error)")
-                    // Show recap anyway
-                    DispatchQueue.main.async {
-                        withAnimation {
-                            self.showRecap = true
-                        }
-                    }
-                    return
-                }
-
-                if success {
-                    builder.finishWorkout { workout, error in
-                        if let error = error {
-                            print("Failed to finish workout: \(error)")
-                        } else if let workout = workout {
-                            // Workout saved to HealthKit
-                            print("Workout saved: \(workout)")
-
-                            // Refresh health data
-                            DispatchQueue.main.async {
-                                self.healthManager.fetchAllWorkoutData()
-                            }
-                        }
-
-                        // Show recap
-                        DispatchQueue.main.async {
-                            withAnimation {
-                                self.showRecap = true
-                            }
-                        }
-                    } else if let error = error {
-                        print("Failed to finish workout: \(error)")
-                    }
-                } else {
-                    // Show recap anyway
-                    DispatchQueue.main.async {
-                        withAnimation {
-                            self.showRecap = true
-                        }
-                    }
-                }
-            } else if let error = error {
-                print("Failed to end workout collection: \(error)")
-            }
-        } else {
-            // No active session, just show recap
+        // End HealthKit workout collection
+        guard let builder = workoutBuilder, let startDate = workoutStartDate else {
+            // No active builder, just show recap
             withAnimation {
                 showRecap = true
             }
+            return
         }
+        
+        let endDate = Date()
+        
+        // Add distance sample to workout (since we're tracking manually on iOS)
+        if currentDistance > 0 {
+            let distanceMeters = currentDistance / 0.000621371 // Convert miles to meters
+            let distanceQuantity = HKQuantity(unit: HKUnit.meter(), doubleValue: distanceMeters)
+            let distanceSample = HKQuantitySample(
+                type: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!,
+                quantity: distanceQuantity,
+                start: startDate,
+                end: endDate
+            )
+            // Add sample as an array with completion handler
+            builder.add([distanceSample]) { success, error in
+                if let error = error {
+                    print("Failed to add distance sample: \(error)")
+                }
+            }
+        }
+        
+        builder.endCollection(withEnd: endDate) { success, error in
+            if let error = error {
+                print("Failed to end workout collection: \(error)")
+                // Show recap anyway
+                DispatchQueue.main.async {
+                    withAnimation {
+                        self.showRecap = true
+                    }
+                }
+                return
+            }
+
+            if success {
+                builder.finishWorkout { workout, error in
+                    if let error = error {
+                        print("Failed to finish workout: \(error)")
+                    } else if let workout = workout {
+                        // Workout saved to HealthKit
+                        print("Workout saved: \(workout)")
+
+                        // Refresh health data
+                        DispatchQueue.main.async {
+                            self.healthManager.fetchAllWorkoutData()
+                        }
+                    }
+
+                    // Show recap
+                    DispatchQueue.main.async {
+                        withAnimation {
+                            self.showRecap = true
+                        }
+                    }
+                }
+            } else {
+                // Show recap anyway
+                DispatchQueue.main.async {
+                    withAnimation {
+                        self.showRecap = true
+                    }
+                }
+            }
+        }
+        
+        // Clear session references
+        workoutSession = nil
+        workoutBuilder = nil
     }
 }
 
