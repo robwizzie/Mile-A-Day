@@ -1155,7 +1155,12 @@ struct TodayProgressCard: View {
         )
         .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
         .fullScreenCover(isPresented: $showWorkoutView) {
-            WorkoutTrackingView(healthManager: healthManager, userManager: userManager, goalDistance: goalDistance)
+            WorkoutTrackingView(
+                healthManager: healthManager,
+                userManager: userManager,
+                goalDistance: goalDistance,
+                startingDistance: currentDistance
+            )
         }
     }
 }
@@ -3363,10 +3368,12 @@ struct WorkoutTrackingView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     let goalDistance: Double
+    let startingDistance: Double
     @Environment(\.dismiss) var dismiss
 
     @StateObject private var locationManager = WorkoutLocationManager()
     @State private var showActivitySelection = true
+    @State private var showGoalAlreadyCompletedAlert = false
     @State private var selectedActivityType: HKWorkoutActivityType?
     @State private var countdownNumber = 3
     @State private var showCountdown = false
@@ -3375,12 +3382,17 @@ struct WorkoutTrackingView: View {
     @State private var timer: Timer?
     @State private var workoutStartDate: Date?
     @State private var showCompletion = false
+    @State private var hasShownCompletion = false // Track if we've already shown completion
     @State private var showRecap = false
     @State private var workoutSession: HKWorkoutSession?
     @State private var workoutBuilder: HKWorkoutBuilder?
 
+    private var goalAlreadyCompleted: Bool {
+        startingDistance >= goalDistance
+    }
+
     private var currentDistance: Double {
-        locationManager.currentDistance
+        startingDistance + locationManager.currentDistance
     }
 
     private var progress: Double {
@@ -3665,7 +3677,13 @@ struct WorkoutTrackingView: View {
             }
         }
         .onChange(of: currentDistance) { oldValue, newValue in
-            if !showCompletion && newValue >= goalDistance {
+            // Only show completion if:
+            // 1. We haven't shown it yet
+            // 2. The goal wasn't already completed when we started
+            // 3. We've now reached the goal
+            if !hasShownCompletion && !goalAlreadyCompleted && newValue >= goalDistance {
+                hasShownCompletion = true // Mark as shown so it doesn't loop
+
                 // Show completion celebration
                 withAnimation {
                     showCompletion = true
@@ -3681,6 +3699,22 @@ struct WorkoutTrackingView: View {
                         showCompletion = false
                     }
                 }
+            }
+        }
+        .alert("Goal Already Completed", isPresented: $showGoalAlreadyCompletedAlert) {
+            Button("Continue Anyway", role: .none) {
+                // User chose to continue, do nothing (alert will dismiss)
+            }
+            Button("Cancel", role: .cancel) {
+                dismiss()
+            }
+        } message: {
+            Text("You've already completed your goal for today (\(String(format: "%.2f", startingDistance)) / \(String(format: "%.2f", goalDistance)) miles). You can still track this workout, but it won't show a goal completion message.")
+        }
+        .onAppear {
+            // Show alert if goal is already completed when view appears
+            if goalAlreadyCompleted {
+                showGoalAlreadyCompletedAlert = true
             }
         }
     }
