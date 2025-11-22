@@ -3366,8 +3366,10 @@ struct WorkoutTrackingView: View {
     @Environment(\.dismiss) var dismiss
 
     @StateObject private var locationManager = WorkoutLocationManager()
+    @State private var showActivitySelection = true
+    @State private var selectedActivityType: HKWorkoutActivityType?
     @State private var countdownNumber = 3
-    @State private var showCountdown = true
+    @State private var showCountdown = false
     @State private var isTracking = false
     @State private var elapsedTime: TimeInterval = 0
     @State private var timer: Timer?
@@ -3406,7 +3408,110 @@ struct WorkoutTrackingView: View {
             )
             .ignoresSafeArea()
 
-            if showCountdown {
+            if showActivitySelection {
+                // Activity selection view
+                VStack(spacing: 40) {
+                    Spacer()
+
+                    // Header
+                    VStack(spacing: 16) {
+                        Image(systemName: "figure.walk")
+                            .font(.system(size: 60))
+                            .foregroundColor(.white)
+
+                        Text("Choose Activity Type")
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+
+                        Text("Select how you'll complete your mile")
+                            .font(.title3)
+                            .foregroundColor(.white.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 32)
+
+                    Spacer()
+
+                    // Activity buttons
+                    VStack(spacing: 20) {
+                        // Run button
+                        Button(action: {
+                            selectActivity(.running)
+                        }) {
+                            HStack(spacing: 16) {
+                                Image(systemName: "figure.run")
+                                    .font(.system(size: 32))
+                                    .frame(width: 50)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Run")
+                                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                                    Text("Track as a running workout")
+                                        .font(.subheadline)
+                                        .opacity(0.9)
+                                }
+
+                                Spacer()
+
+                                Image(systemName: "chevron.right")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .padding(24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(Color.white.opacity(0.15))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                                    )
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        // Walk button
+                        Button(action: {
+                            selectActivity(.walking)
+                        }) {
+                            HStack(spacing: 16) {
+                                Image(systemName: "figure.walk")
+                                    .font(.system(size: 32))
+                                    .frame(width: 50)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Walk")
+                                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                                    Text("Track as a walking workout")
+                                        .font(.subheadline)
+                                        .opacity(0.9)
+                                }
+
+                                Spacer()
+
+                                Image(systemName: "chevron.right")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .padding(24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(Color.white.opacity(0.15))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                                    )
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .padding(.horizontal, 32)
+
+                    Spacer()
+                }
+            } else if showCountdown {
                 // Countdown view
                 VStack {
                     Text("\(countdownNumber)")
@@ -3580,6 +3685,21 @@ struct WorkoutTrackingView: View {
         }
     }
 
+    private func selectActivity(_ activityType: HKWorkoutActivityType) {
+        selectedActivityType = activityType
+
+        // Haptic feedback
+        let impact = UIImpactFeedbackGenerator(style: .medium)
+        impact.impactOccurred()
+
+        // Hide activity selection and show countdown
+        withAnimation {
+            showActivitySelection = false
+            showCountdown = true
+            countdownNumber = 3 // Reset countdown
+        }
+    }
+
     private func startCountdown() {
         // Haptic feedback for countdown
         let impact = UIImpactFeedbackGenerator(style: .heavy)
@@ -3616,7 +3736,7 @@ struct WorkoutTrackingView: View {
             // Start HealthKit workout session
             // Use iOS-compatible API (HKWorkoutBuilder, not HKLiveWorkoutBuilder which is watchOS-only)
             let configuration = HKWorkoutConfiguration()
-            configuration.activityType = .walking
+            configuration.activityType = self.selectedActivityType ?? .walking // Use selected activity type
             configuration.locationType = .outdoor
 
             let healthStore = HKHealthStore()
