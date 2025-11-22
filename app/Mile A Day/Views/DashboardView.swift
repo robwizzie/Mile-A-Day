@@ -3383,6 +3383,8 @@ struct WorkoutTrackingView: View {
     @State private var workoutStartDate: Date?
     @State private var showCompletion = false
     @State private var hasShownCompletion = false // Track if we've already shown completion
+    @State private var showPreviousProgress = false // Show notification when reaching previous progress
+    @State private var hasReachedPreviousProgress = false // Track if we've reached starting distance
     @State private var showRecap = false
     @State private var workoutSession: HKWorkoutSession?
     @State private var workoutBuilder: HKWorkoutBuilder?
@@ -3391,12 +3393,18 @@ struct WorkoutTrackingView: View {
         startingDistance >= goalDistance
     }
 
+    // Workout distance only (starts at 0)
     private var currentDistance: Double {
+        locationManager.currentDistance
+    }
+
+    // Total daily distance (starting + workout)
+    private var totalDailyDistance: Double {
         startingDistance + locationManager.currentDistance
     }
 
     private var progress: Double {
-        min(currentDistance / goalDistance, 1.0)
+        min(totalDailyDistance / goalDistance, 1.0)
     }
 
     private var formattedTime: String {
@@ -3558,6 +3566,7 @@ struct WorkoutTrackingView: View {
                             .foregroundColor(.white.opacity(0.7))
                             .tracking(1.5)
 
+                        // Main counter - Workout distance (starts at 0)
                         Text(String(format: "%.2f", currentDistance))
                             .font(.system(size: 80, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
@@ -3566,6 +3575,17 @@ struct WorkoutTrackingView: View {
                         Text("miles")
                             .font(.title2)
                             .foregroundColor(.white.opacity(0.8))
+
+                        // Smaller daily total counter
+                        if startingDistance > 0 {
+                            VStack(spacing: 4) {
+                                Text("Daily Total: \(String(format: "%.2f", totalDailyDistance)) mi")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            .padding(.top, 4)
+                        }
                     }
 
                     // Progress ring
@@ -3642,9 +3662,33 @@ struct WorkoutTrackingView: View {
                     .padding(.bottom, 40)
                     .buttonStyle(PlainButtonStyle())
                 }
-                .opacity(showCompletion ? 0 : 1)
+                .opacity(showCompletion || showPreviousProgress ? 0 : 1)
                 .overlay(
-                    // Completion celebration
+                    // Previous progress notification
+                    Group {
+                        if showPreviousProgress {
+                            VStack(spacing: 20) {
+                                Image(systemName: "flag.fill")
+                                    .font(.system(size: 60))
+                                    .foregroundColor(.blue)
+                                    .scaleEffect(showPreviousProgress ? 1.0 : 0.5)
+                                    .animation(.spring(response: 0.6, dampingFraction: 0.6), value: showPreviousProgress)
+
+                                Text("Back to where you were!")
+                                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                                    .multilineTextAlignment(.center)
+
+                                Text("\(String(format: "%.2f", startingDistance)) miles reached")
+                                    .font(.title3)
+                                    .foregroundColor(.white.opacity(0.9))
+                            }
+                            .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+                )
+                .overlay(
+                    // Goal completion celebration
                     Group {
                         if showCompletion {
                             VStack(spacing: 24) {
@@ -3677,11 +3721,33 @@ struct WorkoutTrackingView: View {
             }
         }
         .onChange(of: currentDistance) { oldValue, newValue in
+            // Check if we've reached the previous progress point
+            if !hasReachedPreviousProgress && startingDistance > 0 && newValue >= startingDistance {
+                hasReachedPreviousProgress = true
+
+                // Show notification that they've reached where they were
+                withAnimation {
+                    showPreviousProgress = true
+                }
+
+                // Haptic feedback
+                let notification = UINotificationFeedbackGenerator()
+                notification.notificationOccurred(.success)
+
+                // Hide notification after 2 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    withAnimation {
+                        showPreviousProgress = false
+                    }
+                }
+            }
+
+            // Check if we've reached the goal (using total daily distance)
             // Only show completion if:
             // 1. We haven't shown it yet
             // 2. The goal wasn't already completed when we started
-            // 3. We've now reached the goal
-            if !hasShownCompletion && !goalAlreadyCompleted && newValue >= goalDistance {
+            // 3. We've now reached the goal with total daily distance
+            if !hasShownCompletion && !goalAlreadyCompleted && totalDailyDistance >= goalDistance {
                 hasShownCompletion = true // Mark as shown so it doesn't loop
 
                 // Show completion celebration
