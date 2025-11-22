@@ -10,6 +10,10 @@
 	<string>Mile A Day needs access to your Health data to track your running distance and workouts.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Mile A Day needs access to your Health data to track your running distance and workouts.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Mile A Day needs access to your location to accurately track distance during your workouts.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Mile A Day needs access to your location to accurately track distance during your workouts, even when the app is in the background.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>background-processing</string>
@@ -17,6 +21,8 @@
 		<string>background-app-refresh</string>
 		<string>fetch</string>
 		<string>processing</string>
+		<string>location</string>
+		<string>workout</string>
 	</array>
 </dict>
 </plist>

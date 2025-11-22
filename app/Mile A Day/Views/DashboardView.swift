@@ -3284,23 +3284,104 @@ struct SharePreviewView: View {
 
 // MARK: - Workout Tracking View
 
+// Location Manager for tracking distance during workouts
+class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
+    private let locationManager = CLLocationManager()
+    private var lastLocation: CLLocation?
+
+    @Published var currentDistance: Double = 0.0 // Distance in miles
+    @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
+
+    override init() {
+        super.init()
+        locationManager.delegate = self
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.activityType = .fitness
+        locationManager.allowsBackgroundLocationUpdates = true
+        locationManager.pausesLocationUpdatesAutomatically = false
+        authorizationStatus = locationManager.authorizationStatus
+    }
+
+    func requestPermission() {
+        locationManager.requestWhenInUseAuthorization()
+    }
+
+    func startTracking() {
+        // Reset distance for new workout
+        currentDistance = 0.0
+        lastLocation = nil
+
+        // Request permission if not already granted
+        if authorizationStatus == .notDetermined {
+            requestPermission()
+        }
+
+        // Start location updates
+        locationManager.startUpdatingLocation()
+    }
+
+    func stopTracking() {
+        locationManager.stopUpdatingLocation()
+        lastLocation = nil
+    }
+
+    // CLLocationManagerDelegate methods
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let newLocation = locations.last else { return }
+
+        // Only use accurate locations
+        guard newLocation.horizontalAccuracy > 0 && newLocation.horizontalAccuracy < 50 else {
+            return
+        }
+
+        // Calculate distance if we have a previous location
+        if let lastLocation = lastLocation {
+            let distance = newLocation.distance(from: lastLocation) // Distance in meters
+            let distanceInMiles = distance * 0.000621371 // Convert to miles
+
+            // Only add distance if it's reasonable (not a GPS jump)
+            if distanceInMiles < 0.1 { // Less than 0.1 miles between updates (reasonable for running/walking)
+                DispatchQueue.main.async {
+                    self.currentDistance += distanceInMiles
+                }
+            }
+        }
+
+        lastLocation = newLocation
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("Location manager failed with error: \(error.localizedDescription)")
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        authorizationStatus = manager.authorizationStatus
+    }
+}
+
 struct WorkoutTrackingView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     let goalDistance: Double
     @Environment(\.dismiss) var dismiss
 
+    @StateObject private var locationManager = WorkoutLocationManager()
+    @State private var showActivitySelection = true
+    @State private var selectedActivityType: HKWorkoutActivityType?
     @State private var countdownNumber = 3
-    @State private var showCountdown = true
+    @State private var showCountdown = false
     @State private var isTracking = false
     @State private var elapsedTime: TimeInterval = 0
-    @State private var currentDistance: Double = 0.0
     @State private var timer: Timer?
     @State private var workoutStartDate: Date?
     @State private var showCompletion = false
     @State private var showRecap = false
     @State private var workoutSession: HKWorkoutSession?
     @State private var workoutBuilder: HKWorkoutBuilder?
+
+    private var currentDistance: Double {
+        locationManager.currentDistance
+    }
 
     private var progress: Double {
         min(currentDistance / goalDistance, 1.0)
@@ -3327,7 +3408,110 @@ struct WorkoutTrackingView: View {
             )
             .ignoresSafeArea()
 
-            if showCountdown {
+            if showActivitySelection {
+                // Activity selection view
+                VStack(spacing: 40) {
+                    Spacer()
+
+                    // Header
+                    VStack(spacing: 16) {
+                        Image(systemName: "figure.walk")
+                            .font(.system(size: 60))
+                            .foregroundColor(.white)
+
+                        Text("Choose Activity Type")
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+
+                        Text("Select how you'll complete your mile")
+                            .font(.title3)
+                            .foregroundColor(.white.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 32)
+
+                    Spacer()
+
+                    // Activity buttons
+                    VStack(spacing: 20) {
+                        // Run button
+                        Button(action: {
+                            selectActivity(.running)
+                        }) {
+                            HStack(spacing: 16) {
+                                Image(systemName: "figure.run")
+                                    .font(.system(size: 32))
+                                    .frame(width: 50)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Run")
+                                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                                    Text("Track as a running workout")
+                                        .font(.subheadline)
+                                        .opacity(0.9)
+                                }
+
+                                Spacer()
+
+                                Image(systemName: "chevron.right")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .padding(24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(Color.white.opacity(0.15))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                                    )
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        // Walk button
+                        Button(action: {
+                            selectActivity(.walking)
+                        }) {
+                            HStack(spacing: 16) {
+                                Image(systemName: "figure.walk")
+                                    .font(.system(size: 32))
+                                    .frame(width: 50)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Walk")
+                                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                                    Text("Track as a walking workout")
+                                        .font(.subheadline)
+                                        .opacity(0.9)
+                                }
+
+                                Spacer()
+
+                                Image(systemName: "chevron.right")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .padding(24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(Color.white.opacity(0.15))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                                    )
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .padding(.horizontal, 32)
+
+                    Spacer()
+                }
+            } else if showCountdown {
                 // Countdown view
                 VStack {
                     Text("\(countdownNumber)")
@@ -3501,6 +3685,21 @@ struct WorkoutTrackingView: View {
         }
     }
 
+    private func selectActivity(_ activityType: HKWorkoutActivityType) {
+        selectedActivityType = activityType
+
+        // Haptic feedback
+        let impact = UIImpactFeedbackGenerator(style: .medium)
+        impact.impactOccurred()
+
+        // Hide activity selection and show countdown
+        withAnimation {
+            showActivitySelection = false
+            showCountdown = true
+            countdownNumber = 3 // Reset countdown
+        }
+    }
+
     private func startCountdown() {
         // Haptic feedback for countdown
         let impact = UIImpactFeedbackGenerator(style: .heavy)
@@ -3524,6 +3723,9 @@ struct WorkoutTrackingView: View {
     private func startWorkout() {
         workoutStartDate = Date()
 
+        // Start location tracking
+        locationManager.startTracking()
+
         // Request authorization first
         healthManager.requestAuthorization { authorized in
             guard authorized else {
@@ -3534,12 +3736,12 @@ struct WorkoutTrackingView: View {
             // Start HealthKit workout session
             // Use iOS-compatible API (HKWorkoutBuilder, not HKLiveWorkoutBuilder which is watchOS-only)
             let configuration = HKWorkoutConfiguration()
-            configuration.activityType = .walking
+            configuration.activityType = self.selectedActivityType ?? .walking // Use selected activity type
             configuration.locationType = .outdoor
 
             let healthStore = HKHealthStore()
             let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
-            
+
             self.workoutBuilder = builder
 
             // Start collecting workout data (without live data source - we'll add samples manually)
@@ -3551,15 +3753,13 @@ struct WorkoutTrackingView: View {
                 }
 
                 if success {
-                    // Start timer for elapsed time and manual distance tracking
+                    // Start timer for elapsed time
                     DispatchQueue.main.async {
                         self.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
                             if let startDate = self.workoutStartDate {
                                 self.elapsedTime = Date().timeIntervalSince(startDate)
                             }
-                            
-                            // Note: On iOS, we track distance manually since HKLiveWorkoutDataSource is watchOS-only
-                            // The distance will be added to the workout when it's finished
+                            // Distance is now tracked by locationManager
                         }
                     }
                 }
@@ -3572,6 +3772,9 @@ struct WorkoutTrackingView: View {
         timer?.invalidate()
         timer = nil
 
+        // Stop location tracking
+        locationManager.stopTracking()
+
         // End HealthKit workout collection
         guard let builder = workoutBuilder, let startDate = workoutStartDate else {
             // No active builder, just show recap
@@ -3580,12 +3783,13 @@ struct WorkoutTrackingView: View {
             }
             return
         }
-        
+
         let endDate = Date()
-        
-        // Add distance sample to workout (since we're tracking manually on iOS)
-        if currentDistance > 0 {
-            let distanceMeters = currentDistance / 0.000621371 // Convert miles to meters
+        let finalDistance = currentDistance
+
+        // Add distance sample to workout (tracked from location manager)
+        if finalDistance > 0 {
+            let distanceMeters = finalDistance / 0.000621371 // Convert miles to meters
             let distanceQuantity = HKQuantity(unit: HKUnit.meter(), doubleValue: distanceMeters)
             let distanceSample = HKQuantitySample(
                 type: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!,
@@ -3597,6 +3801,8 @@ struct WorkoutTrackingView: View {
             builder.add([distanceSample]) { success, error in
                 if let error = error {
                     print("Failed to add distance sample: \(error)")
+                } else {
+                    print("Successfully added distance sample: \(finalDistance) miles")
                 }
             }
         }
