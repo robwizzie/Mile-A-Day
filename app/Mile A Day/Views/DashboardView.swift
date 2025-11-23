@@ -3,6 +3,7 @@ import HealthKit
 import WidgetKit
 import UIKit
 import CoreLocation
+import ActivityKit
 
 // MARK: - Custom Navigation Bar Appearance for iOS 18 Liquid Glass
 
@@ -3388,6 +3389,7 @@ struct WorkoutTrackingView: View {
     @State private var showRecap = false
     @State private var workoutSession: HKWorkoutSession?
     @State private var workoutBuilder: HKWorkoutBuilder?
+    @State private var workoutActivity: Activity<WorkoutActivityAttributes>?
 
     private var goalAlreadyCompleted: Bool {
         startingDistance >= goalDistance
@@ -3826,6 +3828,9 @@ struct WorkoutTrackingView: View {
         // Start location tracking
         locationManager.startTracking()
 
+        // Start Live Activity
+        startLiveActivity()
+
         // Request authorization first
         healthManager.requestAuthorization { authorized in
             guard authorized else {
@@ -3853,13 +3858,18 @@ struct WorkoutTrackingView: View {
                 }
 
                 if success {
-                    // Start timer for elapsed time
+                    // Start timer for elapsed time and Live Activity updates
                     DispatchQueue.main.async {
                         self.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
                             if let startDate = self.workoutStartDate {
                                 self.elapsedTime = Date().timeIntervalSince(startDate)
                             }
                             // Distance is now tracked by locationManager
+
+                            // Update Live Activity every second (10 ticks of 0.1s)
+                            if Int(self.elapsedTime * 10) % 10 == 0 {
+                                self.updateLiveActivity()
+                            }
                         }
                     }
                 }
@@ -3874,6 +3884,9 @@ struct WorkoutTrackingView: View {
 
         // Stop location tracking
         locationManager.stopTracking()
+
+        // End Live Activity
+        endLiveActivity()
 
         // End HealthKit workout collection
         guard let builder = workoutBuilder, let startDate = workoutStartDate else {
@@ -3953,6 +3966,79 @@ struct WorkoutTrackingView: View {
         // Clear session references
         workoutSession = nil
         workoutBuilder = nil
+    }
+
+    // MARK: - Live Activity Management
+
+    private func startLiveActivity() {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            print("Live Activities are not enabled")
+            return
+        }
+
+        let attributes = WorkoutActivityAttributes(
+            startTime: Date(),
+            goalDistance: goalDistance
+        )
+
+        let initialState = WorkoutActivityAttributes.ContentState(
+            distance: 0.0,
+            totalDailyDistance: startingDistance,
+            elapsedTime: 0,
+            goalDistance: goalDistance,
+            activityType: selectedActivityType == .running ? "Running" : "Walking"
+        )
+
+        do {
+            let activity = try Activity.request(
+                attributes: attributes,
+                content: .init(state: initialState, staleDate: nil),
+                pushType: nil
+            )
+            workoutActivity = activity
+            print("Live Activity started: \(activity.id)")
+        } catch {
+            print("Failed to start Live Activity: \(error)")
+        }
+    }
+
+    private func updateLiveActivity() {
+        guard let activity = workoutActivity else { return }
+
+        let updatedState = WorkoutActivityAttributes.ContentState(
+            distance: currentDistance,
+            totalDailyDistance: totalDailyDistance,
+            elapsedTime: elapsedTime,
+            goalDistance: goalDistance,
+            activityType: selectedActivityType == .running ? "Running" : "Walking"
+        )
+
+        Task {
+            await activity.update(
+                .init(state: updatedState, staleDate: nil)
+            )
+        }
+    }
+
+    private func endLiveActivity() {
+        guard let activity = workoutActivity else { return }
+
+        let finalState = WorkoutActivityAttributes.ContentState(
+            distance: currentDistance,
+            totalDailyDistance: totalDailyDistance,
+            elapsedTime: elapsedTime,
+            goalDistance: goalDistance,
+            activityType: selectedActivityType == .running ? "Running" : "Walking"
+        )
+
+        Task {
+            await activity.end(
+                .init(state: finalState, staleDate: nil),
+                dismissalPolicy: .after(.now + 5) // Keep visible for 5 seconds after workout ends
+            )
+        }
+
+        workoutActivity = nil
     }
 }
 
