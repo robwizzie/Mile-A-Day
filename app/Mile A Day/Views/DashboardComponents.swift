@@ -436,11 +436,6 @@ struct CalendarPreviewCard: View {
                     Text("\(todaysSteps)")
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundColor(.primary)
-
-                    Text("steps")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .padding(.bottom, 4)
                 }
 
                 // Progress bar
