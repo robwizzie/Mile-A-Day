@@ -3,6 +3,7 @@ import HealthKit
 import WidgetKit
 import UIKit
 import CoreLocation
+import ActivityKit
 
 // MARK: - Custom Navigation Bar Appearance for iOS 18 Liquid Glass
 
@@ -1155,7 +1156,12 @@ struct TodayProgressCard: View {
         )
         .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
         .fullScreenCover(isPresented: $showWorkoutView) {
-            WorkoutTrackingView(healthManager: healthManager, userManager: userManager, goalDistance: goalDistance)
+            WorkoutTrackingView(
+                healthManager: healthManager,
+                userManager: userManager,
+                goalDistance: goalDistance,
+                startingDistance: currentDistance
+            )
         }
     }
 }
@@ -3363,10 +3369,12 @@ struct WorkoutTrackingView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     let goalDistance: Double
+    let startingDistance: Double
     @Environment(\.dismiss) var dismiss
 
     @StateObject private var locationManager = WorkoutLocationManager()
     @State private var showActivitySelection = true
+    @State private var showGoalAlreadyCompletedAlert = false
     @State private var selectedActivityType: HKWorkoutActivityType?
     @State private var countdownNumber = 3
     @State private var showCountdown = false
@@ -3375,16 +3383,30 @@ struct WorkoutTrackingView: View {
     @State private var timer: Timer?
     @State private var workoutStartDate: Date?
     @State private var showCompletion = false
+    @State private var hasShownCompletion = false // Track if we've already shown completion
+    @State private var showPreviousProgress = false // Show notification when reaching previous progress
+    @State private var hasReachedPreviousProgress = false // Track if we've reached starting distance
     @State private var showRecap = false
     @State private var workoutSession: HKWorkoutSession?
     @State private var workoutBuilder: HKWorkoutBuilder?
+    @State private var workoutActivity: Activity<WorkoutActivityAttributes>?
 
+    private var goalAlreadyCompleted: Bool {
+        startingDistance >= goalDistance
+    }
+
+    // Workout distance only (starts at 0)
     private var currentDistance: Double {
         locationManager.currentDistance
     }
 
+    // Total daily distance (starting + workout)
+    private var totalDailyDistance: Double {
+        startingDistance + locationManager.currentDistance
+    }
+
     private var progress: Double {
-        min(currentDistance / goalDistance, 1.0)
+        min(totalDailyDistance / goalDistance, 1.0)
     }
 
     private var formattedTime: String {
@@ -3546,6 +3568,7 @@ struct WorkoutTrackingView: View {
                             .foregroundColor(.white.opacity(0.7))
                             .tracking(1.5)
 
+                        // Main counter - Workout distance (starts at 0)
                         Text(String(format: "%.2f", currentDistance))
                             .font(.system(size: 80, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
@@ -3554,6 +3577,17 @@ struct WorkoutTrackingView: View {
                         Text("miles")
                             .font(.title2)
                             .foregroundColor(.white.opacity(0.8))
+
+                        // Smaller daily total counter
+                        if startingDistance > 0 {
+                            VStack(spacing: 4) {
+                                Text("Daily Total: \(String(format: "%.2f", totalDailyDistance)) mi")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.white.opacity(0.6))
+                            }
+                            .padding(.top, 4)
+                        }
                     }
 
                     // Progress ring
@@ -3630,9 +3664,33 @@ struct WorkoutTrackingView: View {
                     .padding(.bottom, 40)
                     .buttonStyle(PlainButtonStyle())
                 }
-                .opacity(showCompletion ? 0 : 1)
+                .opacity(showCompletion || showPreviousProgress ? 0 : 1)
                 .overlay(
-                    // Completion celebration
+                    // Previous progress notification
+                    Group {
+                        if showPreviousProgress {
+                            VStack(spacing: 20) {
+                                Image(systemName: "flag.fill")
+                                    .font(.system(size: 60))
+                                    .foregroundColor(.blue)
+                                    .scaleEffect(showPreviousProgress ? 1.0 : 0.5)
+                                    .animation(.spring(response: 0.6, dampingFraction: 0.6), value: showPreviousProgress)
+
+                                Text("Back to where you were!")
+                                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                                    .multilineTextAlignment(.center)
+
+                                Text("\(String(format: "%.2f", startingDistance)) miles reached")
+                                    .font(.title3)
+                                    .foregroundColor(.white.opacity(0.9))
+                            }
+                            .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+                )
+                .overlay(
+                    // Goal completion celebration
                     Group {
                         if showCompletion {
                             VStack(spacing: 24) {
@@ -3665,7 +3723,35 @@ struct WorkoutTrackingView: View {
             }
         }
         .onChange(of: currentDistance) { oldValue, newValue in
-            if !showCompletion && newValue >= goalDistance {
+            // Check if we've reached the previous progress point
+            if !hasReachedPreviousProgress && startingDistance > 0 && newValue >= startingDistance {
+                hasReachedPreviousProgress = true
+
+                // Show notification that they've reached where they were
+                withAnimation {
+                    showPreviousProgress = true
+                }
+
+                // Haptic feedback
+                let notification = UINotificationFeedbackGenerator()
+                notification.notificationOccurred(.success)
+
+                // Hide notification after 2 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    withAnimation {
+                        showPreviousProgress = false
+                    }
+                }
+            }
+
+            // Check if we've reached the goal (using total daily distance)
+            // Only show completion if:
+            // 1. We haven't shown it yet
+            // 2. The goal wasn't already completed when we started
+            // 3. We've now reached the goal with total daily distance
+            if !hasShownCompletion && !goalAlreadyCompleted && totalDailyDistance >= goalDistance {
+                hasShownCompletion = true // Mark as shown so it doesn't loop
+
                 // Show completion celebration
                 withAnimation {
                     showCompletion = true
@@ -3681,6 +3767,22 @@ struct WorkoutTrackingView: View {
                         showCompletion = false
                     }
                 }
+            }
+        }
+        .alert("Goal Already Completed", isPresented: $showGoalAlreadyCompletedAlert) {
+            Button("Continue Anyway", role: .none) {
+                // User chose to continue, do nothing (alert will dismiss)
+            }
+            Button("Cancel", role: .cancel) {
+                dismiss()
+            }
+        } message: {
+            Text("You've already completed your goal for today (\(String(format: "%.2f", startingDistance)) / \(String(format: "%.2f", goalDistance)) miles). You can still track this workout, but it won't show a goal completion message.")
+        }
+        .onAppear {
+            // Show alert if goal is already completed when view appears
+            if goalAlreadyCompleted {
+                showGoalAlreadyCompletedAlert = true
             }
         }
     }
@@ -3726,6 +3828,9 @@ struct WorkoutTrackingView: View {
         // Start location tracking
         locationManager.startTracking()
 
+        // Start Live Activity
+        startLiveActivity()
+
         // Request authorization first
         healthManager.requestAuthorization { authorized in
             guard authorized else {
@@ -3753,13 +3858,18 @@ struct WorkoutTrackingView: View {
                 }
 
                 if success {
-                    // Start timer for elapsed time
+                    // Start timer for elapsed time and Live Activity updates
                     DispatchQueue.main.async {
                         self.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
                             if let startDate = self.workoutStartDate {
                                 self.elapsedTime = Date().timeIntervalSince(startDate)
                             }
                             // Distance is now tracked by locationManager
+
+                            // Update Live Activity every second (10 ticks of 0.1s)
+                            if Int(self.elapsedTime * 10) % 10 == 0 {
+                                self.updateLiveActivity()
+                            }
                         }
                     }
                 }
@@ -3774,6 +3884,9 @@ struct WorkoutTrackingView: View {
 
         // Stop location tracking
         locationManager.stopTracking()
+
+        // End Live Activity
+        endLiveActivity()
 
         // End HealthKit workout collection
         guard let builder = workoutBuilder, let startDate = workoutStartDate else {
@@ -3853,6 +3966,79 @@ struct WorkoutTrackingView: View {
         // Clear session references
         workoutSession = nil
         workoutBuilder = nil
+    }
+
+    // MARK: - Live Activity Management
+
+    private func startLiveActivity() {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            print("Live Activities are not enabled")
+            return
+        }
+
+        let attributes = WorkoutActivityAttributes(
+            startTime: Date(),
+            goalDistance: goalDistance
+        )
+
+        let initialState = WorkoutActivityAttributes.ContentState(
+            distance: 0.0,
+            totalDailyDistance: startingDistance,
+            elapsedTime: 0,
+            goalDistance: goalDistance,
+            activityType: selectedActivityType == .running ? "Running" : "Walking"
+        )
+
+        do {
+            let activity = try Activity.request(
+                attributes: attributes,
+                content: .init(state: initialState, staleDate: nil),
+                pushType: nil
+            )
+            workoutActivity = activity
+            print("Live Activity started: \(activity.id)")
+        } catch {
+            print("Failed to start Live Activity: \(error)")
+        }
+    }
+
+    private func updateLiveActivity() {
+        guard let activity = workoutActivity else { return }
+
+        let updatedState = WorkoutActivityAttributes.ContentState(
+            distance: currentDistance,
+            totalDailyDistance: totalDailyDistance,
+            elapsedTime: elapsedTime,
+            goalDistance: goalDistance,
+            activityType: selectedActivityType == .running ? "Running" : "Walking"
+        )
+
+        Task {
+            await activity.update(
+                .init(state: updatedState, staleDate: nil)
+            )
+        }
+    }
+
+    private func endLiveActivity() {
+        guard let activity = workoutActivity else { return }
+
+        let finalState = WorkoutActivityAttributes.ContentState(
+            distance: currentDistance,
+            totalDailyDistance: totalDailyDistance,
+            elapsedTime: elapsedTime,
+            goalDistance: goalDistance,
+            activityType: selectedActivityType == .running ? "Running" : "Walking"
+        )
+
+        Task {
+            await activity.end(
+                .init(state: finalState, staleDate: nil),
+                dismissalPolicy: .after(.now + 5) // Keep visible for 5 seconds after workout ends
+            )
+        }
+
+        workoutActivity = nil
     }
 }
 

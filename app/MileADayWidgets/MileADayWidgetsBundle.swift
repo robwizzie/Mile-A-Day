@@ -14,5 +14,6 @@ struct MileADayWidgetsBundle: WidgetBundle {
     var body: some Widget {
         TodayProgressWidget()
         StreakCountWidget()
+        WorkoutLiveActivity()
     }
 }
