@@ -14,6 +14,8 @@
 	<string>Mile A Day needs access to your location to accurately track distance during your workouts.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Mile A Day needs access to your location to accurately track distance during your workouts, even when the app is in the background.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Mile A Day needs access to your motion data to track distance and steps during indoor workouts.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIBackgroundModes</key>

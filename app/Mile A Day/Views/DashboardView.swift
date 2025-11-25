@@ -3,6 +3,7 @@ import HealthKit
 import WidgetKit
 import UIKit
 import CoreLocation
+import CoreMotion
 import ActivityKit
 
 // MARK: - Custom Navigation Bar Appearance for iOS 18 Liquid Glass
@@ -3293,7 +3294,9 @@ struct SharePreviewView: View {
 // Location Manager for tracking distance during workouts
 class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let locationManager = CLLocationManager()
+    private let pedometer = CMPedometer()
     private var lastLocation: CLLocation?
+    private var isUsingPedometer = false
 
     @Published var currentDistance: Double = 0.0 // Distance in miles
     @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
@@ -3312,11 +3315,43 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         locationManager.requestWhenInUseAuthorization()
     }
 
-    func startTracking() {
+    func startTracking(locationType: HKWorkoutSessionLocationType = .outdoor) {
         // Reset distance for new workout
         currentDistance = 0.0
         lastLocation = nil
+        isUsingPedometer = (locationType == .indoor)
 
+        if locationType == .indoor {
+            // Use pedometer for indoor tracking
+            if CMPedometer.isDistanceAvailable() {
+                pedometer.startUpdates(from: Date()) { [weak self] pedometerData, error in
+                    guard let self = self, let data = pedometerData, error == nil else {
+                        if let error = error {
+                            print("Pedometer error: \(error.localizedDescription)")
+                        }
+                        return
+                    }
+
+                    // Update distance from pedometer
+                    if let distance = data.distance {
+                        let distanceInMiles = distance.doubleValue * 0.000621371 // Convert meters to miles
+                        DispatchQueue.main.async {
+                            self.currentDistance = distanceInMiles
+                        }
+                    }
+                }
+            } else {
+                print("Distance tracking not available on this device")
+                // Fallback to GPS even for indoor
+                startGPSTracking()
+            }
+        } else {
+            // Use GPS for outdoor tracking
+            startGPSTracking()
+        }
+    }
+
+    private func startGPSTracking() {
         // Request permission if not already granted
         if authorizationStatus == .notDetermined {
             requestPermission()
@@ -3327,7 +3362,11 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     }
 
     func stopTracking() {
-        locationManager.stopUpdatingLocation()
+        if isUsingPedometer {
+            pedometer.stopUpdates()
+        } else {
+            locationManager.stopUpdatingLocation()
+        }
         lastLocation = nil
     }
 
@@ -3374,8 +3413,10 @@ struct WorkoutTrackingView: View {
 
     @StateObject private var locationManager = WorkoutLocationManager()
     @State private var showActivitySelection = true
+    @State private var showLocationTypeSelection = false
     @State private var showGoalAlreadyCompletedAlert = false
     @State private var selectedActivityType: HKWorkoutActivityType?
+    @State private var selectedLocationType: HKWorkoutSessionLocationType = .outdoor
     @State private var countdownNumber = 3
     @State private var showCountdown = false
     @State private var isTracking = false
@@ -3506,6 +3547,109 @@ struct WorkoutTrackingView: View {
                                     Text("Walk")
                                         .font(.system(size: 28, weight: .bold, design: .rounded))
                                     Text("Track as a walking workout")
+                                        .font(.subheadline)
+                                        .opacity(0.9)
+                                }
+
+                                Spacer()
+
+                                Image(systemName: "chevron.right")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .padding(24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(Color.white.opacity(0.15))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                                    )
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .padding(.horizontal, 32)
+
+                    Spacer()
+                }
+            } else if showLocationTypeSelection {
+                // Location type selection view (Indoor/Outdoor)
+                VStack(spacing: 40) {
+                    Spacer()
+
+                    // Header
+                    VStack(spacing: 16) {
+                        Image(systemName: selectedActivityType == .running ? "figure.run" : "figure.walk")
+                            .font(.system(size: 60))
+                            .foregroundColor(.white)
+
+                        Text("Choose Location")
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+
+                        Text("Where will you be working out?")
+                            .font(.title3)
+                            .foregroundColor(.white.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, 32)
+
+                    Spacer()
+
+                    // Location type buttons
+                    VStack(spacing: 20) {
+                        // Outdoor button
+                        Button(action: {
+                            selectLocationType(.outdoor)
+                        }) {
+                            HStack(spacing: 16) {
+                                Image(systemName: "location.fill")
+                                    .font(.system(size: 32))
+                                    .frame(width: 50)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Outdoor")
+                                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                                    Text("Uses GPS for accurate tracking")
+                                        .font(.subheadline)
+                                        .opacity(0.9)
+                                }
+
+                                Spacer()
+
+                                Image(systemName: "chevron.right")
+                                    .font(.title2)
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .padding(24)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(Color.white.opacity(0.15))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 20)
+                                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                                    )
+                            )
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        // Indoor button
+                        Button(action: {
+                            selectLocationType(.indoor)
+                        }) {
+                            HStack(spacing: 16) {
+                                Image(systemName: "figure.indoor.cycle")
+                                    .font(.system(size: 32))
+                                    .frame(width: 50)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Indoor")
+                                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                                    Text("Uses motion sensors for distance")
                                         .font(.subheadline)
                                         .opacity(0.9)
                                 }
@@ -3794,9 +3938,23 @@ struct WorkoutTrackingView: View {
         let impact = UIImpactFeedbackGenerator(style: .medium)
         impact.impactOccurred()
 
-        // Hide activity selection and show countdown
+        // Hide activity selection and show location type selection
         withAnimation {
             showActivitySelection = false
+            showLocationTypeSelection = true
+        }
+    }
+
+    private func selectLocationType(_ locationType: HKWorkoutSessionLocationType) {
+        selectedLocationType = locationType
+
+        // Haptic feedback
+        let impact = UIImpactFeedbackGenerator(style: .medium)
+        impact.impactOccurred()
+
+        // Hide location type selection and show countdown
+        withAnimation {
+            showLocationTypeSelection = false
             showCountdown = true
             countdownNumber = 3 // Reset countdown
         }
@@ -3825,8 +3983,8 @@ struct WorkoutTrackingView: View {
     private func startWorkout() {
         workoutStartDate = Date()
 
-        // Start location tracking
-        locationManager.startTracking()
+        // Start location tracking with appropriate mode (GPS for outdoor, pedometer for indoor)
+        locationManager.startTracking(locationType: selectedLocationType)
 
         // Start Live Activity
         startLiveActivity()
@@ -3842,7 +4000,7 @@ struct WorkoutTrackingView: View {
             // Use iOS-compatible API (HKWorkoutBuilder, not HKLiveWorkoutBuilder which is watchOS-only)
             let configuration = HKWorkoutConfiguration()
             configuration.activityType = self.selectedActivityType ?? .walking // Use selected activity type
-            configuration.locationType = .outdoor
+            configuration.locationType = self.selectedLocationType // Use selected location type
 
             let healthStore = HKHealthStore()
             let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
