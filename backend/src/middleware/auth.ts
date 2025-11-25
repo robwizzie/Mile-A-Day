@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { jwtVerify } from 'jose';
 
 export interface AuthenticatedRequest extends Request {
-	userId?: string;
+	userId: string;
 }
 
 export async function authenticateToken(req: AuthenticatedRequest, res: Response, next: NextFunction) {

@@ -23,6 +23,14 @@
     -   **[Get Streak](#get-streak)**
     -   **[Get Recent Workouts](#get-recent-workouts)**
     -   **[Get User Stats](#get-user-stats)**
+-   **[Competitions](#competitions)**
+    -   **[Create Competition](#create-competition)**
+    -   **[Get All Competitions](#get-all-competitions)**
+    -   **[Get Competition](#get-competition)**
+    -   **[Get Competition Invites](#get-competition-invites)**
+    -   **[Invite Users to Competition](#invite-users-to-competition)**
+    -   **[Accept Competition Invite](#accept-competition-invite)**
+    -   **[Decline Competition Invite](#decline-competition-invite)**
 
 ## API Domain
 
@@ -1074,6 +1082,484 @@ Retrieves comprehensive workout statistics for a user, including their current s
 >
 > # Get current streak stats only
 > curl --location 'https://mad.mindgoblin.tech/workouts/peter/stats?current_streak=true' \
+> --header 'Authorization: Bearer <your_jwt_token>'
+> ```
+
+</details>
+
+<br/><br/>
+
+---
+
+<a name="competitions"></a>
+
+## 🏆 Competitions
+
+<a name="create-competition"></a>
+
+### Create Competition
+
+**POST** `/competitions`
+
+Creates a new competition. The authenticated user becomes the owner and is automatically added as an accepted participant.
+
+#### Request Body
+
+| Field            | Type     | Description                                                    | Required |
+| :--------------- | :------- | :------------------------------------------------------------- | :------: |
+| competition_name | String   | Name of the competition                                        |    ✅    |
+| type             | String   | Competition type: "streaks", "apex", "clash", "targets", "race"|    ✅    |
+| start_date       | String   | Start date (YYYY-MM-DD)                                        |    ✖️    |
+| end_date         | String   | End date (YYYY-MM-DD)                                          |    ✖️    |
+| workouts         | String[] | Allowed workout types: ["run", "walk"]                         |    ✖️    |
+| options          | Object   | Competition-specific options                                   |    ✖️    |
+
+#### Options Object
+
+| Field    | Type   | Description                              | Required |
+| :------- | :----- | :--------------------------------------- | :------: |
+| goal     | Number | Goal value for the competition           |    ✅    |
+| unit     | String | Unit of measurement: "miles" or "steps"  |    ✅    |
+| first_to | Number | Number of wins needed (for some types)   |    ✅    |
+| history  | Boolean| Whether to include historical data       |    ✖️    |
+| interval | String | Time interval: "day", "week", or "month" |    ✖️    |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **POST** `/competitions`
+>
+> ##### Example Body
+>
+> ```json
+> {
+>     "competition_name": "Summer Running Challenge",
+>     "type": "streaks",
+>     "start_date": "2025-06-01",
+>     "end_date": "2025-08-31",
+>     "workouts": ["run"],
+>     "options": {
+>         "goal": 1,
+>         "unit": "miles",
+>         "first_to": 5,
+>         "history": false,
+>         "interval": "day"
+>     }
+> }
+> ```
+>
+> ##### Example Response
+>
+> ```json
+> {
+>     "competition_id": "comp_abc123"
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location 'https://mad.mindgoblin.tech/competitions' \
+> --header 'Content-Type: application/json' \
+> --header 'Authorization: Bearer <your_jwt_token>' \
+> --data '{
+>     "competition_name": "Summer Running Challenge",
+>     "type": "streaks",
+>     "start_date": "2025-06-01",
+>     "end_date": "2025-08-31",
+>     "workouts": ["run"],
+>     "options": {
+>         "goal": 1,
+>         "unit": "miles",
+>         "first_to": 5,
+>         "history": false,
+>         "interval": "day"
+>     }
+> }'
+> ```
+
+</details>
+
+<br/><br/>
+
+<a name="get-all-competitions"></a>
+
+### Get All Competitions
+
+**GET** `/competitions`
+
+Retrieves all competitions for the authenticated user with pagination and optional status filtering.
+
+#### Query Parameters
+
+| Name     | Type            | Description                                      | Required |
+| :------- | :-------------- | :----------------------------------------------- | :------: |
+| page     | Query Parameter | Page number (default: 1)                         |    ✖️    |
+| pageSize | Query Parameter | Number of results per page (default: 25)         |    ✖️    |
+| status   | Query Parameter | Filter by status (e.g., "on_your_mark", "active")|    ✖️    |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **GET** `/competitions?page=1&pageSize=10&status=active`
+>
+> ##### Example Response
+>
+> ```json
+> {
+>     "competitions": [
+>         {
+>             "competition_id": "comp_abc123",
+>             "competition_name": "Summer Running Challenge",
+>             "start_date": "2025-06-01",
+>             "end_date": "2025-08-31",
+>             "workouts": ["run"],
+>             "type": "streaks",
+>             "options": {
+>                 "goal": 1,
+>                 "unit": "miles",
+>                 "first_to": 5,
+>                 "history": false,
+>                 "interval": "day"
+>             },
+>             "owner": "peter",
+>             "users": [
+>                 {
+>                     "competition_id": "comp_abc123",
+>                     "user_id": "peter",
+>                     "invite_status": "accepted"
+>                 }
+>             ]
+>         }
+>     ]
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location 'https://mad.mindgoblin.tech/competitions?page=1&pageSize=10' \
+> --header 'Authorization: Bearer <your_jwt_token>'
+> ```
+
+</details>
+
+<br/><br/>
+
+<a name="get-competition"></a>
+
+### Get Competition
+
+**GET** `/competitions/{competitionId}`
+
+Retrieves details for a specific competition.
+
+#### Parameters
+
+| Name          | Type           | Description                           | Required |
+| :------------ | :------------- | :------------------------------------ | :------: |
+| competitionId | Path Parameter | The ID of the competition to retrieve |    ✅    |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **GET** `/competitions/comp_abc123`
+>
+> ##### Example Response
+>
+> ```json
+> {
+>     "competition": {
+>         "competition_id": "comp_abc123",
+>         "competition_name": "Summer Running Challenge",
+>         "start_date": "2025-06-01",
+>         "end_date": "2025-08-31",
+>         "workouts": ["run"],
+>         "type": "streaks",
+>         "options": {
+>             "goal": 1,
+>             "unit": "miles",
+>             "first_to": 5,
+>             "history": false,
+>             "interval": "day"
+>         },
+>         "owner": "peter",
+>         "users": [
+>             {
+>                 "competition_id": "comp_abc123",
+>                 "user_id": "peter",
+>                 "invite_status": "accepted"
+>             },
+>             {
+>                 "competition_id": "comp_abc123",
+>                 "user_id": "john",
+>                 "invite_status": "pending"
+>             }
+>         ]
+>     }
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location 'https://mad.mindgoblin.tech/competitions/comp_abc123' \
+> --header 'Authorization: Bearer <your_jwt_token>'
+> ```
+
+</details>
+
+<br/><br/>
+
+<a name="get-competition-invites"></a>
+
+### Get Competition Invites
+
+**GET** `/competitions/invites`
+
+Retrieves all pending competition invites for the authenticated user.
+
+#### Query Parameters
+
+| Name | Type            | Description                  | Required |
+| :--- | :-------------- | :--------------------------- | :------: |
+| page | Query Parameter | Page number (default: 1)     |    ✖️    |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **GET** `/competitions/invites?page=1`
+>
+> ##### Example Response
+>
+> ```json
+> {
+>     "competitionInvites": [
+>         {
+>             "competition_id": "comp_xyz789",
+>             "competition_name": "Weekend Warriors",
+>             "start_date": "2025-07-01",
+>             "end_date": "2025-07-31",
+>             "workouts": ["run", "walk"],
+>             "type": "targets",
+>             "options": {
+>                 "goal": 50,
+>                 "unit": "miles",
+>                 "first_to": 1
+>             },
+>             "owner": "john",
+>             "users": [
+>                 {
+>                     "competition_id": "comp_xyz789",
+>                     "user_id": "peter",
+>                     "invite_status": "pending"
+>                 }
+>             ]
+>         }
+>     ]
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location 'https://mad.mindgoblin.tech/competitions/invites' \
+> --header 'Authorization: Bearer <your_jwt_token>'
+> ```
+
+</details>
+
+<br/><br/>
+
+<a name="invite-users-to-competition"></a>
+
+### Invite Users to Competition
+
+**POST** `/competitions/{competitionId}/invite`
+
+Invites a user to join a competition. Only participants who have already accepted can invite others.
+
+#### Parameters
+
+| Name          | Type           | Description                      | Required |
+| :------------ | :------------- | :------------------------------- | :------: |
+| competitionId | Path Parameter | The ID of the competition        |    ✅    |
+
+#### Request Body
+
+| Field      | Type   | Description                       | Required |
+| :--------- | :----- | :-------------------------------- | :------: |
+| inviteUser | String | The user ID of the user to invite |    ✅    |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **POST** `/competitions/comp_abc123/invite`
+>
+> ##### Example Body
+>
+> ```json
+> {
+>     "inviteUser": "john"
+> }
+> ```
+>
+> ##### Example Response
+>
+> ```json
+> {
+>     "message": "Successfully invited user john to competition comp_abc123"
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location 'https://mad.mindgoblin.tech/competitions/comp_abc123/invite' \
+> --header 'Content-Type: application/json' \
+> --header 'Authorization: Bearer <your_jwt_token>' \
+> --data '{
+>     "inviteUser": "john"
+> }'
+> ```
+
+</details>
+
+<br/><br/>
+
+<a name="accept-competition-invite"></a>
+
+### Accept Competition Invite
+
+**POST** `/competitions/{competitionId}/accept`
+
+Accepts a pending competition invite for the authenticated user.
+
+#### Parameters
+
+| Name          | Type           | Description               | Required |
+| :------------ | :------------- | :------------------------ | :------: |
+| competitionId | Path Parameter | The ID of the competition |    ✅    |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **POST** `/competitions/comp_abc123/accept`
+>
+> ##### Example Response
+>
+> ```json
+> {
+>     "competition": {
+>         "competition_id": "comp_abc123",
+>         "competition_name": "Summer Running Challenge",
+>         "start_date": "2025-06-01",
+>         "end_date": "2025-08-31",
+>         "workouts": ["run"],
+>         "type": "streaks",
+>         "options": {
+>             "goal": 1,
+>             "unit": "miles",
+>             "first_to": 5
+>         },
+>         "owner": "peter",
+>         "users": [
+>             {
+>                 "competition_id": "comp_abc123",
+>                 "user_id": "peter",
+>                 "invite_status": "accepted"
+>             },
+>             {
+>                 "competition_id": "comp_abc123",
+>                 "user_id": "john",
+>                 "invite_status": "accepted"
+>             }
+>         ]
+>     }
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location 'https://mad.mindgoblin.tech/competitions/comp_abc123/accept' \
+> --header 'Authorization: Bearer <your_jwt_token>'
+> ```
+
+</details>
+
+<br/><br/>
+
+<a name="decline-competition-invite"></a>
+
+### Decline Competition Invite
+
+**POST** `/competitions/{competitionId}/decline`
+
+Declines a pending competition invite for the authenticated user.
+
+#### Parameters
+
+| Name          | Type           | Description               | Required |
+| :------------ | :------------- | :------------------------ | :------: |
+| competitionId | Path Parameter | The ID of the competition |    ✅    |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **POST** `/competitions/comp_abc123/decline`
+>
+> ##### Example Response
+>
+> ```json
+> {
+>     "competition": {
+>         "competition_id": "comp_abc123",
+>         "competition_name": "Summer Running Challenge",
+>         "start_date": "2025-06-01",
+>         "end_date": "2025-08-31",
+>         "workouts": ["run"],
+>         "type": "streaks",
+>         "options": {
+>             "goal": 1,
+>             "unit": "miles",
+>             "first_to": 5
+>         },
+>         "owner": "peter",
+>         "users": [
+>             {
+>                 "competition_id": "comp_abc123",
+>                 "user_id": "peter",
+>                 "invite_status": "accepted"
+>             },
+>             {
+>                 "competition_id": "comp_abc123",
+>                 "user_id": "john",
+>                 "invite_status": "declined"
+>             }
+>         ]
+>     }
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location 'https://mad.mindgoblin.tech/competitions/comp_abc123/decline' \
 > --header 'Authorization: Bearer <your_jwt_token>'
 > ```
 
