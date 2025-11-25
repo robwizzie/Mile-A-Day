@@ -8,8 +8,8 @@ import {
 	getCompetitions,
 	sendCompetitionInvite,
 	updateCompetitionInvite
-} from '../services/competitionService';
-import { getUser } from '../services/userService';
+} from '../services/competitionService.js';
+import { getUser } from '../services/userService.js';
 
 export async function createComp(req: AuthenticatedRequest, res: Response) {
 	if (!hasRequiredKeys(['competition_name', 'type'], req, res)) return;
