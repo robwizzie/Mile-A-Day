@@ -3473,28 +3473,50 @@ struct WorkoutTrackingView: View {
 
             if showActivitySelection {
                 // Activity selection view
-                VStack(spacing: 40) {
-                    Spacer()
-
-                    // Header
-                    VStack(spacing: 16) {
-                        Image(systemName: "figure.walk")
-                            .font(.system(size: 60))
+                VStack(spacing: 0) {
+                    // Back button at top
+                    HStack {
+                        Button(action: {
+                            dismiss()
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "chevron.left")
+                                    .font(.title3)
+                                    .fontWeight(.semibold)
+                                Text("Back")
+                                    .font(.body)
+                                    .fontWeight(.medium)
+                            }
                             .foregroundColor(.white)
-
-                        Text("Choose Activity Type")
-                            .font(.system(size: 32, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .multilineTextAlignment(.center)
-
-                        Text("Select how you'll complete your mile")
-                            .font(.title3)
-                            .foregroundColor(.white.opacity(0.8))
-                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                        }
+                        Spacer()
                     }
-                    .padding(.horizontal, 32)
+                    .padding(.top, 16)
 
-                    Spacer()
+                    VStack(spacing: 40) {
+                        Spacer()
+
+                        // Header
+                        VStack(spacing: 16) {
+                            Image(systemName: "figure.walk")
+                                .font(.system(size: 60))
+                                .foregroundColor(.white)
+
+                            Text("Choose Activity Type")
+                                .font(.system(size: 32, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(.center)
+
+                            Text("Select how you'll complete your mile")
+                                .font(.title3)
+                                .foregroundColor(.white.opacity(0.8))
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(.horizontal, 32)
+
+                        Spacer()
 
                     // Activity buttons
                     VStack(spacing: 20) {
@@ -3572,32 +3594,58 @@ struct WorkoutTrackingView: View {
                     }
                     .padding(.horizontal, 32)
 
-                    Spacer()
+                        Spacer()
+                    }
                 }
             } else if showLocationTypeSelection {
                 // Location type selection view (Indoor/Outdoor)
-                VStack(spacing: 40) {
-                    Spacer()
-
-                    // Header
-                    VStack(spacing: 16) {
-                        Image(systemName: selectedActivityType == .running ? "figure.run" : "figure.walk")
-                            .font(.system(size: 60))
+                VStack(spacing: 0) {
+                    // Back button at top
+                    HStack {
+                        Button(action: {
+                            withAnimation {
+                                showLocationTypeSelection = false
+                                showActivitySelection = true
+                            }
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "chevron.left")
+                                    .font(.title3)
+                                    .fontWeight(.semibold)
+                                Text("Back")
+                                    .font(.body)
+                                    .fontWeight(.medium)
+                            }
                             .foregroundColor(.white)
-
-                        Text("Choose Location")
-                            .font(.system(size: 32, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .multilineTextAlignment(.center)
-
-                        Text("Where will you be working out?")
-                            .font(.title3)
-                            .foregroundColor(.white.opacity(0.8))
-                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                        }
+                        Spacer()
                     }
-                    .padding(.horizontal, 32)
+                    .padding(.top, 16)
 
-                    Spacer()
+                    VStack(spacing: 40) {
+                        Spacer()
+
+                        // Header
+                        VStack(spacing: 16) {
+                            Image(systemName: selectedActivityType == .running ? "figure.run" : "figure.walk")
+                                .font(.system(size: 60))
+                                .foregroundColor(.white)
+
+                            Text("Choose Location")
+                                .font(.system(size: 32, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                                .multilineTextAlignment(.center)
+
+                            Text("Where will you be working out?")
+                                .font(.title3)
+                                .foregroundColor(.white.opacity(0.8))
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(.horizontal, 32)
+
+                        Spacer()
 
                     // Location type buttons
                     VStack(spacing: 20) {
@@ -3675,7 +3723,8 @@ struct WorkoutTrackingView: View {
                     }
                     .padding(.horizontal, 32)
 
-                    Spacer()
+                        Spacer()
+                    }
                 }
             } else if showCountdown {
                 // Countdown view
