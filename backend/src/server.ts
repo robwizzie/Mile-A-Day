@@ -7,6 +7,7 @@ import friendRoutes from './routes/friendshipsRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import devRoutes from './routes/devRoutes.js';
 import workoutRoutes from './routes/workoutRoutes.js';
+import competitionRoutes from './routes/competitionRoutes.js';
 import { authenticateToken } from './middleware/auth.js';
 import { webcrypto } from 'node:crypto';
 
@@ -34,6 +35,7 @@ app.use(authenticateToken);
 app.use('/users', userRoutes);
 app.use('/friends', friendRoutes);
 app.use('/workouts', workoutRoutes);
+app.use('/competitions', competitionRoutes);
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 	console.error('Error:', err.message);
