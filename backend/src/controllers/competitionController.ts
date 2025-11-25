@@ -24,7 +24,7 @@ export async function createComp(req: AuthenticatedRequest, res: Response) {
 			workouts,
 			type,
 			options,
-			owner: req.userId
+			owner: req.userId!
 		});
 
 		res.status(200).json({ competition_id: competitionId });
@@ -61,7 +61,7 @@ export async function getAllComps(req: AuthenticatedRequest, res: Response) {
 	const pageSize = req.query.pageSize as string;
 
 	try {
-		const competitions = await getCompetitions(req.userId, {
+		const competitions = await getCompetitions(req.userId!, {
 			page: page ? parseInt(page) : 1,
 			pageSize: pageSize ? parseInt(pageSize) : 25,
 			status
@@ -96,7 +96,7 @@ export async function inviteUsersToComp(req: AuthenticatedRequest, res: Response
 			return res.status(400).json({ error: `User ${inviteUserId} is already in this competition` });
 		}
 
-		if (!competition.users.find(u => u.user_id === req.userId && u.invite_status === 'accepted')) {
+		if (!competition.users.find(u => u.user_id === req.userId! && u.invite_status === 'accepted')) {
 			return res.status(401).json({ error: 'User does not have access to this competition' });
 		}
 
@@ -110,7 +110,7 @@ export async function inviteUsersToComp(req: AuthenticatedRequest, res: Response
 
 export async function getCompInvites(req: AuthenticatedRequest, res: Response) {
 	try {
-		const competitions = await getCompetitions(req.userId, {
+		const competitions = await getCompetitions(req.userId!, {
 			page: parseInt(req.query.page as string) || 1,
 			status: 'on_your_mark',
 			pageSize: 25
@@ -134,15 +134,15 @@ export function getCompInviteHandler(status: 'accepted' | 'declined') {
 				return res.status(404).json({ error: `No competition found with id ${competitionId}` });
 			}
 
-			if (!competition.users.find(u => u.user_id === req.userId && u.invite_status === 'pending')) {
+			if (!competition.users.find(u => u.user_id === req.userId! && u.invite_status === 'pending')) {
 				return res
 					.status(400)
-					.json({ error: `User ${req.userId} does not have a pending invite to competition ${competitionId}` });
+					.json({ error: `User ${req.userId!} does not have a pending invite to competition ${competitionId}` });
 			}
 
-			const updatedUserInfo = await updateCompetitionInvite(competitionId, req.userId, status);
+			const updatedUserInfo = await updateCompetitionInvite(competitionId, req.userId!, status);
 
-			competition.users = competition.users.map(u => (u.user_id === req.userId ? updatedUserInfo : u));
+			competition.users = competition.users.map(u => (u.user_id === req.userId! ? updatedUserInfo : u));
 
 			res.status(200).json({ competition });
 		} catch (error: any) {
