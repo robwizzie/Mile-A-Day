@@ -1,6 +1,6 @@
-import { BadRequestError } from '../errors/Errors';
-import { Competition, CompetitionActivity, CompetitionOptions, CompetitionType, CompetitionUser } from '../types/competitions';
-import { PostgresService } from './DbService';
+import { BadRequestError } from '../errors/Errors.js';
+import { Competition, CompetitionActivity, CompetitionOptions, CompetitionType, CompetitionUser } from '../types/competitions.js';
+import { PostgresService } from './DbService.js';
 
 const db = PostgresService.getInstance();
 

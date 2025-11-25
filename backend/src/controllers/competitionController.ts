@@ -1,7 +1,7 @@
-import { AuthenticatedRequest } from '../middleware/auth';
+import { AuthenticatedRequest } from '../middleware/auth.js';
 import { Response } from 'express';
 import hasRequiredKeys from '../utils/hasRequiredKeys.js';
-import { BadRequestError } from '../errors/Errors';
+import { BadRequestError } from '../errors/Errors.js';
 import {
 	createCompetition,
 	getCompetition,
