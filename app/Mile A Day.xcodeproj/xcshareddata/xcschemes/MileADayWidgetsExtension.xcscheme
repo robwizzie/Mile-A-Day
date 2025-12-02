@@ -44,6 +44,30 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
+      <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "B22046272DF51EA9006ECF83"
+               BuildableName = "Mile A DayTests.xctest"
+               BlueprintName = "Mile A DayTests"
+               ReferencedContainer = "container:Mile A Day.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "B22046312DF51EA9006ECF83"
+               BuildableName = "Mile A DayUITests.xctest"
+               BlueprintName = "Mile A DayUITests"
+               ReferencedContainer = "container:Mile A Day.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"

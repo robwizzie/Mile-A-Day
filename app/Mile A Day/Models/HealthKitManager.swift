@@ -306,6 +306,10 @@ struct AppPreferences: Codable {
 }
 #endif
 class HealthKitManager: ObservableObject {
+    #if os(watchOS)
+    static let shared = HealthKitManager()
+    #endif
+    
     let healthStore = HKHealthStore()
     
     @Published var isAuthorized = false
@@ -337,9 +341,11 @@ class HealthKitManager: ObservableObject {
     
     // MARK: - NEW: Persistent Workout Index (Phase 1 - Architectural Redesign)
     /// Single source of truth for workout data - eliminates inconsistencies
+    #if !os(watchOS)
     @Published var workoutIndex: WorkoutIndex?
     private let workoutProcessor = WorkoutProcessor()
     private var isIndexBuilding = false
+    #endif
     
     private func log(_ message: String) {}
     
@@ -358,6 +364,10 @@ class HealthKitManager: ObservableObject {
     @Published var timezoneDebugInfo: String = ""
     
     init() {
+        #if os(watchOS)
+        // For watchOS, use simplified initialization
+        loadCachedData()
+        #else
         // Load preferences on initialization
         let prefs = AppPreferences.load()
         self.useLocationBasedTimezone = prefs.useLocationBasedTimezone
@@ -375,6 +385,7 @@ class HealthKitManager: ObservableObject {
         
         // Load cached data on initialization
         loadCachedData()
+        #endif
     }
     
     // MARK: - Caching Methods
@@ -623,6 +634,7 @@ class HealthKitManager: ObservableObject {
             guard let self = self, let workouts = samples as? [HKWorkout], !workouts.isEmpty else {
                 DispatchQueue.main.async {
                     self?.todaysDistance = 0.0
+                    #if !os(watchOS)
                     // Get current goal from widget store or default to 1.0
                     let widgetData = WidgetDataStore.load()
                     let currentGoal = widgetData.goal
@@ -630,6 +642,7 @@ class HealthKitManager: ObservableObject {
                     
                     // Use unified progress calculation
                     WidgetDataStore.save(todayMiles: 0, goal: safeGoal)
+                    #endif
                 }
                 return
             }
@@ -729,6 +742,7 @@ class HealthKitManager: ObservableObject {
     func calculatePersonalRecords() {
         guard isAuthorized else { return }
         
+        #if !os(watchOS)
         // CRITICAL FIX: If index exists, use it for streak and total miles
         if let index = workoutIndex {
             DispatchQueue.main.async {
@@ -738,6 +752,7 @@ class HealthKitManager: ObservableObject {
             }
             // Continue calculating other stats (fastest pace, most miles) from cached workouts
         }
+        #endif
         
         // OPTIMIZATION: If we have cached workouts, use them instead of fetching ALL workouts again
         if !cachedWorkouts.isEmpty && cachedLatestWorkoutDate != nil {
@@ -938,6 +953,7 @@ class HealthKitManager: ObservableObject {
     
     /// Processes workouts grouped by day to calculate statistics and streaks
     private func processWorkoutsByDay(_ workoutsByDay: [Date: [HKWorkout]], mostMilesInDay: Double, mostMilesWorkouts: [HKWorkout]) {
+        #if !os(watchOS)
         // CRITICAL FIX: If index exists, DON'T run old streak calculation (use index value instead)
         if let index = workoutIndex {
             log("[HealthKit] ✅ Index available, skipping old streak calculation. Using index streak: \(index.currentStreak)")
@@ -949,6 +965,7 @@ class HealthKitManager: ObservableObject {
             }
             return // Skip old calculation entirely
         }
+        #endif
         
         log("[HealthKit] Processing workouts by day for statistics...")
         var finalMostMilesInDay = mostMilesInDay
@@ -1035,6 +1052,7 @@ class HealthKitManager: ObservableObject {
         DispatchQueue.main.async {
             self.todaysDistance = totalMiles
             self.recentWorkouts = todaysWorkouts
+            #if !os(watchOS)
             // Get current goal from widget store or default to 1.0
             let widgetData = WidgetDataStore.load()
             let currentGoal = widgetData.goal
@@ -1042,6 +1060,7 @@ class HealthKitManager: ObservableObject {
             
             // Use unified progress calculation
             WidgetDataStore.save(todayMiles: totalMiles, goal: safeGoal)
+            #endif
         }
     }
     
@@ -1362,6 +1381,7 @@ class HealthKitManager: ObservableObject {
     
     // Function to fetch all workout data in one call
     func fetchAllWorkoutData() {
+        #if !os(watchOS)
         // PHASE 1: Check if we need to build/update workout index
         Task {
             if workoutIndex == nil {
@@ -1373,6 +1393,7 @@ class HealthKitManager: ObservableObject {
                 await updateIndexWithNewWorkouts()
             }
         }
+        #endif
         
         // Always fetch today's data (fresh)
         fetchTodaysDistance()
@@ -1395,6 +1416,7 @@ class HealthKitManager: ObservableObject {
     private func performInitialWorkoutFetch() {
         guard isAuthorized else { return }
         
+        #if !os(watchOS)
         // CRITICAL FIX: If index exists, use it instead of old calculation
         if let index = workoutIndex {
             log("[HealthKit] ✅ Index available, using pre-computed streak: \(index.currentStreak)")
@@ -1404,6 +1426,7 @@ class HealthKitManager: ObservableObject {
             }
             return // Skip old calculation entirely
         }
+        #endif
         
         log("[HealthKit] Starting initial workout fetch to populate cache...")
         
@@ -1456,6 +1479,7 @@ class HealthKitManager: ObservableObject {
     private     func fetchWorkoutsSmartly() {
         guard isAuthorized else { return }
         
+        #if !os(watchOS)
         // CRITICAL FIX: If index exists, use it instead of old calculation
         if let index = workoutIndex {
             log("[HealthKit] ✅ Index available, using pre-computed streak: \(index.currentStreak)")
@@ -1465,6 +1489,7 @@ class HealthKitManager: ObservableObject {
             }
             return // Skip old calculation entirely
         }
+        #endif
         
         let startDate = getWorkoutFetchStartDate()
         let endDate = Date()
@@ -2465,6 +2490,7 @@ class HealthKitManager: ObservableObject {
     
     // Get workouts for a specific date using location-aware timezone calculation
     func getWorkoutsForDate(_ date: Date, completion: @escaping ([HKWorkout]) -> Void) {
+        #if !os(watchOS)
         // PHASE 1 FIX: Use index if available for instant lookup
         if let index = workoutIndex {
             let targetDay = Calendar.current.startOfDay(for: date)
@@ -2485,6 +2511,7 @@ class HealthKitManager: ObservableObject {
                 return
             }
         }
+        #endif
         
         // FALLBACK: If no index, use old method
         print("[WorkoutIndex] ⚠️ Index not available, falling back to HealthKit query")
@@ -2612,6 +2639,7 @@ class HealthKitManager: ObservableObject {
     
     /// Build workout index from all workouts (one-time operation)
     /// This processes all workouts and caches timezone-corrected dates
+    #if !os(watchOS)
     func buildWorkoutIndex(progressCallback: ((Int, Int) -> Void)? = nil) async {
         guard isAuthorized else {
             print("[WorkoutIndex] ❌ Not authorized to access HealthKit")
@@ -2714,7 +2742,9 @@ class HealthKitManager: ObservableObject {
         
         isIndexBuilding = false
     }
+    #endif
     
+    #if !os(watchOS)
     /// Update index with new workouts (incremental, fast)
     func updateIndexWithNewWorkouts() async {
         guard let currentIndex = workoutIndex else {
@@ -2817,9 +2847,11 @@ class HealthKitManager: ObservableObject {
             NotificationCenter.default.post(name: NSNotification.Name("WorkoutIndexReady"), object: nil)
         }
     }
+    #endif
     
     // MARK: - Helper Methods for Index
     
+    #if !os(watchOS)
     private func dateKey(from date: Date) -> String {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.year, .month, .day], from: date)
@@ -2835,10 +2867,12 @@ class HealthKitManager: ObservableObject {
         formatter.timeZone = TimeZone.current
         return formatter.date(from: key)
     }
+    #endif
     
     /// Get the timezone-corrected local end time for a workout
     /// Returns the corrected time if workout is in index, otherwise returns workout's device time
     func getCorrectedLocalTime(for workout: HKWorkout) -> Date {
+        #if !os(watchOS)
         guard let index = workoutIndex else {
             return workout.endDate // No index, return device time
         }
@@ -2854,5 +2888,8 @@ class HealthKitManager: ObservableObject {
         // Not found in index, return device time
         print("[WorkoutIndex] ⚠️ Workout not found in index, using device time")
         return workout.endDate
+        #else
+        return workout.endDate
+        #endif
     }
 } 

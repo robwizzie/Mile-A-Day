@@ -6,12 +6,24 @@ struct ContentView: View {
     @EnvironmentObject var userManager: UserManager
     @State private var showWorkoutView = false
 
-    private var currentState: DayState {
-        healthManager.getCurrentDayState(for: userManager.user)
+    private var goalDistance: Double {
+        userManager.currentUser.goalMiles > 0 ? userManager.currentUser.goalMiles : 1.0
     }
-
+    
+    private var currentDistance: Double {
+        healthManager.todaysDistance
+    }
+    
     private var progress: Double {
-        min(currentState.distance / currentState.goal, 1.0)
+        min(currentDistance / goalDistance, 1.0)
+    }
+    
+    private var isCompleted: Bool {
+        currentDistance >= goalDistance
+    }
+    
+    private var currentStreak: Int {
+        healthManager.retroactiveStreak
     }
 
     var body: some View {
@@ -19,7 +31,7 @@ struct ContentView: View {
             VStack(spacing: 16) {
                 // Streak display
                 VStack(spacing: 4) {
-                    Text("\(healthManager.currentStreak)")
+                    Text("\(currentStreak)")
                         .font(.system(size: 48, weight: .bold, design: .rounded))
                         .foregroundColor(.orange)
 
@@ -56,7 +68,7 @@ struct ContentView: View {
                             .animation(.easeOut(duration: 0.5), value: progress)
 
                         VStack(spacing: 2) {
-                            Text(String(format: "%.2f", currentState.distance))
+                            Text(String(format: "%.2f", currentDistance))
                                 .font(.system(size: 24, weight: .bold, design: .rounded))
                             Text("miles")
                                 .font(.caption2)
@@ -65,12 +77,12 @@ struct ContentView: View {
                     }
 
                     // Goal text
-                    Text("Goal: \(String(format: "%.1f", currentState.goal)) mi")
+                    Text("Goal: \(String(format: "%.1f", goalDistance)) mi")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
                     // Completion status
-                    if currentState.isCompleted {
+                    if isCompleted {
                         HStack(spacing: 4) {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
@@ -107,21 +119,19 @@ struct ContentView: View {
             WorkoutView(
                 healthManager: healthManager,
                 userManager: userManager,
-                goalDistance: currentState.goal,
-                startingDistance: currentState.distance
+                goalDistance: goalDistance,
+                startingDistance: currentDistance
             )
         }
         .onAppear {
             // Refresh data when view appears
-            healthManager.fetchLatestWorkoutData()
+            healthManager.fetchTodaysDistance()
         }
     }
 }
 
-struct ContentView_Previews: PreviewProvider {
-    static var previews: some View {
-        ContentView()
-            .environmentObject(HealthKitManager.shared)
-            .environmentObject(UserManager.shared)
-    }
+#Preview {
+    ContentView()
+        .environmentObject(HealthKitManager.shared)
+        .environmentObject(UserManager.shared)
 }

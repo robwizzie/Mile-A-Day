@@ -2,6 +2,10 @@ import Foundation
 import SwiftUI
 
 class UserManager: ObservableObject {
+    #if os(watchOS)
+    static let shared = UserManager()
+    #endif
+    
     @Published var currentUser: User
     @Published var friends: [User] = []
     @Published var authToken: String?
@@ -25,9 +29,11 @@ class UserManager: ObservableObject {
         self.authToken = userDefaults.string(forKey: authTokenKey)
         
         // Initialize widget data store with current values
+        #if !os(watchOS)
         let currentMiles = WidgetDataStore.load().miles
         WidgetDataStore.save(todayMiles: currentMiles, goal: currentUser.goalMiles)
         WidgetDataStore.save(streak: currentUser.streak)
+        #endif
         
         // Load friends
         if let friendsData = userDefaults.data(forKey: friendsKey),
@@ -70,10 +76,13 @@ class UserManager: ObservableObject {
         }
         
         // Push streak to widget store
+        #if !os(watchOS)
         WidgetDataStore.save(streak: currentUser.streak)
+        #endif
     }
     
     // Handle Apple Sign In completion
+    #if !os(watchOS)
     func handleAppleSignIn(profile: AppleSignInManager.AppleUserProfile, backendResponse: AppleSignInManager.BackendAuthResponse) {
         // Update current user with Apple data
         currentUser.appleId = profile.id
@@ -103,8 +112,10 @@ class UserManager: ObservableObject {
         // Save all data
         saveUserData()
     }
+    #endif
     
     // Save Apple profile image
+    #if !os(watchOS)
     private func saveAppleProfileImage(_ image: UIImage) {
         if let data = image.jpegData(compressionQuality: 0.8) {
             UserDefaults.standard.set(data, forKey: "appleProfileImage")
@@ -119,6 +130,7 @@ class UserManager: ObservableObject {
         }
         return nil
     }
+    #endif
     
     // Sign out
     func signOut() {
@@ -171,11 +183,15 @@ class UserManager: ObservableObject {
         currentUser.goalMiles = miles
         
         // Update widget data with new goal
+        #if !os(watchOS)
         let currentData = WidgetDataStore.load()
         WidgetDataStore.save(todayMiles: currentData.miles, goal: miles)
         saveUserData()
         let currentMiles = WidgetDataStore.load().miles
         WidgetDataStore.save(todayMiles: currentMiles, goal: miles)
+        #else
+        saveUserData()
+        #endif
     }
     
     // Get users sorted by streak (for leaderboard)

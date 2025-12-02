@@ -7,12 +7,34 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B20E1DE42ED544C00041BC19 /* Mile A Day Watch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = B20E1DC42ED544BB0041BC19 /* Mile A Day Watch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B218EEE52DFCD67F00E19230 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B218EEE42DFCD67F00E19230 /* WidgetKit.framework */; };
 		B218EEE72DFCD67F00E19230 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B218EEE62DFCD67F00E19230 /* SwiftUI.framework */; };
 		B218EEF82DFCD68300E19230 /* MileADayWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B218EEE22DFCD67F00E19230 /* MileADayWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		B20E1DD12ED544BF0041BC19 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B22046132DF51E9A006ECF83 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B20E1DC32ED544BB0041BC19;
+			remoteInfo = "Mile A Day Watch Watch App";
+		};
+		B20E1DDB2ED544C00041BC19 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B22046132DF51E9A006ECF83 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B20E1DC32ED544BB0041BC19;
+			remoteInfo = "Mile A Day Watch Watch App";
+		};
+		B20E1DE22ED544C00041BC19 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B22046132DF51E9A006ECF83 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B20E1DC32ED544BB0041BC19;
+			remoteInfo = "Mile A Day Watch Watch App";
+		};
 		B218EEF62DFCD68300E19230 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = B22046132DF51E9A006ECF83 /* Project object */;
@@ -37,6 +59,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		B20E1DE52ED544C00041BC19 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				B20E1DE42ED544C00041BC19 /* Mile A Day Watch Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B218EEFD2DFCD68300E19230 /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -51,6 +84,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		B20E1DC42ED544BB0041BC19 /* Mile A Day Watch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Mile A Day Watch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20E1DD02ED544BF0041BC19 /* Mile A Day Watch Watch AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Mile A Day Watch Watch AppTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		B20E1DDA2ED544C00041BC19 /* Mile A Day Watch Watch AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Mile A Day Watch Watch AppUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B218EEE22DFCD67F00E19230 /* MileADayWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MileADayWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B218EEE42DFCD67F00E19230 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		B218EEE62DFCD67F00E19230 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
@@ -61,6 +97,22 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		B20E1DFF2ED545870041BC19 /* Exceptions for "Mile A Day" folder in "Mile A Day Watch Watch App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Models/AppPreferences.swift,
+				Models/BackendUser.swift,
+				Models/CustomShareCard.swift,
+				Models/HealthKitManager.swift,
+				Models/NotificationManager.swift,
+				Models/NotificationPreferences.swift,
+				Models/User.swift,
+				Models/UserManager.swift,
+				Models/WorkoutIndex.swift,
+				Models/WorkoutProcessor.swift,
+			);
+			target = B20E1DC32ED544BB0041BC19 /* Mile A Day Watch Watch App */;
+		};
 		B218EEF92DFCD68300E19230 /* Exceptions for "MileADayWidgets" folder in "MileADayWidgetsExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -89,6 +141,21 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		B20E1DC52ED544BB0041BC19 /* Mile A Day Watch Watch App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Mile A Day Watch Watch App";
+			sourceTree = "<group>";
+		};
+		B20E1DD32ED544BF0041BC19 /* Mile A Day Watch Watch AppTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Mile A Day Watch Watch AppTests";
+			sourceTree = "<group>";
+		};
+		B20E1DDD2ED544C00041BC19 /* Mile A Day Watch Watch AppUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Mile A Day Watch Watch AppUITests";
+			sourceTree = "<group>";
+		};
 		B218EEE82DFCD67F00E19230 /* MileADayWidgets */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -102,6 +169,7 @@
 			exceptions = (
 				B218EF022DFCD6B000E19230 /* Exceptions for "Mile A Day" folder in "Mile A Day" target */,
 				B218EF012DFCD6AF00E19230 /* Exceptions for "Mile A Day" folder in "MileADayWidgetsExtension" target */,
+				B20E1DFF2ED545870041BC19 /* Exceptions for "Mile A Day" folder in "Mile A Day Watch Watch App" target */,
 			);
 			path = "Mile A Day";
 			sourceTree = "<group>";
@@ -119,6 +187,27 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		B20E1DC12ED544BB0041BC19 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B20E1DCD2ED544BF0041BC19 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B20E1DD72ED544BF0041BC19 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B218EEDF2DFCD67F00E19230 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -169,6 +258,9 @@
 				B220462B2DF51EA9006ECF83 /* Mile A DayTests */,
 				B22046352DF51EA9006ECF83 /* Mile A DayUITests */,
 				B218EEE82DFCD67F00E19230 /* MileADayWidgets */,
+				B20E1DC52ED544BB0041BC19 /* Mile A Day Watch Watch App */,
+				B20E1DD32ED544BF0041BC19 /* Mile A Day Watch Watch AppTests */,
+				B20E1DDD2ED544C00041BC19 /* Mile A Day Watch Watch AppUITests */,
 				B218EEE32DFCD67F00E19230 /* Frameworks */,
 				B220461C2DF51E9A006ECF83 /* Products */,
 			);
@@ -181,6 +273,9 @@
 				B22046282DF51EA9006ECF83 /* Mile A DayTests.xctest */,
 				B22046322DF51EA9006ECF83 /* Mile A DayUITests.xctest */,
 				B218EEE22DFCD67F00E19230 /* MileADayWidgetsExtension.appex */,
+				B20E1DC42ED544BB0041BC19 /* Mile A Day Watch Watch App.app */,
+				B20E1DD02ED544BF0041BC19 /* Mile A Day Watch Watch AppTests.xctest */,
+				B20E1DDA2ED544C00041BC19 /* Mile A Day Watch Watch AppUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -188,6 +283,74 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		B20E1DC32ED544BB0041BC19 /* Mile A Day Watch Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B20E1DEC2ED544C00041BC19 /* Build configuration list for PBXNativeTarget "Mile A Day Watch Watch App" */;
+			buildPhases = (
+				B20E1DC02ED544BB0041BC19 /* Sources */,
+				B20E1DC12ED544BB0041BC19 /* Frameworks */,
+				B20E1DC22ED544BB0041BC19 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				B20E1DC52ED544BB0041BC19 /* Mile A Day Watch Watch App */,
+			);
+			name = "Mile A Day Watch Watch App";
+			packageProductDependencies = (
+			);
+			productName = "Mile A Day Watch Watch App";
+			productReference = B20E1DC42ED544BB0041BC19 /* Mile A Day Watch Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B20E1DCF2ED544BF0041BC19 /* Mile A Day Watch Watch AppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B20E1DED2ED544C00041BC19 /* Build configuration list for PBXNativeTarget "Mile A Day Watch Watch AppTests" */;
+			buildPhases = (
+				B20E1DCC2ED544BF0041BC19 /* Sources */,
+				B20E1DCD2ED544BF0041BC19 /* Frameworks */,
+				B20E1DCE2ED544BF0041BC19 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B20E1DD22ED544BF0041BC19 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B20E1DD32ED544BF0041BC19 /* Mile A Day Watch Watch AppTests */,
+			);
+			name = "Mile A Day Watch Watch AppTests";
+			packageProductDependencies = (
+			);
+			productName = "Mile A Day Watch Watch AppTests";
+			productReference = B20E1DD02ED544BF0041BC19 /* Mile A Day Watch Watch AppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		B20E1DD92ED544BF0041BC19 /* Mile A Day Watch Watch AppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B20E1DEE2ED544C00041BC19 /* Build configuration list for PBXNativeTarget "Mile A Day Watch Watch AppUITests" */;
+			buildPhases = (
+				B20E1DD62ED544BF0041BC19 /* Sources */,
+				B20E1DD72ED544BF0041BC19 /* Frameworks */,
+				B20E1DD82ED544BF0041BC19 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B20E1DDC2ED544C00041BC19 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B20E1DDD2ED544C00041BC19 /* Mile A Day Watch Watch AppUITests */,
+			);
+			name = "Mile A Day Watch Watch AppUITests";
+			packageProductDependencies = (
+			);
+			productName = "Mile A Day Watch Watch AppUITests";
+			productReference = B20E1DDA2ED544C00041BC19 /* Mile A Day Watch Watch AppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		B218EEE12DFCD67F00E19230 /* MileADayWidgetsExtension */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = B218EEFA2DFCD68300E19230 /* Build configuration list for PBXNativeTarget "MileADayWidgetsExtension" */;
@@ -218,11 +381,13 @@
 				B22046182DF51E9A006ECF83 /* Frameworks */,
 				B22046192DF51E9A006ECF83 /* Resources */,
 				B218EEFD2DFCD68300E19230 /* Embed Foundation Extensions */,
+				B20E1DE52ED544C00041BC19 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				B218EEF72DFCD68300E19230 /* PBXTargetDependency */,
+				B20E1DE32ED544C00041BC19 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				B220461D2DF51E9A006ECF83 /* Mile A Day */,
@@ -290,6 +455,17 @@
 				LastSwiftUpdateCheck = 1640;
 				LastUpgradeCheck = 1640;
 				TargetAttributes = {
+					B20E1DC32ED544BB0041BC19 = {
+						CreatedOnToolsVersion = 16.4;
+					};
+					B20E1DCF2ED544BF0041BC19 = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = B20E1DC32ED544BB0041BC19;
+					};
+					B20E1DD92ED544BF0041BC19 = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = B20E1DC32ED544BB0041BC19;
+					};
 					B218EEE12DFCD67F00E19230 = {
 						CreatedOnToolsVersion = 16.4;
 					};
@@ -324,11 +500,35 @@
 				B22046272DF51EA9006ECF83 /* Mile A DayTests */,
 				B22046312DF51EA9006ECF83 /* Mile A DayUITests */,
 				B218EEE12DFCD67F00E19230 /* MileADayWidgetsExtension */,
+				B20E1DC32ED544BB0041BC19 /* Mile A Day Watch Watch App */,
+				B20E1DCF2ED544BF0041BC19 /* Mile A Day Watch Watch AppTests */,
+				B20E1DD92ED544BF0041BC19 /* Mile A Day Watch Watch AppUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		B20E1DC22ED544BB0041BC19 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B20E1DCE2ED544BF0041BC19 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B20E1DD82ED544BF0041BC19 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B218EEE02DFCD67F00E19230 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -360,6 +560,27 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		B20E1DC02ED544BB0041BC19 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B20E1DCC2ED544BF0041BC19 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B20E1DD62ED544BF0041BC19 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B218EEDE2DFCD67F00E19230 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -391,6 +612,21 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		B20E1DD22ED544BF0041BC19 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B20E1DC32ED544BB0041BC19 /* Mile A Day Watch Watch App */;
+			targetProxy = B20E1DD12ED544BF0041BC19 /* PBXContainerItemProxy */;
+		};
+		B20E1DDC2ED544C00041BC19 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B20E1DC32ED544BB0041BC19 /* Mile A Day Watch Watch App */;
+			targetProxy = B20E1DDB2ED544C00041BC19 /* PBXContainerItemProxy */;
+		};
+		B20E1DE32ED544C00041BC19 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B20E1DC32ED544BB0041BC19 /* Mile A Day Watch Watch App */;
+			targetProxy = B20E1DE22ED544C00041BC19 /* PBXContainerItemProxy */;
+		};
 		B218EEF72DFCD68300E19230 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = B218EEE12DFCD67F00E19230 /* MileADayWidgetsExtension */;
@@ -409,6 +645,154 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		B20E1DE62ED544C00041BC19 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Mile A Day Watch Watch App/Mile A Day Watch Watch App.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NS237SS5KD;
+			ENABLE_PREVIEWS = YES;
+			GENERATE_INFOPLIST_FILE = YES;
+			INFOPLIST_FILE = "Mile-A-Day-Watch-Watch-App-Info.plist";
+			INFOPLIST_KEY_CFBundleDisplayName = "Mile A Day Watch";
+			INFOPLIST_KEY_NSHealthShareUsageDescription = "Mile A Day needs access to your Health data to track your running distance and workouts on your Apple Watch.";
+			INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Mile A Day needs access to your Health data to save your workouts to Apple Health.";
+			INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Mile A Day needs access to your location to accurately track distance during outdoor workouts.";
+			INFOPLIST_KEY_NSMotionUsageDescription = "Mile A Day needs access to your motion data to track distance during indoor workouts.";
+			INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+			INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "org.robertwiscount.Mile-A-Day";
+			LD_RUNPATH_SEARCH_PATHS = (
+				"$(inherited)",
+				"@executable_path/Frameworks",
+			);
+			MARKETING_VERSION = 1.0;
+			PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.watchkitapp";
+			PRODUCT_NAME = "$(TARGET_NAME)";
+			SDKROOT = watchos;
+			SKIP_INSTALL = YES;
+			SWIFT_EMIT_LOC_STRINGS = YES;
+			SWIFT_VERSION = 5.0;
+			TARGETED_DEVICE_FAMILY = 4;
+			WATCHOS_DEPLOYMENT_TARGET = 10.6;
+		};
+		name = Debug;
+		};
+		B20E1DE72ED544C00041BC19 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Mile A Day Watch Watch App/Mile A Day Watch Watch App.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NS237SS5KD;
+			ENABLE_PREVIEWS = YES;
+			GENERATE_INFOPLIST_FILE = YES;
+			INFOPLIST_FILE = "Mile-A-Day-Watch-Watch-App-Info.plist";
+			INFOPLIST_KEY_CFBundleDisplayName = "Mile A Day Watch";
+			INFOPLIST_KEY_NSHealthShareUsageDescription = "Mile A Day needs access to your Health data to track your running distance and workouts on your Apple Watch.";
+			INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Mile A Day needs access to your Health data to save your workouts to Apple Health.";
+			INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Mile A Day needs access to your location to accurately track distance during outdoor workouts.";
+			INFOPLIST_KEY_NSMotionUsageDescription = "Mile A Day needs access to your motion data to track distance during indoor workouts.";
+			INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+			INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "org.robertwiscount.Mile-A-Day";
+			LD_RUNPATH_SEARCH_PATHS = (
+				"$(inherited)",
+				"@executable_path/Frameworks",
+			);
+			MARKETING_VERSION = 1.0;
+			PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.watchkitapp";
+			PRODUCT_NAME = "$(TARGET_NAME)";
+			SDKROOT = watchos;
+			SKIP_INSTALL = YES;
+			SWIFT_EMIT_LOC_STRINGS = YES;
+			SWIFT_VERSION = 5.0;
+			TARGETED_DEVICE_FAMILY = 4;
+			WATCHOS_DEPLOYMENT_TARGET = 10.6;
+		};
+		name = Release;
+		};
+		B20E1DE82ED544C00041BC19 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NS237SS5KD;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day-Watch-Watch-AppTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Mile A Day Watch Watch App.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Mile A Day Watch Watch App";
+				WATCHOS_DEPLOYMENT_TARGET = 11.5;
+			};
+			name = Debug;
+		};
+		B20E1DE92ED544C00041BC19 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NS237SS5KD;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day-Watch-Watch-AppTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Mile A Day Watch Watch App.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Mile A Day Watch Watch App";
+				WATCHOS_DEPLOYMENT_TARGET = 11.5;
+			};
+			name = Release;
+		};
+		B20E1DEA2ED544C00041BC19 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NS237SS5KD;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day-Watch-Watch-AppUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_TARGET_NAME = "Mile A Day Watch Watch App";
+				WATCHOS_DEPLOYMENT_TARGET = 11.5;
+			};
+			name = Debug;
+		};
+		B20E1DEB2ED544C00041BC19 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = NS237SS5KD;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day-Watch-Watch-AppUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_TARGET_NAME = "Mile A Day Watch Watch App";
+				WATCHOS_DEPLOYMENT_TARGET = 11.5;
+			};
+			name = Release;
+		};
 		B218EEFB2DFCD68300E19230 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -721,6 +1105,33 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		B20E1DEC2ED544C00041BC19 /* Build configuration list for PBXNativeTarget "Mile A Day Watch Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B20E1DE62ED544C00041BC19 /* Debug */,
+				B20E1DE72ED544C00041BC19 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B20E1DED2ED544C00041BC19 /* Build configuration list for PBXNativeTarget "Mile A Day Watch Watch AppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B20E1DE82ED544C00041BC19 /* Debug */,
+				B20E1DE92ED544C00041BC19 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B20E1DEE2ED544C00041BC19 /* Build configuration list for PBXNativeTarget "Mile A Day Watch Watch AppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B20E1DEA2ED544C00041BC19 /* Debug */,
+				B20E1DEB2ED544C00041BC19 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		B218EEFA2DFCD68300E19230 /* Build configuration list for PBXNativeTarget "MileADayWidgetsExtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

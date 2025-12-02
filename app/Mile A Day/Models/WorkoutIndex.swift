@@ -100,8 +100,51 @@ struct WorkoutIndex: Codable {
         formatter.timeZone = TimeZone.current
         return formatter.date(from: key)
     }
+    
+    // MARK: - Index Persistence
+    
+    private static let indexKey = "com.mileaday.workoutIndex.v1"
+    
+    /// Save index to persistent storage
+    func save() {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        
+        do {
+            let data = try encoder.encode(self)
+            UserDefaults.standard.set(data, forKey: Self.indexKey)
+            workoutIndexLog("[WorkoutIndex] ✅ Saved index: \(totalWorkouts) workouts, \(currentStreak) day streak")
+        } catch {
+            workoutIndexLog("[WorkoutIndex] ❌ Failed to save index: \(error)")
+        }
+    }
+    
+    /// Load index from persistent storage
+    static func load() -> WorkoutIndex? {
+        guard let data = UserDefaults.standard.data(forKey: indexKey) else {
+            workoutIndexLog("[WorkoutIndex] No cached index found")
+            return nil
+        }
+        
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        
+        do {
+            let index = try decoder.decode(WorkoutIndex.self, from: data)
+            workoutIndexLog("[WorkoutIndex] ✅ Loaded index: \(index.totalWorkouts) workouts, \(index.currentStreak) day streak")
+            return index
+        } catch {
+            workoutIndexLog("[WorkoutIndex] ❌ Failed to load index: \(error)")
+            return nil
+        }
+    }
+    
+    /// Clear the cached index (for testing/reset)
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: indexKey)
+        workoutIndexLog("[WorkoutIndex] 🗑️ Cleared cached index")
+    }
 }
-#endif
 
 /// Lightweight workout record with pre-computed timezone correction
 struct WorkoutRecord: Codable, Identifiable {
@@ -186,50 +229,5 @@ struct WorkoutRecord: Codable, Identifiable {
         return distance >= 0.95
     }
 }
-
-// MARK: - Index Persistence
-
-extension WorkoutIndex {
-    private static let indexKey = "com.mileaday.workoutIndex.v1"
-    
-    /// Save index to persistent storage
-    func save() {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        
-        do {
-            let data = try encoder.encode(self)
-            UserDefaults.standard.set(data, forKey: Self.indexKey)
-            workoutIndexLog("[WorkoutIndex] ✅ Saved index: \(totalWorkouts) workouts, \(currentStreak) day streak")
-        } catch {
-            workoutIndexLog("[WorkoutIndex] ❌ Failed to save index: \(error)")
-        }
-    }
-    
-    /// Load index from persistent storage
-    static func load() -> WorkoutIndex? {
-        guard let data = UserDefaults.standard.data(forKey: indexKey) else {
-            workoutIndexLog("[WorkoutIndex] No cached index found")
-            return nil
-        }
-        
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        
-        do {
-            let index = try decoder.decode(WorkoutIndex.self, from: data)
-            workoutIndexLog("[WorkoutIndex] ✅ Loaded index: \(index.totalWorkouts) workouts, \(index.currentStreak) day streak")
-            return index
-        } catch {
-            workoutIndexLog("[WorkoutIndex] ❌ Failed to load index: \(error)")
-            return nil
-        }
-    }
-    
-    /// Clear the cached index (for testing/reset)
-    static func clear() {
-        UserDefaults.standard.removeObject(forKey: indexKey)
-        workoutIndexLog("[WorkoutIndex] 🗑️ Cleared cached index")
-    }
-}
+#endif
 
