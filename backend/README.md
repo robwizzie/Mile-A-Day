@@ -27,6 +27,7 @@
     -   **[Create Competition](#create-competition)**
     -   **[Get All Competitions](#get-all-competitions)**
     -   **[Get Competition](#get-competition)**
+    -   **[Update Competition](#update-competition)**
     -   **[Get Competition Invites](#get-competition-invites)**
     -   **[Invite Users to Competition](#invite-users-to-competition)**
     -   **[Accept Competition Invite](#accept-competition-invite)**
@@ -1311,6 +1312,109 @@ Retrieves details for a specific competition.
 > ```bash
 > curl --location 'https://mad.mindgoblin.tech/competitions/comp_abc123' \
 > --header 'Authorization: Bearer <your_jwt_token>'
+> ```
+
+</details>
+
+<br/><br/>
+
+<a name="update-competition"></a>
+
+### Update Competition
+
+**PATCH** `/competitions/{competitionId}`
+
+Updates a competition. Only fields included in the request will be updated. For options, the new values are merged with existing options, so you only need to include the option fields you want to change. Only the competition owner can update it.
+
+#### Parameters
+
+| Name          | Type           | Description               | Required |
+| :------------ | :------------- | :------------------------ | :------: |
+| competitionId | Path Parameter | The ID of the competition |    ✅    |
+
+#### Request Body (All Optional)
+
+| Field            | Type     | Description                                                    | Required |
+| :--------------- | :------- | :------------------------------------------------------------- | :------: |
+| competition_name | String   | Name of the competition                                        |    ✖️    |
+| type             | String   | Competition type: "streaks", "apex", "clash", "targets", "race"|    ✖️    |
+| start_date       | String   | Start date (YYYY-MM-DD)                                        |    ✖️    |
+| end_date         | String   | End date (YYYY-MM-DD)                                          |    ✖️    |
+| workouts         | String[] | Allowed workout types: ["run", "walk"]                         |    ✖️    |
+| options          | Object   | Competition options to merge with existing options            |    ✖️    |
+
+#### Options Object (Partial Update)
+
+Any of the following fields can be included. Only specified fields will be updated:
+
+| Field    | Type    | Description                              |
+| :------- | :------ | :--------------------------------------- |
+| goal     | Number  | Goal value for the competition           |
+| unit     | String  | Unit of measurement: "miles" or "steps"  |
+| first_to | Number  | Number of wins needed (for some types)   |
+| history  | Boolean | Whether to include historical data       |
+| interval | String  | Time interval: "day", "week", or "month" |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **PATCH** `/competitions/comp_abc123`
+>
+> ##### Example Body (Update Name and Goal Only)
+>
+> ```json
+> {
+>     "competition_name": "Updated Summer Challenge",
+>     "options": {
+>         "goal": 2
+>     }
+> }
+> ```
+>
+> ##### Example Response
+>
+> ```json
+> {
+>     "competition": {
+>         "competition_id": "comp_abc123",
+>         "competition_name": "Updated Summer Challenge",
+>         "start_date": "2025-06-01",
+>         "end_date": "2025-08-31",
+>         "workouts": ["run"],
+>         "type": "streaks",
+>         "options": {
+>             "goal": 2,
+>             "unit": "miles",
+>             "first_to": 5,
+>             "history": false,
+>             "interval": "day"
+>         },
+>         "owner": "peter",
+>         "users": [
+>             {
+>                 "competition_id": "comp_abc123",
+>                 "user_id": "peter",
+>                 "invite_status": "accepted"
+>             }
+>         ]
+>     }
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location --request PATCH 'https://mad.mindgoblin.tech/competitions/comp_abc123' \
+> --header 'Content-Type: application/json' \
+> --header 'Authorization: Bearer <your_jwt_token>' \
+> --data '{
+>     "competition_name": "Updated Summer Challenge",
+>     "options": {
+>         "goal": 2
+>     }
+> }'
 > ```
 
 </details>
