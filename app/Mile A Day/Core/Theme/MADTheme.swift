@@ -10,7 +10,10 @@ struct MADTheme {
         static let madRed = Color(red: 0.85, green: 0.25, blue: 0.35) // Deep red from logo
         static let madBlack = Color(red: 0.1, green: 0.1, blue: 0.1) // Rich black
         static let madWhite = Color.white
-        
+
+        // Aliases for consistency
+        static let primary = madRed
+
         // Gradient variations for visual interest
         static let redGradient = LinearGradient(
             colors: [
@@ -20,7 +23,9 @@ struct MADTheme {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
-        
+
+        static let primaryGradient = redGradient
+
         static let blackGradient = LinearGradient(
             colors: [
                 Color(red: 0.15, green: 0.15, blue: 0.15),
