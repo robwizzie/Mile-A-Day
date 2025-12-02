@@ -365,14 +365,6 @@ class CompetitionService: ObservableObject {
     }
 }
 
-// MARK: - HTTP Methods
-enum HTTPMethod: String {
-    case GET = "GET"
-    case POST = "POST"
-    case PATCH = "PATCH"
-    case DELETE = "DELETE"
-}
-
 // MARK: - Error Types
 enum CompetitionServiceError: LocalizedError {
     case invalidURL

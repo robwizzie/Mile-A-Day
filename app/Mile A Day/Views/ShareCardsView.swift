@@ -347,7 +347,7 @@ struct EnhancedShareView: View {
                                                 VStack(spacing: 6) {
                                                     Image(systemName: "square.fill")
                                                         .font(.title3)
-                                                        .foregroundColor(Color(hex: card.accentColor) ?? .pink)
+                                                        .foregroundColor(Color(hex: card.accentColor))
                                                     
                                                     Text(card.name)
                                                         .font(.caption)
@@ -1476,7 +1476,7 @@ struct CustomShareCardView: View {
     }
     
     private var accentColor: Color {
-        Color(hex: config.accentColor) ?? .pink
+        Color(hex: config.accentColor)
     }
     
     var body: some View {

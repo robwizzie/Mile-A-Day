@@ -654,31 +654,31 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = NS237SS5KD;
-			ENABLE_PREVIEWS = YES;
-			GENERATE_INFOPLIST_FILE = YES;
-			INFOPLIST_FILE = "Mile-A-Day-Watch-Watch-App-Info.plist";
-			INFOPLIST_KEY_CFBundleDisplayName = "Mile A Day Watch";
-			INFOPLIST_KEY_NSHealthShareUsageDescription = "Mile A Day needs access to your Health data to track your running distance and workouts on your Apple Watch.";
-			INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Mile A Day needs access to your Health data to save your workouts to Apple Health.";
-			INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Mile A Day needs access to your location to accurately track distance during outdoor workouts.";
-			INFOPLIST_KEY_NSMotionUsageDescription = "Mile A Day needs access to your motion data to track distance during indoor workouts.";
-			INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-			INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "org.robertwiscount.Mile-A-Day";
-			LD_RUNPATH_SEARCH_PATHS = (
-				"$(inherited)",
-				"@executable_path/Frameworks",
-			);
-			MARKETING_VERSION = 1.0;
-			PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.watchkitapp";
-			PRODUCT_NAME = "$(TARGET_NAME)";
-			SDKROOT = watchos;
-			SKIP_INSTALL = YES;
-			SWIFT_EMIT_LOC_STRINGS = YES;
-			SWIFT_VERSION = 5.0;
-			TARGETED_DEVICE_FAMILY = 4;
-			WATCHOS_DEPLOYMENT_TARGET = 10.6;
-		};
-		name = Debug;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Mile-A-Day-Watch-Watch-App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Mile A Day Watch";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Mile A Day needs access to your Health data to track your running distance and workouts on your Apple Watch.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Mile A Day needs access to your Health data to save your workouts to Apple Health.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Mile A Day needs access to your location to accurately track distance during outdoor workouts.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Mile A Day needs access to your motion data to track distance during indoor workouts.";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "org.robertwiscount.Mile-A-Day";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.watchkitapp";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.6;
+			};
+			name = Debug;
 		};
 		B20E1DE72ED544C00041BC19 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -689,31 +689,31 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = NS237SS5KD;
-			ENABLE_PREVIEWS = YES;
-			GENERATE_INFOPLIST_FILE = YES;
-			INFOPLIST_FILE = "Mile-A-Day-Watch-Watch-App-Info.plist";
-			INFOPLIST_KEY_CFBundleDisplayName = "Mile A Day Watch";
-			INFOPLIST_KEY_NSHealthShareUsageDescription = "Mile A Day needs access to your Health data to track your running distance and workouts on your Apple Watch.";
-			INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Mile A Day needs access to your Health data to save your workouts to Apple Health.";
-			INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Mile A Day needs access to your location to accurately track distance during outdoor workouts.";
-			INFOPLIST_KEY_NSMotionUsageDescription = "Mile A Day needs access to your motion data to track distance during indoor workouts.";
-			INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-			INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "org.robertwiscount.Mile-A-Day";
-			LD_RUNPATH_SEARCH_PATHS = (
-				"$(inherited)",
-				"@executable_path/Frameworks",
-			);
-			MARKETING_VERSION = 1.0;
-			PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.watchkitapp";
-			PRODUCT_NAME = "$(TARGET_NAME)";
-			SDKROOT = watchos;
-			SKIP_INSTALL = YES;
-			SWIFT_EMIT_LOC_STRINGS = YES;
-			SWIFT_VERSION = 5.0;
-			TARGETED_DEVICE_FAMILY = 4;
-			WATCHOS_DEPLOYMENT_TARGET = 10.6;
-		};
-		name = Release;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "Mile-A-Day-Watch-Watch-App-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Mile A Day Watch";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Mile A Day needs access to your Health data to track your running distance and workouts on your Apple Watch.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Mile A Day needs access to your Health data to save your workouts to Apple Health.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Mile A Day needs access to your location to accurately track distance during outdoor workouts.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "Mile A Day needs access to your motion data to track distance during indoor workouts.";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "org.robertwiscount.Mile-A-Day";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "org.robertwiscount.Mile-A-Day.watchkitapp";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 10.6;
+			};
+			name = Release;
 		};
 		B20E1DE82ED544C00041BC19 /* Debug */ = {
 			isa = XCBuildConfiguration;

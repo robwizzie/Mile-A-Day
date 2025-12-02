@@ -442,14 +442,6 @@ class FriendService: ObservableObject {
     }
 }
 
-// MARK: - HTTP Methods
-enum HTTPMethod: String {
-    case GET = "GET"
-    case POST = "POST"
-    case PATCH = "PATCH"
-    case DELETE = "DELETE"
-}
-
 // MARK: - Friend Workout Models
 
 /// Workout data for a friend

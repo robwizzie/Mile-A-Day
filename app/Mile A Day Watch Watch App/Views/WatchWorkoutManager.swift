@@ -175,6 +175,8 @@ extension WatchWorkoutManager: HKWorkoutSessionDelegate {
     func workoutSession(_ workoutSession: HKWorkoutSession, didChangeTo toState: HKWorkoutSessionState, from fromState: HKWorkoutSessionState, date: Date) {
         DispatchQueue.main.async {
             switch toState {
+            case .notStarted:
+                print("Workout session not started")
             case .running:
                 print("Workout session running")
             case .ended:
