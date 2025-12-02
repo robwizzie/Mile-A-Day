@@ -7,7 +7,8 @@ import {
 	getCompetition,
 	getCompetitions,
 	sendCompetitionInvite,
-	updateCompetitionInvite
+	updateCompetitionInvite,
+	updateCompetition
 } from '../services/competitionService.js';
 import { getUser } from '../services/userService.js';
 
@@ -117,6 +118,47 @@ export async function getCompInvites(req: AuthenticatedRequest, res: Response) {
 		});
 		res.status(200).json({ competitionInvites: competitions });
 	} catch (error: any) {
+		res.status(500).json({ error: error.message });
+	}
+}
+
+export async function updateComp(req: AuthenticatedRequest, res: Response) {
+	if (!hasRequiredKeys(['competitionId'], req, res)) return;
+
+	const { competition_name, start_date, end_date, workouts, type, options } = req.body;
+	const competitionId = req.params.competitionId;
+
+	try {
+		const existingCompetition = await getCompetition(competitionId);
+
+		if (!existingCompetition) {
+			return res.status(404).json({ error: `No competition found with id: ${competitionId}` });
+		}
+
+		if (existingCompetition.owner !== req.userId!) {
+			return res.status(403).json({ error: 'Only the competition owner can update it' });
+		}
+
+		if (existingCompetition.start_date && new Date(existingCompetition.start_date) <= new Date()) {
+			return res.status(400).json({ error: 'Cannot update a competition that has already started' });
+		}
+
+		const updatedCompetition = await updateCompetition({
+			competitionId,
+			competition_name,
+			start_date,
+			end_date,
+			workouts,
+			type,
+			options
+		});
+
+		res.status(200).json({ competition: updatedCompetition });
+	} catch (error: any) {
+		if (error instanceof BadRequestError) {
+			return res.status(400).json({ error: error.message });
+		}
+
 		res.status(500).json({ error: error.message });
 	}
 }

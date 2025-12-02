@@ -6,7 +6,8 @@ import {
 	getAllComps,
 	inviteUsersToComp,
 	getCompInvites,
-	getCompInviteHandler
+	getCompInviteHandler,
+	updateComp
 } from '../controllers/competitionController.js';
 
 const router = Router();
@@ -15,6 +16,7 @@ router.post('/', createComp);
 router.get('/', getAllComps);
 router.get('/invites', getCompInvites);
 router.get('/:competitionId', getComp);
+router.patch('/:competitionId', updateComp);
 router.post('/:competitionId/start', startComp);
 router.post('/:competitionId/invite', inviteUsersToComp);
 router.post('/:competitionId/accept', getCompInviteHandler('accepted'));

@@ -171,6 +171,70 @@ export async function updateCompetitionInvite(
 	return updatedUserStatus;
 }
 
+interface UpdateCompetitionParams {
+	competitionId: string;
+	competition_name?: string;
+	start_date?: string;
+	end_date?: string;
+	workouts?: CompetitionActivity[];
+	type?: CompetitionType;
+	options?: Partial<CompetitionOptions>;
+}
+
+export async function updateCompetition(params: UpdateCompetitionParams): Promise<Competition> {
+	const { competitionId, options, ...updateFields } = params;
+
+	const existingCompetition = await getCompetition(competitionId);
+
+	if (!existingCompetition) {
+		throw new BadRequestError(`Competition with id ${competitionId} not found`);
+	}
+
+	const updates: string[] = [];
+	const values: any[] = [];
+	let paramIndex = 1;
+
+	for (const [key, value] of Object.entries(updateFields)) {
+		if (value !== undefined) {
+			if (key === 'workouts' || options) {
+				updates.push(`${key} = $${paramIndex}`);
+				values.push(JSON.stringify(value));
+			} else {
+				updates.push(`${key} = $${paramIndex}`);
+				values.push(value);
+			}
+			paramIndex++;
+		}
+	}
+
+	if (options && Object.keys(options).length > 0) {
+		const mergedOptions = {
+			...existingCompetition.options,
+			...options
+		};
+		updates.push(`options = $${paramIndex}`);
+		values.push(JSON.stringify(mergedOptions));
+		paramIndex++;
+	}
+
+	if (updates.length === 0) {
+		return existingCompetition;
+	}
+
+	values.push(competitionId);
+
+	const query = `
+		UPDATE competitions
+		SET ${updates.join(', ')}
+		WHERE id = $${paramIndex}
+		RETURNING *
+	`;
+
+	const [updatedCompetition] = await db.query(query, values);
+
+	return getCompetition(updatedCompetition.id);
+}
+
 // TODO: you can only invite friends to competitions
 
 // TODO: order get competitions by start/end dates
