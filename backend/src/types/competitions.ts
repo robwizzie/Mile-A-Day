@@ -1,4 +1,4 @@
-export type CompetitionActivity = 'run' | 'walk';
+export type CompetitionActivity = 'running' | 'walking';
 
 export type CompetitionType = 'streaks' | 'apex' | 'clash' | 'targets' | 'race';
 
@@ -14,6 +14,8 @@ export interface CompetitionUser {
 	competition_id: string;
 	user_id: string;
 	invite_status: string;
+	intervals?: { [intervalKey: string]: number };
+	score?: number;
 }
 
 export interface Competition {

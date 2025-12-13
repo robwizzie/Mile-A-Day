@@ -1,6 +1,7 @@
 import { BadRequestError } from '../errors/Errors.js';
 import { Competition, CompetitionActivity, CompetitionOptions, CompetitionType, CompetitionUser } from '../types/competitions.js';
 import { PostgresService } from './DbService.js';
+import { getQuantityDateRange } from './workoutService.js';
 
 const db = PostgresService.getInstance();
 
@@ -103,6 +104,11 @@ export async function getCompetition(competitionId: string): Promise<Competition
 			[competitionId]
 		)
 	)[0];
+
+	if (new Date(competition.start_date + ' EST') > new Date()) {
+		const userScores = await getUserScores(competition);
+		competition.users = competition.users.map(user => ({ ...user, ...userScores[user.user_id] }));
+	}
 
 	return competition;
 }
@@ -235,6 +241,164 @@ export async function updateCompetition(params: UpdateCompetitionParams): Promis
 	return getCompetition(updatedCompetition.id);
 }
 
+interface UserData {
+	[userId: string]: {
+		intervals: {
+			[intervalKey: string]: number;
+		};
+		score: number;
+	};
+}
+
+export async function getUserScores(competition: Competition): UserData {
+	const userData: UserData = competition.users.reduce(async (allUsers, { user_id }) => {
+		const userData = await getQuantityDateRange(user_id, competition.start_date, competition.end_date, competition.workouts);
+
+		const intervals = userData.reduce((groupedData, dayData) => {
+			const intervalKey = getCurrentInterval(dayData.local_date);
+			if (!groupedData[intervalKey]) {
+				groupedData[intervalKey] = { interval: intervalKey, quantity: 0 };
+			}
+			groupedData[intervalKey].quantity += dayData.total_quantity;
+			return groupedData;
+		}, {});
+
+		return { ...allUsers, [user_id]: { intervals, score: 0 } };
+	}, {});
+
+	const intervals = getIntervalRange(competition);
+	const todaysInterval = getCurrentInterval(new Date(), competition.options.interval);
+
+	for (let interval of intervals) {
+		Object.entries(userData).forEach(([userId, { intervals }]) => {
+			if (!intervals[interval]) {
+				userData[userId].intervals[interval] = 0;
+			}
+		});
+
+		if (todaysInterval === interval) {
+			break;
+		}
+	}
+
+	if (competition.type === 'streaks') {
+		let activeStreak = 0;
+
+		for (let interval of intervals) {
+			// TODO: handle losses, wins, ties
+			Object.entries(userData).forEach(([userId, { intervals }]) => {
+				if (intervals[interval] >= competition.options.goal) {
+					userData[userId].score++;
+				} else if (todaysInterval != interval) {
+					userData[userId].score = 0;
+				}
+			});
+
+			if (todaysInterval === interval) {
+				break;
+			}
+
+			activeStreak++;
+		}
+	} else if (competition.type === 'apex') {
+		Object.entries(userData).forEach(([userId, { intervals }]) => {
+			const score = Object.values(intervals).reduce((total, quantity) => total + quantity, 0);
+			userData[userId].score = score;
+		});
+	} else if (competition.type === 'clash') {
+		for (let interval of intervals) {
+			if (todaysInterval === interval) {
+				break;
+			}
+
+			const userQuantities: { [quantities: number]: string[] } = {};
+
+			Object.entries(userData).forEach(([userId, { intervals }]) => {
+				const quantity = intervals[interval];
+
+				if (!Object.keys(userQuantities).includes(quantity.toString())) {
+					userQuantities[quantity] = [];
+				}
+
+				userQuantities[quantity].push(userId);
+			});
+
+			const maxQuantity = Math.max(...Object.keys(userQuantities).map(q => parseFloat(q)));
+
+			userQuantities[maxQuantity].forEach(userId => userData[userId].score++);
+		}
+	} else if (competition.type === 'targets') {
+		for (let interval of intervals) {
+			Object.entries(userData).forEach(([userId, { intervals }]) => {
+				if (intervals[interval] >= competition.options.goal) {
+					userData[userId].score++;
+				}
+			});
+
+			if (todaysInterval === interval) {
+				break;
+			}
+		}
+	} else if (competition.type === 'race') {
+		Object.entries(userData).forEach(([userId, { intervals }]) => {
+			const score = Object.values(intervals).reduce((total, quantity) => total + quantity, 0);
+			userData[userId].score = score;
+		});
+	}
+
+	return userData;
+}
+
+function getCurrentInterval(currentDate: Date | string | number, interval?: 'day' | 'week' | 'month'): string {
+	if (!(currentDate instanceof Date)) {
+		currentDate = new Date(currentDate + ' EST');
+	}
+
+	if (interval === 'week') {
+		const dayOfWeek = currentDate.getDay();
+		const daysUntilSunday = (7 - dayOfWeek) % 7;
+		const sundayDate = new Date(currentDate);
+		sundayDate.setDate(currentDate.getDate() + daysUntilSunday);
+		return sundayDate.toISOString().split('T')[0];
+	} else if (interval === 'month') {
+		const year = currentDate.getFullYear();
+		const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+		return `${year}-${month}`;
+	} else {
+		return currentDate.toISOString().split('T')[0];
+	}
+}
+
+function getIntervalRange(competition: Competition): string[] {
+	const currentDate = new Date(competition.start_date + ' EST');
+	const endDate = new Date(competition.end_date + ' EST');
+
+	const intervals = [];
+
+	if (competition.options.interval === 'week') {
+		const dayOfWeek = currentDate.getDay();
+		const daysUntilSunday = (7 - dayOfWeek) % 7;
+		currentDate.setDate(currentDate.getDate() + daysUntilSunday);
+	}
+
+	while (currentDate <= endDate) {
+		const intervalKey = getCurrentInterval(currentDate, competition.options.interval);
+		intervals.push(intervalKey);
+
+		if (competition.options.interval === 'day') {
+			currentDate.setDate(currentDate.getDate() + 1);
+		} else if (competition.options.interval === 'week') {
+			currentDate.setDate(currentDate.getDate() + 7);
+		} else if (competition.options.interval === 'month') {
+			currentDate.setMonth(currentDate.getMonth() + 1);
+		}
+	}
+
+	return intervals;
+}
+
 // TODO: you can only invite friends to competitions
 
 // TODO: order get competitions by start/end dates
+
+// TODO: end competitions
