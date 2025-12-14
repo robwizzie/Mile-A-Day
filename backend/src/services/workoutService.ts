@@ -180,3 +180,28 @@ export async function getRecentWorkouts(userId: string, limit: number | null = 1
 
 	return await db.query(recentWorkoutsQuery, [userId, limit]);
 }
+
+export async function getQuantityDateRange(
+	userId: string,
+	startDate: string,
+	endDate?: string,
+	workoutTypes?: ('running' | 'walking')[]
+) {
+	let query = `
+		SELECT 
+			local_date,
+			SUM(distance) as total_distance,
+		FROM workouts
+		WHERE user_id = $1
+			AND local_date >= $2
+			AND local_date <= $3
+			AND workout_type = ANY($4)
+		GROUP BY local_date
+		ORDER BY local_date ASC
+	`;
+
+	const date = new Date();
+	const todaysDate = date.toISOString().split('T')[0];
+
+	return await db.query(query, [userId, startDate, endDate || todaysDate, workoutTypes || ['running', 'walking']]);
+}
