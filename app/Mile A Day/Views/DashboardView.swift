@@ -36,7 +36,7 @@ struct DashboardView: View {
     @ObservedObject var userManager: UserManager
     @EnvironmentObject var notificationService: MADNotificationService
     @StateObject private var workoutService = WorkoutService()
-    
+
     @State private var showConfetti = false
     @State private var showGoalSheet = false
     @State private var newGoalMiles: Double = 1.0
@@ -44,6 +44,11 @@ struct DashboardView: View {
     @State private var showInstructions = false
     @State private var showCelebration = false
     @State private var showWorkoutUploadAlert = false
+    /// Controls presentation of the in‑progress workout tracking UI.
+    @State private var showWorkoutView = false
+    /// Whether to show a compact “Resume workout” banner when an in‑progress workout exists
+    /// but the full‑screen tracker is not currently visible.
+    @State private var showInProgressBanner = false
     @AppStorage("lastGoalCompletionDate") private var lastGoalCompletionDate: Date = Date.distantPast
     
     // Simplified state calculation
@@ -54,6 +59,11 @@ struct DashboardView: View {
         let isCompleted = ProgressCalculator.isGoalCompleted(current: distance, goal: goal)
         
         return (distance, goal, progress, isCompleted)
+    }
+    
+    /// Latest persisted in‑progress workout snapshot, if any.
+    private var inProgressState: InProgressWorkoutState? {
+        InProgressWorkoutStore.load()
     }
     
     var body: some View {
@@ -105,6 +115,18 @@ struct DashboardView: View {
                     .padding(.top, 8)
                     .padding(.bottom, 12)
                     
+                    // In‑progress workout banner (if user dismissed full‑screen tracker)
+                    if showInProgressBanner, let state = inProgressState, state.isActive {
+                        InProgressWorkoutBanner(
+                            state: state,
+                            onResume: {
+                                // Re‑open the full‑screen workout tracker
+                                showInProgressBanner = false
+                                showWorkoutView = true
+                            }
+                        )
+                    }
+                    
                     // Instructions banner
                     InstructionsBanner(
                         showInstructions: $showInstructions
@@ -138,7 +160,8 @@ struct DashboardView: View {
                         mostMiles: healthManager.mostMilesInOneDay,
                         totalMiles: healthManager.totalLifetimeMiles,
                         healthManager: healthManager,
-                        userManager: userManager
+                        userManager: userManager,
+                        showWorkoutView: $showWorkoutView
                     )
 
                     // SECTION: Steps and Badges (side by side)
@@ -182,6 +205,32 @@ struct DashboardView: View {
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .liquidGlassNavigationBar()
+            // Always surface an in‑progress workout as the primary experience.
+            .fullScreenCover(isPresented: $showWorkoutView, onDismiss: {
+                // When the user dismisses the workout tracker while a workout is still active,
+                // show a compact banner so they can easily resume.
+                if let state = InProgressWorkoutStore.load(), state.isActive {
+                    showInProgressBanner = true
+                } else {
+                    showInProgressBanner = false
+                }
+            }) {
+                if let state = InProgressWorkoutStore.load(), state.isActive {
+                    WorkoutTrackingView(
+                        healthManager: healthManager,
+                        userManager: userManager,
+                        goalDistance: state.goalDistance,
+                        startingDistance: state.startingDistance
+                    )
+                } else {
+                    WorkoutTrackingView(
+                        healthManager: healthManager,
+                        userManager: userManager,
+                        goalDistance: currentState.goal,
+                        startingDistance: currentState.distance
+                    )
+                }
+            }
             .onAppear {
                 refreshData()
                 // Sync widget data immediately
@@ -231,6 +280,21 @@ struct DashboardView: View {
                         showCelebration = true
                         lastGoalCompletionDate = Date()
                     }
+                }
+                
+                // If there is a persisted in‑progress workout when the dashboard appears,
+                // automatically surface it so the user can't "lose" their active workout.
+                if let state = InProgressWorkoutStore.load(), state.isActive {
+                    showWorkoutView = true
+                }
+
+                // Listen for Live Activity / deep‑link requests to open the workout.
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("MAD_OpenWorkoutFromLiveActivity"),
+                    object: nil,
+                    queue: .main
+                ) { _ in
+                    showWorkoutView = true
                 }
             }
             .sheet(isPresented: $showGoalSheet) {
@@ -1036,7 +1100,8 @@ struct TodayProgressCard: View {
     @ObservedObject var userManager: UserManager
     @Environment(\.colorScheme) var colorScheme
     @State private var animateProgress = false
-    @State private var showWorkoutView = false
+    /// Binding that controls whether the workout tracking view is currently presented.
+    @Binding var showWorkoutView: Bool
     @State private var isPressed = false
 
     var body: some View {
@@ -1091,16 +1156,25 @@ struct TodayProgressCard: View {
             }
             .frame(height: 12)
 
-            // Start Mile button
+            // Start Mile button (or Resume if workout in progress)
             Button(action: {
+                // Always just show the workout view - it will handle restoration if needed
                 showWorkoutView = true
             }) {
                 HStack(spacing: 8) {
-                    Image(systemName: "play.fill")
-                        .font(.title3)
-                    Text("Start Mile")
-                        .font(.headline)
-                        .fontWeight(.semibold)
+                    if let state = InProgressWorkoutStore.load(), state.isActive {
+                        Image(systemName: "play.circle.fill")
+                            .font(.title3)
+                        Text("Resume Workout")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                    } else {
+                        Image(systemName: "play.fill")
+                            .font(.title3)
+                        Text("Start Mile")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                    }
                 }
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
@@ -1156,14 +1230,6 @@ struct TodayProgressCard: View {
             }
         )
         .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
-        .fullScreenCover(isPresented: $showWorkoutView) {
-            WorkoutTrackingView(
-                healthManager: healthManager,
-                userManager: userManager,
-                goalDistance: goalDistance,
-                startingDistance: currentDistance
-            )
-        }
     }
 }
 
@@ -3370,6 +3436,12 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         lastLocation = nil
     }
 
+    /// Restore a previously tracked distance (e.g. after app relaunch)
+    /// so the user never "loses" visible progress for an in‑progress workout.
+    func restoreDistance(_ distance: Double) {
+        currentDistance = distance
+    }
+
     // CLLocationManagerDelegate methods
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let newLocation = locations.last else { return }
@@ -3404,6 +3476,98 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     }
 }
 
+// MARK: - In‑Progress Workout Banner
+
+/// Compact banner shown on the dashboard when there is an in‑progress workout
+/// but the full‑screen tracker has been dismissed. Tapping it resumes the workout.
+struct InProgressWorkoutBanner: View {
+    let state: InProgressWorkoutState
+    let onResume: () -> Void
+    
+    @State private var currentTime = Date()
+    @State private var latestState: InProgressWorkoutState?
+    
+    // Compute real-time elapsed time based on start time
+    private var realTimeElapsedSeconds: TimeInterval {
+        if let latest = latestState {
+            return currentTime.timeIntervalSince(latest.startTime)
+        }
+        return currentTime.timeIntervalSince(state.startTime)
+    }
+
+    private var formattedTime: String {
+        let minutes = Int(realTimeElapsedSeconds) / 60
+        let seconds = Int(realTimeElapsedSeconds) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+    
+    private var currentDistance: Double {
+        latestState?.currentDistance ?? state.currentDistance
+    }
+
+    var body: some View {
+        Button(action: onResume) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.85, green: 0.25, blue: 0.35),
+                                    Color(red: 0.7, green: 0.2, blue: 0.3)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 40, height: 40)
+
+                    Image(systemName: "play.fill")
+                        .foregroundColor(.white)
+                        .font(.system(size: 18, weight: .bold))
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Workout in progress")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+
+                    Text("\(String(format: "%.2f", currentDistance)) mi • \(formattedTime)")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.8))
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .onAppear {
+            // Start a timer to update the time display every second
+            Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+                currentTime = Date()
+                // Reload the latest state to get updated distance
+                if let updated = InProgressWorkoutStore.load(), updated.isActive {
+                    latestState = updated
+                }
+            }
+        }
+    }
+}
+
 struct WorkoutTrackingView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
@@ -3414,7 +3578,6 @@ struct WorkoutTrackingView: View {
     @StateObject private var locationManager = WorkoutLocationManager()
     @State private var showActivitySelection = true
     @State private var showLocationTypeSelection = false
-    @State private var showGoalAlreadyCompletedAlert = false
     @State private var selectedActivityType: HKWorkoutActivityType?
     @State private var selectedLocationType: HKWorkoutSessionLocationType = .outdoor
     @State private var countdownNumber = 3
@@ -3431,10 +3594,6 @@ struct WorkoutTrackingView: View {
     @State private var workoutSession: HKWorkoutSession?
     @State private var workoutBuilder: HKWorkoutBuilder?
     @State private var workoutActivity: Activity<WorkoutActivityAttributes>?
-
-    private var goalAlreadyCompleted: Bool {
-        startingDistance >= goalDistance
-    }
 
     // Workout distance only (starts at 0)
     private var currentDistance: Double {
@@ -3751,6 +3910,27 @@ struct WorkoutTrackingView: View {
             } else {
                 // Tracking view
                 VStack(spacing: 40) {
+                    // Back button to minimize workout and return to dashboard
+                    HStack {
+                        Button(action: {
+                            dismiss()
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "chevron.left")
+                                    .font(.title3)
+                                    .fontWeight(.semibold)
+                                Text("Dashboard")
+                                    .font(.body)
+                                    .fontWeight(.medium)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                        }
+                        Spacer()
+                    }
+                    .padding(.top, 16)
+                    
                     Spacer()
 
                     // Distance display
@@ -3940,9 +4120,9 @@ struct WorkoutTrackingView: View {
             // Check if we've reached the goal (using total daily distance)
             // Only show completion if:
             // 1. We haven't shown it yet
-            // 2. The goal wasn't already completed when we started
+            // 2. The goal wasn't already completed when we started (startingDistance < goalDistance)
             // 3. We've now reached the goal with total daily distance
-            if !hasShownCompletion && !goalAlreadyCompleted && totalDailyDistance >= goalDistance {
+            if !hasShownCompletion && startingDistance < goalDistance && totalDailyDistance >= goalDistance {
                 hasShownCompletion = true // Mark as shown so it doesn't loop
 
                 // Show completion celebration
@@ -3962,20 +4142,67 @@ struct WorkoutTrackingView: View {
                 }
             }
         }
-        .alert("Goal Already Completed", isPresented: $showGoalAlreadyCompletedAlert) {
-            Button("Continue Anyway", role: .none) {
-                // User chose to continue, do nothing (alert will dismiss)
-            }
-            Button("Cancel", role: .cancel) {
-                dismiss()
-            }
-        } message: {
-            Text("You've already completed your goal for today (\(String(format: "%.2f", startingDistance)) / \(String(format: "%.2f", goalDistance)) miles). You can still track this workout, but it won't show a goal completion message.")
+        .onDisappear {
+            // When the view disappears (e.g., user switches apps or dismisses the workout),
+            // stop the timer to save battery, but keep the workout state persisted
+            // so we can restore it when they come back.
+            timer?.invalidate()
+            timer = nil
         }
         .onAppear {
-            // Show alert if goal is already completed when view appears
-            if goalAlreadyCompleted {
-                showGoalAlreadyCompletedAlert = true
+            // If we have a persisted in‑progress workout, restore it so the user
+            // returns to exactly where they left off (distance + time).
+            if let saved = InProgressWorkoutStore.load(), saved.isActive {
+                // Restore core state
+                workoutStartDate = saved.startTime
+                // Recompute elapsed time from start time to keep time accurate,
+                // but fall back to the persisted elapsedTime if needed.
+                if Date() > saved.startTime {
+                    elapsedTime = Date().timeIntervalSince(saved.startTime)
+                } else {
+                    elapsedTime = saved.elapsedTime
+                }
+
+                // Restore activity + location type
+                if saved.activityType == "Running" {
+                    selectedActivityType = .running
+                } else if saved.activityType == "Walking" {
+                    selectedActivityType = .walking
+                }
+                if let locationType = HKWorkoutSessionLocationType(rawValue: saved.locationTypeRawValue) {
+                    selectedLocationType = locationType
+                }
+
+                // Restore distance into the location manager
+                locationManager.restoreDistance(saved.currentDistance)
+
+                // Jump directly into the tracking UI
+                showActivitySelection = false
+                showLocationTypeSelection = false
+                showCountdown = false
+                isTracking = true
+                
+                // Restart location tracking in the background (it was stopped when app was closed)
+                locationManager.startTracking(locationType: selectedLocationType)
+                
+                // Ensure any old timer is stopped before starting a new one
+                timer?.invalidate()
+                
+                // Restart the timer for elapsed time updates and Live Activity updates
+                timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+                    if let startDate = workoutStartDate {
+                        elapsedTime = Date().timeIntervalSince(startDate)
+                    }
+                    
+                    // Update Live Activity every second (10 ticks of 0.1s)
+                    if Int(elapsedTime * 10) % 10 == 0 {
+                        updateLiveActivity()
+                    }
+                }
+                
+                // Start a Live Activity if one doesn't already exist
+                // (The system may have ended it while we were in the background)
+                startLiveActivity()
             }
         }
     }
@@ -4030,6 +4257,12 @@ struct WorkoutTrackingView: View {
     }
 
     private func startWorkout() {
+        // Safety check: don't start a new workout if one is already in progress
+        if let existing = InProgressWorkoutStore.load(), existing.isActive {
+            print("⚠️ Workout already in progress, not starting a new one")
+            return
+        }
+        
         workoutStartDate = Date()
 
         // Start location tracking with appropriate mode (GPS for outdoor, pedometer for indoor)
@@ -4178,20 +4411,34 @@ struct WorkoutTrackingView: View {
     // MARK: - Live Activity Management
 
     private func startLiveActivity() {
+        // Don't create a duplicate Live Activity if one is already active
+        guard workoutActivity == nil else {
+            print("Live Activity already exists, skipping creation")
+            return
+        }
+        
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             print("Live Activities are not enabled")
             return
         }
 
         let attributes = WorkoutActivityAttributes(
-            startTime: Date(),
+            startTime: workoutStartDate ?? Date(),
             goalDistance: goalDistance
         )
 
+        // Compute real-time elapsed time from start date
+        let realTimeElapsed: TimeInterval
+        if let startDate = workoutStartDate {
+            realTimeElapsed = Date().timeIntervalSince(startDate)
+        } else {
+            realTimeElapsed = 0
+        }
+
         let initialState = WorkoutActivityAttributes.ContentState(
-            distance: 0.0,
-            totalDailyDistance: startingDistance,
-            elapsedTime: 0,
+            distance: currentDistance,
+            totalDailyDistance: totalDailyDistance,
+            elapsedTime: realTimeElapsed,
             goalDistance: goalDistance,
             activityType: selectedActivityType == .running ? "Running" : "Walking"
         )
@@ -4212,10 +4459,18 @@ struct WorkoutTrackingView: View {
     private func updateLiveActivity() {
         guard let activity = workoutActivity else { return }
 
+        // Compute real-time elapsed time from start date for accuracy
+        let realTimeElapsed: TimeInterval
+        if let startDate = workoutStartDate {
+            realTimeElapsed = Date().timeIntervalSince(startDate)
+        } else {
+            realTimeElapsed = elapsedTime
+        }
+
         let updatedState = WorkoutActivityAttributes.ContentState(
             distance: currentDistance,
             totalDailyDistance: totalDailyDistance,
-            elapsedTime: elapsedTime,
+            elapsedTime: realTimeElapsed,
             goalDistance: goalDistance,
             activityType: selectedActivityType == .running ? "Running" : "Walking"
         )
@@ -4225,6 +4480,21 @@ struct WorkoutTrackingView: View {
                 .init(state: updatedState, staleDate: nil)
             )
         }
+
+        // Persist a snapshot so we can always restore this workout later.
+        // Reuse the real-time elapsed time we computed above for accuracy
+        let snapshot = InProgressWorkoutState(
+            isActive: true,
+            startTime: workoutStartDate ?? Date(),
+            elapsedTime: realTimeElapsed,
+            currentDistance: currentDistance,
+            startingDistance: startingDistance,
+            totalDailyDistance: totalDailyDistance,
+            goalDistance: goalDistance,
+            activityType: selectedActivityType == .running ? "Running" : "Walking",
+            locationTypeRawValue: selectedLocationType.rawValue
+        )
+        InProgressWorkoutStore.save(snapshot)
     }
 
     private func endLiveActivity() {
@@ -4246,6 +4516,9 @@ struct WorkoutTrackingView: View {
         }
 
         workoutActivity = nil
+
+        // Clear any persisted in‑progress state now that the workout is finished.
+        InProgressWorkoutStore.clear()
     }
 }
 

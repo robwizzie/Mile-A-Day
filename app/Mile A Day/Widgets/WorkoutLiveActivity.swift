@@ -242,6 +242,9 @@ struct WorkoutLiveActivityView: View {
         )
         .activityBackgroundTint(Color.clear)
         .activitySystemActionForegroundColor(.white)
+        // Tapping the Live Activity should always take the user back to their
+        // in‑progress workout inside the main app.
+        .widgetURL(URL(string: "mileaday://workout"))
     }
 
     private func formatTime(_ timeInterval: TimeInterval) -> String {

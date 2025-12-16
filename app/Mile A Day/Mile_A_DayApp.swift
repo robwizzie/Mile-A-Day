@@ -27,6 +27,15 @@ struct Mile_A_DayApp: App {
                     // Handle app returning to foreground
                     MADBackgroundService.shared.appWillEnterForeground()
                 }
+                .onOpenURL { url in
+                    // Handle deep links from Live Activities / widgets
+                    if url.scheme == "mileaday", url.host == "workout" {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("MAD_OpenWorkoutFromLiveActivity"),
+                            object: nil
+                        )
+                    }
+                }
         }
     }
 }
