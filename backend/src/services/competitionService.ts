@@ -107,7 +107,7 @@ export async function getCompetition(competitionId: string): Promise<Competition
 
 	if (new Date(competition.start_date + ' EST') > new Date()) {
 		const userScores = await getUserScores(competition);
-		competition.users = competition.users.map(user => ({ ...user, ...userScores[user.user_id] }));
+		competition.users = competition.users.map((user: CompetitionUser) => ({ ...user, ...userScores[user.user_id] }));
 	}
 
 	return competition;
@@ -250,7 +250,7 @@ interface UserData {
 	};
 }
 
-export async function getUserScores(competition: Competition): UserData {
+export async function getUserScores(competition: Competition): Promise<UserData> {
 	const userData: UserData = competition.users.reduce(async (allUsers, { user_id }) => {
 		const userData = await getQuantityDateRange(user_id, competition.start_date, competition.end_date, competition.workouts);
 
