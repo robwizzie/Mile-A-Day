@@ -1,7 +1,15 @@
 import { Request, Response } from 'express';
 import hasRequiredKeys from '../utils/hasRequiredKeys.js';
 import { getUser as dbGetUser, createUser as dbCreateUser } from '../services/userService.js';
-import { createRemoteJWKSet, jwtVerify, SignJWT } from 'jose';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { generateAccessToken } from '../services/tokenService.js';
+import {
+	createRefreshToken,
+	rotateRefreshToken,
+	revokeRefreshToken,
+	revokeAllUserTokens
+} from '../services/refreshTokenService.js';
+import { AuthenticatedRequest } from '../middleware/auth.js';
 
 export async function signIn(req: Request, res: Response) {
 	if (!hasRequiredKeys(['user_id', 'identity_token', 'authorization_code'], req, res)) return;
@@ -10,7 +18,6 @@ export async function signIn(req: Request, res: Response) {
 	const email = req.body.email as string;
 
 	const expectedAudience = process.env.APPLE_CLIENT_ID;
-	const appJwtSecret = process.env.APP_JWT_SECRET;
 
 	try {
 		const APPLE_ISS = 'https://appleid.apple.com';
@@ -29,11 +36,70 @@ export async function signIn(req: Request, res: Response) {
 			user = await dbCreateUser({ email: emailFromToken, apple_sub: appleSub });
 		}
 
-		const token = await new SignJWT({ provider: 'apple' }).setProtectedHeader({ alg: 'HS256' }).setSubject(user.user_id).setIssuedAt().setExpirationTime('30d').sign(new TextEncoder().encode(appJwtSecret));
+		const accessToken = await generateAccessToken(user.user_id);
+		const refreshToken = await createRefreshToken(user.user_id, {
+			userAgent: req.headers['user-agent'],
+			ipAddress: req.ip,
+			deviceInfo: req.body.device_info
+		});
 
-		return res.json({ user, token });
+		return res.json({ user, accessToken, refreshToken });
 	} catch (err) {
 		console.error('Apple sign-in failed', err);
 		return res.status(401).json({ error: 'Invalid Apple identity token' });
+	}
+}
+
+export async function refresh(req: Request, res: Response) {
+	if (!hasRequiredKeys(['refreshToken'], req, res)) return;
+
+	const { refreshToken } = req.body;
+
+	try {
+		const tokenPair = await rotateRefreshToken(refreshToken, {
+			userAgent: req.headers['user-agent'],
+			ipAddress: req.ip,
+			deviceInfo: req.body.device_info
+		});
+
+		return res.json(tokenPair);
+	} catch (err) {
+		console.error('Token refresh failed', err);
+		return res.status(403).json({
+			error: 'Invalid or expired refresh token',
+			message: err instanceof Error ? err.message : 'Token refresh failed'
+		});
+	}
+}
+
+export async function logout(req: Request, res: Response) {
+	if (!hasRequiredKeys(['refreshToken'], req, res)) return;
+
+	const { refreshToken } = req.body;
+
+	try {
+		await revokeRefreshToken(refreshToken, 'manual_logout');
+		return res.json({ success: true, message: 'Logged out successfully' });
+	} catch (err) {
+		console.error('Logout failed', err);
+		return res.status(500).json({ error: 'Logout failed' });
+	}
+}
+
+export async function logoutAll(req: AuthenticatedRequest, res: Response) {
+	if (!req.userId) {
+		return res.status(401).json({ error: 'Authentication required' });
+	}
+
+	try {
+		const revokedCount = await revokeAllUserTokens(req.userId, 'manual_logout_all');
+		return res.json({
+			success: true,
+			message: 'All sessions revoked',
+			revokedCount
+		});
+	} catch (err) {
+		console.error('Logout all failed', err);
+		return res.status(500).json({ error: 'Logout all failed' });
 	}
 }
