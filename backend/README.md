@@ -4,6 +4,9 @@
 
 -   **[Authentication](#authentication)**
     -   **[Sign In](#sign-in)**
+    -   **[Refresh Token](#refresh-token)**
+    -   **[Logout](#logout)**
+    -   **[Logout All](#logout-all)**
 -   **[Users](#users)**
     -   **[Get User](#get-user)**
     -   **[Search For User](#search-for-user)**
@@ -64,8 +67,22 @@ Whenever an error occurs, the API will respond with an error code as well as an 
 Most endpoints require authentication via a JWT Bearer token in the Authorization header:
 
 ```
-Authorization: Bearer <your_jwt_token>
+Authorization: Bearer <your_access_token>
 ```
+
+### Token Types
+
+The API uses two types of tokens:
+
+- **Access Token**: Short-lived JWT (15 minutes) used for API requests
+- **Refresh Token**: Long-lived opaque token used to obtain new access tokens
+
+### Token Security Features
+
+- **Automatic Rotation**: Refresh tokens are rotated on each use (old token revoked, new issued)
+- **Token Reuse Detection**: If a revoked refresh token is used, entire token family is revoked
+- **Session Tracking**: Tokens stored with user agent, IP address, and device info for security monitoring
+- **Immediate Revocation**: Tokens can be instantly revoked (logout, security breach)
 
 If you attempt to access a resource you don't own, you'll receive a 403 error:
 
@@ -116,7 +133,7 @@ curl --location 'http://localhost:3000/dev/test-token' \
 
 **POST** `/auth/signin`
 
-Authenticates users via Apple Sign-In and returns a JWT token for accessing protected endpoints.
+Authenticates users via Apple Sign-In and returns both access and refresh tokens.
 
 #### Parameters
 
@@ -126,6 +143,14 @@ Authenticates users via Apple Sign-In and returns a JWT token for accessing prot
 | identity_token     | String | The JWT identity token from Apple Sign-In |    ✅    |
 | authorization_code | String | The authorization code from Apple Sign-In |    ✅    |
 | email              | String | User's email (fallback if not in token)   |    ✖️    |
+| device_info        | Object | Device information for security tracking  |    ✖️    |
+
+#### Device Info Object (Optional)
+
+| Name       | Type   | Description                     |
+| :--------- | :----- | :------------------------------ |
+| model      | String | Device model (e.g., "iPhone15") |
+| os_version | String | OS version (e.g., "iOS 17.2")   |
 
 #### Examples
 
@@ -141,7 +166,11 @@ Authenticates users via Apple Sign-In and returns a JWT token for accessing prot
 >     "user_id": "000123.abc123def456.0000",
 >     "identity_token": "eyJhbGciOiJSUzI1NiIsImtpZCI6IldRYUFiOGh...",
 >     "authorization_code": "c12345abcdef67890...",
->     "email": "user@example.com"
+>     "email": "user@example.com",
+>     "device_info": {
+>         "model": "iPhone15,2",
+>         "os_version": "iOS 17.2"
+>     }
 > }
 > ```
 >
@@ -154,9 +183,14 @@ Authenticates users via Apple Sign-In and returns a JWT token for accessing prot
 >         "username": null,
 >         "email": "user@example.com",
 >         "first_name": null,
->         "last_name": null
+>         "last_name": null,
+>         "bio": null,
+>         "profile_image_url": null,
+>         "apple_id": "000123.abc123def456.0000",
+>         "auth_provider": "apple"
 >     },
->     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+>     "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+>     "refreshToken": "rt_a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6_abc123"
 > }
 > ```
 >
@@ -171,6 +205,160 @@ Authenticates users via Apple Sign-In and returns a JWT token for accessing prot
 >     "authorization_code": "c12345abcdef67890...",
 >     "email": "user@example.com"
 > }'
+> ```
+
+</details>
+
+<br/>
+
+<a name="refresh-token"></a>
+
+### Refresh Token
+
+**POST** `/auth/refresh`
+
+Exchanges a refresh token for a new access token and refresh token pair. The old refresh token is automatically revoked.
+
+#### Parameters
+
+| Name         | Type   | Description                   | Required |
+| :----------- | :----- | :---------------------------- | :------: |
+| refreshToken | String | The current valid refresh token |    ✅    |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **POST** `/auth/refresh`
+>
+> ##### Example Body
+>
+> ```json
+> {
+>     "refreshToken": "rt_a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6_abc123"
+> }
+> ```
+>
+> ##### Example Response
+>
+> ```json
+> {
+>     "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+>     "refreshToken": "rt_b4g3c2d5e6f7a8b9c0d1e2f3a4b5c7d8_def456"
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location 'https://mad.mindgoblin.tech/auth/refresh' \
+> --header 'Content-Type: application/json' \
+> --data '{
+>     "refreshToken": "rt_a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6_abc123"
+> }'
+> ```
+
+</details>
+
+#### Error Responses
+
+- **403 Forbidden**: Refresh token is invalid, expired, or has been revoked
+- **Token Reuse Detected**: If a revoked refresh token is used, all tokens in the family are revoked
+
+<br/>
+
+<a name="logout"></a>
+
+### Logout
+
+**POST** `/auth/logout`
+
+Revokes a specific refresh token (single session logout).
+
+#### Parameters
+
+| Name         | Type   | Description                       | Required |
+| :----------- | :----- | :-------------------------------- | :------: |
+| refreshToken | String | The refresh token to revoke       |    ✅    |
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **POST** `/auth/logout`
+>
+> ##### Example Body
+>
+> ```json
+> {
+>     "refreshToken": "rt_a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6_abc123"
+> }
+> ```
+>
+> ##### Example Response
+>
+> ```json
+> {
+>     "success": true,
+>     "message": "Logged out successfully"
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location 'https://mad.mindgoblin.tech/auth/logout' \
+> --header 'Content-Type: application/json' \
+> --data '{
+>     "refreshToken": "rt_a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6_abc123"
+> }'
+> ```
+
+</details>
+
+<br/>
+
+<a name="logout-all"></a>
+
+### Logout All
+
+**POST** `/auth/logout-all`
+
+Revokes all refresh tokens for the authenticated user (all sessions logout).
+
+**Requires Authentication**: Yes (Bearer token in Authorization header)
+
+#### Examples
+
+<details>
+<summary>Click to expand</summary>
+
+> **POST** `/auth/logout-all`
+>
+> ##### Headers
+>
+> ```
+> Authorization: Bearer <access_token>
+> ```
+>
+> ##### Example Response
+>
+> ```json
+> {
+>     "success": true,
+>     "message": "All sessions revoked",
+>     "revokedCount": 3
+> }
+> ```
+>
+> ##### Full cURL Example
+>
+> ```bash
+> curl --location 'https://mad.mindgoblin.tech/auth/logout-all' \
+> --header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' \
+> --header 'Content-Type: application/json'
 > ```
 
 </details>
