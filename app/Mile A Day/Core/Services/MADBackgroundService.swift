@@ -283,6 +283,20 @@ extension MADBackgroundService {
     
     /// Call this from App's sceneDidEnterBackground
     func appDidEnterBackground() {
+        // CRITICAL: Force save any active workout state before backgrounding
+        // This ensures zero data loss if app is terminated by the system
+        if let activeWorkout = InProgressWorkoutStore.load(), activeWorkout.isActive {
+            print("🔄 App backgrounding with active workout - forcing state save")
+            print("   Current distance: \(activeWorkout.currentDistance) miles")
+            print("   Elapsed time: \(Int(activeWorkout.elapsedTime)) seconds")
+            print("   Route points: \(activeWorkout.routePoints.count)")
+
+            // State is already saved by updateLiveActivity() every second,
+            // but we force synchronize here to ensure UserDefaults is flushed to disk
+            UserDefaults.standard.synchronize()
+            print("✅ Workout state synchronized to disk")
+        }
+
         scheduleBackgroundRefresh()
     }
     
