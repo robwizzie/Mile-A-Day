@@ -39,65 +39,35 @@ class CompetitionService: ObservableObject {
         body: Data? = nil,
         responseType: T.Type
     ) async throws -> T {
-        guard let url = URL(string: "\(baseURL)\(endpoint)") else {
-            throw CompetitionServiceError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = method.rawValue
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        if let token = authToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-
-        if let body = body {
-            request.httpBody = body
-        }
-
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
+            return try await APIClient.fancyFetch(
+                endpoint: endpoint,
+                method: method,
+                body: body,
+                responseType: responseType
+            )
+        } catch let error as APIError {
+            // Map APIError to CompetitionServiceError
+            switch error {
+            case .invalidURL:
+                throw CompetitionServiceError.invalidURL
+            case .invalidResponse:
                 throw CompetitionServiceError.invalidResponse
-            }
-
-            print("[CompetitionService] 📊 Response status code: \(httpResponse.statusCode)")
-            if let responseString = String(data: data, encoding: .utf8) {
-                print("[CompetitionService] 📦 Response body: \(responseString)")
-            }
-
-            // Handle different status codes
-            switch httpResponse.statusCode {
-            case 200...299:
-                break
-            case 401:
-                print("[CompetitionService] ❌ Unauthorized (401)")
+            case .notAuthenticated:
+                throw CompetitionServiceError.notAuthenticated
+            case .unauthorized:
                 throw CompetitionServiceError.unauthorized
-            case 404:
-                print("[CompetitionService] ❌ Competition not found (404)")
+            case .badRequest(let message):
+                throw CompetitionServiceError.apiError(message)
+            case .serverError(let code):
+                throw CompetitionServiceError.serverError(code)
+            case .tokenRefreshFailed:
+                throw CompetitionServiceError.notAuthenticated
+            case .networkError(let message):
+                throw CompetitionServiceError.networkError(message)
+            case .notFound:
                 throw CompetitionServiceError.competitionNotFound
-            case 400:
-                // Try to parse error message from response
-                if let errorData = try? JSONDecoder().decode([String: String].self, from: data),
-                   let errorMessage = errorData["error"] {
-                    print("[CompetitionService] ❌ Bad request (400): \(errorMessage)")
-                    throw CompetitionServiceError.apiError(errorMessage)
-                }
-                print("[CompetitionService] ❌ Bad request (400)")
-                throw CompetitionServiceError.badRequest
-            default:
-                print("[CompetitionService] ❌ Server error (\(httpResponse.statusCode))")
-                throw CompetitionServiceError.serverError(httpResponse.statusCode)
             }
-
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-
-            return try decoder.decode(T.self, from: data)
-
-        } catch let error as CompetitionServiceError {
-            throw error
         } catch {
             throw CompetitionServiceError.networkError(error.localizedDescription)
         }

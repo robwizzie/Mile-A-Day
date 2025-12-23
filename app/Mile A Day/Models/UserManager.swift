@@ -9,11 +9,13 @@ class UserManager: ObservableObject {
     @Published var currentUser: User
     @Published var friends: [User] = []
     @Published var authToken: String?
+    @Published var refreshToken: String?
     
     private let userDefaults = UserDefaults.standard
     private let currentUserKey = "currentUser"
     private let friendsKey = "friends"
     private let authTokenKey = "authToken"
+    private let refreshTokenKey = "refreshToken"
     
     init() {
         // Load or create a new user
@@ -27,6 +29,9 @@ class UserManager: ObservableObject {
         
         // Load auth token
         self.authToken = userDefaults.string(forKey: authTokenKey)
+        
+        // Load refresh token
+        self.refreshToken = userDefaults.string(forKey: refreshTokenKey)
         
         // Initialize widget data store with current values
         #if !os(watchOS)
@@ -70,6 +75,11 @@ class UserManager: ObservableObject {
             userDefaults.set(token, forKey: authTokenKey)
         }
         
+        // Save refresh token
+        if let token = refreshToken {
+            userDefaults.set(token, forKey: refreshTokenKey)
+        }
+        
         // Save privacy settings
         if let privacyEncoded = try? JSONEncoder().encode(currentUser.privacySettings) {
             userDefaults.set(privacyEncoded, forKey: "privacySettings")
@@ -106,6 +116,9 @@ class UserManager: ObservableObject {
         // Store auth token
         authToken = backendResponse.accessToken
         
+        // Store refresh token
+        refreshToken = backendResponse.refreshToken
+        
         // Store backend user ID in UserDefaults for FriendService
         UserDefaults.standard.set(backendResponse.user.user_id, forKey: "backendUserId")
         
@@ -140,11 +153,29 @@ class UserManager: ObservableObject {
         currentUser.backendUserId = nil
         currentUser.authToken = nil
         authToken = nil
+        refreshToken = nil
         
-        // Clear stored token
+        // Clear stored tokens
         userDefaults.removeObject(forKey: authTokenKey)
+        userDefaults.removeObject(forKey: refreshTokenKey)
         
         saveUserData()
+    }
+    
+    // Token management methods
+    func setTokens(accessToken: String, refreshToken: String) {
+        self.authToken = accessToken
+        self.refreshToken = refreshToken
+        userDefaults.set(accessToken, forKey: authTokenKey)
+        userDefaults.set(refreshToken, forKey: refreshTokenKey)
+    }
+    
+    func getAccessToken() -> String? {
+        return authToken ?? userDefaults.string(forKey: authTokenKey)
+    }
+    
+    func getRefreshToken() -> String? {
+        return refreshToken ?? userDefaults.string(forKey: refreshTokenKey)
     }
     
     // Update user stats from HealthKit data
