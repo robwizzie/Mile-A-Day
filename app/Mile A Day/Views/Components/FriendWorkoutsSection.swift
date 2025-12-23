@@ -103,30 +103,3 @@ struct FriendWorkoutRow: View {
     }
 }
 
-// MARK: - Preview
-
-struct FriendWorkoutsSection_Previews: PreviewProvider {
-    static var previews: some View {
-        let mockWorkouts = [
-            FriendWorkout(
-                id: "1",
-                date: "2025-06-10",
-                distance: 1.5,
-                totalDuration: 720,
-                workoutType: "running",
-                deviceEndDate: nil
-            ),
-            FriendWorkout(
-                id: "2",
-                date: "2025-06-09",
-                distance: 2.1,
-                totalDuration: 960,
-                workoutType: "walking",
-                deviceEndDate: nil
-            )
-        ]
-
-        FriendWorkoutsSection(workouts: mockWorkouts)
-            .padding()
-    }
-}

@@ -43,18 +43,7 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
 			return [
 				{
 					query: workoutQuery,
-					params: [
-						userId,
-						workout.workoutId,
-						workout.distance,
-						workout.localDate,
-						workout.date,
-						workout.timezoneOffset,
-						workout.workoutType,
-						workout.deviceEndDate,
-						workout.calories,
-						workout.totalDuration
-					]
+					params: [userId, workout.workoutId, workout.distance, workout.localDate, workout.date, workout.timezoneOffset, workout.workoutType, workout.deviceEndDate, workout.calories, workout.totalDuration]
 				},
 				...workout.splitTimes.map((split: number, i: number) => ({
 					query: splitQuery,
@@ -165,7 +154,14 @@ export async function getBestSplit(userId: string, startDate?: string) {
     LIMIT 1
 	`;
 
-	const { best_split_time, ...workout } = (await db.query(bestSplitQuery, params))[0] || {};
+	const result = await db.query(bestSplitQuery, params);
+
+	// If no results, return null for best_split_time
+	if (!result || result.length === 0) {
+		return null;
+	}
+
+	const { best_split_time, ...workout } = result[0];
 
 	return { best_split_time, workout };
 }
@@ -181,12 +177,18 @@ export async function getRecentWorkouts(userId: string, limit: number | null = 1
 	return await db.query(recentWorkoutsQuery, [userId, limit]);
 }
 
-export async function getQuantityDateRange(
-	userId: string,
-	startDate: string,
-	endDate?: string,
-	workoutTypes?: ('running' | 'walking')[]
-) {
+export async function getTodayMiles(userId: string) {
+	const today = new Date().toISOString().split('T')[0];
+	const todayMilesQuery = `
+	SELECT SUM(distance) as total_distance FROM workouts
+	WHERE user_id = $1 AND local_date = $2
+	`;
+
+	const result = await db.query(todayMilesQuery, [userId, today]);
+	return result[0]?.total_distance || 0;
+}
+
+export async function getQuantityDateRange(userId: string, startDate: string, endDate?: string, workoutTypes?: ('running' | 'walking')[]) {
 	let query = `
 		SELECT 
 			local_date,
