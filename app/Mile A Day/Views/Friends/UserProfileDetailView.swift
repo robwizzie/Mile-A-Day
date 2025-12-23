@@ -130,18 +130,40 @@ struct UserProfileDetailView: View {
                 // Fetch friend stats from API
                 let stats = try await friendService.fetchFriendStats(for: user.user_id)
 
-                // Fetch recent workouts from API
-                let workouts = try await friendService.fetchRecentWorkouts(for: user.user_id, limit: 10)
+                // Fetch recent workouts from API (use workouts from stats if available, otherwise fetch separately)
+                let workouts: [FriendWorkout]
+                if let recentWorkouts = stats.recentWorkouts {
+                    workouts = recentWorkouts
+                } else {
+                    workouts = try await friendService.fetchRecentWorkouts(for: user.user_id, limit: 10)
+                }
 
                 await MainActor.run {
-                    // Convert FriendStats to UserStats
+                    // Extract most miles in one day from bestMilesDay
+                    let mostMilesInOneDay = stats.bestMilesDay?.totalDistance ?? 0.0
+                    
+                    // Extract fastest mile pace from bestSplitTime (convert seconds to minutes per mile)
+                    var fastestMilePace: TimeInterval = 0.0
+                    if let bestSplitTime = stats.bestSplitTime,
+                       let bestSplitSeconds = bestSplitTime.bestSplitTime,
+                       bestSplitSeconds > 0 {
+                        // Convert seconds to minutes per mile
+                        fastestMilePace = bestSplitSeconds / 60.0
+                    }
+                    
+                    // Get goal miles and today miles from API response
+                    let goalMiles = stats.goalMiles ?? 1.0
+                    let todayMiles = stats.todayMiles ?? 0.0
+                    let hasCompletedGoalToday = todayMiles >= goalMiles && goalMiles > 0
+                    
+                    // Convert FriendStats to UserStats using actual API data
                     userStats = UserStats(
-                        streak: stats.currentStreak,
+                        streak: stats.streak,
                         totalMiles: stats.totalMiles,
-                        fastestMilePace: stats.averagePace ?? 0.0,
-                        mostMilesInOneDay: 0.0, // API doesn't provide this yet
-                        hasCompletedGoalToday: false, // API doesn't provide this yet
-                        goalMiles: 1.0 // Default goal miles (API doesn't provide this yet)
+                        fastestMilePace: fastestMilePace,
+                        mostMilesInOneDay: mostMilesInOneDay,
+                        hasCompletedGoalToday: hasCompletedGoalToday,
+                        goalMiles: goalMiles
                     )
 
                     friendWorkouts = workouts

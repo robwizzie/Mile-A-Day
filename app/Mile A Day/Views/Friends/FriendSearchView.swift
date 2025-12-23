@@ -130,36 +130,6 @@ struct FriendSearchView: View {
                     .multilineTextAlignment(.center)
             }
             
-            // Show some recommended users when no search results
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                Text("You might like")
-                    .font(MADTheme.Typography.headline)
-                    .foregroundColor(MADTheme.Colors.primaryText)
-                
-                LazyVStack(spacing: MADTheme.Spacing.md) {
-                    ForEach(getRecommendedUsers().prefix(2)) { user in
-                        UserProfileCard(
-                            user: user,
-                            showStats: false,
-                            showBadges: false,
-                            onTap: {
-                                selectedUser = user
-                            },
-                            actionButton: AnyView(
-                                FriendActionButton(
-                                    title: getActionButtonTitle(for: user),
-                                    style: getActionButtonStyle(for: user),
-                                    isLoading: false,
-                                    action: {
-                                        handleFriendAction(for: user)
-                                    }
-                                )
-                            )
-                        )
-                    }
-                }
-            }
-            .padding(.top, MADTheme.Spacing.lg)
         }
         .padding(MADTheme.Spacing.xl)
     }
@@ -178,43 +148,12 @@ struct FriendSearchView: View {
                         .font(MADTheme.Typography.title2)
                         .foregroundColor(MADTheme.Colors.primaryText)
                     
-                    Text("Type at least 3 letters to search, or discover recommended users below")
+                    Text("Type at least 3 letters to search for users")
                         .font(MADTheme.Typography.body)
                         .foregroundColor(MADTheme.Colors.secondaryText)
                         .multilineTextAlignment(.center)
                 }
                 .padding(MADTheme.Spacing.lg)
-                
-                // Recommended Users (mock data for now)
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                    Text("Suggested for You")
-                        .font(MADTheme.Typography.headline)
-                        .foregroundColor(MADTheme.Colors.primaryText)
-                        .padding(.horizontal, MADTheme.Spacing.md)
-                    
-                    LazyVStack(spacing: MADTheme.Spacing.md) {
-                        ForEach(getRecommendedUsers()) { user in
-                            UserProfileCard(
-                                user: user,
-                                showStats: false,
-                                showBadges: false,
-                                onTap: {
-                                    selectedUser = user
-                                },
-                                actionButton: AnyView(
-                                    FriendActionButton(
-                                        title: getActionButtonTitle(for: user),
-                                        style: getActionButtonStyle(for: user),
-                                        isLoading: false,
-                                        action: {
-                                            handleFriendAction(for: user)
-                                        }
-                                    )
-                                )
-                            )
-                        }
-                    }
-                }
             }
             .padding(MADTheme.Spacing.md)
         }
@@ -273,46 +212,6 @@ struct FriendSearchView: View {
                 }
             }
         }
-    }
-    
-    private func getRecommendedUsers() -> [BackendUser] {
-        // Mock recommended users - in a real app, this would come from your backend
-        // based on mutual friends, similar interests, location, etc.
-        return [
-            BackendUser(
-                user_id: "rec1",
-                username: "papameags",
-                email: "matthew@mfoobert.com",
-                first_name: "Matthew",
-                last_name: "Meagher",
-                bio: "Hunting milfs and running a mile a day 🏃‍♂️",
-                profile_image_url: nil,
-                apple_id: nil,
-                auth_provider: "apple"
-            ),
-            BackendUser(
-                user_id: "rec2",
-                username: "ishowspeed",
-                email: "speed@ishow.com",
-                first_name: "Darren",
-                last_name: "Watkins Jr",
-                bio: "Fastest streamer in the world",
-                profile_image_url: nil,
-                apple_id: nil,
-                auth_provider: "apple"
-            ),
-            BackendUser(
-                user_id: "rec3",
-                username: "tyreek_hill",
-                email: "tyreek@hill.com",
-                first_name: "Tyreek",
-                last_name: "Hill",
-                bio: "Beating women and catching touchdowns",
-                profile_image_url: nil,
-                apple_id: nil,
-                auth_provider: "apple"
-            )
-        ]
     }
     
     private func clearSearch() {

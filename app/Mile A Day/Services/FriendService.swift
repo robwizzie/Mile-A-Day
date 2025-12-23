@@ -447,28 +447,42 @@ class FriendService: ObservableObject {
 /// Workout data for a friend
 struct FriendWorkout: Codable, Identifiable {
     let id: String
+    let userId: String
     let date: String
     let distance: Double
     let totalDuration: Double
     let workoutType: String
     let deviceEndDate: String?
+    let calories: Double?
 
     enum CodingKeys: String, CodingKey {
-        case id = "workoutId"
-        case date = "localDate"
+        case id = "workout_id"
+        case userId = "user_id"
+        case date = "local_date"
         case distance
-        case totalDuration
-        case workoutType
-        case deviceEndDate
+        case totalDuration = "total_duration"
+        case workoutType = "workout_type"
+        case deviceEndDate = "device_end_date"
+        case calories
     }
 
     var formattedDate: String {
+        // Handle both date formats (with time and without)
         let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+        
+        if let parsedDate = formatter.date(from: date) {
+            formatter.dateFormat = "MMM d, yyyy"
+            return formatter.string(from: parsedDate)
+        }
+        
+        // Try date-only format
         formatter.dateFormat = "yyyy-MM-dd"
         if let parsedDate = formatter.date(from: date) {
             formatter.dateFormat = "MMM d, yyyy"
             return formatter.string(from: parsedDate)
         }
+        
         return date
     }
 
@@ -483,22 +497,85 @@ struct FriendWorkout: Codable, Identifiable {
     }
 }
 
+/// Best miles day data structure
+struct BestMilesDay: Codable {
+    let localDate: String
+    let totalDistance: Double
+    
+    enum CodingKeys: String, CodingKey {
+        case localDate = "local_date"
+        case totalDistance = "total_distance"
+    }
+}
+
+/// Best split time data structure
+/// The backend returns an object with best_split_time (number) and workout (object)
+/// When no splits exist, backend returns null (handled at FriendStats level)
+struct BestSplitTime: Codable {
+    let bestSplitTime: Double?
+    
+    enum CodingKeys: String, CodingKey {
+        case bestSplitTime = "best_split_time"
+        case workout // Ignored but must be present to avoid decoding errors
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Extract best_split_time number if it exists
+        bestSplitTime = try? container.decode(Double.self, forKey: .bestSplitTime)
+        // Ignore workout object - we don't need it
+        _ = try? container.decodeIfPresent([String: String].self, forKey: .workout)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try? container.encodeIfPresent(bestSplitTime, forKey: .bestSplitTime)
+    }
+}
+
 /// Stats data for a friend
 struct FriendStats: Codable {
-    let totalWorkouts: Int
+    let streak: Int
+    let startDate: String?
     let totalMiles: Double
-    let currentStreak: Int
-    let longestStreak: Int
-    let averagePace: Double?
+    let bestMilesDay: BestMilesDay?
+    let bestSplitTime: BestSplitTime?
     let recentWorkouts: [FriendWorkout]?
+    let todayMiles: Double?
+    let goalMiles: Double?
 
     enum CodingKeys: String, CodingKey {
-        case totalWorkouts = "total_workouts"
+        case streak
+        case startDate = "start_date"
         case totalMiles = "total_miles"
-        case currentStreak = "current_streak"
-        case longestStreak = "longest_streak"
-        case averagePace = "average_pace"
+        case bestMilesDay = "best_miles_day"
+        case bestSplitTime = "best_split_time"
         case recentWorkouts = "recent_workouts"
+        case todayMiles = "today_miles"
+        case goalMiles = "goal_miles"
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        streak = try container.decode(Int.self, forKey: .streak)
+        startDate = try? container.decode(String.self, forKey: .startDate)
+        totalMiles = try container.decode(Double.self, forKey: .totalMiles)
+        bestMilesDay = try? container.decode(BestMilesDay.self, forKey: .bestMilesDay)
+        
+        // Handle best_split_time - can be null or an object
+        if container.contains(.bestSplitTime) {
+            if try container.decodeNil(forKey: .bestSplitTime) {
+                bestSplitTime = nil
+            } else {
+                bestSplitTime = try? container.decode(BestSplitTime.self, forKey: .bestSplitTime)
+            }
+        } else {
+            bestSplitTime = nil
+        }
+        
+        recentWorkouts = try? container.decode([FriendWorkout].self, forKey: .recentWorkouts)
+        todayMiles = try? container.decode(Double.self, forKey: .todayMiles)
+        goalMiles = try? container.decode(Double.self, forKey: .goalMiles)
     }
 }
 

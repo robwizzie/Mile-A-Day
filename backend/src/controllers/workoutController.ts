@@ -9,7 +9,8 @@ import {
 	getRecentWorkouts as getRecentWorkoutsDb,
 	getTotalMiles,
 	getBestMilesDay,
-	getBestSplit
+	getBestSplit,
+	getTodayMiles
 } from '../services/workoutService.js';
 
 export async function uploadWorkouts(req: Request, res: Response) {
@@ -106,12 +107,16 @@ export async function getUserStats(req: Request, res: Response) {
 		const { streak, start } = await getActiveStreak(userId);
 
 		const startDateParam = currentStreak ? start : undefined;
-		const [total_miles, best_miles_day, best_split_time, recent_workouts] = await Promise.all([
+		const [total_miles, best_miles_day, best_split_time, recent_workouts, today_miles] = await Promise.all([
 			getTotalMiles(userId, startDateParam),
 			getBestMilesDay(userId, startDateParam),
 			getBestSplit(userId, startDateParam),
-			getRecentWorkoutsDb(userId, 10)
+			getRecentWorkoutsDb(userId, 10),
+			getTodayMiles(userId)
 		]);
+
+		// Default goal miles is 1.0 (can be updated when user preferences are stored)
+		const goal_miles = 1.0;
 
 		return res.status(200).json({
 			streak,
@@ -119,7 +124,9 @@ export async function getUserStats(req: Request, res: Response) {
 			total_miles,
 			best_miles_day,
 			best_split_time,
-			recent_workouts
+			recent_workouts,
+			today_miles,
+			goal_miles
 		});
 	} catch (error) {
 		return res.status(500).json({
