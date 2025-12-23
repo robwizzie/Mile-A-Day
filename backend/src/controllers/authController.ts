@@ -43,7 +43,9 @@ export async function signIn(req: Request, res: Response) {
 			deviceInfo: req.body.device_info
 		});
 
-		return res.json({ user, accessToken, refreshToken });
+		const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
+
+		return res.json({ user, accessToken, refreshToken, expiresIn: '30d', expiresAt });
 	} catch (err) {
 		console.error('Apple sign-in failed', err);
 		return res.status(401).json({ error: 'Invalid Apple identity token' });
@@ -62,7 +64,9 @@ export async function refresh(req: Request, res: Response) {
 			deviceInfo: req.body.device_info
 		});
 
-		return res.json(tokenPair);
+		const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
+
+		return res.json({ ...tokenPair, expiresIn: '30d', expiresAt });
 	} catch (err) {
 		console.error('Token refresh failed', err);
 		return res.status(403).json({

@@ -74,7 +74,7 @@ Authorization: Bearer <your_access_token>
 
 The API uses two types of tokens:
 
-- **Access Token**: Short-lived JWT (15 minutes) used for API requests
+- **Access Token**: Long-lived JWT (30 days) used for API requests
 - **Refresh Token**: Long-lived opaque token used to obtain new access tokens
 
 ### Token Security Features
@@ -121,9 +121,12 @@ curl --location 'http://localhost:3000/dev/test-token' \
 	"token": "eyJhbGciOiJIUzI1NiJ9...",
 	"userId": "peter",
 	"expiresIn": "30d",
+	"expiresAt": 1740326400000,
 	"environment": "development"
 }
 ```
+
+**Note**: `expiresAt` is a Unix timestamp in milliseconds indicating when the token expires.
 
 **Note:** This endpoint is only available in development and staging environments. It will return a 403 error in production.
 
@@ -190,9 +193,13 @@ Authenticates users via Apple Sign-In and returns both access and refresh tokens
 >         "auth_provider": "apple"
 >     },
 >     "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
->     "refreshToken": "rt_a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6_abc123"
+>     "refreshToken": "rt_a3f2b1c4d5e6f7a8b9c0d1e2f3a4b5c6_abc123",
+>     "expiresIn": "30d",
+>     "expiresAt": 1740326400000
 > }
 > ```
+>
+> **Note**: `expiresAt` is a Unix timestamp in milliseconds indicating when the access token expires.
 >
 > ##### Full cURL Example
 >
@@ -245,9 +252,13 @@ Exchanges a refresh token for a new access token and refresh token pair. The old
 > ```json
 > {
 >     "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
->     "refreshToken": "rt_b4g3c2d5e6f7a8b9c0d1e2f3a4b5c7d8_def456"
+>     "refreshToken": "rt_b4g3c2d5e6f7a8b9c0d1e2f3a4b5c7d8_def456",
+>     "expiresIn": "30d",
+>     "expiresAt": 1740326400000
 > }
 > ```
+>
+> **Note**: `expiresAt` is a Unix timestamp in milliseconds indicating when the access token expires.
 >
 > ##### Full cURL Example
 >
