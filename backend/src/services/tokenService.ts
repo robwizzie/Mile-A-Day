@@ -2,7 +2,7 @@ import { SignJWT, jwtVerify } from 'jose';
 import crypto from 'crypto';
 
 const APP_JWT_SECRET = process.env.APP_JWT_SECRET!;
-const ACCESS_TOKEN_EXPIRY = '15m';
+const ACCESS_TOKEN_EXPIRY = '30d';
 
 export async function generateAccessToken(userId: string): Promise<string> {
 	return await new SignJWT({ provider: 'apple' })

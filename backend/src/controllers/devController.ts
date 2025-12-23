@@ -34,10 +34,13 @@ export async function generateTestToken(req: Request, res: Response) {
 			.setExpirationTime('30d')
 			.sign(new TextEncoder().encode(appJwtSecret));
 
+		const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
+
 		return res.json({
 			token,
 			userId,
 			expiresIn: '30d',
+			expiresAt,
 			environment: env
 		});
 	} catch (err) {
