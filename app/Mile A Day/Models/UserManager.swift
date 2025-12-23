@@ -89,7 +89,7 @@ class UserManager: ObservableObject {
         currentUser.email = profile.email
         currentUser.authProvider = .apple
         currentUser.backendUserId = backendResponse.user.user_id
-        currentUser.authToken = backendResponse.token
+        currentUser.authToken = backendResponse.accessToken
         
         // Update name if we have it from Apple
         if let fullName = profile.fullName?.formatted(), !fullName.isEmpty {
@@ -104,7 +104,7 @@ class UserManager: ObservableObject {
         }
         
         // Store auth token
-        authToken = backendResponse.token
+        authToken = backendResponse.accessToken
         
         // Store backend user ID in UserDefaults for FriendService
         UserDefaults.standard.set(backendResponse.user.user_id, forKey: "backendUserId")

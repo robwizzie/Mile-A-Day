@@ -20,7 +20,8 @@ class AppleSignInManager: NSObject, ObservableObject {
 
     struct BackendAuthResponse: Codable {
         let user: BackendUser
-        let token: String
+        let accessToken: String
+        let refreshToken: String
     }
 
     struct BackendUser: Codable {
@@ -29,7 +30,10 @@ class AppleSignInManager: NSObject, ObservableObject {
         let email: String
         let first_name: String?
         let last_name: String?
+        let bio: String?
+        let profile_image_url: String?
         let apple_id: String?
+        let auth_provider: String?
     }
 
     func signIn() async throws -> (AppleUserProfile, BackendAuthResponse) {
