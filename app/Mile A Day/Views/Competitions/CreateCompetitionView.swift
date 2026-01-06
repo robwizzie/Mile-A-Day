@@ -13,7 +13,7 @@ struct CreateCompetitionView: View {
     @State private var unit: CompetitionUnit = .miles
     @State private var durationHours: Int = 24
     @State private var selectedWorkouts: Set<CompetitionActivity> = [.run]
-    @State private var firstTo: String = "5"
+    @State private var firstTo: Int = 5
     @State private var interval: CompetitionInterval = .day
     @State private var includeHistory = false
 
@@ -39,6 +39,45 @@ struct CreateCompetitionView: View {
         return goal * 2.4
     }
 
+    // Contextual labels based on competition type
+    var goalLabel: String {
+        switch selectedType {
+        case .streaks:
+            return "Daily Goal"
+        case .apex:
+            return "Total Distance Target"
+        case .targets:
+            return "Daily Goal to Score"
+        case .clash:
+            return "Daily Goal to Win Day"
+        case .race:
+            return "Total Distance to Win"
+        }
+    }
+
+    var goalDescription: String {
+        switch selectedType {
+        case .streaks:
+            return "Minimum distance to maintain streak each day"
+        case .apex:
+            return "Optional milestone distance for the competition"
+        case .targets:
+            return "Distance needed per interval to score a point"
+        case .clash:
+            return "Highest distance wins that day's point"
+        case .race:
+            return "First to reach this distance wins"
+        }
+    }
+
+    var needsInterval: Bool {
+        selectedType == .apex || selectedType == .targets || selectedType == .clash
+    }
+
+    var needsFirstTo: Bool {
+        selectedType == .streaks || selectedType == .clash
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -50,14 +89,31 @@ struct CreateCompetitionView: View {
                         // Challengers Section
                         challengersSection
 
-                        // Type Selection
-                        typeSelectionSection
+                        // Competition Type Selection
+                        competitionTypeSection
+
+                        // Activity Selection
+                        activitySelectionSection
 
                         // Goal Selection
                         goalSelectionSection
 
-                        // Duration
-                        durationSection
+                        // Type-Specific Options
+                        if needsInterval {
+                            intervalSection
+                        }
+
+                        if needsFirstTo {
+                            firstToSection
+                        }
+
+                        // Duration (not needed for race)
+                        if selectedType != .race {
+                            durationSection
+                        }
+
+                        // Historical Data Toggle
+                        historyToggleSection
 
                         Spacer(minLength: MADTheme.Spacing.xxl)
                     }
@@ -248,52 +304,91 @@ struct CreateCompetitionView: View {
         }
     }
 
-    // MARK: - Type Selection Section
+    // MARK: - Competition Type Section
 
-    var typeSelectionSection: some View {
+    var competitionTypeSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Select the Type")
+            Text("Competition Type")
+                .font(MADTheme.Typography.subheadline)
+                .foregroundColor(.white.opacity(0.6))
+                .padding(.horizontal, MADTheme.Spacing.xl)
+
+            Button {
+                showTypeSelector = true
+            } label: {
+                HStack(spacing: MADTheme.Spacing.md) {
+                    // Type icon
+                    Image(systemName: selectedType.icon)
+                        .font(.title2)
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: selectedType.gradient.map { Color(hex: $0) },
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 40, height: 40)
+                        .background(
+                            Circle()
+                                .fill(Color(hex: selectedType.gradient[0]).opacity(0.15))
+                        )
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(selectedType.displayName)
+                            .font(MADTheme.Typography.headline)
+                            .foregroundColor(.white)
+
+                        Text(selectedType.description)
+                            .font(MADTheme.Typography.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                            .lineLimit(2)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                .padding(MADTheme.Spacing.lg)
+                .background(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .padding(.horizontal, MADTheme.Spacing.xl)
+        }
+    }
+
+    // MARK: - Activity Selection Section
+
+    var activitySelectionSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            Text("Allowed Activities")
                 .font(MADTheme.Typography.subheadline)
                 .foregroundColor(.white.opacity(0.6))
                 .padding(.horizontal, MADTheme.Spacing.xl)
 
             HStack(spacing: MADTheme.Spacing.md) {
-                // Run type
-                CompactTypeButton(
-                    icon: "figure.run",
-                    label: "Run",
-                    iconColor: .blue,
-                    isSelected: selectedType == .apex && selectedWorkouts.contains(.run),
-                    action: {
-                        selectedType = .apex
-                        selectedWorkouts = [.run]
-                    }
-                )
-
-                // Steps type (mapped to targets)
-                CompactTypeButton(
-                    icon: "shoe.2.fill",
-                    label: "Steps",
-                    iconColor: .green,
-                    isSelected: selectedType == .targets && unit == .steps,
-                    action: {
-                        selectedType = .targets
-                        unit = .steps
-                        selectedWorkouts = [.run, .walk]
-                    }
-                )
-
-                // Cycle type
-                CompactTypeButton(
-                    icon: "bicycle",
-                    label: "Cycle",
-                    iconColor: .orange,
-                    isSelected: selectedType == .race && selectedWorkouts.contains(.walk),
-                    action: {
-                        selectedType = .race
-                        selectedWorkouts = [.walk] // Using walk as placeholder for cycling
-                    }
-                )
+                ForEach(CompetitionActivity.allCases, id: \.self) { activity in
+                    ActivityToggle(
+                        activity: activity,
+                        isSelected: selectedWorkouts.contains(activity),
+                        action: {
+                            if selectedWorkouts.contains(activity) {
+                                if selectedWorkouts.count > 1 {
+                                    selectedWorkouts.remove(activity)
+                                }
+                            } else {
+                                selectedWorkouts.insert(activity)
+                            }
+                        }
+                    )
+                }
             }
             .padding(.horizontal, MADTheme.Spacing.xl)
         }
@@ -303,10 +398,16 @@ struct CreateCompetitionView: View {
 
     var goalSelectionSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Select Goal")
-                .font(MADTheme.Typography.subheadline)
-                .foregroundColor(.white.opacity(0.6))
-                .padding(.horizontal, MADTheme.Spacing.xl)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(goalLabel)
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
+
+                Text(goalDescription)
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .padding(.horizontal, MADTheme.Spacing.xl)
 
             VStack(spacing: MADTheme.Spacing.lg) {
                 // Goal picker with +/- buttons
@@ -426,6 +527,139 @@ struct CreateCompetitionView: View {
                         .stroke(Color.white.opacity(0.1), lineWidth: 1)
                 )
         )
+        .padding(.horizontal, MADTheme.Spacing.xl)
+    }
+
+    // MARK: - Interval Section
+
+    var intervalSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Scoring Interval")
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
+
+                Text("How often to tally points or progress")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .padding(.horizontal, MADTheme.Spacing.xl)
+
+            Picker("Interval", selection: $interval) {
+                ForEach(CompetitionInterval.allCases, id: \.self) { interval in
+                    Text(interval.displayName).tag(interval)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, MADTheme.Spacing.xl)
+        }
+    }
+
+    // MARK: - First To Section
+
+    var firstToSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(selectedType == .streaks ? "Breaks to Lose" : "Points to Win")
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
+
+                Text(selectedType == .streaks ? "First to break this many days loses" : "First to reach this score wins")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .padding(.horizontal, MADTheme.Spacing.xl)
+
+            HStack(spacing: MADTheme.Spacing.xl) {
+                // Minus button
+                Button {
+                    if firstTo > 1 {
+                        firstTo -= 1
+                    }
+                } label: {
+                    Image(systemName: "minus")
+                        .font(.title3)
+                        .foregroundColor(.white)
+                        .frame(width: 44, height: 44)
+                        .background(
+                            Circle()
+                                .fill(.ultraThinMaterial)
+                        )
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(ScaleButtonStyle())
+
+                Spacer()
+
+                // Value display
+                Text("\(firstTo)")
+                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                // Plus button
+                Button {
+                    firstTo += 1
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.title3)
+                        .foregroundColor(.white)
+                        .frame(width: 44, height: 44)
+                        .background(
+                            Circle()
+                                .fill(.ultraThinMaterial)
+                        )
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(ScaleButtonStyle())
+            }
+            .padding(MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+            .padding(.horizontal, MADTheme.Spacing.xl)
+        }
+    }
+
+    // MARK: - History Toggle Section
+
+    var historyToggleSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            Toggle(isOn: $includeHistory) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Include Historical Data")
+                        .font(MADTheme.Typography.callout)
+                        .foregroundColor(.white)
+
+                    Text("Start the competition with existing workout data from before the start date")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.white.opacity(0.6))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(MADTheme.Colors.primary)
+            .padding(MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+        }
         .padding(.horizontal, MADTheme.Spacing.xl)
     }
 
@@ -609,8 +843,6 @@ struct CreateCompetitionView: View {
         let startDate = Date()
         let endDate = Calendar.current.date(byAdding: .hour, value: durationHours, to: startDate) ?? Date()
 
-        let firstToValue = Int(firstTo) ?? 5
-
         Task {
             do {
                 let competitionId = try await competitionService.createCompetition(
@@ -621,7 +853,7 @@ struct CreateCompetitionView: View {
                     workouts: Array(selectedWorkouts),
                     goal: goal,
                     unit: unit,
-                    firstTo: firstToValue,
+                    firstTo: firstTo,
                     history: includeHistory,
                     interval: interval
                 )
