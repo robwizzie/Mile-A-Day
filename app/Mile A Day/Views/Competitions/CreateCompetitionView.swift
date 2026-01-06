@@ -276,6 +276,8 @@ struct CreateCompetitionView: View {
                                 .font(MADTheme.Typography.caption)
                                 .foregroundColor(.white)
                                 .lineLimit(1)
+                                .frame(width: 70)
+                                .truncationMode(.tail)
                         }
                     }
                 }
