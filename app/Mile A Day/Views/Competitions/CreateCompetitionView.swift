@@ -153,26 +153,6 @@ struct CreateCompetitionView: View {
                         )
                     }
                 }
-
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        // Show streak/fire count (placeholder)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "flame.fill")
-                                .foregroundStyle(
-                                    LinearGradient(
-                                        colors: [.orange, .red],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                            Text("12")
-                                .foregroundColor(.white)
-                        }
-                        .font(.callout)
-                    }
-                }
             }
             .sheet(isPresented: $showFriendPicker) {
                 friendPickerSheet
@@ -436,17 +416,18 @@ struct CreateCompetitionView: View {
                     Spacer()
 
                     // Goal display
-                    VStack(spacing: 4) {
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text(String(format: "%.0f", goal))
-                                .font(.system(size: 64, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(String(format: "%.0f", goal))
+                            .font(.system(size: 64, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .fixedSize()
 
-                            Text(unit == .steps ? "k" : unit.rawValue)
-                                .font(MADTheme.Typography.title2)
-                                .foregroundColor(.white.opacity(0.7))
-                        }
+                        Text(unit == .steps ? "k" : unit.rawValue)
+                            .font(MADTheme.Typography.title2)
+                            .foregroundColor(.white.opacity(0.7))
+                            .fixedSize()
                     }
+                    .fixedSize(horizontal: true, vertical: false)
 
                     Spacer()
 
@@ -598,6 +579,7 @@ struct CreateCompetitionView: View {
                 Text("\(firstTo)")
                     .font(.system(size: 48, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
+                    .fixedSize()
 
                 Spacer()
 
