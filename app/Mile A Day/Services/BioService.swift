@@ -4,27 +4,37 @@ class BioService {
     private static let backendURL = "https://mad.mindgoblin.tech"
     
     static func updateBio(_ bio: String, userId: String, authToken: String) async throws {
-        guard let url = URL(string: "\(backendURL)/users/\(userId)/bio") else {
-            throw BioError.invalidURL
-        }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "PATCH"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
-        
+        let endpoint = "/users/\(userId)/bio"
         let body = ["bio": bio]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
         
-        let (data, response) = try await URLSession.shared.data(for: request)
-        
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw BioError.networkError
+        struct Response: Codable {
+            // Empty response expected
         }
         
-        guard httpResponse.statusCode == 200 else {
-            let errorMessage = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw BioError.serverError(errorMessage)
+        do {
+            let _: Response = try await APIClient.fancyFetch(
+                endpoint: endpoint,
+                method: .PATCH,
+                body: bodyData,
+                responseType: Response.self
+            )
+        } catch let error as APIError {
+            // Map APIError to BioError
+            switch error {
+            case .invalidURL:
+                throw BioError.invalidURL
+            case .invalidResponse, .networkError:
+                throw BioError.networkError
+            case .serverError:
+                throw BioError.serverError("Server error")
+            case .badRequest(let message):
+                throw BioError.serverError(message)
+            default:
+                throw BioError.serverError(error.localizedDescription ?? "Unknown error")
+            }
+        } catch {
+            throw BioError.serverError(error.localizedDescription)
         }
     }
 }

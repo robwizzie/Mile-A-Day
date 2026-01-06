@@ -213,62 +213,202 @@ struct FriendStatsView: View {
     let stats: UserStats?
     
     var body: some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            HStack {
-                Text("Stats")
-                    .font(MADTheme.Typography.headline)
-                    .foregroundColor(MADTheme.Colors.primaryText)
-                Spacer()
-            }
-            
+        VStack(spacing: MADTheme.Spacing.md) {
             if let stats = stats {
-                // Today's Goal Status Card (Prominent)
-                todayGoalCard(stats: stats)
-                
-                // Stats Grid
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: MADTheme.Spacing.md) {
-                    FriendStatCard(title: "Streak", value: "\(stats.streak)", icon: "flame.fill", color: .orange)
-                    FriendStatCard(title: "Total Miles", value: String(format: "%.1f", stats.totalMiles), icon: "figure.run", color: MADTheme.Colors.madRed)
-                    FriendStatCard(title: "Best Pace", value: formatPace(stats.fastestMilePace), icon: "timer", color: .blue)
-                    FriendStatCard(title: "Best Day", value: String(format: "%.1f mi", stats.mostMilesInOneDay), icon: "calendar", color: .green)
+                // Streak and Today's Goal in a row - wrapped in container with padding to match Performance section
+                HStack(spacing: MADTheme.Spacing.md) {
+                    // Streak Card (smaller, consistent with dashboard style)
+                    streakCard(stats: stats)
+                    
+                    // Today's Goal Card (compact)
+                    compactGoalCard(stats: stats)
                 }
+                .padding(MADTheme.Spacing.md)
+                .background(MADTheme.Colors.primaryBackground)
+                .cornerRadius(MADTheme.CornerRadius.large)
+                .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+                
+                // Performance Stats Section
+                VStack(spacing: MADTheme.Spacing.md) {
+                    HStack {
+                        Image(systemName: "chart.line.uptrend.xyaxis")
+                            .font(.system(size: 16))
+                            .foregroundColor(MADTheme.Colors.madRed)
+                        Text("Performance")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(MADTheme.Colors.primaryText)
+                        Spacer()
+                    }
+                    
+                    // Stats Grid
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: MADTheme.Spacing.md) {
+                        FriendStatCard(
+                            title: "Total Miles",
+                            value: String(format: "%.1f", stats.totalMiles),
+                            icon: "map.fill",
+                            color: .blue,
+                            subtitle: "mi"
+                        )
+                        FriendStatCard(
+                            title: "Best Pace",
+                            value: formatPace(stats.fastestMilePace),
+                            icon: "timer",
+                            color: MADTheme.Colors.madRed,
+                            subtitle: "/mi"
+                        )
+                        FriendStatCard(
+                            title: "Best Day",
+                            value: String(format: "%.1f", stats.mostMilesInOneDay),
+                            icon: "calendar",
+                            color: .green,
+                            subtitle: "mi"
+                        )
+                        FriendStatCard(
+                            title: "Avg/Day",
+                            value: String(format: "%.1f", stats.streak > 0 ? stats.totalMiles / Double(stats.streak) : 0),
+                            icon: "chart.bar.fill",
+                            color: .purple,
+                            subtitle: "mi"
+                        )
+                    }
+                }
+                .padding(MADTheme.Spacing.md)
+                .background(MADTheme.Colors.primaryBackground)
+                .cornerRadius(MADTheme.CornerRadius.large)
+                .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
             } else {
-                Text("Stats not available")
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(MADTheme.Colors.secondaryText)
-                    .frame(maxWidth: .infinity)
-                    .padding(MADTheme.Spacing.lg)
+                loadingOrEmptyState
             }
         }
-        .padding(MADTheme.Spacing.md)
-        .madCard()
     }
     
+    // MARK: - Streak Card (Dashboard-style)
     @ViewBuilder
-    private func todayGoalCard(stats: UserStats) -> some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: stats.hasCompletedGoalToday ? "checkmark.circle.fill" : "circle")
-                    .font(.title3)
-                    .foregroundColor(stats.hasCompletedGoalToday ? MADTheme.Colors.success : MADTheme.Colors.secondaryText)
-                
-                Text(stats.hasCompletedGoalToday ? "Goal Completed Today!" : "Goal Today")
-                    .font(MADTheme.Typography.subheadline)
-                    .foregroundColor(MADTheme.Colors.primaryText)
-            }
+    private func streakCard(stats: UserStats) -> some View {
+        ZStack {
+            // Dynamic gradient based on status (like dashboard)
+            LinearGradient(
+                gradient: Gradient(colors: stats.hasCompletedGoalToday 
+                    ? [Color.green.opacity(0.3), Color.green.opacity(0.1)]
+                    : [Color.orange.opacity(0.3), Color.orange.opacity(0.1)]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
             
-            Text("Daily goal: \(String(format: "%.1f", stats.goalMiles)) mi")
+            VStack(alignment: .leading, spacing: 8) {
+                // "CURRENT STREAK" header
+                Text("STREAK")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(stats.hasCompletedGoalToday ? .green : .orange)
+                    .tracking(1.5)
+                
+                // Streak number with days
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(stats.streak)")
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundColor(MADTheme.Colors.primaryText)
+                    
+                    Text("days")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(MADTheme.Colors.secondaryText)
+                }
+                
+                Spacer()
+                
+                // Fire icon at bottom
+                HStack {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(stats.hasCompletedGoalToday ? .green : .orange)
+                    Spacer()
+                    if stats.hasCompletedGoalToday {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(.green)
+                    }
+                }
+            }
+            .padding(MADTheme.Spacing.md)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 140)
+        .cornerRadius(MADTheme.CornerRadius.medium)
+        .overlay(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .stroke(stats.hasCompletedGoalToday 
+                    ? Color.green.opacity(0.3) 
+                    : Color.orange.opacity(0.3), 
+                    lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+    }
+    
+    // MARK: - Compact Goal Card
+    @ViewBuilder
+    private func compactGoalCard(stats: UserStats) -> some View {
+        ZStack {
+            // Background
+            MADTheme.Colors.secondaryBackground
+            
+            VStack(alignment: .leading, spacing: 8) {
+                // Header
+                Text("DAILY GOAL")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(MADTheme.Colors.secondaryText)
+                    .tracking(1.5)
+                
+                // Goal value
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(String(format: "%.1f", stats.goalMiles))
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundColor(MADTheme.Colors.primaryText)
+                    
+                    Text("mi")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(MADTheme.Colors.secondaryText)
+                }
+                
+                Spacer()
+                
+                // Status
+                HStack {
+                    Image(systemName: stats.hasCompletedGoalToday ? "checkmark.circle.fill" : "target")
+                        .font(.system(size: 18))
+                        .foregroundColor(stats.hasCompletedGoalToday ? .green : MADTheme.Colors.madRed)
+                    Spacer()
+                }
+            }
+            .padding(MADTheme.Spacing.md)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 140)
+        .cornerRadius(MADTheme.CornerRadius.medium)
+        .overlay(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .stroke(stats.hasCompletedGoalToday 
+                    ? Color.green.opacity(0.2) 
+                    : MADTheme.Colors.madRed.opacity(0.2), 
+                    lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+    }
+    
+    // MARK: - Loading/Empty State
+    private var loadingOrEmptyState: some View {
+        VStack(spacing: MADTheme.Spacing.md) {
+            ProgressView()
+                .scaleEffect(1.2)
+                .tint(MADTheme.Colors.madRed)
+            
+            Text("Loading stats...")
                 .font(MADTheme.Typography.caption)
                 .foregroundColor(MADTheme.Colors.secondaryText)
         }
         .frame(maxWidth: .infinity)
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                .fill(stats.hasCompletedGoalToday ? MADTheme.Colors.success.opacity(0.1) : MADTheme.Colors.secondaryBackground)
-        )
+        .padding(MADTheme.Spacing.xl)
     }
     
+    // MARK: - Helper Functions
     private func formatPace(_ pace: TimeInterval) -> String {
         if pace == 0 {
             return "N/A"
@@ -279,33 +419,69 @@ struct FriendStatsView: View {
     }
 }
 
+
 // MARK: - Friend Stat Card
 struct FriendStatCard: View {
     let title: String
     let value: String
     let icon: String
     let color: Color
+    var subtitle: String? = nil
     
     var body: some View {
-        VStack(spacing: MADTheme.Spacing.xs) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundColor(color)
+        ZStack {
+            // Subtle gradient background like streak card
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    color.opacity(0.08),
+                    color.opacity(0.03)
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
             
-            Text(value)
-                .font(MADTheme.Typography.title3)
-                .foregroundColor(MADTheme.Colors.primaryText)
-            
-            Text(title)
-                .font(MADTheme.Typography.caption)
-                .foregroundColor(MADTheme.Colors.secondaryText)
+            VStack(alignment: .leading, spacing: 8) {
+                // Header label
+                Text(title.uppercased())
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(color)
+                    .tracking(1.5)
+                
+                // Value
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(value)
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundColor(MADTheme.Colors.primaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                    
+                    if let subtitle = subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(MADTheme.Colors.secondaryText)
+                    }
+                }
+                
+                Spacer()
+                
+                // Icon at bottom
+                HStack {
+                    Image(systemName: icon)
+                        .font(.system(size: 18))
+                        .foregroundColor(color)
+                    Spacer()
+                }
+            }
+            .padding(MADTheme.Spacing.md)
         }
         .frame(maxWidth: .infinity)
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                .fill(MADTheme.Colors.secondaryBackground)
+        .frame(height: 120)
+        .cornerRadius(MADTheme.CornerRadius.medium)
+        .overlay(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .stroke(color.opacity(0.3), lineWidth: 1)
         )
+        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
     }
 }
 

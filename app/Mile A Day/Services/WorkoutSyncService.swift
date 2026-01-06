@@ -70,10 +70,6 @@ class WorkoutSyncService: ObservableObject {
 
     private let healthStore = HKHealthStore()
 
-    private var authToken: String? {
-        UserDefaults.standard.string(forKey: "authToken")
-    }
-
     private var currentUserId: String? {
         UserDefaults.standard.string(forKey: "backendUserId")
     }
@@ -404,35 +400,44 @@ class WorkoutSyncService: ObservableObject {
             throw SyncError.notAuthenticated
         }
 
-        guard let token = authToken else {
-            throw SyncError.notAuthenticated
-        }
-
         // Transform workouts to backend format
         let workoutData = try await transformWorkoutsForBackend(workouts)
 
-        // Make API request
-        let url = URL(string: "\(baseURL)/workouts/\(userId)/upload")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
+        // Make API request using fancyFetch
+        let endpoint = "/workouts/\(userId)/upload"
         let requestBody = try JSONSerialization.data(withJSONObject: workoutData)
-        request.httpBody = requestBody
-
-        let (_, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw SyncError.invalidResponse
+        
+        struct UploadResponse: Codable {
+            let message: String?
         }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            print("[WorkoutSyncService] ❌ Upload failed with status: \(httpResponse.statusCode)")
-            throw SyncError.serverError(httpResponse.statusCode)
+        
+        do {
+            let _: UploadResponse = try await APIClient.fancyFetch(
+                endpoint: endpoint,
+                method: .POST,
+                body: requestBody,
+                responseType: UploadResponse.self
+            )
+            print("[WorkoutSyncService] ✅ Uploaded batch of \(workouts.count) workouts")
+        } catch let error as APIError {
+            // Map APIError to SyncError
+            switch error {
+            case .invalidURL:
+                throw SyncError.invalidResponse
+            case .invalidResponse:
+                throw SyncError.invalidResponse
+            case .notAuthenticated:
+                throw SyncError.notAuthenticated
+            case .serverError(let code):
+                throw SyncError.serverError(code)
+            case .networkError(let message):
+                throw SyncError.networkError(message)
+            default:
+                throw SyncError.networkError(error.localizedDescription ?? "Unknown error")
+            }
+        } catch {
+            throw SyncError.networkError(error.localizedDescription)
         }
-
-        print("[WorkoutSyncService] ✅ Uploaded batch of \(workouts.count) workouts")
     }
 
     /// Transform HKWorkout objects to backend format

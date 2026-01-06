@@ -40,65 +40,35 @@ class FriendService: ObservableObject {
         body: Data? = nil,
         responseType: T.Type
     ) async throws -> T {
-        guard let url = URL(string: "\(baseURL)\(endpoint)") else {
-            throw FriendServiceError.invalidURL
-        }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = method.rawValue
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        if let token = authToken {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        
-        if let body = body {
-            request.httpBody = body
-        }
-        
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse else {
+            return try await APIClient.fancyFetch(
+                endpoint: endpoint,
+                method: method,
+                body: body,
+                responseType: responseType
+            )
+        } catch let error as APIError {
+            // Map APIError to FriendServiceError
+            switch error {
+            case .invalidURL:
+                throw FriendServiceError.invalidURL
+            case .invalidResponse:
                 throw FriendServiceError.invalidResponse
-            }
-            
-            print("[FriendService] 📊 Response status code: \(httpResponse.statusCode)")
-            if let responseString = String(data: data, encoding: .utf8) {
-                print("[FriendService] 📦 Response body: \(responseString)")
-            }
-            
-            // Handle different status codes
-            switch httpResponse.statusCode {
-            case 200...299:
-                break
-            case 401:
-                print("[FriendService] ❌ Unauthorized (401)")
+            case .notAuthenticated:
+                throw FriendServiceError.notAuthenticated
+            case .unauthorized:
                 throw FriendServiceError.unauthorized
-            case 404:
-                print("[FriendService] ❌ User not found (404)")
+            case .badRequest(let message):
+                throw FriendServiceError.apiError(message)
+            case .serverError(let code):
+                throw FriendServiceError.serverError(code)
+            case .tokenRefreshFailed:
+                throw FriendServiceError.notAuthenticated
+            case .networkError(let message):
+                throw FriendServiceError.networkError(message)
+            case .notFound:
                 throw FriendServiceError.userNotFound
-            case 400:
-                // Try to parse error message from response
-                if let errorData = try? JSONDecoder().decode([String: String].self, from: data),
-                   let errorMessage = errorData["error"] {
-                    print("[FriendService] ❌ Bad request (400): \(errorMessage)")
-                    throw FriendServiceError.apiError(errorMessage)
-                }
-                print("[FriendService] ❌ Bad request (400)")
-                throw FriendServiceError.badRequest
-            default:
-                print("[FriendService] ❌ Server error (\(httpResponse.statusCode))")
-                throw FriendServiceError.serverError(httpResponse.statusCode)
             }
-            
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            
-            return try decoder.decode(T.self, from: data)
-            
-        } catch let error as FriendServiceError {
-            throw error
         } catch {
             throw FriendServiceError.networkError(error.localizedDescription)
         }

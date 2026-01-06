@@ -13,25 +13,38 @@ struct FriendWorkoutsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             // Section Header
-            HStack {
-                Image(systemName: "figure.run")
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "figure.run.circle.fill")
+                    .font(.title3)
                     .foregroundColor(MADTheme.Colors.madRed)
                 Text("Recent Workouts")
-                    .font(MADTheme.Typography.title3)
+                    .font(.system(size: 20, weight: .bold))
                     .foregroundColor(MADTheme.Colors.primaryText)
                 Spacer()
+                Text("\(workouts.count)")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(MADTheme.Colors.secondaryText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(MADTheme.Colors.secondaryBackground)
+                    )
             }
-            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.top, MADTheme.Spacing.md)
 
-            // Workouts List
-            VStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(workouts.prefix(10)) { workout in
+            // Workouts List - removed prefix(10) to show all workouts
+            VStack(spacing: MADTheme.Spacing.xs) {
+                ForEach(workouts) { workout in
                     FriendWorkoutRow(workout: workout)
                 }
             }
+            .padding(.bottom, MADTheme.Spacing.md)
         }
-        .padding(MADTheme.Spacing.md)
-        .madCard()
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .background(MADTheme.Colors.primaryBackground)
+        .cornerRadius(MADTheme.CornerRadius.large)
+        .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
     }
 }
 
@@ -40,51 +53,68 @@ struct FriendWorkoutRow: View {
 
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
-            // Workout Icon
-            Image(systemName: workoutIcon)
-                .font(.title2)
-                .foregroundColor(MADTheme.Colors.madRed)
-                .frame(width: 40)
+            // Workout Icon in colored circle
+            ZStack {
+                Circle()
+                    .fill(workoutColor.opacity(0.15))
+                    .frame(width: 48, height: 48)
+                
+                Image(systemName: workoutIcon)
+                    .font(.system(size: 20))
+                    .foregroundColor(workoutColor)
+            }
 
             // Workout Details
-            VStack(alignment: .leading, spacing: 4) {
-                Text(workout.formattedDate)
-                    .font(MADTheme.Typography.body)
-                    .fontWeight(.semibold)
-                    .foregroundColor(MADTheme.Colors.primaryText)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text(workout.formattedDate)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(MADTheme.Colors.primaryText)
+                    
+                    // Type badge
+                    Text(workout.workoutType.capitalized)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(workoutColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(workoutColor.opacity(0.15))
+                        )
+                }
 
-                Text(workout.workoutType.capitalized)
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(MADTheme.Colors.secondaryText)
+                HStack(spacing: 12) {
+                    // Distance
+                    HStack(spacing: 4) {
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(MADTheme.Colors.secondaryText)
+                        Text(workout.formattedDistance)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(MADTheme.Colors.primaryText)
+                    }
+                    
+                    // Duration
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(MADTheme.Colors.secondaryText)
+                        Text(workout.formattedDuration)
+                            .font(.system(size: 13))
+                            .foregroundColor(MADTheme.Colors.secondaryText)
+                    }
+                }
             }
 
             Spacer()
-
-            // Workout Stats
-            VStack(alignment: .trailing, spacing: 4) {
-                HStack(spacing: 4) {
-                    Image(systemName: "figure.walk")
-                        .font(.caption)
-                        .foregroundColor(MADTheme.Colors.secondaryText)
-                    Text(workout.formattedDistance)
-                        .font(MADTheme.Typography.body)
-                        .fontWeight(.medium)
-                        .foregroundColor(MADTheme.Colors.primaryText)
-                }
-
-                HStack(spacing: 4) {
-                    Image(systemName: "clock")
-                        .font(.caption)
-                        .foregroundColor(MADTheme.Colors.secondaryText)
-                    Text(workout.formattedDuration)
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(MADTheme.Colors.secondaryText)
-                }
-            }
         }
-        .padding(MADTheme.Spacing.sm)
+        .padding(MADTheme.Spacing.md)
         .background(MADTheme.Colors.secondaryBackground)
         .cornerRadius(MADTheme.CornerRadius.medium)
+        .overlay(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .stroke(workoutColor.opacity(0.1), lineWidth: 1)
+        )
     }
 
     private var workoutIcon: String {
@@ -99,6 +129,21 @@ struct FriendWorkoutRow: View {
             return "figure.hiking"
         default:
             return "figure.run"
+        }
+    }
+    
+    private var workoutColor: Color {
+        switch workout.workoutType.lowercased() {
+        case "running":
+            return MADTheme.Colors.madRed
+        case "walking":
+            return .blue
+        case "cycling":
+            return .green
+        case "hiking":
+            return .orange
+        default:
+            return MADTheme.Colors.madRed
         }
     }
 }
