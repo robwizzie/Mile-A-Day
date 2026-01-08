@@ -891,7 +891,7 @@ struct CompactTypeButton: View {
             .padding(.horizontal, MADTheme.Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(isSelected ? .ultraThinMaterial : Color.white.opacity(0.05))
+                    .fill(isSelected ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Color.white.opacity(0.05)))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
