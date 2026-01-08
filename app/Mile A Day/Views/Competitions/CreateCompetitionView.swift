@@ -134,26 +134,6 @@ struct CreateCompetitionView: View {
             .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbarBackgroundVisibility(.automatic, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                // Date badge on leading side
-                ToolbarItem(placement: .navigationBarLeading) {
-                    HStack(spacing: 6) {
-                        VStack(spacing: 0) {
-                            Text(getCurrentDayName())
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(.black)
-                            Text(getCurrentDayNumber())
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.black)
-                        }
-                        .frame(width: 44, height: 44)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.yellow.gradient)
-                        )
-                    }
-                }
-            }
             .sheet(isPresented: $showFriendPicker) {
                 friendPickerSheet
             }
@@ -235,48 +215,45 @@ struct CreateCompetitionView: View {
                     // Selected friends
                     ForEach(Array(selectedFriends), id: \.user_id) { friend in
                         VStack(spacing: MADTheme.Spacing.sm) {
-                            ZStack {
-                                Circle()
-                                    .fill(.ultraThinMaterial)
-                                    .frame(width: 70, height: 70)
+                            ZStack(alignment: .topTrailing) {
+                                // Avatar circle
+                                ZStack {
+                                    Circle()
+                                        .fill(.ultraThinMaterial)
+                                        .frame(width: 70, height: 70)
 
-                                Circle()
-                                    .stroke(MADTheme.Colors.primary, lineWidth: 2)
-                                    .frame(width: 70, height: 70)
+                                    Circle()
+                                        .stroke(MADTheme.Colors.primary, lineWidth: 2)
+                                        .frame(width: 70, height: 70)
 
-                                // Friend initial or image
-                                Text(friend.displayName.prefix(1).uppercased())
-                                    .font(MADTheme.Typography.title2)
-                                    .foregroundColor(.white)
-
-                                // Remove button
-                                VStack {
-                                    HStack {
-                                        Spacer()
-                                        Button {
-                                            selectedFriends.remove(friend)
-                                        } label: {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .font(.caption)
-                                                .foregroundColor(.white)
-                                                .background(
-                                                    Circle()
-                                                        .fill(MADTheme.Colors.primary)
-                                                        .frame(width: 18, height: 18)
-                                                )
-                                        }
-                                        .offset(x: 8, y: -8)
-                                    }
-                                    Spacer()
+                                    // Friend initial
+                                    Text(friend.displayName.prefix(1).uppercased())
+                                        .font(MADTheme.Typography.title2)
+                                        .foregroundColor(.white)
                                 }
-                                .frame(width: 70, height: 70)
+
+                                // Remove button - positioned outside the circle
+                                Button {
+                                    selectedFriends.remove(friend)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(MADTheme.Colors.primary)
+                                        .background(
+                                            Circle()
+                                                .fill(.white)
+                                                .frame(width: 20, height: 20)
+                                        )
+                                }
+                                .offset(x: 2, y: -2)
                             }
+                            .frame(width: 74, height: 74)
 
                             Text(friend.displayName)
                                 .font(MADTheme.Typography.caption)
                                 .foregroundColor(.white)
                                 .lineLimit(1)
-                                .frame(width: 70)
+                                .frame(width: 74)
                                 .truncationMode(.tail)
                         }
                     }
@@ -392,6 +369,35 @@ struct CreateCompetitionView: View {
             .padding(.horizontal, MADTheme.Spacing.xl)
 
             VStack(spacing: MADTheme.Spacing.lg) {
+                // Unit selector
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    ForEach([CompetitionUnit.miles, CompetitionUnit.kilometers, CompetitionUnit.steps], id: \.self) { unitOption in
+                        Button {
+                            unit = unitOption
+                        } label: {
+                            Text(unitOption == .steps ? "Steps" : unitOption.rawValue.capitalized)
+                                .font(MADTheme.Typography.callout)
+                                .fontWeight(unit == unitOption ? .semibold : .regular)
+                                .foregroundColor(unit == unitOption ? .white : .white.opacity(0.6))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, MADTheme.Spacing.sm)
+                                .background(
+                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                        .fill(unit == unitOption ? MADTheme.Colors.primary.opacity(0.3) : Color.white.opacity(0.05))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                        .stroke(
+                                            unit == unitOption ? MADTheme.Colors.primary : Color.white.opacity(0.1),
+                                            lineWidth: unit == unitOption ? 2 : 1
+                                        )
+                                )
+                        }
+                        .buttonStyle(ScaleButtonStyle())
+                    }
+                }
+                .padding(.horizontal, MADTheme.Spacing.xl)
+
                 // Goal picker with +/- buttons
                 HStack(spacing: MADTheme.Spacing.xl) {
                     // Minus button
@@ -477,40 +483,57 @@ struct CreateCompetitionView: View {
     // MARK: - Duration Section
 
     var durationSection: some View {
-        HStack {
-            Text("Duration")
-                .font(MADTheme.Typography.callout)
-                .foregroundColor(.white.opacity(0.6))
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Competition Length")
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
 
-            Spacer()
-
-            Menu {
-                Button("12 hours") { durationHours = 12 }
-                Button("24 hours") { durationHours = 24 }
-                Button("48 hours") { durationHours = 48 }
-                Button("1 week") { durationHours = 168 }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(durationHours < 168 ? "\(durationHours) hours" : "1 week")
-                        .font(MADTheme.Typography.callout)
-                        .foregroundColor(.white)
-
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption2)
-                        .foregroundColor(.white.opacity(0.5))
-                }
+                Text("How long the challenge will run")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.5))
             }
-        }
-        .padding(MADTheme.Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            .padding(.horizontal, MADTheme.Spacing.xl)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: MADTheme.Spacing.md) {
+                DurationOption(
+                    title: "1 Day",
+                    subtitle: "24 hours",
+                    hours: 24,
+                    icon: "sun.max.fill",
+                    isSelected: durationHours == 24,
+                    action: { durationHours = 24 }
                 )
-        )
-        .padding(.horizontal, MADTheme.Spacing.xl)
+
+                DurationOption(
+                    title: "2 Days",
+                    subtitle: "48 hours",
+                    hours: 48,
+                    icon: "calendar",
+                    isSelected: durationHours == 48,
+                    action: { durationHours = 48 }
+                )
+
+                DurationOption(
+                    title: "1 Week",
+                    subtitle: "7 days",
+                    hours: 168,
+                    icon: "calendar.badge.clock",
+                    isSelected: durationHours == 168,
+                    action: { durationHours = 168 }
+                )
+
+                DurationOption(
+                    title: "2 Weeks",
+                    subtitle: "14 days",
+                    hours: 336,
+                    icon: "calendar.badge.plus",
+                    isSelected: durationHours == 336,
+                    action: { durationHours = 336 }
+                )
+            }
+            .padding(.horizontal, MADTheme.Spacing.xl)
+        }
     }
 
     // MARK: - Interval Section
@@ -528,12 +551,15 @@ struct CreateCompetitionView: View {
             }
             .padding(.horizontal, MADTheme.Spacing.xl)
 
-            Picker("Interval", selection: $interval) {
-                ForEach(CompetitionInterval.allCases, id: \.self) { interval in
-                    Text(interval.displayName).tag(interval)
+            HStack(spacing: MADTheme.Spacing.md) {
+                ForEach(CompetitionInterval.allCases, id: \.self) { intervalOption in
+                    IntervalOptionButton(
+                        interval: intervalOption,
+                        isSelected: interval == intervalOption,
+                        action: { interval = intervalOption }
+                    )
                 }
             }
-            .pickerStyle(.segmented)
             .padding(.horizontal, MADTheme.Spacing.xl)
         }
     }
@@ -983,6 +1009,96 @@ struct MADTextFieldStyle: TextFieldStyle {
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                     .stroke(Color.white.opacity(0.2), lineWidth: 1)
             )
+    }
+}
+
+// MARK: - Duration Option Component
+
+struct DurationOption: View {
+    let title: String
+    let subtitle: String
+    let hours: Int
+    let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundColor(isSelected ? MADTheme.Colors.primary : .white.opacity(0.6))
+
+                Text(title)
+                    .font(MADTheme.Typography.callout)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundColor(.white)
+
+                Text(subtitle)
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(isSelected ? MADTheme.Colors.primary.opacity(0.2) : .ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .stroke(
+                        isSelected ? MADTheme.Colors.primary : Color.white.opacity(0.1),
+                        lineWidth: isSelected ? 2 : 1
+                    )
+            )
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+}
+
+// MARK: - Interval Option Button
+
+struct IntervalOptionButton: View {
+    let interval: CompetitionInterval
+    let isSelected: Bool
+    let action: () -> Void
+
+    var icon: String {
+        switch interval {
+        case .day:
+            return "calendar.day.timeline.left"
+        case .week:
+            return "calendar.badge.clock"
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundColor(isSelected ? MADTheme.Colors.primary : .white.opacity(0.6))
+
+                Text(interval.displayName)
+                    .font(MADTheme.Typography.callout)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundColor(.white)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(isSelected ? MADTheme.Colors.primary.opacity(0.2) : .ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .stroke(
+                        isSelected ? MADTheme.Colors.primary : Color.white.opacity(0.1),
+                        lineWidth: isSelected ? 2 : 1
+                    )
+            )
+        }
+        .buttonStyle(ScaleButtonStyle())
     }
 }
 
