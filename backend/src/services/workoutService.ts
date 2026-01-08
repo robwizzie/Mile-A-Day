@@ -38,12 +38,25 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
         DO UPDATE SET split_time = EXCLUDED.split_time
       `;
 
+	console.log('Workout split test logs:', workouts);
+
 	await db.transaction(
 		workouts.flatMap((workout: Workout) => {
 			return [
 				{
 					query: workoutQuery,
-					params: [userId, workout.workoutId, workout.distance, workout.localDate, workout.date, workout.timezoneOffset, workout.workoutType, workout.deviceEndDate, workout.calories, workout.totalDuration]
+					params: [
+						userId,
+						workout.workoutId,
+						workout.distance,
+						workout.localDate,
+						workout.date,
+						workout.timezoneOffset,
+						workout.workoutType,
+						workout.deviceEndDate,
+						workout.calories,
+						workout.totalDuration
+					]
 				},
 				...workout.splitTimes.map((split: number, i: number) => ({
 					query: splitQuery,
@@ -188,7 +201,12 @@ export async function getTodayMiles(userId: string) {
 	return result[0]?.total_distance || 0;
 }
 
-export async function getQuantityDateRange(userId: string, startDate: string, endDate?: string, workoutTypes?: ('running' | 'walking')[]) {
+export async function getQuantityDateRange(
+	userId: string,
+	startDate: string,
+	endDate?: string,
+	workoutTypes?: ('running' | 'walking')[]
+) {
 	let query = `
 		SELECT 
 			local_date,
