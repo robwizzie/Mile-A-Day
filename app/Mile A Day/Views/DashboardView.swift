@@ -4245,8 +4245,12 @@ struct WorkoutTrackingView: View {
                     }
                 }
 
-                // Start a Live Activity if one doesn't already exist
-                // (The system may have ended it while we were in the background)
+                // CRITICAL: Restore/create Live Activity
+                // startLiveActivity() will intelligently:
+                // 1. Check for existing Live Activities from previous session
+                // 2. Reuse matching activity if found (based on start time)
+                // 3. Clean up any orphaned activities
+                // 4. Create new activity only if needed
                 startLiveActivity()
 
                 print("✅ Workout recovery complete - tracking resumed")
@@ -4533,16 +4537,53 @@ struct WorkoutTrackingView: View {
     // MARK: - Live Activity Management
 
     private func startLiveActivity() {
-        // Don't create a duplicate Live Activity if one is already active
-        guard workoutActivity == nil else {
-            print("Live Activity already exists, skipping creation")
-            return
-        }
-        
+        // CRITICAL FIX: Check for existing Live Activities before creating a new one
+        // This prevents creating multiple activities when app restarts
+
         guard ActivityAuthorizationInfo().areActivitiesEnabled else {
             print("Live Activities are not enabled")
             return
         }
+
+        // First, check if we already have a reference to an active Live Activity
+        if let existingActivity = workoutActivity {
+            print("✅ Live Activity already exists in memory: \(existingActivity.id)")
+            return
+        }
+
+        // Second, check for any running Live Activities (in case app was killed and restarted)
+        let existingActivities = Activity<WorkoutActivityAttributes>.activities
+        print("🔍 Found \(existingActivities.count) existing Live Activities")
+
+        // Try to find an active Live Activity that matches our current workout
+        if let matchingActivity = existingActivities.first(where: { activity in
+            let timeDiff = abs(activity.attributes.startTime.timeIntervalSince(workoutStartDate ?? Date()))
+            return timeDiff < 5.0 // Within 5 seconds of our workout start time
+        }) {
+            print("✅ Found matching Live Activity from previous session: \(matchingActivity.id)")
+            workoutActivity = matchingActivity
+
+            // Save the Live Activity ID to persistent storage
+            if var state = InProgressWorkoutStore.load() {
+                state.liveActivityID = matchingActivity.id
+                InProgressWorkoutStore.save(state)
+            }
+            return
+        }
+
+        // Clean up any orphaned Live Activities that don't match our workout
+        for orphanedActivity in existingActivities {
+            let timeDiff = abs(orphanedActivity.attributes.startTime.timeIntervalSince(workoutStartDate ?? Date()))
+            if timeDiff > 5.0 {
+                print("🗑️ Ending orphaned Live Activity: \(orphanedActivity.id)")
+                Task {
+                    await orphanedActivity.end(nil, dismissalPolicy: .immediate)
+                }
+            }
+        }
+
+        // No matching activity found, create a new one
+        print("📱 Creating new Live Activity...")
 
         let attributes = WorkoutActivityAttributes(
             startTime: workoutStartDate ?? Date(),
@@ -4572,16 +4613,34 @@ struct WorkoutTrackingView: View {
                 pushType: nil
             )
             workoutActivity = activity
-            print("Live Activity started: \(activity.id)")
+            print("✅ Live Activity created: \(activity.id)")
+
+            // CRITICAL: Save the Live Activity ID to persistent storage
+            if var state = InProgressWorkoutStore.load() {
+                state.liveActivityID = activity.id
+                InProgressWorkoutStore.save(state)
+                print("✅ Live Activity ID saved to persistent storage")
+            }
         } catch {
-            print("Failed to start Live Activity: \(error)")
+            print("❌ Failed to start Live Activity: \(error)")
         }
     }
 
     private func updateLiveActivity() {
-        guard let activity = workoutActivity else { return }
+        // CRITICAL FIX: Ensure we have a Live Activity reference
+        // If we don't have one, try to find/create it
+        if workoutActivity == nil {
+            print("⚠️ No Live Activity reference during update, attempting to recover...")
+            startLiveActivity()
+        }
 
-        // Compute real-time elapsed time from start date for accuracy
+        guard let activity = workoutActivity else {
+            print("❌ Cannot update Live Activity: no active activity found")
+            return
+        }
+
+        // Compute real-time elapsed time from start date for MAXIMUM ACCURACY
+        // This ensures the Dynamic Island shows the correct time even if the timer drifts
         let realTimeElapsed: TimeInterval
         if let startDate = workoutStartDate {
             realTimeElapsed = Date().timeIntervalSince(startDate)
@@ -4589,17 +4648,23 @@ struct WorkoutTrackingView: View {
             realTimeElapsed = elapsedTime
         }
 
+        // CRITICAL: Use FRESH data directly from location manager
+        // Don't rely on cached values that might be stale
+        let freshDistance = locationManager.currentDistance
+        let freshTotalDaily = startingDistance + freshDistance
+
         let updatedState = WorkoutActivityAttributes.ContentState(
-            distance: currentDistance,
-            totalDailyDistance: totalDailyDistance,
+            distance: freshDistance,
+            totalDailyDistance: freshTotalDaily,
             elapsedTime: realTimeElapsed,
             goalDistance: goalDistance,
             activityType: selectedActivityType == .running ? "Running" : "Walking"
         )
 
+        // Update the Live Activity with fresh data
         Task {
             await activity.update(
-                .init(state: updatedState, staleDate: nil)
+                ActivityContent(state: updatedState, staleDate: nil)
             )
         }
 
@@ -4608,23 +4673,25 @@ struct WorkoutTrackingView: View {
         if var existingState = InProgressWorkoutStore.load() {
             // Update dynamic fields while preserving accumulated data
             existingState.elapsedTime = realTimeElapsed
-            existingState.currentDistance = currentDistance
-            existingState.totalDailyDistance = totalDailyDistance
+            existingState.currentDistance = freshDistance
+            existingState.totalDailyDistance = freshTotalDaily
             existingState.lastSaveTime = Date()
+            existingState.liveActivityID = activity.id
 
             // Save updated state
             InProgressWorkoutStore.save(existingState)
         } else {
             // Fallback: create new state if none exists (shouldn't happen but defensive)
+            print("⚠️ Creating new workout state during update (unexpected)")
             let snapshot = InProgressWorkoutState(
                 isActive: true,
                 isPaused: false,
                 startTime: workoutStartDate ?? Date(),
                 elapsedTime: realTimeElapsed,
                 pausedTime: 0,
-                currentDistance: currentDistance,
+                currentDistance: freshDistance,
                 startingDistance: startingDistance,
-                totalDailyDistance: totalDailyDistance,
+                totalDailyDistance: freshTotalDaily,
                 goalDistance: goalDistance,
                 activityType: selectedActivityType == .running ? "Running" : "Walking",
                 locationTypeRawValue: selectedLocationType.rawValue,
@@ -4635,29 +4702,50 @@ struct WorkoutTrackingView: View {
                 liveActivityID: activity.id
             )
             InProgressWorkoutStore.save(snapshot)
-            print("⚠️ Created new workout state during update (unexpected)")
         }
     }
 
     private func endLiveActivity() {
-        guard let activity = workoutActivity else { return }
+        // CRITICAL FIX: End ALL Live Activities to prevent orphans
+        print("🔚 Ending Live Activity...")
+
+        // Use FRESH data for the final state
+        let freshDistance = locationManager.currentDistance
+        let freshTotalDaily = startingDistance + freshDistance
+        let realTimeElapsed = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
 
         let finalState = WorkoutActivityAttributes.ContentState(
-            distance: currentDistance,
-            totalDailyDistance: totalDailyDistance,
-            elapsedTime: elapsedTime,
+            distance: freshDistance,
+            totalDailyDistance: freshTotalDaily,
+            elapsedTime: realTimeElapsed,
             goalDistance: goalDistance,
             activityType: selectedActivityType == .running ? "Running" : "Walking"
         )
 
-        Task {
-            await activity.end(
-                .init(state: finalState, staleDate: nil),
-                dismissalPolicy: .after(.now + 5) // Keep visible for 5 seconds after workout ends
-            )
+        // End the Live Activity we have a reference to
+        if let activity = workoutActivity {
+            Task {
+                await activity.end(
+                    ActivityContent(state: finalState, staleDate: nil),
+                    dismissalPolicy: .after(.now + 5) // Keep visible for 5 seconds
+                )
+                print("✅ Ended Live Activity: \(activity.id)")
+            }
+            workoutActivity = nil
         }
 
-        workoutActivity = nil
+        // CRITICAL: Also end any other Live Activities that might be orphaned
+        // This ensures we don't leave behind duplicate activities
+        Task {
+            let allActivities = Activity<WorkoutActivityAttributes>.activities
+            for orphanedActivity in allActivities {
+                // End any activity that's still running
+                if orphanedActivity.id != workoutActivity?.id {
+                    print("🗑️ Cleaning up orphaned Live Activity: \(orphanedActivity.id)")
+                    await orphanedActivity.end(nil, dismissalPolicy: .immediate)
+                }
+            }
+        }
 
         // Clear any persisted in‑progress state now that the workout is finished.
         InProgressWorkoutStore.clear()

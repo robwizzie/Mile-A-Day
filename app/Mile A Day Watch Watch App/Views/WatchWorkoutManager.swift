@@ -9,6 +9,7 @@ class WatchWorkoutManager: NSObject, ObservableObject {
     @Published var currentHeartRate: Double = 0
     @Published var averageHeartRate: Double = 0
     @Published var calories: Double = 0
+    @Published var isPaused: Bool = false
 
     // HealthKit properties
     private let healthStore = HKHealthStore()
@@ -18,6 +19,8 @@ class WatchWorkoutManager: NSObject, ObservableObject {
     // Timing
     private var startDate: Date?
     private var timer: Timer?
+    private var pausedTime: TimeInterval = 0
+    private var pauseStartDate: Date?
 
     // Heart rate tracking
     private var heartRateSamples: [Double] = []
@@ -99,11 +102,31 @@ class WatchWorkoutManager: NSObject, ObservableObject {
 
     private func startTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self, let startDate = self.startDate else { return }
+            guard let self = self, let startDate = self.startDate, !self.isPaused else { return }
             DispatchQueue.main.async {
-                self.elapsedTime = Date().timeIntervalSince(startDate)
+                self.elapsedTime = Date().timeIntervalSince(startDate) - self.pausedTime
             }
         }
+    }
+
+    func pauseWorkout() {
+        guard !isPaused else { return }
+        isPaused = true
+        pauseStartDate = Date()
+        session?.pause()
+    }
+
+    func resumeWorkout() {
+        guard isPaused else { return }
+        isPaused = false
+
+        // Add the paused duration to total paused time
+        if let pauseStart = pauseStartDate {
+            pausedTime += Date().timeIntervalSince(pauseStart)
+        }
+        pauseStartDate = nil
+
+        session?.resume()
     }
 
     func endWorkout(completion: @escaping (Bool) -> Void) {

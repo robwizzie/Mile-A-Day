@@ -39,10 +39,6 @@ class WorkoutService: ObservableObject {
             throw WorkoutServiceError.notAuthenticated
         }
         
-        guard authToken != nil else {
-            throw WorkoutServiceError.notAuthenticated
-        }
-        
         isLoading = true
         errorMessage = nil
         
@@ -75,8 +71,56 @@ class WorkoutService: ObservableObject {
         
         isLoading = false
     }
-
-
+    
+    /// Upload all workouts from HealthKit (for testing purposes)
+    func uploadAllWorkouts() async throws {
+        guard let currentUserId = getCurrentUserId() else {
+            throw WorkoutServiceError.notAuthenticated
+        }
+        
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            // Fetch all workouts directly from HealthKit
+            let allWorkouts = try await fetchAllWorkoutsFromHealthKit()
+            
+            if allWorkouts.isEmpty {
+                await MainActor.run {
+                    self.errorMessage = "No workouts found to upload"
+                }
+                return
+            }
+            
+            // Transform and upload
+            let workoutData = try await transformWorkoutsForBackend(allWorkouts)
+            
+            // Debug: Print the full request data
+            let requestBody = try JSONSerialization.data(withJSONObject: workoutData)
+            if let requestString = String(data: requestBody, encoding: .utf8) {
+                print("[WorkoutService] 📤 Full request body: \(requestString)")
+            }
+            
+            // Make the API request
+            let response: WorkoutUploadResponse = try await makeRequest(
+                endpoint: "/workouts/\(currentUserId)/upload",
+                method: .POST,
+                body: requestBody,
+                responseType: WorkoutUploadResponse.self
+            )
+            
+            lastUploadStatus = response.message
+            print("[WorkoutService] ✅ Successfully uploaded \(allWorkouts.count) workouts")
+            
+        } catch {
+            errorMessage = error.localizedDescription
+            print("[WorkoutService] ❌ Upload failed: \(error)")
+            throw error
+        }
+        
+        isLoading = false
+    }
+    
     // MARK: - Private Helper Methods
     private func makeRequest<T: Decodable>(
         endpoint: String,
@@ -84,59 +128,35 @@ class WorkoutService: ObservableObject {
         body: Data? = nil,
         responseType: T.Type
     ) async throws -> T {
-        guard let url = URL(string: "\(baseURL)\(endpoint)") else {
-            throw WorkoutServiceError.invalidURL
-        }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = method.rawValue
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(authToken!)", forHTTPHeaderField: "Authorization")
-        
-        if let body = body {
-            request.httpBody = body
-        }
-        
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            
-            guard let httpResponse = response as? HTTPURLResponse else {
+            return try await APIClient.fancyFetch(
+                endpoint: endpoint,
+                method: method,
+                body: body,
+                responseType: responseType
+            )
+        } catch let error as APIError {
+            // Map APIError to WorkoutServiceError
+            switch error {
+            case .invalidURL:
+                throw WorkoutServiceError.invalidURL
+            case .invalidResponse:
+                throw WorkoutServiceError.invalidResponse
+            case .notAuthenticated:
+                throw WorkoutServiceError.notAuthenticated
+            case .unauthorized:
+                throw WorkoutServiceError.unauthorized
+            case .badRequest(let message):
+                throw WorkoutServiceError.apiError(message)
+            case .serverError(let code):
+                throw WorkoutServiceError.serverError(code)
+            case .tokenRefreshFailed:
+                throw WorkoutServiceError.notAuthenticated
+            case .networkError(let message):
+                throw WorkoutServiceError.networkError(message)
+            case .notFound:
                 throw WorkoutServiceError.invalidResponse
             }
-            
-            print("[WorkoutService] 📊 Response status code: \(httpResponse.statusCode)")
-            if let responseString = String(data: data, encoding: .utf8) {
-                print("[WorkoutService] 📦 Response body: \(responseString)")
-            }
-            
-            // Handle different status codes
-            switch httpResponse.statusCode {
-            case 200...299:
-                break
-            case 401:
-                print("[WorkoutService] ❌ Unauthorized (401)")
-                throw WorkoutServiceError.unauthorized
-            case 400:
-                // Try to parse error message from response
-                if let errorData = try? JSONDecoder().decode([String: String].self, from: data),
-                   let errorMessage = errorData["error"] {
-                    print("[WorkoutService] ❌ Bad request (400): \(errorMessage)")
-                    throw WorkoutServiceError.apiError(errorMessage)
-                }
-                print("[WorkoutService] ❌ Bad request (400)")
-                throw WorkoutServiceError.badRequest
-            default:
-                print("[WorkoutService] ❌ Server error (\(httpResponse.statusCode))")
-                throw WorkoutServiceError.serverError(httpResponse.statusCode)
-            }
-            
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            
-            return try decoder.decode(T.self, from: data)
-            
-        } catch let error as WorkoutServiceError {
-            throw error
         } catch {
             throw WorkoutServiceError.networkError(error.localizedDescription)
         }
@@ -349,10 +369,6 @@ class WorkoutService: ObservableObject {
     ///   - limit: Maximum number of workouts to return (default: 10)
     /// - Returns: Array of recent workouts
     func getRecentWorkouts(userId: String, limit: Int = 10) async throws -> [RecentWorkout] {
-        guard authToken != nil else {
-            throw WorkoutServiceError.notAuthenticated
-        }
-        
         let endpoint = "/workouts/\(userId)/recent?limit=\(limit)"
         
         do {
@@ -375,10 +391,6 @@ class WorkoutService: ObservableObject {
     /// - Parameter userId: The ID of the user to get streak for
     /// - Returns: The user's current workout streak
     func getStreak(userId: String) async throws -> Int {
-        guard authToken != nil else {
-            throw WorkoutServiceError.notAuthenticated
-        }
-        
         let endpoint = "/workouts/\(userId)/streak"
         
         do {
@@ -401,9 +413,6 @@ class WorkoutService: ObservableObject {
     ///   - userId: The ID of the user
     ///   - currentStreakOnly: If true, limits stats to current streak period
     func getUserStats(userId: String, currentStreakOnly: Bool = false) async throws -> UserStatsAPIResponse {
-        guard authToken != nil else {
-            throw WorkoutServiceError.notAuthenticated
-        }
         let param = currentStreakOnly ? "?current_streak=true" : ""
         let endpoint = "/workouts/\(userId)/stats\(param)"
         return try await makeRequest(endpoint: endpoint, method: .GET, responseType: UserStatsAPIResponse.self)

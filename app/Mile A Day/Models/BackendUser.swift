@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Backend User Models
 /// Represents a user from the backend API
-struct BackendUser: Codable, Identifiable {
+struct BackendUser: Codable, Identifiable, Hashable {
     let user_id: String
     let username: String?
     let email: String
@@ -12,9 +12,9 @@ struct BackendUser: Codable, Identifiable {
     let profile_image_url: String?
     let apple_id: String?
     let auth_provider: String?
-    
+
     var id: String { user_id }
-    
+
     // Computed properties for convenience
     var displayName: String {
         if let first = first_name, let last = last_name {
@@ -27,9 +27,18 @@ struct BackendUser: Codable, Identifiable {
             return "Unknown User"
         }
     }
-    
+
     var hasProfileImage: Bool {
         return profile_image_url != nil && !profile_image_url!.isEmpty
+    }
+
+    // Hashable conformance
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(user_id)
+    }
+
+    static func == (lhs: BackendUser, rhs: BackendUser) -> Bool {
+        lhs.user_id == rhs.user_id
     }
 }
 

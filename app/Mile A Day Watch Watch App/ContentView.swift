@@ -5,115 +5,147 @@ struct ContentView: View {
     @EnvironmentObject var healthManager: HealthKitManager
     @EnvironmentObject var userManager: UserManager
     @State private var showWorkoutView = false
+    @State private var selectedActivityType: HKWorkoutActivityType = .running
     @State private var showCelebration = false
     @State private var hasShownCelebration = false
-    
+
     // MAD Theme Colors
     private let madRed = Color(red: 217/255, green: 64/255, blue: 63/255)
     private let madOrange = Color.orange
-    
+
     private var goalDistance: Double {
         userManager.currentUser.goalMiles > 0 ? userManager.currentUser.goalMiles : 1.0
     }
-    
+
     private var currentDistance: Double {
         healthManager.todaysDistance
     }
-    
+
     private var progress: Double {
         min(currentDistance / goalDistance, 1.0)
     }
-    
+
     private var isCompleted: Bool {
         currentDistance >= goalDistance
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                // Main content
-                VStack(spacing: 0) {
-                    // Top bar with workout button - minimal height
-                    HStack {
-                        Spacer()
-                        Button(action: {
-                            showWorkoutView = true
-                        }) {
+        ZStack {
+            // Main content
+            VStack(spacing: 0) {
+                // App title with logo
+                HStack(spacing: 4) {
+                    Image(systemName: "figure.run")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(madRed)
+                    Text("Mile A Day")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundColor(.primary)
+                }
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+
+                Spacer()
+
+                // RUN and WALK buttons
+                VStack(spacing: 12) {
+                    // RUN button
+                    Button(action: {
+                        selectedActivityType = .running
+                        showWorkoutView = true
+                    }) {
+                        HStack(spacing: 12) {
                             Image(systemName: "figure.run")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(madOrange)
-                                .frame(width: 28, height: 28)
-                                .background(
-                                    Circle()
-                                        .fill(madOrange.opacity(0.15))
+                                .font(.system(size: 32, weight: .medium))
+                                .foregroundColor(.white)
+                            Text("RUN")
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 64)
+                        .background(
+                            RoundedRectangle(cornerRadius: 32)
+                                .fill(madRed)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 32)
+                                .stroke(madRed.opacity(0.3), lineWidth: 3)
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    // WALK button
+                    Button(action: {
+                        selectedActivityType = .walking
+                        showWorkoutView = true
+                    }) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "figure.walk")
+                                .font(.system(size: 32, weight: .medium))
+                                .foregroundColor(.white)
+                            Text("WALK")
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 64)
+                        .background(
+                            RoundedRectangle(cornerRadius: 32)
+                                .fill(Color.black.opacity(0.6))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 32)
+                                .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+
+                Spacer()
+
+                // Today's progress
+                VStack(spacing: 2) {
+                    Text(String(format: "Today: %.1f / %.1f mi", currentDistance, goalDistance))
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundColor(.secondary)
+
+                    // Mini progress bar
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            // Background
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.secondary.opacity(0.2))
+                                .frame(height: 4)
+
+                            // Progress
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(
+                                    LinearGradient(
+                                        colors: isCompleted
+                                            ? [Color.green, Color.green.opacity(0.8)]
+                                            : [madRed, madOrange],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
                                 )
-                        }
-                        .buttonStyle(.plain)
-                        .padding(.trailing, 6)
-                        .padding(.top, 2)
-                    }
-                    .frame(height: 32)
-                    
-                    Spacer()
-                    
-                    // Goal circle - perfectly centered
-                    ZStack {
-                        // Background circle (subtle)
-                        Circle()
-                            .stroke(Color.secondary.opacity(0.15), lineWidth: 5)
-                            .frame(width: min(geometry.size.width * 0.7, 130), 
-                                   height: min(geometry.size.width * 0.7, 130))
-                        
-                        // Progress circle
-                        Circle()
-                            .trim(from: 0, to: progress)
-                            .stroke(
-                                LinearGradient(
-                                    colors: isCompleted 
-                                        ? [Color.green, Color.green.opacity(0.8)]
-                                        : [madOrange, madRed],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                style: StrokeStyle(lineWidth: 5, lineCap: .round)
-                            )
-                            .frame(width: min(geometry.size.width * 0.7, 130), 
-                                   height: min(geometry.size.width * 0.7, 130))
-                            .rotationEffect(.degrees(-90))
-                            .animation(.spring(response: 0.6, dampingFraction: 0.8), value: progress)
-                        
-                        // Center content - compact and clean
-                        VStack(spacing: 1) {
-                            Text(String(format: "%.2f", currentDistance))
-                                .font(.system(size: 26, weight: .bold, design: .rounded))
-                                .foregroundColor(.primary)
-                                .minimumScaleFactor(0.8)
-                                .lineLimit(1)
-                            
-                            Text(String(format: "of %.1f", goalDistance))
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
-                                .foregroundColor(.secondary)
+                                .frame(width: geometry.size.width * progress, height: 4)
+                                .animation(.spring(response: 0.6, dampingFraction: 0.8), value: progress)
                         }
                     }
-                    
-                    Spacer()
-                    
-                    // Bottom percentage - only show if not completed
-                    if !isCompleted && progress > 0 {
-                        Text("\(Int(progress * 100))%")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundColor(.secondary)
-                            .padding(.bottom, 4)
-                    }
+                    .frame(height: 4)
+                    .padding(.horizontal, 24)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                
-                // Celebration animation overlay
-                if showCelebration {
-                    CelebrationView(madRed: madRed, madOrange: madOrange)
-                        .transition(.scale.combined(with: .opacity))
-                        .zIndex(100)
-                }
+                .padding(.bottom, 12)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Celebration animation overlay
+            if showCelebration {
+                CelebrationView(madRed: madRed, madOrange: madOrange)
+                    .transition(.scale.combined(with: .opacity))
+                    .zIndex(100)
             }
         }
         .fullScreenCover(isPresented: $showWorkoutView) {
@@ -121,7 +153,8 @@ struct ContentView: View {
                 healthManager: healthManager,
                 userManager: userManager,
                 goalDistance: goalDistance,
-                startingDistance: currentDistance
+                startingDistance: currentDistance,
+                activityType: selectedActivityType
             )
         }
         .onAppear {
@@ -145,7 +178,7 @@ struct ContentView: View {
                         showCelebration = true
                     }
                 }
-                
+
                 // Hide celebration after 2.5 seconds
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.7) {
                     withAnimation(.easeOut(duration: 0.3)) {

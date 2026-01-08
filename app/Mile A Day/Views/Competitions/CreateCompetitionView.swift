@@ -3,19 +3,19 @@ import SwiftUI
 struct CreateCompetitionView: View {
     @Environment(\.dismiss) var dismiss
     @StateObject private var competitionService = CompetitionService()
-
-    // Step management
-    @State private var currentStep = 0
+    @StateObject private var friendService = FriendService()
 
     // Form fields
-    @State private var selectedType: CompetitionType?
+    @State private var selectedFriends: Set<BackendUser> = []
+    @State private var selectedType: CompetitionType = .apex
     @State private var competitionName = ""
-    @State private var startDate = Date()
-    @State private var endDate = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
-    @State private var selectedWorkouts: Set<CompetitionActivity> = [.run]
-    @State private var goal: String = "1"
+    @State private var goal: Double = 5.0
     @State private var unit: CompetitionUnit = .miles
-    @State private var firstTo: String = "5"
+    @State private var durationHours: Int = 24
+    @State private var customDurationDays: Int = 3
+    @State private var isCustomDuration: Bool = false
+    @State private var selectedWorkouts: Set<CompetitionActivity> = [.run]
+    @State private var firstTo: Int = 5
     @State private var interval: CompetitionInterval = .day
     @State private var includeHistory = false
 
@@ -24,19 +24,60 @@ struct CreateCompetitionView: View {
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var showSuccess = false
+    @State private var showFriendPicker = false
+    @State private var showTypeSelector = false
 
-    var canProceedStep1: Bool {
-        selectedType != nil
+    var canCreate: Bool {
+        !selectedFriends.isEmpty &&
+        goal > 0
     }
 
-    var canProceedStep2: Bool {
-        !competitionName.isEmpty &&
-        endDate > startDate &&
-        !selectedWorkouts.isEmpty &&
-        !goal.isEmpty &&
-        Double(goal) != nil &&
-        !firstTo.isEmpty &&
-        Int(firstTo) != nil
+    var firstSelectedFriend: BackendUser? {
+        selectedFriends.first
+    }
+
+    var friendBestDistance: Double {
+        // In a real implementation, fetch from friend stats
+        return goal * 2.4
+    }
+
+    // Contextual labels based on competition type
+    var goalLabel: String {
+        switch selectedType {
+        case .streaks:
+            return "Daily Goal"
+        case .apex:
+            return "Total Distance Target"
+        case .targets:
+            return "Daily Goal to Score"
+        case .clash:
+            return "Daily Goal to Win Day"
+        case .race:
+            return "Total Distance to Win"
+        }
+    }
+
+    var goalDescription: String {
+        switch selectedType {
+        case .streaks:
+            return "Minimum distance to maintain streak each day"
+        case .apex:
+            return "Optional milestone distance for the competition"
+        case .targets:
+            return "Distance needed per interval to score a point"
+        case .clash:
+            return "Highest distance wins that day's point"
+        case .race:
+            return "First to reach this distance wins"
+        }
+    }
+
+    var needsInterval: Bool {
+        selectedType == .apex || selectedType == .targets || selectedType == .clash
+    }
+
+    var needsFirstTo: Bool {
+        selectedType == .streaks || selectedType == .clash
     }
 
     var body: some View {
@@ -47,42 +88,59 @@ struct CreateCompetitionView: View {
 
                 ScrollView {
                     VStack(spacing: MADTheme.Spacing.xl) {
-                        // Progress indicator
-                        HStack(spacing: MADTheme.Spacing.sm) {
-                            ForEach(0..<2) { index in
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(index <= currentStep ? MADTheme.Colors.primary : Color.white.opacity(0.3))
-                                    .frame(height: 4)
-                            }
-                        }
-                        .padding(.horizontal, MADTheme.Spacing.xl)
-                        .padding(.top, MADTheme.Spacing.md)
+                        // Challengers Section
+                        challengersSection
 
-                        // Step content
-                        if currentStep == 0 {
-                            step1SelectType
-                        } else if currentStep == 1 {
-                            step2ConfigureDetails
+                        // Competition Type Selection
+                        competitionTypeSection
+
+                        // Activity Selection
+                        activitySelectionSection
+
+                        // Goal Selection
+                        goalSelectionSection
+
+                        // Type-Specific Options
+                        if needsInterval {
+                            intervalSection
                         }
 
-                        // Navigation buttons
-                        navigationButtons
+                        if needsFirstTo {
+                            firstToSection
+                        }
+
+                        // Duration (not needed for race)
+                        if selectedType != .race {
+                            durationSection
+                        }
+
+                        // Historical Data Toggle
+                        historyToggleSection
+
+                        Spacer(minLength: MADTheme.Spacing.xxl)
                     }
+                    .padding(.top, MADTheme.Spacing.md)
                     .padding(.bottom, MADTheme.Spacing.xl)
                 }
+
+                // Send Invite Button (Fixed at bottom)
+                VStack {
+                    Spacer()
+                    sendInviteButton
+                        .padding(.horizontal, MADTheme.Spacing.xl)
+                        .padding(.bottom, MADTheme.Spacing.lg)
+                }
             }
-            .navigationTitle("Create Competition")
+            .navigationTitle("Challenge")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbarBackgroundVisibility(.automatic, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                    .foregroundColor(.white)
-                }
+            .sheet(isPresented: $showFriendPicker) {
+                friendPickerSheet
+            }
+            .sheet(isPresented: $showTypeSelector) {
+                typeSelectorSheet
             }
             .alert("Error", isPresented: $showError) {
                 Button("OK", role: .cancel) { }
@@ -96,25 +154,199 @@ struct CreateCompetitionView: View {
             } message: {
                 Text("Your competition has been created successfully!")
             }
+            .task {
+                // Load friends when view appears
+                do {
+                    try await friendService.loadFriends()
+                } catch {
+                    print("Failed to load friends: \(error)")
+                }
+            }
         }
     }
 
-    // MARK: - Step 1: Select Type
+    // MARK: - Challengers Section
 
-    var step1SelectType: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-            Text("Choose Competition Type")
-                .font(MADTheme.Typography.title2)
-                .foregroundColor(.white)
+    var challengersSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            HStack {
+                Text("Challengers")
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
+
+                Spacer()
+
+                Button {
+                    showFriendPicker = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.6))
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.xl)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: MADTheme.Spacing.md) {
+                    // Add challenger button
+                    Button {
+                        showFriendPicker = true
+                    } label: {
+                        VStack(spacing: MADTheme.Spacing.sm) {
+                            ZStack {
+                                Circle()
+                                    .fill(.ultraThinMaterial)
+                                    .frame(width: 70, height: 70)
+
+                                Circle()
+                                    .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                                    .frame(width: 70, height: 70)
+
+                                Image(systemName: "plus")
+                                    .font(.title2)
+                                    .foregroundColor(.white.opacity(0.7))
+                            }
+
+                            Text("Add")
+                                .font(MADTheme.Typography.caption)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                    }
+                    .buttonStyle(ScaleButtonStyle())
+
+                    // Selected friends
+                    ForEach(Array(selectedFriends), id: \.user_id) { friend in
+                        VStack(spacing: MADTheme.Spacing.sm) {
+                            ZStack(alignment: .topTrailing) {
+                                // Avatar circle
+                                ZStack {
+                                    Circle()
+                                        .fill(.ultraThinMaterial)
+                                        .frame(width: 70, height: 70)
+
+                                    Circle()
+                                        .stroke(MADTheme.Colors.primary, lineWidth: 2)
+                                        .frame(width: 70, height: 70)
+
+                                    // Friend initial
+                                    Text(friend.displayName.prefix(1).uppercased())
+                                        .font(MADTheme.Typography.title2)
+                                        .foregroundColor(.white)
+                                }
+
+                                // Remove button - positioned outside the circle
+                                Button {
+                                    selectedFriends.remove(friend)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundColor(MADTheme.Colors.primary)
+                                        .background(
+                                            Circle()
+                                                .fill(.white)
+                                                .frame(width: 20, height: 20)
+                                        )
+                                }
+                                .offset(x: 2, y: -2)
+                            }
+                            .frame(width: 74, height: 74)
+
+                            Text(friend.displayName)
+                                .font(MADTheme.Typography.caption)
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                                .frame(width: 74)
+                                .truncationMode(.tail)
+                        }
+                    }
+                }
+                .padding(.horizontal, MADTheme.Spacing.xl)
+            }
+        }
+    }
+
+    // MARK: - Competition Type Section
+
+    var competitionTypeSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            Text("Competition Type")
+                .font(MADTheme.Typography.subheadline)
+                .foregroundColor(.white.opacity(0.6))
                 .padding(.horizontal, MADTheme.Spacing.xl)
 
-            VStack(spacing: MADTheme.Spacing.md) {
-                ForEach(CompetitionType.allCases, id: \.self) { type in
-                    CompetitionTypeCard(
-                        type: type,
-                        isSelected: selectedType == type,
+            Button {
+                showTypeSelector = true
+            } label: {
+                HStack(spacing: MADTheme.Spacing.md) {
+                    // Type icon
+                    Image(systemName: selectedType.icon)
+                        .font(.title2)
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: selectedType.gradient.map { Color(hex: $0) },
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 40, height: 40)
+                        .background(
+                            Circle()
+                                .fill(Color(hex: selectedType.gradient[0]).opacity(0.15))
+                        )
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(selectedType.displayName)
+                            .font(MADTheme.Typography.headline)
+                            .foregroundColor(.white)
+
+                        Text(selectedType.description)
+                            .font(MADTheme.Typography.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                            .lineLimit(2)
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                .padding(MADTheme.Spacing.lg)
+                .background(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(ScaleButtonStyle())
+            .padding(.horizontal, MADTheme.Spacing.xl)
+        }
+    }
+
+    // MARK: - Activity Selection Section
+
+    var activitySelectionSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            Text("Allowed Activities")
+                .font(MADTheme.Typography.subheadline)
+                .foregroundColor(.white.opacity(0.6))
+                .padding(.horizontal, MADTheme.Spacing.xl)
+
+            HStack(spacing: MADTheme.Spacing.md) {
+                ForEach(CompetitionActivity.allCases, id: \.self) { activity in
+                    ActivityToggle(
+                        activity: activity,
+                        isSelected: selectedWorkouts.contains(activity),
                         action: {
-                            selectedType = type
+                            if selectedWorkouts.contains(activity) {
+                                if selectedWorkouts.count > 1 {
+                                    selectedWorkouts.remove(activity)
+                                }
+                            } else {
+                                selectedWorkouts.insert(activity)
+                            }
                         }
                     )
                 }
@@ -123,248 +355,619 @@ struct CreateCompetitionView: View {
         }
     }
 
-    // MARK: - Step 2: Configure Details
+    // MARK: - Goal Selection Section
 
-    var step2ConfigureDetails: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-            Text("Competition Details")
-                .font(MADTheme.Typography.title2)
-                .foregroundColor(.white)
-                .padding(.horizontal, MADTheme.Spacing.xl)
+    var goalSelectionSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(goalLabel)
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
+
+                Text(goalDescription)
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .padding(.horizontal, MADTheme.Spacing.xl)
 
             VStack(spacing: MADTheme.Spacing.lg) {
-                // Competition name
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                    Text("Name")
-                        .font(MADTheme.Typography.subheadline)
-                        .foregroundColor(.white.opacity(0.7))
-
-                    TextField("Enter competition name", text: $competitionName)
-                        .textFieldStyle(MADTextFieldStyle())
-                }
-
-                // Date range
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                    Text("Duration")
-                        .font(MADTheme.Typography.subheadline)
-                        .foregroundColor(.white.opacity(0.7))
-
-                    HStack(spacing: MADTheme.Spacing.md) {
-                        DatePicker("Start", selection: $startDate, displayedComponents: .date)
-                            .datePickerStyle(.compact)
-                            .labelsHidden()
-                            .accentColor(MADTheme.Colors.primary)
-                            .frame(maxWidth: .infinity)
-                            .padding(MADTheme.Spacing.md)
-                            .background(
-                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                    .fill(.ultraThinMaterial)
-                            )
-
-                        Image(systemName: "arrow.right")
-                            .foregroundColor(.white.opacity(0.5))
-
-                        DatePicker("End", selection: $endDate, displayedComponents: .date)
-                            .datePickerStyle(.compact)
-                            .labelsHidden()
-                            .accentColor(MADTheme.Colors.primary)
-                            .frame(maxWidth: .infinity)
-                            .padding(MADTheme.Spacing.md)
-                            .background(
-                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                    .fill(.ultraThinMaterial)
-                            )
+                // Unit selector
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    ForEach([CompetitionUnit.miles, CompetitionUnit.kilometers, CompetitionUnit.steps], id: \.self) { unitOption in
+                        Button {
+                            unit = unitOption
+                        } label: {
+                            Text(unitOption == .steps ? "Steps" : unitOption.rawValue.capitalized)
+                                .font(MADTheme.Typography.callout)
+                                .fontWeight(unit == unitOption ? .semibold : .regular)
+                                .foregroundColor(unit == unitOption ? .white : .white.opacity(0.6))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, MADTheme.Spacing.sm)
+                                .background(
+                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                        .fill(unit == unitOption ? MADTheme.Colors.primary.opacity(0.3) : Color.white.opacity(0.05))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                        .stroke(
+                                            unit == unitOption ? MADTheme.Colors.primary : Color.white.opacity(0.1),
+                                            lineWidth: unit == unitOption ? 2 : 1
+                                        )
+                                )
+                        }
+                        .buttonStyle(ScaleButtonStyle())
                     }
                 }
+                .padding(.horizontal, MADTheme.Spacing.xl)
 
-                // Workout types
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                    Text("Allowed Activities")
-                        .font(MADTheme.Typography.subheadline)
-                        .foregroundColor(.white.opacity(0.7))
+                // Goal picker with +/- buttons
+                HStack(spacing: MADTheme.Spacing.xl) {
+                    // Minus button
+                    Button {
+                        if goal > 1 {
+                            goal -= 1
+                        }
+                    } label: {
+                        Image(systemName: "minus")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                            .frame(width: 50, height: 50)
+                            .background(
+                                Circle()
+                                    .fill(.ultraThinMaterial)
+                            )
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(ScaleButtonStyle())
 
-                    HStack(spacing: MADTheme.Spacing.md) {
-                        ForEach(CompetitionActivity.allCases, id: \.self) { activity in
-                            ActivityToggle(
-                                activity: activity,
-                                isSelected: selectedWorkouts.contains(activity),
-                                action: {
-                                    if selectedWorkouts.contains(activity) {
-                                        selectedWorkouts.remove(activity)
-                                    } else {
-                                        selectedWorkouts.insert(activity)
-                                    }
+                    Spacer()
+
+                    // Goal display
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(String(format: "%.0f", goal))
+                            .font(.system(size: 64, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .fixedSize()
+
+                        Text(unit == .steps ? "k" : unit.rawValue)
+                            .font(MADTheme.Typography.title2)
+                            .foregroundColor(.white.opacity(0.7))
+                            .fixedSize()
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+
+                    Spacer()
+
+                    // Plus button
+                    Button {
+                        goal += 1
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.title2)
+                            .foregroundColor(.white)
+                            .frame(width: 50, height: 50)
+                            .background(
+                                Circle()
+                                    .fill(.ultraThinMaterial)
+                            )
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                            )
+                    }
+                    .buttonStyle(ScaleButtonStyle())
+                }
+                .padding(.horizontal, MADTheme.Spacing.xl)
+
+                // Friend's best
+                if let friend = firstSelectedFriend {
+                    Text("\(friend.displayName)'s best  \(String(format: "%.0f", friendBestDistance))\(unit.rawValue)")
+                        .font(MADTheme.Typography.callout)
+                        .foregroundColor(.white.opacity(0.6))
+                }
+            }
+            .padding(.vertical, MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+            .padding(.horizontal, MADTheme.Spacing.xl)
+        }
+    }
+
+    // MARK: - Duration Section
+
+    var durationSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Competition Length")
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
+
+                Text("How long the challenge will run")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .padding(.horizontal, MADTheme.Spacing.xl)
+
+            VStack(spacing: MADTheme.Spacing.md) {
+                // Quick presets
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: MADTheme.Spacing.md) {
+                    DurationPreset(
+                        title: "1 Day",
+                        hours: 24,
+                        icon: "sun.max.fill",
+                        isSelected: !isCustomDuration && durationHours == 24,
+                        action: {
+                            isCustomDuration = false
+                            durationHours = 24
+                        }
+                    )
+
+                    DurationPreset(
+                        title: "3 Days",
+                        hours: 72,
+                        icon: "calendar",
+                        isSelected: !isCustomDuration && durationHours == 72,
+                        action: {
+                            isCustomDuration = false
+                            durationHours = 72
+                        }
+                    )
+
+                    DurationPreset(
+                        title: "1 Week",
+                        hours: 168,
+                        icon: "calendar.badge.clock",
+                        isSelected: !isCustomDuration && durationHours == 168,
+                        action: {
+                            isCustomDuration = false
+                            durationHours = 168
+                        }
+                    )
+
+                    DurationPreset(
+                        title: "Custom",
+                        hours: 0,
+                        icon: "slider.horizontal.3",
+                        isSelected: isCustomDuration,
+                        action: {
+                            isCustomDuration = true
+                            durationHours = customDurationDays * 24
+                        }
+                    )
+                }
+
+                // Custom duration picker
+                if isCustomDuration {
+                    VStack(spacing: MADTheme.Spacing.md) {
+                        Text("Enter custom duration")
+                            .font(MADTheme.Typography.caption)
+                            .foregroundColor(.white.opacity(0.6))
+
+                        HStack(spacing: MADTheme.Spacing.xl) {
+                            // Minus button
+                            Button {
+                                if customDurationDays > 1 {
+                                    customDurationDays -= 1
+                                    durationHours = customDurationDays * 24
                                 }
-                            )
-                        }
-                    }
-                }
-
-                // Goal
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                    Text("Goal")
-                        .font(MADTheme.Typography.subheadline)
-                        .foregroundColor(.white.opacity(0.7))
-
-                    HStack(spacing: MADTheme.Spacing.md) {
-                        TextField("Amount", text: $goal)
-                            .keyboardType(.decimalPad)
-                            .textFieldStyle(MADTextFieldStyle())
-                            .frame(maxWidth: .infinity)
-
-                        Picker("Unit", selection: $unit) {
-                            ForEach(CompetitionUnit.allCases, id: \.self) { unit in
-                                Text(unit.displayName).tag(unit)
+                            } label: {
+                                Image(systemName: "minus")
+                                    .font(.title3)
+                                    .foregroundColor(.white)
+                                    .frame(width: 44, height: 44)
+                                    .background(
+                                        Circle()
+                                            .fill(.ultraThinMaterial)
+                                    )
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                    )
                             }
+                            .buttonStyle(ScaleButtonStyle())
+
+                            Spacer()
+
+                            // Days display
+                            VStack(spacing: 4) {
+                                Text("\(customDurationDays)")
+                                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                                    .fixedSize()
+
+                                Text(customDurationDays == 1 ? "day" : "days")
+                                    .font(MADTheme.Typography.callout)
+                                    .foregroundColor(.white.opacity(0.7))
+                            }
+
+                            Spacer()
+
+                            // Plus button
+                            Button {
+                                if customDurationDays < 90 {
+                                    customDurationDays += 1
+                                    durationHours = customDurationDays * 24
+                                }
+                            } label: {
+                                Image(systemName: "plus")
+                                    .font(.title3)
+                                    .foregroundColor(.white)
+                                    .frame(width: 44, height: 44)
+                                    .background(
+                                        Circle()
+                                            .fill(.ultraThinMaterial)
+                                    )
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(ScaleButtonStyle())
                         }
-                        .pickerStyle(.menu)
-                        .accentColor(.white)
-                        .padding(MADTheme.Spacing.md)
+                        .padding(MADTheme.Spacing.lg)
                         .background(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                                 .fill(.ultraThinMaterial)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
                         )
                     }
-                }
-
-                // Interval (for apex, targets, clash)
-                if selectedType == .apex || selectedType == .targets || selectedType == .clash {
-                    VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                        Text("Scoring Interval")
-                            .font(MADTheme.Typography.subheadline)
-                            .foregroundColor(.white.opacity(0.7))
-
-                        Picker("Interval", selection: $interval) {
-                            ForEach(CompetitionInterval.allCases, id: \.self) { interval in
-                                Text(interval.displayName).tag(interval)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .colorMultiply(MADTheme.Colors.primary)
-                    }
-                }
-
-                // First to (for streaks, clash)
-                if selectedType == .streaks || selectedType == .clash {
-                    VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                        Text(selectedType == .streaks ? "First to Break Loses" : "First to Win")
-                            .font(MADTheme.Typography.subheadline)
-                            .foregroundColor(.white.opacity(0.7))
-
-                        TextField("Number of wins", text: $firstTo)
-                            .keyboardType(.numberPad)
-                            .textFieldStyle(MADTextFieldStyle())
-                    }
-                }
-
-                // Include history
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                    Toggle(isOn: $includeHistory) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Include Historical Data")
-                                .font(MADTheme.Typography.subheadline)
-                                .foregroundColor(.white)
-
-                            Text("Start the competition with existing workout data")
-                                .font(MADTheme.Typography.caption)
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                    }
-                    .tint(MADTheme.Colors.primary)
                 }
             }
             .padding(.horizontal, MADTheme.Spacing.xl)
         }
     }
 
-    // MARK: - Navigation Buttons
+    // MARK: - Interval Section
 
-    var navigationButtons: some View {
-        HStack(spacing: MADTheme.Spacing.md) {
-            if currentStep > 0 {
-                Button(action: {
-                    withAnimation {
-                        currentStep -= 1
+    var intervalSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Scoring Interval")
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
+
+                Text("How often to tally points or progress")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .padding(.horizontal, MADTheme.Spacing.xl)
+
+            HStack(spacing: MADTheme.Spacing.md) {
+                ForEach(CompetitionInterval.allCases, id: \.self) { intervalOption in
+                    IntervalOptionButton(
+                        interval: intervalOption,
+                        isSelected: interval == intervalOption,
+                        action: { interval = intervalOption }
+                    )
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.xl)
+        }
+    }
+
+    // MARK: - First To Section
+
+    var firstToSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(selectedType == .streaks ? "Breaks to Lose" : "Points to Win")
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
+
+                Text(selectedType == .streaks ? "First to break this many days loses" : "First to reach this score wins")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .padding(.horizontal, MADTheme.Spacing.xl)
+
+            HStack(spacing: MADTheme.Spacing.xl) {
+                // Minus button
+                Button {
+                    if firstTo > 1 {
+                        firstTo -= 1
                     }
-                }) {
-                    Text("Back")
-                        .font(MADTheme.Typography.callout)
-                        .fontWeight(.semibold)
+                } label: {
+                    Image(systemName: "minus")
+                        .font(.title3)
                         .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, MADTheme.Spacing.md)
+                        .frame(width: 44, height: 44)
                         .background(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                            Circle()
+                                .fill(.ultraThinMaterial)
+                        )
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
                         )
                 }
-            }
+                .buttonStyle(ScaleButtonStyle())
 
-            Button(action: {
-                if currentStep == 0 {
-                    withAnimation {
-                        currentStep = 1
-                    }
-                } else {
-                    createCompetition()
-                }
-            }) {
-                HStack {
-                    if isCreating {
-                        ProgressView()
-                            .tint(.white)
-                    } else {
-                        Text(currentStep == 0 ? "Next" : "Create Competition")
-                            .font(MADTheme.Typography.callout)
-                            .fontWeight(.semibold)
-                    }
-                }
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, MADTheme.Spacing.md)
-                .background(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                        .fill(
-                            (currentStep == 0 ? canProceedStep1 : canProceedStep2)
-                                ? MADTheme.Colors.primaryGradient
-                                : LinearGradient(colors: [Color.gray], startPoint: .leading, endPoint: .trailing)
+                Spacer()
+
+                // Value display
+                Text("\(firstTo)")
+                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .fixedSize()
+
+                Spacer()
+
+                // Plus button
+                Button {
+                    firstTo += 1
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.title3)
+                        .foregroundColor(.white)
+                        .frame(width: 44, height: 44)
+                        .background(
+                            Circle()
+                                .fill(.ultraThinMaterial)
                         )
-                )
+                        .overlay(
+                            Circle()
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(ScaleButtonStyle())
             }
-            .disabled(
-                (currentStep == 0 && !canProceedStep1) ||
-                (currentStep == 1 && !canProceedStep2) ||
-                isCreating
+            .padding(MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+            .padding(.horizontal, MADTheme.Spacing.xl)
+        }
+    }
+
+    // MARK: - History Toggle Section
+
+    var historyToggleSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            Toggle(isOn: $includeHistory) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Include Historical Data")
+                        .font(MADTheme.Typography.callout)
+                        .foregroundColor(.white)
+
+                    Text("Start the competition with existing workout data from before the start date")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.white.opacity(0.6))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .tint(MADTheme.Colors.primary)
+            .padding(MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
             )
         }
         .padding(.horizontal, MADTheme.Spacing.xl)
     }
 
+    // MARK: - Send Invite Button
+
+    var sendInviteButton: some View {
+        Button {
+            createCompetition()
+        } label: {
+            HStack(spacing: MADTheme.Spacing.md) {
+                Text("Send Invite to")
+                    .font(MADTheme.Typography.headline)
+                    .foregroundColor(.black)
+
+                if let friend = firstSelectedFriend {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(MADTheme.Colors.primary)
+                            .frame(width: 24, height: 24)
+                            .overlay(
+                                Text(friend.displayName.prefix(1).uppercased())
+                                    .font(.caption2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                            )
+
+                        Text(friend.displayName)
+                            .font(MADTheme.Typography.headline)
+                            .foregroundColor(.black)
+                    }
+                } else {
+                    Text("Select Friend")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.black.opacity(0.5))
+                }
+
+                Spacer()
+
+                Image(systemName: "paperplane.fill")
+                    .foregroundColor(.black)
+            }
+            .padding(MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(Color.white)
+            )
+            .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+        }
+        .disabled(!canCreate || isCreating)
+        .opacity((canCreate && !isCreating) ? 1.0 : 0.6)
+        .buttonStyle(ScaleButtonStyle())
+    }
+
+    // MARK: - Friend Picker Sheet
+
+    var friendPickerSheet: some View {
+        NavigationStack {
+            ZStack {
+                MADTheme.Colors.appBackgroundGradient
+                    .ignoresSafeArea()
+
+                if friendService.friends.isEmpty {
+                    VStack(spacing: MADTheme.Spacing.lg) {
+                        Image(systemName: "person.2.slash")
+                            .font(.system(size: 50))
+                            .foregroundColor(.white.opacity(0.3))
+
+                        Text("No Friends Yet")
+                            .font(MADTheme.Typography.title2)
+                            .foregroundColor(.white)
+
+                        Text("Add friends to challenge them")
+                            .font(MADTheme.Typography.callout)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                } else {
+                    ScrollView {
+                        VStack(spacing: MADTheme.Spacing.md) {
+                            ForEach(friendService.friends) { friend in
+                                FriendSelectRow(
+                                    friend: friend,
+                                    isSelected: selectedFriends.contains(friend),
+                                    action: {
+                                        if selectedFriends.contains(friend) {
+                                            selectedFriends.remove(friend)
+                                        } else {
+                                            selectedFriends.insert(friend)
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                        .padding(MADTheme.Spacing.lg)
+                    }
+                }
+            }
+            .navigationTitle("Select Friends")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        showFriendPicker = false
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+        }
+    }
+
+    // MARK: - Type Selector Sheet
+
+    var typeSelectorSheet: some View {
+        NavigationStack {
+            ZStack {
+                MADTheme.Colors.appBackgroundGradient
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: MADTheme.Spacing.lg) {
+                        ForEach(CompetitionType.allCases, id: \.self) { type in
+                            CompetitionTypeCard(
+                                type: type,
+                                isSelected: selectedType == type,
+                                action: {
+                                    selectedType = type
+                                    showTypeSelector = false
+                                }
+                            )
+                        }
+                    }
+                    .padding(MADTheme.Spacing.lg)
+                }
+            }
+            .navigationTitle("Competition Type")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") {
+                        showTypeSelector = false
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+        }
+    }
+
+    // MARK: - Helper Functions
+
+    func getCurrentDayName() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE"
+        return formatter.string(from: Date())
+    }
+
+    func getCurrentDayNumber() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "d"
+        return formatter.string(from: Date())
+    }
+
     // MARK: - Actions
 
     func createCompetition() {
-        guard let type = selectedType,
-              let goalValue = Double(goal),
-              let firstToValue = Int(firstTo) else {
+        guard !selectedFriends.isEmpty else {
+            errorMessage = "Please select at least one friend to challenge"
+            showError = true
             return
         }
 
         isCreating = true
 
+        // Generate competition name based on type and participants
+        let friendNames = selectedFriends.prefix(2).map { $0.displayName }.joined(separator: " & ")
+        let autoName = "\(selectedType.displayName) with \(friendNames)"
+
+        // Calculate end date based on duration
+        let startDate = Date()
+        let endDate = Calendar.current.date(byAdding: .hour, value: durationHours, to: startDate) ?? Date()
+
         Task {
             do {
-                _ = try await competitionService.createCompetition(
-                    name: competitionName,
-                    type: type,
+                let competitionId = try await competitionService.createCompetition(
+                    name: competitionName.isEmpty ? autoName : competitionName,
+                    type: selectedType,
                     startDate: startDate,
                     endDate: endDate,
                     workouts: Array(selectedWorkouts),
-                    goal: goalValue,
+                    goal: goal,
                     unit: unit,
-                    firstTo: firstToValue,
+                    firstTo: firstTo,
                     history: includeHistory,
                     interval: interval
                 )
+
+                // Invite all selected friends
+                for friend in selectedFriends {
+                    try? await competitionService.inviteUser(
+                        competitionId: competitionId,
+                        userId: friend.user_id
+                    )
+                }
 
                 await MainActor.run {
                     isCreating = false
@@ -378,6 +981,109 @@ struct CreateCompetitionView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Supporting Components
+
+struct CompactTypeButton: View {
+    let icon: String
+    let label: String
+    let iconColor: Color
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundColor(isSelected ? iconColor : .white.opacity(0.6))
+
+                Text(label)
+                    .font(MADTheme.Typography.callout)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundColor(isSelected ? .white : .white.opacity(0.7))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, MADTheme.Spacing.md)
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(isSelected ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Color.white.opacity(0.05)))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .stroke(
+                        isSelected ? iconColor.opacity(0.5) : Color.white.opacity(0.1),
+                        lineWidth: isSelected ? 2 : 1
+                    )
+            )
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+}
+
+struct FriendSelectRow: View {
+    let friend: BackendUser
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: MADTheme.Spacing.md) {
+                // Friend avatar
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .frame(width: 50, height: 50)
+                    .overlay(
+                        Text(friend.displayName.prefix(1).uppercased())
+                            .font(MADTheme.Typography.headline)
+                            .foregroundColor(.white)
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(isSelected ? MADTheme.Colors.primary : Color.white.opacity(0.2), lineWidth: 2)
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(friend.displayName)
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.white)
+
+                    if let username = friend.username {
+                        Text("@\(username)")
+                            .font(MADTheme.Typography.caption)
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                }
+
+                Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(MADTheme.Colors.primary)
+                } else {
+                    Image(systemName: "circle")
+                        .font(.title3)
+                        .foregroundColor(.white.opacity(0.3))
+                }
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                            .stroke(
+                                isSelected ? MADTheme.Colors.primary.opacity(0.5) : Color.white.opacity(0.1),
+                                lineWidth: 1
+                            )
+                    )
+            )
+        }
+        .buttonStyle(ScaleButtonStyle())
     }
 }
 
@@ -396,6 +1102,91 @@ struct MADTextFieldStyle: TextFieldStyle {
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                     .stroke(Color.white.opacity(0.2), lineWidth: 1)
             )
+    }
+}
+
+// MARK: - Duration Preset Component
+
+struct DurationPreset: View {
+    let title: String
+    let hours: Int
+    let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundColor(isSelected ? MADTheme.Colors.primary : .white.opacity(0.6))
+
+                Text(title)
+                    .font(MADTheme.Typography.callout)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundColor(.white)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(isSelected ? MADTheme.Colors.primary.opacity(0.2) : .ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .stroke(
+                        isSelected ? MADTheme.Colors.primary : Color.white.opacity(0.1),
+                        lineWidth: isSelected ? 2 : 1
+                    )
+            )
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+}
+
+// MARK: - Interval Option Button
+
+struct IntervalOptionButton: View {
+    let interval: CompetitionInterval
+    let isSelected: Bool
+    let action: () -> Void
+
+    var icon: String {
+        switch interval {
+        case .day:
+            return "calendar.day.timeline.left"
+        case .week:
+            return "calendar.badge.clock"
+        }
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundColor(isSelected ? MADTheme.Colors.primary : .white.opacity(0.6))
+
+                Text(interval.displayName)
+                    .font(MADTheme.Typography.callout)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundColor(.white)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(isSelected ? MADTheme.Colors.primary.opacity(0.2) : .ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .stroke(
+                        isSelected ? MADTheme.Colors.primary : Color.white.opacity(0.1),
+                        lineWidth: isSelected ? 2 : 1
+                    )
+            )
+        }
+        .buttonStyle(ScaleButtonStyle())
     }
 }
 
