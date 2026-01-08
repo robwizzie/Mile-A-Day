@@ -38,8 +38,6 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
         DO UPDATE SET split_time = EXCLUDED.split_time
       `;
 
-	console.log('Workout split test logs:', workouts);
-
 	await db.transaction(
 		workouts.flatMap((workout: Workout) => {
 			return [

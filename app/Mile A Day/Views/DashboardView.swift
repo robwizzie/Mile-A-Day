@@ -36,6 +36,7 @@ struct DashboardView: View {
     @ObservedObject var userManager: UserManager
     @EnvironmentObject var notificationService: MADNotificationService
     @StateObject private var workoutService = WorkoutService()
+    @StateObject private var syncService = WorkoutSyncService.shared
 
     @State private var showConfetti = false
     @State private var showGoalSheet = false
@@ -509,18 +510,16 @@ struct DashboardView: View {
     }
     
     private func uploadAllWorkouts() async {
-        do {
-            // Upload all workouts from HealthKit
-            try await workoutService.uploadAllWorkouts()
-            
-            // Show success alert
-            await MainActor.run {
-                showWorkoutUploadAlert = true
-            }
-            
-        } catch {
-            await MainActor.run {
-                workoutService.errorMessage = error.localizedDescription
+        // Use WorkoutSyncService for batched upload with retry logic
+        for await progress in syncService.performInitialSync() {
+            if case .complete = progress.phase {
+                await MainActor.run {
+                    showWorkoutUploadAlert = true
+                }
+            } else if case .error(let message) = progress.phase {
+                await MainActor.run {
+                    workoutService.errorMessage = message
+                }
             }
         }
     }
