@@ -12,6 +12,8 @@ struct CreateCompetitionView: View {
     @State private var goal: Double = 5.0
     @State private var unit: CompetitionUnit = .miles
     @State private var durationHours: Int = 24
+    @State private var customDurationDays: Int = 3
+    @State private var isCustomDuration: Bool = false
     @State private var selectedWorkouts: Set<CompetitionActivity> = [.run]
     @State private var firstTo: Int = 5
     @State private var interval: CompetitionInterval = .day
@@ -495,42 +497,133 @@ struct CreateCompetitionView: View {
             }
             .padding(.horizontal, MADTheme.Spacing.xl)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: MADTheme.Spacing.md) {
-                DurationOption(
-                    title: "1 Day",
-                    subtitle: "24 hours",
-                    hours: 24,
-                    icon: "sun.max.fill",
-                    isSelected: durationHours == 24,
-                    action: { durationHours = 24 }
-                )
+            VStack(spacing: MADTheme.Spacing.md) {
+                // Quick presets
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: MADTheme.Spacing.md) {
+                    DurationPreset(
+                        title: "1 Day",
+                        hours: 24,
+                        icon: "sun.max.fill",
+                        isSelected: !isCustomDuration && durationHours == 24,
+                        action: {
+                            isCustomDuration = false
+                            durationHours = 24
+                        }
+                    )
 
-                DurationOption(
-                    title: "2 Days",
-                    subtitle: "48 hours",
-                    hours: 48,
-                    icon: "calendar",
-                    isSelected: durationHours == 48,
-                    action: { durationHours = 48 }
-                )
+                    DurationPreset(
+                        title: "3 Days",
+                        hours: 72,
+                        icon: "calendar",
+                        isSelected: !isCustomDuration && durationHours == 72,
+                        action: {
+                            isCustomDuration = false
+                            durationHours = 72
+                        }
+                    )
 
-                DurationOption(
-                    title: "1 Week",
-                    subtitle: "7 days",
-                    hours: 168,
-                    icon: "calendar.badge.clock",
-                    isSelected: durationHours == 168,
-                    action: { durationHours = 168 }
-                )
+                    DurationPreset(
+                        title: "1 Week",
+                        hours: 168,
+                        icon: "calendar.badge.clock",
+                        isSelected: !isCustomDuration && durationHours == 168,
+                        action: {
+                            isCustomDuration = false
+                            durationHours = 168
+                        }
+                    )
 
-                DurationOption(
-                    title: "2 Weeks",
-                    subtitle: "14 days",
-                    hours: 336,
-                    icon: "calendar.badge.plus",
-                    isSelected: durationHours == 336,
-                    action: { durationHours = 336 }
-                )
+                    DurationPreset(
+                        title: "Custom",
+                        hours: 0,
+                        icon: "slider.horizontal.3",
+                        isSelected: isCustomDuration,
+                        action: {
+                            isCustomDuration = true
+                            durationHours = customDurationDays * 24
+                        }
+                    )
+                }
+
+                // Custom duration picker
+                if isCustomDuration {
+                    VStack(spacing: MADTheme.Spacing.md) {
+                        Text("Enter custom duration")
+                            .font(MADTheme.Typography.caption)
+                            .foregroundColor(.white.opacity(0.6))
+
+                        HStack(spacing: MADTheme.Spacing.xl) {
+                            // Minus button
+                            Button {
+                                if customDurationDays > 1 {
+                                    customDurationDays -= 1
+                                    durationHours = customDurationDays * 24
+                                }
+                            } label: {
+                                Image(systemName: "minus")
+                                    .font(.title3)
+                                    .foregroundColor(.white)
+                                    .frame(width: 44, height: 44)
+                                    .background(
+                                        Circle()
+                                            .fill(.ultraThinMaterial)
+                                    )
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(ScaleButtonStyle())
+
+                            Spacer()
+
+                            // Days display
+                            VStack(spacing: 4) {
+                                Text("\(customDurationDays)")
+                                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                                    .fixedSize()
+
+                                Text(customDurationDays == 1 ? "day" : "days")
+                                    .font(MADTheme.Typography.callout)
+                                    .foregroundColor(.white.opacity(0.7))
+                            }
+
+                            Spacer()
+
+                            // Plus button
+                            Button {
+                                if customDurationDays < 90 {
+                                    customDurationDays += 1
+                                    durationHours = customDurationDays * 24
+                                }
+                            } label: {
+                                Image(systemName: "plus")
+                                    .font(.title3)
+                                    .foregroundColor(.white)
+                                    .frame(width: 44, height: 44)
+                                    .background(
+                                        Circle()
+                                            .fill(.ultraThinMaterial)
+                                    )
+                                    .overlay(
+                                        Circle()
+                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(ScaleButtonStyle())
+                        }
+                        .padding(MADTheme.Spacing.lg)
+                        .background(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                .fill(.ultraThinMaterial)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                                )
+                        )
+                    }
+                }
             }
             .padding(.horizontal, MADTheme.Spacing.xl)
         }
@@ -1012,11 +1105,10 @@ struct MADTextFieldStyle: TextFieldStyle {
     }
 }
 
-// MARK: - Duration Option Component
+// MARK: - Duration Preset Component
 
-struct DurationOption: View {
+struct DurationPreset: View {
     let title: String
-    let subtitle: String
     let hours: Int
     let icon: String
     let isSelected: Bool
@@ -1033,10 +1125,6 @@ struct DurationOption: View {
                     .font(MADTheme.Typography.callout)
                     .fontWeight(isSelected ? .semibold : .regular)
                     .foregroundColor(.white)
-
-                Text(subtitle)
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(.white.opacity(0.6))
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, MADTheme.Spacing.lg)
