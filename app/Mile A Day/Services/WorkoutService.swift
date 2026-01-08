@@ -71,56 +71,7 @@ class WorkoutService: ObservableObject {
         
         isLoading = false
     }
-    
-    /// Upload all workouts from HealthKit (for testing purposes)
-    func uploadAllWorkouts() async throws {
-        guard let currentUserId = getCurrentUserId() else {
-            throw WorkoutServiceError.notAuthenticated
-        }
-        
-        isLoading = true
-        errorMessage = nil
-        
-        do {
-            // Fetch all workouts directly from HealthKit
-            let allWorkouts = try await fetchAllWorkoutsFromHealthKit()
-            
-            if allWorkouts.isEmpty {
-                await MainActor.run {
-                    self.errorMessage = "No workouts found to upload"
-                }
-                return
-            }
-            
-            // Transform and upload
-            let workoutData = try await transformWorkoutsForBackend(allWorkouts)
-            
-            // Debug: Print the full request data
-            let requestBody = try JSONSerialization.data(withJSONObject: workoutData)
-            if let requestString = String(data: requestBody, encoding: .utf8) {
-                print("[WorkoutService] 📤 Full request body: \(requestString)")
-            }
-            
-            // Make the API request
-            let response: WorkoutUploadResponse = try await makeRequest(
-                endpoint: "/workouts/\(currentUserId)/upload",
-                method: .POST,
-                body: requestBody,
-                responseType: WorkoutUploadResponse.self
-            )
-            
-            lastUploadStatus = response.message
-            print("[WorkoutService] ✅ Successfully uploaded \(allWorkouts.count) workouts")
-            
-        } catch {
-            errorMessage = error.localizedDescription
-            print("[WorkoutService] ❌ Upload failed: \(error)")
-            throw error
-        }
-        
-        isLoading = false
-    }
-    
+
     // MARK: - Private Helper Methods
     private func makeRequest<T: Decodable>(
         endpoint: String,
