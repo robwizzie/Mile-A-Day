@@ -1807,11 +1807,7 @@ class HealthKitManager: ObservableObject {
                         let endTime = sample.endDate
                         let mileDuration = endTime.timeIntervalSince(start)
                         let minutesPerMile = mileDuration / 60.0
-                        
-                        // Validate the split time (between 3:00 and 20:00 per mile)
-                        if minutesPerMile >= 3.0 && minutesPerMile <= 20.0 {
-                            mileSplits.append(minutesPerMile)
-                        }
+                        mileSplits.append(minutesPerMile)
                         
                         // Reset for next mile
                         accumulatedDistance -= mileInMeters
@@ -1851,41 +1847,18 @@ class HealthKitManager: ObservableObject {
             }
             
             if let splitTimes = splitTimes, !splitTimes.isEmpty {
-                // ENHANCED VALIDATION: Filter out invalid split times
-                let validSplits = splitTimes.filter { split in
-                    let isValid = split >= 3.0 && split <= 20.0
-                    if !isValid {
-                    self.log("[HealthKit] ⚠️ Filtering out invalid split: \(self.formatPace(minutesPerMile: split))")
-                    }
-                    return isValid
-                }
-                
-                if !validSplits.isEmpty {
-                    let fastestSplit = validSplits.min() ?? 0
-                    self.log("[HealthKit] ✅ Using fastest valid split time: \(self.formatPace(minutesPerMile: fastestSplit)) from \(validSplits.count) valid splits (filtered \(splitTimes.count - validSplits.count) invalid)")
-                    completion(fastestSplit)
-                    return
-                } else {
-                    self.log("[HealthKit] ⚠️ All split times were invalid, falling back to average pace")
-                }
+                let fastestSplit = splitTimes.min() ?? 0
+                self.log("[HealthKit] ✅ Using fastest split time: \(self.formatPace(minutesPerMile: fastestSplit)) from \(splitTimes.count) splits")
+                completion(fastestSplit)
+                return
             } else {
                 self.log("[HealthKit] No split times available, falling back to average pace")
             }
             
             // Fallback to average pace calculation
             let avgPaceMinutesPerMile = workout.duration / 60.0 / miles
-            
-            // ENHANCED VALIDATION: More detailed pace validation
-            if avgPaceMinutesPerMile < 3.0 {
-                self.log("[HealthKit] ⚠️ Average pace \(self.formatPace(minutesPerMile: avgPaceMinutesPerMile)) is unrealistically fast (< 3:00/mile) - rejecting")
-                completion(nil)
-            } else if avgPaceMinutesPerMile > 20.0 {
-                self.log("[HealthKit] ⚠️ Average pace \(self.formatPace(minutesPerMile: avgPaceMinutesPerMile)) is too slow (> 20:00/mile) - rejecting")
-                completion(nil)
-            } else {
-                self.log("[HealthKit] ✅ Using valid average pace fallback: \(self.formatPace(minutesPerMile: avgPaceMinutesPerMile))")
-                completion(avgPaceMinutesPerMile)
-            }
+            self.log("[HealthKit] ✅ Using average pace fallback: \(self.formatPace(minutesPerMile: avgPaceMinutesPerMile))")
+            completion(avgPaceMinutesPerMile)
         }
     }
     

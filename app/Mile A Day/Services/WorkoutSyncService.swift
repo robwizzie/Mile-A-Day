@@ -445,6 +445,9 @@ class WorkoutSyncService: ObservableObject {
         var workoutData: [[String: Any]] = []
 
         for workout in workouts {
+            // Get split times for this workout
+            let splitTimes = await getSplitTimes(for: workout)
+
             let timezoneOffset = TimeZone.current.secondsFromGMT() / 60
 
             let formatter = DateFormatter()
@@ -469,7 +472,7 @@ class WorkoutSyncService: ObservableObject {
                 "deviceEndDate": deviceEndDate,
                 "calories": calories,
                 "totalDuration": workout.duration,
-                "splitTimes": []
+                "splitTimes": splitTimes
             ]
 
             workoutData.append(workoutDict)
@@ -499,7 +502,7 @@ class WorkoutSyncService: ObservableObject {
                   let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) else {
                 return 0
             }
-            
+
             return await withCheckedContinuation { continuation in
                 let predicate = HKQuery.predicateForObjects(from: workout)
                 let query = HKStatisticsQuery(
@@ -510,15 +513,97 @@ class WorkoutSyncService: ObservableObject {
                     if let error = error {
                         print("[WorkoutSyncService] ⚠️ Active energy query failed: \(error.localizedDescription)")
                     }
-                    
+
                     let value = statistics?.sumQuantity()?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
                     continuation.resume(returning: value)
                 }
-                
+
                 healthStore.execute(query)
             }
         } else {
             return workout.totalEnergyBurned?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
+        }
+    }
+
+    /// Get split times for a workout
+    private func getSplitTimes(for workout: HKWorkout) async -> [Double] {
+        return await withCheckedContinuation { continuation in
+            guard HKHealthStore.isHealthDataAvailable() else {
+                print("[WorkoutSyncService] ⚠️ HealthKit not available for split times")
+                continuation.resume(returning: [])
+                return
+            }
+
+            guard let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else {
+                print("[WorkoutSyncService] ⚠️ Distance type not available for split times")
+                continuation.resume(returning: [])
+                return
+            }
+
+            let workoutPredicate = HKQuery.predicateForObjects(from: workout)
+            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+
+            print("[WorkoutSyncService] 🔍 Starting split time calculation for workout \(workout.uuid)")
+
+            let query = HKSampleQuery(
+                sampleType: distanceType,
+                predicate: workoutPredicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: [sortDescriptor]
+            ) { _, results, error in
+                if let error = error {
+                    print("[WorkoutSyncService] ⚠️ Error fetching split times: \(error.localizedDescription)")
+                    continuation.resume(returning: [])
+                    return
+                }
+
+                guard let distanceSamples = results as? [HKQuantitySample], !distanceSamples.isEmpty else {
+                    print("[WorkoutSyncService] ℹ️ No distance samples found for workout \(workout.uuid)")
+                    continuation.resume(returning: [])
+                    return
+                }
+
+                print("[WorkoutSyncService] 📊 Found \(distanceSamples.count) distance samples")
+
+                // Calculate mile splits from distance samples
+                var mileSplits: [Double] = []
+                var accumulatedDistance: Double = 0.0
+                var startTime: Date?
+                let mileInMeters = 1609.34 // One mile in meters
+
+                for sample in distanceSamples {
+                    let distance = sample.quantity.doubleValue(for: HKUnit.meter())
+
+                    if startTime == nil {
+                        startTime = sample.startDate
+                    }
+
+                    accumulatedDistance += distance
+
+                    // Check if we've completed a mile
+                    if accumulatedDistance >= mileInMeters {
+                        if let start = startTime {
+                            let endTime = sample.endDate
+                            let mileDuration = endTime.timeIntervalSince(start)
+                            let minutesPerMile = mileDuration / 60.0
+
+                            // Convert minutes per mile to seconds per mile (API expects seconds)
+                            let secondsPerMile = minutesPerMile * 60.0
+                            mileSplits.append(secondsPerMile)
+                            print("[WorkoutSyncService] ✅ Added split: \(String(format: "%.2f", minutesPerMile)) min/mi (\(String(format: "%.0f", secondsPerMile)) seconds)")
+
+                            // Reset for next mile
+                            accumulatedDistance -= mileInMeters
+                            startTime = endTime
+                        }
+                    }
+                }
+
+                print("[WorkoutSyncService] ✅ Total splits calculated: \(mileSplits.count)")
+                continuation.resume(returning: mileSplits)
+            }
+
+            healthStore.execute(query)
         }
     }
 

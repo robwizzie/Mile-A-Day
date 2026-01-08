@@ -291,17 +291,10 @@ class WorkoutService: ObservableObject {
                             let mileDuration = endTime.timeIntervalSince(start)
                             let minutesPerMile = mileDuration / 60.0
                             
-                            print("[WorkoutService] 🔢 Calculated split: \(String(format: "%.2f", minutesPerMile)) min/mi")
-                            
-                            // Validate the split time (between 3:00 and 20:00 per mile)
-                            if minutesPerMile >= 3.0 && minutesPerMile <= 20.0 {
-                                // Convert minutes per mile to seconds per mile (API expects seconds)
-                                let secondsPerMile = minutesPerMile * 60.0
-                                mileSplits.append(secondsPerMile)
-                                print("[WorkoutService] ✅ Added valid split: \(String(format: "%.2f", minutesPerMile)) min/mi (\(String(format: "%.0f", secondsPerMile)) seconds)")
-                            } else {
-                                print("[WorkoutService] ⚠️ Filtered out invalid split: \(String(format: "%.2f", minutesPerMile)) min/mi (outside 3:00-20:00 range)")
-                            }
+                            // Convert minutes per mile to seconds per mile (API expects seconds)
+                            let secondsPerMile = minutesPerMile * 60.0
+                            mileSplits.append(secondsPerMile)
+                            print("[WorkoutService] ✅ Added split: \(String(format: "%.2f", minutesPerMile)) min/mi (\(String(format: "%.0f", secondsPerMile)) seconds)")
                             
                             // Reset for next mile
                             accumulatedDistance -= mileInMeters
@@ -361,46 +354,6 @@ class WorkoutService: ObservableObject {
             return "hiking"
         default:
             return "other"
-        }
-    }
-    
-    /// Fetch all workouts from HealthKit (for testing purposes)
-    private func fetchAllWorkoutsFromHealthKit() async throws -> [HKWorkout] {
-        return try await withCheckedThrowingContinuation { continuation in
-            guard HKHealthStore.isHealthDataAvailable() else {
-                continuation.resume(throwing: WorkoutServiceError.networkError("HealthKit not available"))
-                return
-            }
-            
-            let healthStore = HKHealthStore()
-            
-            // Look for both running and walking workouts
-            let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
-            let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
-            let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
-            
-            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
-            
-            let query = HKSampleQuery(
-                sampleType: HKObjectType.workoutType(),
-                predicate: compoundPredicate,
-                limit: HKObjectQueryNoLimit, // No limit - fetch all workouts
-                sortDescriptors: [sortDescriptor]
-            ) { query, samples, error in
-                if let error = error {
-                    continuation.resume(throwing: WorkoutServiceError.networkError(error.localizedDescription))
-                    return
-                }
-                
-                guard let workouts = samples as? [HKWorkout] else {
-                    continuation.resume(returning: [])
-                    return
-                }
-                
-                continuation.resume(returning: workouts)
-            }
-            
-            healthStore.execute(query)
         }
     }
     

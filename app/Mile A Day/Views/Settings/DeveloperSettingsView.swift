@@ -370,15 +370,17 @@ struct DeveloperSettingsView: View {
     }
 
     private func uploadAllWorkouts() async {
-        do {
-            try await workoutService.uploadAllWorkouts()
-
-            await MainActor.run {
-                showWorkoutUploadAlert = true
-            }
-        } catch {
-            await MainActor.run {
-                showWorkoutUploadAlert = true
+        // Use WorkoutSyncService for batched upload with retry logic
+        for await progress in syncService.performInitialSync() {
+            if case .complete = progress.phase {
+                await MainActor.run {
+                    showWorkoutUploadAlert = true
+                }
+            } else if case .error(let message) = progress.phase {
+                await MainActor.run {
+                    workoutService.errorMessage = message
+                    showWorkoutUploadAlert = true
+                }
             }
         }
     }
