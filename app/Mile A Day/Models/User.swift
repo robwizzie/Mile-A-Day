@@ -143,124 +143,189 @@ struct User: Identifiable, Codable {
     }
     
     // Award badges based on milestones
-    mutating func checkForMilestoneBadges() {
+    @discardableResult
+    mutating func checkForMilestoneBadges() -> [Badge] {
+        var newBadges: [Badge] = []
+
         // Streak milestones
         if streak >= 7 && !hasBadge(id: "streak_7") {
             let earnedDate = calculateRetroactiveDate(for: 7, type: .streak)
-            badges.append(Badge(id: "streak_7", name: "Week Warrior", description: "7 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_7", name: "Week Warrior", description: "7 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 10 && !hasBadge(id: "streak_10") {
             let earnedDate = calculateRetroactiveDate(for: 10, type: .streak)
-            badges.append(Badge(id: "streak_10", name: "Ten Days Strong", description: "10 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_10", name: "Ten Days Strong", description: "10 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 14 && !hasBadge(id: "streak_14") {
             let earnedDate = calculateRetroactiveDate(for: 14, type: .streak)
-            badges.append(Badge(id: "streak_14", name: "Fortnight Fighter", description: "14 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_14", name: "Fortnight Fighter", description: "14 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 21 && !hasBadge(id: "streak_21") {
             let earnedDate = calculateRetroactiveDate(for: 21, type: .streak)
-            badges.append(Badge(id: "streak_21", name: "Three Week Champion", description: "21 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_21", name: "Three Week Champion", description: "21 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 30 && !hasBadge(id: "streak_30") {
             let earnedDate = calculateRetroactiveDate(for: 30, type: .streak)
-            badges.append(Badge(id: "streak_30", name: "Monthly Master", description: "30 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_30", name: "Monthly Master", description: "30 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 50 && !hasBadge(id: "streak_50") {
             let earnedDate = calculateRetroactiveDate(for: 50, type: .streak)
-            badges.append(Badge(id: "streak_50", name: "Half Century", description: "50 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_50", name: "Half Century", description: "50 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 60 && !hasBadge(id: "streak_60") {
             let earnedDate = calculateRetroactiveDate(for: 60, type: .streak)
-            badges.append(Badge(id: "streak_60", name: "Two Month Milestone", description: "60 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_60", name: "Two Month Milestone", description: "60 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 75 && !hasBadge(id: "streak_75") {
             let earnedDate = calculateRetroactiveDate(for: 75, type: .streak)
-            badges.append(Badge(id: "streak_75", name: "Consistency King", description: "75 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_75", name: "Consistency King", description: "75 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 90 && !hasBadge(id: "streak_90") {
             let earnedDate = calculateRetroactiveDate(for: 90, type: .streak)
-            badges.append(Badge(id: "streak_90", name: "Quarter Year Hero", description: "90 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_90", name: "Quarter Year Hero", description: "90 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 100 && !hasBadge(id: "streak_100") {
             let earnedDate = calculateRetroactiveDate(for: 100, type: .streak)
-            badges.append(Badge(id: "streak_100", name: "Century Club", description: "100 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_100", name: "Century Club", description: "100 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 150 && !hasBadge(id: "streak_150") {
             let earnedDate = calculateRetroactiveDate(for: 150, type: .streak)
-            badges.append(Badge(id: "streak_150", name: "Unstoppable", description: "150 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_150", name: "Unstoppable", description: "150 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 200 && !hasBadge(id: "streak_200") {
             let earnedDate = calculateRetroactiveDate(for: 200, type: .streak)
-            badges.append(Badge(id: "streak_200", name: "Double Century", description: "200 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_200", name: "Double Century", description: "200 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 250 && !hasBadge(id: "streak_250") {
             let earnedDate = calculateRetroactiveDate(for: 250, type: .streak)
-            badges.append(Badge(id: "streak_250", name: "Legendary Streak", description: "250 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_250", name: "Legendary Streak", description: "250 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 365 && !hasBadge(id: "streak_365") {
             let earnedDate = calculateRetroactiveDate(for: 365, type: .streak)
-            badges.append(Badge(id: "streak_365", name: "Year Warrior", description: "365 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_365", name: "Year Warrior", description: "365 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 500 && !hasBadge(id: "streak_500") {
             let earnedDate = calculateRetroactiveDate(for: 500, type: .streak)
-            badges.append(Badge(id: "streak_500", name: "Elite Runner", description: "500 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_500", name: "Elite Runner", description: "500 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 1000 && !hasBadge(id: "streak_1000") {
             let earnedDate = calculateRetroactiveDate(for: 1000, type: .streak)
-            badges.append(Badge(id: "streak_1000", name: "Immortal", description: "1000 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "streak_1000", name: "Immortal", description: "1000 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         
         // Total miles milestones
         if totalMiles >= 50 && !hasBadge(id: "miles_50") {
-            badges.append(Badge(id: "miles_50", name: "50 Mile Club", description: "Ran 50 total miles!", dateAwarded: lastCompletionDate ?? Date()))
+            let badge = Badge(id: "miles_50", name: "50 Mile Club", description: "Ran 50 total miles!", dateAwarded: lastCompletionDate ?? Date())
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if totalMiles >= 100 && !hasBadge(id: "miles_100") {
-            badges.append(Badge(id: "miles_100", name: "100 Mile Club", description: "Ran 100 total miles!", dateAwarded: lastCompletionDate ?? Date()))
+            let badge = Badge(id: "miles_100", name: "100 Mile Club", description: "Ran 100 total miles!", dateAwarded: lastCompletionDate ?? Date())
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if totalMiles >= 250 && !hasBadge(id: "miles_250") {
-            badges.append(Badge(id: "miles_250", name: "250 Mile Club", description: "Ran 250 total miles!", dateAwarded: lastCompletionDate ?? Date()))
+            let badge = Badge(id: "miles_250", name: "250 Mile Club", description: "Ran 250 total miles!", dateAwarded: lastCompletionDate ?? Date())
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if totalMiles >= 500 && !hasBadge(id: "miles_500") {
-            badges.append(Badge(id: "miles_500", name: "500 Mile Club", description: "Ran 500 total miles!", dateAwarded: lastCompletionDate ?? Date()))
+            let badge = Badge(id: "miles_500", name: "500 Mile Club", description: "Ran 500 total miles!", dateAwarded: lastCompletionDate ?? Date())
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if totalMiles >= 1000 && !hasBadge(id: "miles_1000") {
-            badges.append(Badge(id: "miles_1000", name: "1000 Mile Club", description: "Ran 1000 total miles!", dateAwarded: lastCompletionDate ?? Date()))
+            let badge = Badge(id: "miles_1000", name: "1000 Mile Club", description: "Ran 1000 total miles!", dateAwarded: lastCompletionDate ?? Date())
+            badges.append(badge)
+            newBadges.append(badge)
         }
-        
+
         // Speed milestones (fastest mile pace)
         if fastestMilePace > 0 && fastestMilePace <= 6.0 && !hasBadge(id: "pace_6min") {
-            badges.append(Badge(id: "pace_6min", name: "Speed Demon", description: "Sub-6 minute mile!", dateAwarded: lastCompletionDate ?? Date()))
+            let badge = Badge(id: "pace_6min", name: "Speed Demon", description: "Sub-6 minute mile!", dateAwarded: lastCompletionDate ?? Date())
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if fastestMilePace > 0 && fastestMilePace <= 7.0 && !hasBadge(id: "pace_7min") {
-            badges.append(Badge(id: "pace_7min", name: "Quick Runner", description: "Sub-7 minute mile!", dateAwarded: lastCompletionDate ?? Date()))
+            let badge = Badge(id: "pace_7min", name: "Quick Runner", description: "Sub-7 minute mile!", dateAwarded: lastCompletionDate ?? Date())
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if fastestMilePace > 0 && fastestMilePace <= 8.0 && !hasBadge(id: "pace_8min") {
-            badges.append(Badge(id: "pace_8min", name: "Fast Runner", description: "Sub-8 minute mile!", dateAwarded: lastCompletionDate ?? Date()))
+            let badge = Badge(id: "pace_8min", name: "Fast Runner", description: "Sub-8 minute mile!", dateAwarded: lastCompletionDate ?? Date())
+            badges.append(badge)
+            newBadges.append(badge)
         }
-        
+
         // Distance milestones (most miles in one day)
         if mostMilesInOneDay >= 5.0 && !hasBadge(id: "daily_5") {
-            badges.append(Badge(id: "daily_5", name: "5 Mile Day", description: "Ran 5+ miles in one day!", dateAwarded: lastCompletionDate ?? Date()))
+            let badge = Badge(id: "daily_5", name: "5 Mile Day", description: "Ran 5+ miles in one day!", dateAwarded: lastCompletionDate ?? Date())
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if mostMilesInOneDay >= 10.0 && !hasBadge(id: "daily_10") {
-            badges.append(Badge(id: "daily_10", name: "10 Mile Day", description: "Ran 10+ miles in one day!", dateAwarded: lastCompletionDate ?? Date()))
+            let badge = Badge(id: "daily_10", name: "10 Mile Day", description: "Ran 10+ miles in one day!", dateAwarded: lastCompletionDate ?? Date())
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if mostMilesInOneDay >= 13.1 && !hasBadge(id: "daily_half") {
-            badges.append(Badge(id: "daily_half", name: "Half Marathon", description: "Ran 13.1+ miles in one day!", dateAwarded: lastCompletionDate ?? Date()))
+            let badge = Badge(id: "daily_half", name: "Half Marathon", description: "Ran 13.1+ miles in one day!", dateAwarded: lastCompletionDate ?? Date())
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if mostMilesInOneDay >= 26.2 && !hasBadge(id: "daily_marathon") {
-            badges.append(Badge(id: "daily_marathon", name: "Marathon Runner", description: "Ran 26.2+ miles in one day!", dateAwarded: lastCompletionDate ?? Date()))
+            let badge = Badge(id: "daily_marathon", name: "Marathon Runner", description: "Ran 26.2+ miles in one day!", dateAwarded: lastCompletionDate ?? Date())
+            badges.append(badge)
+            newBadges.append(badge)
         }
-        
+
         // Consistency milestones (consecutive days)
         if streak >= 3 && !hasBadge(id: "consistency_3") {
             let earnedDate = calculateRetroactiveDate(for: 3, type: .streak)
-            badges.append(Badge(id: "consistency_3", name: "Getting Started", description: "3 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "consistency_3", name: "Getting Started", description: "3 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
         if streak >= 5 && !hasBadge(id: "consistency_5") {
             let earnedDate = calculateRetroactiveDate(for: 5, type: .streak)
-            badges.append(Badge(id: "consistency_5", name: "Building Habits", description: "5 day streak!", dateAwarded: earnedDate))
+            let badge = Badge(id: "consistency_5", name: "Building Habits", description: "5 day streak!", dateAwarded: earnedDate)
+            badges.append(badge)
+            newBadges.append(badge)
         }
+
+        return newBadges
     }
     
     // Calculate retroactive date when badge should have been earned

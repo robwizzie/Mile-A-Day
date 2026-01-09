@@ -43,8 +43,8 @@ struct DashboardView: View {
     @State private var newGoalMiles: Double = 1.0
     @State private var isRefreshing = false
     @State private var showInstructions = false
-    @State private var showCelebration = false
     @State private var showWorkoutUploadAlert = false
+    @StateObject private var celebrationManager = CelebrationManager.shared
     /// Controls presentation of the in‑progress workout tracking UI.
     @State private var showWorkoutView = false
     /// Whether to show a compact “Resume workout” banner when an in‑progress workout exists
@@ -278,7 +278,7 @@ struct DashboardView: View {
                     // Show celebration with minimal delay for smooth UX
                     Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
-                        showCelebration = true
+                        celebrationManager.addCelebration(.goalCompleted)
                         lastGoalCompletionDate = Date()
                     }
                 }
@@ -328,86 +328,9 @@ struct DashboardView: View {
                 }
             }
             .confetti(isShowing: $showConfetti)
-            .confetti(isShowing: $showCelebration)
             .overlay(
-                // Celebration overlay
-                Group {
-                    if showCelebration {
-                        ZStack {
-                            // Background blur
-                            Color.primary.opacity(0.4)
-                                .ignoresSafeArea()
-                            
-                            // Celebration content
-                            VStack(spacing: 24) {
-                                // Animated trophy icon
-                                ZStack {
-                                    Circle()
-                                        .fill(
-                                            LinearGradient(
-                                                gradient: Gradient(colors: [.yellow.opacity(0.3), .orange.opacity(0.2)]),
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                        .frame(width: 100, height: 100)
-                                    
-                                    Image(systemName: "trophy.fill")
-                                        .font(.system(size: 50))
-                                        .foregroundColor(.orange)
-                                        .scaleEffect(showCelebration ? 1.1 : 0.9)
-                                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: showCelebration)
-                                }
-                                
-                                VStack(spacing: 8) {
-                                    Text("Goal Completed!")
-                                        .font(.title)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.primary)
-                                    
-                                    Text("You've crushed your daily mile goal. Keep up the amazing work!")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                        .multilineTextAlignment(.center)
-                                        .padding(.horizontal, 20)
-                                }
-                                
-                                Button {
-                                    withAnimation(.easeInOut(duration: 0.5)) {
-                                        showCelebration = false
-                                    }
-                                } label: {
-                                    Text("Continue")
-                                        .font(.headline)
-                                        .fontWeight(.semibold)
-                                        .foregroundColor(.white)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 16)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 12)
-                                                .fill(Color("appPrimary"))
-                                        )
-                                }
-                                .padding(.horizontal, 20)
-                            }
-                            .padding(32)
-                            .background(
-                                RoundedRectangle(cornerRadius: 20)
-                                    .fill(Color(.systemBackground))
-                                    .shadow(color: Color.primary.opacity(0.2), radius: 20, x: 0, y: 10)
-                            )
-                            .scaleEffect(showCelebration ? 1.0 : 0.8)
-                            .opacity(showCelebration ? 1.0 : 0.0)
-                            .animation(.spring(response: 0.6, dampingFraction: 0.8), value: showCelebration)
-                        }
-                        .onTapGesture {
-                            withAnimation(.easeInOut(duration: 0.5)) {
-                                showCelebration = false
-                            }
-                        }
-                    }
-            }
-        )
+                CelebrationContainerView()
+            )
         }
     }
     
