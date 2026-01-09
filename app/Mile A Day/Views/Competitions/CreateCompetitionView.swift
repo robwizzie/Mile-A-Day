@@ -359,126 +359,139 @@ struct CreateCompetitionView: View {
 
     var goalSelectionSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(goalLabel)
-                    .font(MADTheme.Typography.subheadline)
-                    .foregroundColor(.white.opacity(0.6))
-
-                Text(goalDescription)
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(.white.opacity(0.5))
-            }
-            .padding(.horizontal, MADTheme.Spacing.xl)
-
-            VStack(spacing: MADTheme.Spacing.lg) {
-                // Unit selector
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    ForEach([CompetitionUnit.miles, CompetitionUnit.kilometers, CompetitionUnit.steps], id: \.self) { unitOption in
-                        Button {
-                            unit = unitOption
-                        } label: {
-                            Text(unitOption == .steps ? "Steps" : unitOption.rawValue.capitalized)
-                                .font(MADTheme.Typography.callout)
-                                .fontWeight(unit == unitOption ? .semibold : .regular)
-                                .foregroundColor(unit == unitOption ? .white : .white.opacity(0.6))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, MADTheme.Spacing.sm)
-                                .background(
-                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                        .fill(unit == unitOption ? MADTheme.Colors.primary.opacity(0.3) : Color.white.opacity(0.05))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                        .stroke(
-                                            unit == unitOption ? MADTheme.Colors.primary : Color.white.opacity(0.1),
-                                            lineWidth: unit == unitOption ? 2 : 1
-                                        )
-                                )
-                        }
-                        .buttonStyle(ScaleButtonStyle())
-                    }
-                }
+            goalSectionHeader
+            
+            goalSectionContent
+                .padding(.vertical, MADTheme.Spacing.lg)
+                .background(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                )
                 .padding(.horizontal, MADTheme.Spacing.xl)
+        }
+    }
+    
+    private var goalSectionHeader: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(goalLabel)
+                .font(MADTheme.Typography.subheadline)
+                .foregroundColor(.white.opacity(0.6))
 
-                // Goal picker with +/- buttons
-                HStack(spacing: MADTheme.Spacing.xl) {
-                    // Minus button
-                    Button {
-                        if goal > 1 {
-                            goal -= 1
-                        }
-                    } label: {
-                        Image(systemName: "minus")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .frame(width: 50, height: 50)
-                            .background(
-                                Circle()
-                                    .fill(.ultraThinMaterial)
-                            )
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(ScaleButtonStyle())
-
-                    Spacer()
-
-                    // Goal display
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(String(format: "%.0f", goal))
-                            .font(.system(size: 64, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .fixedSize()
-
-                        Text(unit == .steps ? "k" : unit.rawValue)
-                            .font(MADTheme.Typography.title2)
-                            .foregroundColor(.white.opacity(0.7))
-                            .fixedSize()
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
-
-                    Spacer()
-
-                    // Plus button
-                    Button {
-                        goal += 1
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.title2)
-                            .foregroundColor(.white)
-                            .frame(width: 50, height: 50)
-                            .background(
-                                Circle()
-                                    .fill(.ultraThinMaterial)
-                            )
-                            .overlay(
-                                Circle()
-                                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(ScaleButtonStyle())
-                }
-                .padding(.horizontal, MADTheme.Spacing.xl)
-
-                // Friend's best
-                if let friend = firstSelectedFriend {
-                    Text("\(friend.displayName)'s best  \(String(format: "%.0f", friendBestDistance))\(unit.rawValue)")
-                        .font(MADTheme.Typography.callout)
-                        .foregroundColor(.white.opacity(0.6))
-                }
+            Text(goalDescription)
+                .font(MADTheme.Typography.caption)
+                .foregroundColor(.white.opacity(0.5))
+        }
+        .padding(.horizontal, MADTheme.Spacing.xl)
+    }
+    
+    private var goalSectionContent: some View {
+        VStack(spacing: MADTheme.Spacing.lg) {
+            unitSelector
+            goalPickerControls
+            friendBestView
+        }
+    }
+    
+    private var unitSelector: some View {
+        HStack(spacing: MADTheme.Spacing.sm) {
+            ForEach([CompetitionUnit.miles, CompetitionUnit.steps], id: \.self) { unitOption in
+                unitButton(for: unitOption)
             }
-            .padding(.vertical, MADTheme.Spacing.lg)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                    )
-            )
-            .padding(.horizontal, MADTheme.Spacing.xl)
+        }
+        .padding(.horizontal, MADTheme.Spacing.xl)
+    }
+    
+    private func unitButton(for unitOption: CompetitionUnit) -> some View {
+        Button {
+            unit = unitOption
+        } label: {
+            Text(unitOption == .steps ? "Steps" : unitOption.rawValue.capitalized)
+                .font(MADTheme.Typography.callout)
+                .fontWeight(unit == unitOption ? .semibold : .regular)
+                .foregroundColor(unit == unitOption ? .white : .white.opacity(0.6))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, MADTheme.Spacing.sm)
+                .background(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                        .fill(unit == unitOption ? MADTheme.Colors.primary.opacity(0.3) : Color.white.opacity(0.05))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                        .stroke(
+                            unit == unitOption ? MADTheme.Colors.primary : Color.white.opacity(0.1),
+                            lineWidth: unit == unitOption ? 2 : 1
+                        )
+                )
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+    
+    private var goalPickerControls: some View {
+        HStack(spacing: MADTheme.Spacing.xl) {
+            decrementButton
+            Spacer()
+            goalDisplay
+            Spacer()
+            incrementButton
+        }
+        .padding(.horizontal, MADTheme.Spacing.xl)
+    }
+    
+    private var decrementButton: some View {
+        Button {
+            if goal > 1 {
+                goal -= 1
+            }
+        } label: {
+            Image(systemName: "minus")
+                .font(.title2)
+                .foregroundColor(.white)
+                .frame(width: 50, height: 50)
+                .background(Circle().fill(.ultraThinMaterial))
+                .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+    
+    private var incrementButton: some View {
+        Button {
+            goal += 1
+        } label: {
+            Image(systemName: "plus")
+                .font(.title2)
+                .foregroundColor(.white)
+                .frame(width: 50, height: 50)
+                .background(Circle().fill(.ultraThinMaterial))
+                .overlay(Circle().stroke(Color.white.opacity(0.2), lineWidth: 1))
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+    
+    private var goalDisplay: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(String(format: "%.0f", goal))
+                .font(.system(size: 64, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .fixedSize()
+
+            Text(unit == .steps ? "k" : unit.rawValue)
+                .font(MADTheme.Typography.title2)
+                .foregroundColor(.white.opacity(0.7))
+                .fixedSize()
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+    
+    @ViewBuilder
+    private var friendBestView: some View {
+        if let friend = firstSelectedFriend {
+            Text("\(friend.displayName)'s best  \(String(format: "%.0f", friendBestDistance))\(unit.rawValue)")
+                .font(MADTheme.Typography.callout)
+                .foregroundColor(.white.opacity(0.6))
         }
     }
 
@@ -1130,7 +1143,7 @@ struct DurationPreset: View {
             .padding(.vertical, MADTheme.Spacing.lg)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(isSelected ? MADTheme.Colors.primary.opacity(0.2) : .ultraThinMaterial)
+                    .fill(isSelected ? AnyShapeStyle(MADTheme.Colors.primary.opacity(0.2)) : AnyShapeStyle(.ultraThinMaterial))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
@@ -1157,6 +1170,8 @@ struct IntervalOptionButton: View {
             return "calendar.day.timeline.left"
         case .week:
             return "calendar.badge.clock"
+        default:
+            return "calendar"
         }
     }
 
@@ -1176,7 +1191,7 @@ struct IntervalOptionButton: View {
             .padding(.vertical, MADTheme.Spacing.lg)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(isSelected ? MADTheme.Colors.primary.opacity(0.2) : .ultraThinMaterial)
+                    .fill(isSelected ? AnyShapeStyle(MADTheme.Colors.primary.opacity(0.2)) : AnyShapeStyle(.ultraThinMaterial))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
