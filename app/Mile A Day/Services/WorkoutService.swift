@@ -228,28 +228,37 @@ class WorkoutService: ObservableObject {
                 
                 for sample in distanceSamples {
                     let distance = sample.quantity.doubleValue(for: HKUnit.meter())
-                    
+
                     if startTime == nil {
                         startTime = sample.startDate
                     }
-                    
+
+                    let previousDistance = accumulatedDistance
                     accumulatedDistance += distance
-                    
+
                     // Check if we've completed a mile
                     if accumulatedDistance >= mileInMeters {
                         if let start = startTime {
-                            let endTime = sample.endDate
-                            let mileDuration = endTime.timeIntervalSince(start)
-                            let minutesPerMile = mileDuration / 60.0
-                            
-                            // Convert minutes per mile to seconds per mile (API expects seconds)
-                            let secondsPerMile = minutesPerMile * 60.0
+                            // Calculate how much of current sample was needed to complete the mile
+                            let distanceNeededForMile = mileInMeters - previousDistance
+
+                            // Calculate the proportion of this sample that completed the mile
+                            let proportion = distance > 0 ? distanceNeededForMile / distance : 1.0
+
+                            // Interpolate the time when the mile was completed
+                            let sampleDuration = sample.endDate.timeIntervalSince(sample.startDate)
+                            let timeToCompleteMile = sampleDuration * proportion
+                            let mileCompletionTime = sample.startDate.addingTimeInterval(timeToCompleteMile)
+
+                            // Calculate the duration for this mile in seconds
+                            let secondsPerMile = mileCompletionTime.timeIntervalSince(start)
+
                             mileSplits.append(secondsPerMile)
-                            print("[WorkoutService] ✅ Added split: \(String(format: "%.2f", minutesPerMile)) min/mi (\(String(format: "%.0f", secondsPerMile)) seconds)")
-                            
+                            print("[WorkoutService] ✅ Added split: \(String(format: "%.2f", secondsPerMile / 60.0)) min/mi (\(String(format: "%.0f", secondsPerMile)) seconds)")
+
                             // Reset for next mile
                             accumulatedDistance -= mileInMeters
-                            startTime = endTime
+                            startTime = mileCompletionTime
                         }
                     }
                 }
