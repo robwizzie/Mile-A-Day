@@ -187,19 +187,43 @@ class WorkoutService: ObservableObject {
                 continuation.resume(returning: [])
                 return
             }
-            
+
+            print("[WorkoutService] 🔍 Starting split time calculation for workout \(workout.uuid)")
+
+            // First, try to get splits from workout events (segment markers)
+            if #available(iOS 11.0, *) {
+                let segmentEvents = workout.workoutEvents?.filter { $0.type == .segment } ?? []
+                if !segmentEvents.isEmpty {
+                    print("[WorkoutService] 📊 Found \(segmentEvents.count) segment events")
+
+                    var mileSplits: [Double] = []
+                    var previousTime = workout.startDate
+
+                    for event in segmentEvents {
+                        let splitDuration = event.dateInterval.start.timeIntervalSince(previousTime)
+                        mileSplits.append(splitDuration)
+                        print("[WorkoutService] ✅ Segment split: \(String(format: "%.2f", splitDuration / 60.0)) min (\(String(format: "%.0f", splitDuration)) seconds)")
+                        previousTime = event.dateInterval.start
+                    }
+
+                    continuation.resume(returning: mileSplits)
+                    return
+                }
+            }
+
+            print("[WorkoutService] ℹ️ No segment events found, calculating from distance samples")
+
+            // Fallback: Calculate from distance samples
             guard let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else {
                 print("[WorkoutService] ⚠️ Distance type not available for split times")
                 continuation.resume(returning: [])
                 return
             }
-            
+
             let healthStore = HKHealthStore()
             let workoutPredicate = HKQuery.predicateForObjects(from: workout)
             let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
-            
-            print("[WorkoutService] 🔍 Starting split time calculation for workout \(workout.uuid)")
-            
+
             let query = HKSampleQuery(
                 sampleType: distanceType,
                 predicate: workoutPredicate,
@@ -211,62 +235,61 @@ class WorkoutService: ObservableObject {
                     continuation.resume(returning: [])
                     return
                 }
-                
+
                 guard let distanceSamples = results as? [HKQuantitySample], !distanceSamples.isEmpty else {
                     print("[WorkoutService] ℹ️ No distance samples found for workout \(workout.uuid)")
                     continuation.resume(returning: [])
                     return
                 }
-                
+
                 print("[WorkoutService] 📊 Found \(distanceSamples.count) distance samples")
-                
+
                 // Calculate mile splits from distance samples
                 var mileSplits: [Double] = []
                 var accumulatedDistance: Double = 0.0
-                var startTime: Date?
+                var currentMileStartTime: Date = distanceSamples[0].startDate
                 let mileInMeters = 1609.34 // One mile in meters
-                
+
                 for sample in distanceSamples {
-                    let distance = sample.quantity.doubleValue(for: HKUnit.meter())
+                    let sampleDistance = sample.quantity.doubleValue(for: HKUnit.meter())
+                    let sampleDuration = sample.endDate.timeIntervalSince(sample.startDate)
 
-                    if startTime == nil {
-                        startTime = sample.startDate
+                    var remainingDistance = sampleDistance
+                    var sampleStartOffset: TimeInterval = 0
+
+                    // Handle cases where a single sample might cross multiple mile boundaries
+                    while accumulatedDistance + remainingDistance >= mileInMeters {
+                        // Calculate distance needed to complete current mile
+                        let distanceToMile = mileInMeters - accumulatedDistance
+
+                        // Calculate time proportion for this segment of the sample
+                        let timeProportion = sampleDistance > 0 ? distanceToMile / sampleDistance : 0
+                        let timeToMile = sampleDuration * timeProportion
+
+                        // Calculate when the mile was completed
+                        let mileCompletionTime = sample.startDate.addingTimeInterval(sampleStartOffset + timeToMile)
+
+                        // Calculate split time
+                        let splitTime = mileCompletionTime.timeIntervalSince(currentMileStartTime)
+                        mileSplits.append(splitTime)
+
+                        print("[WorkoutService] ✅ Mile \(mileSplits.count) split: \(String(format: "%.2f", splitTime / 60.0)) min (\(String(format: "%.0f", splitTime)) seconds)")
+
+                        // Update for next mile
+                        remainingDistance -= distanceToMile
+                        sampleStartOffset += timeToMile
+                        accumulatedDistance = 0
+                        currentMileStartTime = mileCompletionTime
                     }
 
-                    let previousDistance = accumulatedDistance
-                    accumulatedDistance += distance
-
-                    // Check if we've completed a mile
-                    if accumulatedDistance >= mileInMeters {
-                        if let start = startTime {
-                            // Calculate how much of current sample was needed to complete the mile
-                            let distanceNeededForMile = mileInMeters - previousDistance
-
-                            // Calculate the proportion of this sample that completed the mile
-                            let proportion = distance > 0 ? distanceNeededForMile / distance : 1.0
-
-                            // Interpolate the time when the mile was completed
-                            let sampleDuration = sample.endDate.timeIntervalSince(sample.startDate)
-                            let timeToCompleteMile = sampleDuration * proportion
-                            let mileCompletionTime = sample.startDate.addingTimeInterval(timeToCompleteMile)
-
-                            // Calculate the duration for this mile in seconds
-                            let secondsPerMile = mileCompletionTime.timeIntervalSince(start)
-
-                            mileSplits.append(secondsPerMile)
-                            print("[WorkoutService] ✅ Added split: \(String(format: "%.2f", secondsPerMile / 60.0)) min/mi (\(String(format: "%.0f", secondsPerMile)) seconds)")
-
-                            // Reset for next mile
-                            accumulatedDistance -= mileInMeters
-                            startTime = mileCompletionTime
-                        }
-                    }
+                    // Add any remaining distance to accumulated
+                    accumulatedDistance += remainingDistance
                 }
-                
+
                 print("[WorkoutService] ✅ Total splits calculated: \(mileSplits.count)")
                 continuation.resume(returning: mileSplits)
             }
-            
+
             healthStore.execute(query)
         }
     }
