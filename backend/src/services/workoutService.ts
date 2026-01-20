@@ -35,9 +35,9 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
         INSERT INTO workout_splits (workout_id, split_number, split_duration, split_distance)
         VALUES ($1, $2, $3, $4)
         ON CONFLICT (workout_id, split_number)
-        DO UPDATE SET 
-			split_time = EXCLUDED.split_time
-			distance = EXCLUDED.split_distance
+        DO UPDATE SET
+			split_duration = EXCLUDED.split_duration,
+			split_distance = EXCLUDED.split_distance
       `;
 
 	await db.transaction(
