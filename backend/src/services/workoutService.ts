@@ -37,7 +37,7 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
         ON CONFLICT (workout_id, split_number)
         DO UPDATE SET
 			split_duration = EXCLUDED.split_duration,
-			split_distance = EXCLUDED.split_distance
+			split_distance = EXCLUDED.split_distance,
 			split_pace = EXCLUDED.split_pace
       `;
 
