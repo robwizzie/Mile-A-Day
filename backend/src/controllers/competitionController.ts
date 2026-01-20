@@ -34,7 +34,8 @@ export async function createComp(req: AuthenticatedRequest, res: Response) {
 			return res.status(400).json({ error: error.message });
 		}
 
-		res.status(500).json({ error: error.message });
+		console.error('Error creating competition:', error.message);
+		res.status(500).json({ error: 'Error creating competition: ' + error.message });
 	}
 }
 
@@ -52,7 +53,8 @@ export async function getComp(req: AuthenticatedRequest, res: Response) {
 
 		return res.status(200).json({ competition });
 	} catch (error: any) {
-		res.status(500).json({ error: error.message });
+		console.error('Error getting competition:', error.message);
+		res.status(500).json({ error: 'Error getting competition: ' + error.message });
 	}
 }
 
@@ -70,7 +72,8 @@ export async function getAllComps(req: AuthenticatedRequest, res: Response) {
 
 		res.status(200).json({ competitions });
 	} catch (error: any) {
-		res.status(500).json({ error: error.message });
+		console.error('Error getting comps:', error.message);
+		res.status(500).json({ error: 'Error getting comps: ' + error.message });
 	}
 }
 
@@ -105,7 +108,8 @@ export async function inviteUsersToComp(req: AuthenticatedRequest, res: Response
 
 		res.status(200).json({ message: `Successfully invited user ${inviteUserId} to competition ${competitionId}` });
 	} catch (error: any) {
-		res.status(500).json({ error: error.message });
+		console.error('Error inviting user:', error.message);
+		res.status(500).json({ error: 'Error inviting user: ' + error.message });
 	}
 }
 
@@ -118,7 +122,8 @@ export async function getCompInvites(req: AuthenticatedRequest, res: Response) {
 		});
 		res.status(200).json({ competitionInvites: competitions });
 	} catch (error: any) {
-		res.status(500).json({ error: error.message });
+		console.error('Error getting competition invites:', error.message);
+		res.status(500).json({ error: 'Error getting competition invites: ' + error.message });
 	}
 }
 
@@ -159,7 +164,8 @@ export async function updateComp(req: AuthenticatedRequest, res: Response) {
 			return res.status(400).json({ error: error.message });
 		}
 
-		res.status(500).json({ error: error.message });
+		console.error('Error updating competition:', error.message);
+		res.status(500).json({ error: 'Error updating competition: ' + error.message });
 	}
 }
 
@@ -188,7 +194,8 @@ export function getCompInviteHandler(status: 'accepted' | 'declined') {
 
 			res.status(200).json({ competition });
 		} catch (error: any) {
-			res.status(500).json({ error: error.message });
+			console.error('Error handling invite:', error.message);
+			res.status(500).json({ error: 'Error handling invite: ' + error.message });
 		}
 	};
 }

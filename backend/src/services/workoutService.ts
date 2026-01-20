@@ -32,16 +32,16 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
     `;
 
 	const splitQuery = `
-        INSERT INTO workout_splits (workout_id, split_number, split_time, complete_mile)
+        INSERT INTO workout_splits (workout_id, split_number, split_duration, split_distance)
         VALUES ($1, $2, $3, $4)
         ON CONFLICT (workout_id, split_number)
-        DO UPDATE SET split_time = EXCLUDED.split_time
+        DO UPDATE SET 
+			split_time = EXCLUDED.split_time
+			distance = EXCLUDED.split_distance
       `;
 
 	await db.transaction(
 		workouts.flatMap((workout: Workout) => {
-			const miles = Math.floor(workout.distance);
-
 			return [
 				{
 					query: workoutQuery,
@@ -58,9 +58,9 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
 						workout.totalDuration
 					]
 				},
-				...workout.splitTimes.map((split: number, i: number) => ({
+				...workout.splits.map(split => ({
 					query: splitQuery,
-					params: [workout.workoutId, i, split, i <= miles - 1]
+					params: [workout.workoutId, split.splitNumber, split.duration, split.distance]
 				}))
 			];
 		})
@@ -148,12 +148,12 @@ export async function getBestMilesDay(userId: string, startDate?: string) {
 export async function getBestSplit(userId: string, startDate?: string) {
 	let bestSplitQuery = `
     SELECT 
-      ws.split_time AS best_split_time,
+      ws.split_pace AS best_split_time,
       w.*
     FROM workout_splits ws
     JOIN workouts w ON ws.workout_id = w.workout_id
     WHERE w.user_id = $1
-	AND complete_mile = true
+	AND split_distance >= 1
 	`;
 
 	const params: (string | number)[] = [userId];
@@ -170,7 +170,6 @@ export async function getBestSplit(userId: string, startDate?: string) {
 
 	const result = await db.query(bestSplitQuery, params);
 
-	// If no results, return null for best_split_time
 	if (!result || result.length === 0) {
 		return null;
 	}

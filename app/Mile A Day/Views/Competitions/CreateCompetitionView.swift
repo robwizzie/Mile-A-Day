@@ -1010,7 +1010,7 @@ struct CompactTypeButton: View {
             .padding(.horizontal, MADTheme.Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(isSelected ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Color.white.opacity(0.05)))
+                    .fill(isSelected ? Color.white.opacity(0.15) : Color.white.opacity(0.05))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
@@ -1130,7 +1130,7 @@ struct DurationPreset: View {
             .padding(.vertical, MADTheme.Spacing.lg)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(isSelected ? MADTheme.Colors.primary.opacity(0.2) : .ultraThinMaterial)
+                    .fill(isSelected ? MADTheme.Colors.primary.opacity(0.2) : Color.white.opacity(0.1))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
@@ -1157,6 +1157,8 @@ struct IntervalOptionButton: View {
             return "calendar.day.timeline.left"
         case .week:
             return "calendar.badge.clock"
+        case .month:
+            return "calendar"
         }
     }
 
@@ -1176,7 +1178,7 @@ struct IntervalOptionButton: View {
             .padding(.vertical, MADTheme.Spacing.lg)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(isSelected ? MADTheme.Colors.primary.opacity(0.2) : .ultraThinMaterial)
+                    .fill(isSelected ? MADTheme.Colors.primary.opacity(0.2) : Color.white.opacity(0.1))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
