@@ -100,6 +100,7 @@
 		B20E1DFF2ED545870041BC19 /* Exceptions for "Mile A Day" folder in "Mile A Day Watch Watch App" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				Managers/CelebrationManager.swift,
 				Models/AppPreferences.swift,
 				Models/BackendUser.swift,
 				Models/CustomShareCard.swift,

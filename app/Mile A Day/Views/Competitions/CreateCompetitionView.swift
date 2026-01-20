@@ -1195,3 +1195,4 @@ struct IntervalOptionButton: View {
 #Preview {
     CreateCompetitionView()
 }
+

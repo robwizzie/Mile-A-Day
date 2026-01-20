@@ -276,7 +276,17 @@ class UserManager: ObservableObject {
     // Check for retroactive badges based on current stats
     func checkForRetroactiveBadges() {
         // Force a badge check with current stats
-        currentUser.checkForMilestoneBadges()
+        let newBadges = currentUser.checkForMilestoneBadges()
         saveUserData()
+
+        // Trigger celebrations for badges earned today (not retroactive ones)
+        let today = Calendar.current.startOfDay(for: Date())
+        for badge in newBadges {
+            let badgeDate = Calendar.current.startOfDay(for: badge.dateAwarded)
+            // Only celebrate badges earned today to avoid showing celebrations for old retroactive badges
+            if badgeDate == today {
+                CelebrationManager.shared.addCelebration(.badgeUnlocked(badge: badge))
+            }
+        }
     }
 } 
