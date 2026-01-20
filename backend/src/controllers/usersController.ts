@@ -124,7 +124,8 @@ export async function checkUsername(req: Request, res: Response) {
 	try {
 		const isAvailable = await checkUsernameAvailability(username as string);
 		res.json({ available: isAvailable });
-	} catch (error) {
+	} catch (error: any) {
+		console.error('Error: username check failed:', error.message);
 		res.status(500).json({
 			error: 'Username check failed',
 			message: error instanceof Error ? error.message : 'Unknown error'

@@ -135,6 +135,7 @@ struct CompetitionOptions: Codable {
 /// Competition unit
 enum CompetitionUnit: String, Codable, CaseIterable {
     case miles = "miles"
+    case kilometers = "kilometers"
     case steps = "steps"
 
     var displayName: String {
@@ -144,6 +145,7 @@ enum CompetitionUnit: String, Codable, CaseIterable {
     var icon: String {
         switch self {
         case .miles: return "figure.run"
+        case .kilometers: return "figure.run"
         case .steps: return "figure.walk"
         }
     }

@@ -8,5 +8,12 @@ export type Workout = {
 	deviceEndDate: string;
 	calories: number;
 	totalDuration: number;
-	splitTimes: number[];
+	splits: WorkoutSplit[];
+};
+
+export type WorkoutSplit = {
+	splitNumber: number;
+	distance: number;
+	duration: number;
+	pace: number;
 };

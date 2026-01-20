@@ -35,10 +35,9 @@ export async function uploadWorkouts(req: Request, res: Response) {
 		res.status(200).json({
 			message: 'Successfully uploaded workouts.'
 		});
-	} catch (error) {
-		return res.status(500).json({
-			error: error instanceof Error ? error.message : 'Unknown error'
-		});
+	} catch (error: any) {
+		console.error('Error uploading workouts:', error.message);
+		res.status(500).json({ error: 'Error uploading workouts: ' + error.message });
 	}
 }
 
@@ -56,10 +55,9 @@ export async function getStreak(req: Request, res: Response) {
 		const { streak } = await getActiveStreak(userId);
 
 		return res.status(200).json({ streak });
-	} catch (error) {
-		return res.status(500).json({
-			error: error instanceof Error ? error.message : 'Unknown error'
-		});
+	} catch (error: any) {
+		console.error('Error getting streak:', error.message);
+		res.status(500).json({ error: 'Error getting streak: ' + error.message });
 	}
 }
 
@@ -85,10 +83,9 @@ export async function getRecentWorkouts(req: Request, res: Response) {
 		const results = await getRecentWorkoutsDb(userId, resultLimit);
 
 		return res.status(200).json(results);
-	} catch (error) {
-		return res.status(500).json({
-			error: error instanceof Error ? error.message : 'Unknown error'
-		});
+	} catch (error: any) {
+		console.error('Error getting recent workouts:', error.message);
+		res.status(500).json({ error: 'Error getting recent workouts: ' + error.message });
 	}
 }
 
@@ -128,9 +125,8 @@ export async function getUserStats(req: Request, res: Response) {
 			today_miles,
 			goal_miles
 		});
-	} catch (error) {
-		return res.status(500).json({
-			error: error instanceof Error ? error.message : 'Unknown error'
-		});
+	} catch (error: any) {
+		console.error('Error getting user stats:', error.message);
+		res.status(500).json({ error: 'Error getting user stats: ' + error.message });
 	}
 }

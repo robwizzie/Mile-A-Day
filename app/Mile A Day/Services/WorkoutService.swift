@@ -4,54 +4,54 @@ import HealthKit
 /// Service for handling workout-related API operations
 @MainActor
 class WorkoutService: ObservableObject {
-    
+
     // MARK: - Published Properties
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var lastUploadStatus: String?
-    
+
     // MARK: - Private Properties
     private let baseURL = "https://mad.mindgoblin.tech"
     private var authToken: String?
     private let healthStore = HKHealthStore()
-    
+
     // MARK: - Initialization
     init() {
         // Load auth token from UserDefaults
         self.authToken = UserDefaults.standard.string(forKey: "authToken")
     }
-    
+
     // MARK: - Authentication
     func setAuthToken(_ token: String) {
         self.authToken = token
         UserDefaults.standard.set(token, forKey: "authToken")
     }
-    
+
     func clearAuthToken() {
         self.authToken = nil
         UserDefaults.standard.removeObject(forKey: "authToken")
     }
-    
+
     // MARK: - Workout Upload
     /// Upload workouts to the backend
     func uploadWorkouts(_ workouts: [HKWorkout]) async throws {
         guard let currentUserId = getCurrentUserId() else {
             throw WorkoutServiceError.notAuthenticated
         }
-        
+
         isLoading = true
         errorMessage = nil
-        
+
         do {
             // Transform HKWorkout objects to backend format
             let workoutData = try await transformWorkoutsForBackend(workouts)
-            
+
             // Debug: Print the full request data
             let requestBody = try JSONSerialization.data(withJSONObject: workoutData)
             if let requestString = String(data: requestBody, encoding: .utf8) {
                 print("[WorkoutService] 📤 Full request body: \(requestString)")
             }
-            
+
             // Make the API request
             let response: WorkoutUploadResponse = try await makeRequest(
                 endpoint: "/workouts/\(currentUserId)/upload",
@@ -59,16 +59,16 @@ class WorkoutService: ObservableObject {
                 body: requestBody,
                 responseType: WorkoutUploadResponse.self
             )
-            
+
             lastUploadStatus = response.message
             print("[WorkoutService] ✅ Successfully uploaded \(workouts.count) workouts")
-            
+
         } catch {
             errorMessage = error.localizedDescription
             print("[WorkoutService] ❌ Upload failed: \(error)")
             throw error
         }
-        
+
         isLoading = false
     }
 
@@ -112,75 +112,79 @@ class WorkoutService: ObservableObject {
             throw WorkoutServiceError.networkError(error.localizedDescription)
         }
     }
-    
+
     /// Transform HKWorkout objects to backend format
-    private func transformWorkoutsForBackend(_ workouts: [HKWorkout]) async throws -> [[String: Any]] {
+    private func transformWorkoutsForBackend(_ workouts: [HKWorkout]) async throws -> [[String:
+        Any]]
+    {
         var workoutData: [[String: Any]] = []
-        
+
         for workout in workouts {
-            // Get split times for this workout
-            let splitTimes = await getSplitTimes(for: workout)
-            
+            // Get split data for this workout
+            let splits = await getSplitTimes(for: workout)
+
             // Calculate timezone offset
             let timezoneOffset = TimeZone.current.secondsFromGMT() / 60
-            
+
             // Format local date
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyy-MM-dd"
             formatter.timeZone = TimeZone.current
             let localDate = formatter.string(from: workout.startDate)
-            
+
             // Format device end date
             let isoFormatter = ISO8601DateFormatter()
             let deviceEndDate = isoFormatter.string(from: workout.endDate)
-            
+
             // Determine workout type
             let workoutType = getWorkoutType(from: workout.workoutActivityType)
-            
+
             let calories = await activeEnergyKilocalories(for: workout)
-            
+
             let workoutDict: [String: Any] = [
                 "workoutId": workout.uuid.uuidString,
                 "distance": distanceInMiles(from: workout),
                 "localDate": localDate,
-                "date": localDate, // Add date field for database compatibility
+                "date": localDate,  // Add date field for database compatibility
                 "timezoneOffset": timezoneOffset,
                 "workoutType": workoutType,
                 "deviceEndDate": deviceEndDate,
                 "calories": calories,
                 "totalDuration": workout.duration,
-                "splitTimes": splitTimes  // Using camelCase as shown in API example
+                "splits": splits,
             ]
-            
-            // Debug: Print the workout data being sent with specific focus on split_times
+
+            // Debug: Print the workout data being sent with detailed split information
             print("[WorkoutService] 📤 Sending workout data:")
             print("  - Workout ID: \(workout.uuid.uuidString)")
             print("  - Distance: \(distanceInMiles(from: workout)) mi")
-            print("  - Split Times Count: \(splitTimes.count)")
-            if !splitTimes.isEmpty {
-                print("  - Split Times Array: \(splitTimes)")
-                for (index, split) in splitTimes.enumerated() {
-                    print("    Split \(index + 1): \(String(format: "%.2f", split)) min/mi")
+            print("  - Splits Count: \(splits.count)")
+            if !splits.isEmpty {
+                print("  - Detailed Splits:")
+                for split in splits {
+                    print(
+                        "    Split \(split.splitNumber): \(split.formattedPace)/mile (\(String(format: "%.2f", split.distance)) mi in \(String(format: "%.0f", split.duration))s)"
+                    )
                 }
             } else {
-                print("  - Split Times: [] (empty)")
+                print("  - Splits: [] (empty)")
             }
             print("[WorkoutService] 📤 Full workout dict: \(workoutDict)")
-            
+
             workoutData.append(workoutDict)
         }
-        
+
         return workoutData
     }
-    
+
     /// Get distance in miles from a workout
     private func distanceInMiles(from workout: HKWorkout) -> Double {
         guard let distance = workout.totalDistance else { return 0 }
         return distance.doubleValue(for: HKUnit.mile())
     }
-    
-    /// Get split times for a workout
-    private func getSplitTimes(for workout: HKWorkout) async -> [Double] {
+
+    /// Get split data for a workout with detailed information about each split
+    private func getSplitTimes(for workout: HKWorkout) async -> [WorkoutSplit] {
         return await withCheckedContinuation { continuation in
             guard HKHealthStore.isHealthDataAvailable() else {
                 print("[WorkoutService] ⚠️ HealthKit not available for split times")
@@ -188,7 +192,7 @@ class WorkoutService: ObservableObject {
                 return
             }
 
-            print("[WorkoutService] 🔍 Starting split time calculation for workout \(workout.uuid)")
+            print("[WorkoutService] 🔍 Starting split calculation for workout \(workout.uuid)")
 
             // First, try to get splits from workout events (segment markers)
             if #available(iOS 11.0, *) {
@@ -196,17 +200,29 @@ class WorkoutService: ObservableObject {
                 if !segmentEvents.isEmpty {
                     print("[WorkoutService] 📊 Found \(segmentEvents.count) segment events")
 
-                    var mileSplits: [Double] = []
+                    var splits: [WorkoutSplit] = []
                     var previousTime = workout.startDate
+                    let mileDistance = 1.0  // Assuming each segment is 1 mile
 
-                    for event in segmentEvents {
-                        let splitDuration = event.dateInterval.start.timeIntervalSince(previousTime)
-                        mileSplits.append(splitDuration)
-                        print("[WorkoutService] ✅ Segment split: \(String(format: "%.2f", splitDuration / 60.0)) min (\(String(format: "%.0f", splitDuration)) seconds)")
+                    for (index, event) in segmentEvents.enumerated() {
+                        let duration = event.dateInterval.start.timeIntervalSince(previousTime)
+                        let pace = duration / mileDistance
+
+                        let split = WorkoutSplit(
+                            splitNumber: index + 1,
+                            distance: mileDistance,
+                            duration: duration,
+                            pace: pace
+                        )
+                        splits.append(split)
+
+                        print(
+                            "[WorkoutService] ✅ Split \(split.splitNumber): \(split.formattedPace)/mile"
+                        )
                         previousTime = event.dateInterval.start
                     }
 
-                    continuation.resume(returning: mileSplits)
+                    continuation.resume(returning: splits)
                     return
                 }
             }
@@ -214,7 +230,10 @@ class WorkoutService: ObservableObject {
             print("[WorkoutService] ℹ️ No segment events found, calculating from distance samples")
 
             // Fallback: Calculate from distance samples
-            guard let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else {
+            guard
+                let distanceType = HKQuantityType.quantityType(
+                    forIdentifier: .distanceWalkingRunning)
+            else {
                 print("[WorkoutService] ⚠️ Distance type not available for split times")
                 continuation.resume(returning: [])
                 return
@@ -222,7 +241,8 @@ class WorkoutService: ObservableObject {
 
             let healthStore = HKHealthStore()
             let workoutPredicate = HKQuery.predicateForObjects(from: workout)
-            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+            let sortDescriptor = NSSortDescriptor(
+                key: HKSampleSortIdentifierStartDate, ascending: true)
 
             let query = HKSampleQuery(
                 sampleType: distanceType,
@@ -231,13 +251,17 @@ class WorkoutService: ObservableObject {
                 sortDescriptors: [sortDescriptor]
             ) { _, results, error in
                 if let error = error {
-                    print("[WorkoutService] ⚠️ Error fetching split times: \(error.localizedDescription)")
+                    print(
+                        "[WorkoutService] ⚠️ Error fetching split times: \(error.localizedDescription)"
+                    )
                     continuation.resume(returning: [])
                     return
                 }
 
-                guard let distanceSamples = results as? [HKQuantitySample], !distanceSamples.isEmpty else {
-                    print("[WorkoutService] ℹ️ No distance samples found for workout \(workout.uuid)")
+                guard let distanceSamples = results as? [HKQuantitySample], !distanceSamples.isEmpty
+                else {
+                    print(
+                        "[WorkoutService] ℹ️ No distance samples found for workout \(workout.uuid)")
                     continuation.resume(returning: [])
                     return
                 }
@@ -245,10 +269,11 @@ class WorkoutService: ObservableObject {
                 print("[WorkoutService] 📊 Found \(distanceSamples.count) distance samples")
 
                 // Calculate mile splits from distance samples
-                var mileSplits: [Double] = []
+                var splits: [WorkoutSplit] = []
                 var accumulatedDistance: Double = 0.0
                 var currentMileStartTime: Date = distanceSamples[0].startDate
-                let mileInMeters = 1609.34 // One mile in meters
+                let mileInMeters = 1609.34  // One mile in meters
+                let mileInMiles = 1.0
 
                 for sample in distanceSamples {
                     let sampleDistance = sample.quantity.doubleValue(for: HKUnit.meter())
@@ -263,17 +288,29 @@ class WorkoutService: ObservableObject {
                         let distanceToMile = mileInMeters - accumulatedDistance
 
                         // Calculate time proportion for this segment of the sample
-                        let timeProportion = sampleDistance > 0 ? distanceToMile / sampleDistance : 0
+                        let timeProportion =
+                            sampleDistance > 0 ? distanceToMile / sampleDistance : 0
                         let timeToMile = sampleDuration * timeProportion
 
                         // Calculate when the mile was completed
-                        let mileCompletionTime = sample.startDate.addingTimeInterval(sampleStartOffset + timeToMile)
+                        let mileCompletionTime = sample.startDate.addingTimeInterval(
+                            sampleStartOffset + timeToMile)
 
-                        // Calculate split time
-                        let splitTime = mileCompletionTime.timeIntervalSince(currentMileStartTime)
-                        mileSplits.append(splitTime)
+                        // Calculate split duration and pace
+                        let duration = mileCompletionTime.timeIntervalSince(currentMileStartTime)
+                        let pace = duration / mileInMiles
 
-                        print("[WorkoutService] ✅ Mile \(mileSplits.count) split: \(String(format: "%.2f", splitTime / 60.0)) min (\(String(format: "%.0f", splitTime)) seconds)")
+                        let split = WorkoutSplit(
+                            splitNumber: splits.count + 1,
+                            distance: mileInMiles,
+                            duration: duration,
+                            pace: pace
+                        )
+                        splits.append(split)
+
+                        print(
+                            "[WorkoutService] ✅ Split \(split.splitNumber): \(split.formattedPace)/mile (distance: \(String(format: "%.2f", split.distance)) mi, duration: \(String(format: "%.0f", split.duration))s)"
+                        )
 
                         // Update for next mile
                         remainingDistance -= distanceToMile
@@ -286,22 +323,23 @@ class WorkoutService: ObservableObject {
                     accumulatedDistance += remainingDistance
                 }
 
-                print("[WorkoutService] ✅ Total splits calculated: \(mileSplits.count)")
-                continuation.resume(returning: mileSplits)
+                print("[WorkoutService] ✅ Total splits calculated: \(splits.count)")
+                continuation.resume(returning: splits)
             }
 
             healthStore.execute(query)
         }
     }
-    
+
     /// Compute active energy for a workout using HealthKit statistics queries.
     private func activeEnergyKilocalories(for workout: HKWorkout) async -> Double {
         if #available(iOS 18.0, *) {
             guard HKHealthStore.isHealthDataAvailable(),
-                  let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) else {
+                let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)
+            else {
                 return 0
             }
-            
+
             return await withCheckedContinuation { continuation in
                 let predicate = HKQuery.predicateForObjects(from: workout)
                 let query = HKStatisticsQuery(
@@ -310,20 +348,23 @@ class WorkoutService: ObservableObject {
                     options: .cumulativeSum
                 ) { _, statistics, error in
                     if let error = error {
-                        print("[WorkoutService] ⚠️ Active energy query failed: \(error.localizedDescription)")
+                        print(
+                            "[WorkoutService] ⚠️ Active energy query failed: \(error.localizedDescription)"
+                        )
                     }
-                    
-                    let value = statistics?.sumQuantity()?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
+
+                    let value =
+                        statistics?.sumQuantity()?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
                     continuation.resume(returning: value)
                 }
-                
+
                 healthStore.execute(query)
             }
         } else {
             return workout.totalEnergyBurned?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
         }
     }
-    
+
     /// Convert HKWorkoutActivityType to string
     private func getWorkoutType(from activityType: HKWorkoutActivityType) -> String {
         switch activityType {
@@ -339,12 +380,12 @@ class WorkoutService: ObservableObject {
             return "other"
         }
     }
-    
+
     /// Get current user ID from UserDefaults
     private func getCurrentUserId() -> String? {
         return UserDefaults.standard.string(forKey: "backendUserId")
     }
-    
+
     // MARK: - Recent Workouts
     /// Get recent workouts for a user
     /// - Parameters:
@@ -353,38 +394,38 @@ class WorkoutService: ObservableObject {
     /// - Returns: Array of recent workouts
     func getRecentWorkouts(userId: String, limit: Int = 10) async throws -> [RecentWorkout] {
         let endpoint = "/workouts/\(userId)/recent?limit=\(limit)"
-        
+
         do {
             let workouts: [RecentWorkout] = try await makeRequest(
                 endpoint: endpoint,
                 method: .GET,
                 responseType: [RecentWorkout].self
             )
-            
+
             // Only log summary, detailed logs are in UserProfileDetailView
             return workouts
-            
+
         } catch {
             throw error
         }
     }
-    
+
     // MARK: - Streak
     /// Get workout streak for a user
     /// - Parameter userId: The ID of the user to get streak for
     /// - Returns: The user's current workout streak
     func getStreak(userId: String) async throws -> Int {
         let endpoint = "/workouts/\(userId)/streak"
-        
+
         do {
             let response: StreakResponse = try await makeRequest(
                 endpoint: endpoint,
                 method: .GET,
                 responseType: StreakResponse.self
             )
-            
+
             return response.streak
-            
+
         } catch {
             throw error
         }
@@ -395,10 +436,13 @@ class WorkoutService: ObservableObject {
     /// - Parameters:
     ///   - userId: The ID of the user
     ///   - currentStreakOnly: If true, limits stats to current streak period
-    func getUserStats(userId: String, currentStreakOnly: Bool = false) async throws -> UserStatsAPIResponse {
+    func getUserStats(userId: String, currentStreakOnly: Bool = false) async throws
+        -> UserStatsAPIResponse
+    {
         let param = currentStreakOnly ? "?current_streak=true" : ""
         let endpoint = "/workouts/\(userId)/stats\(param)"
-        return try await makeRequest(endpoint: endpoint, method: .GET, responseType: UserStatsAPIResponse.self)
+        return try await makeRequest(
+            endpoint: endpoint, method: .GET, responseType: UserStatsAPIResponse.self)
     }
 }
 
@@ -413,13 +457,13 @@ struct UserStatsAPIResponse: Decodable {
     struct BestMilesDay: Decodable {
         let localDate: String
         let totalDistance: Double
-        
+
         enum CodingKeys: String, CodingKey {
             case localDate = "local_date"
             case totalDistance = "total_distance"
         }
     }
-    
+
     struct DynamicCodingKeys: CodingKey {
         var stringValue: String
         init?(stringValue: String) { self.stringValue = stringValue }
@@ -435,7 +479,7 @@ struct UserStatsAPIResponse: Decodable {
     let recentWorkouts: [RecentWorkout]
     let todayMiles: Double?
     let goalMiles: Double?
-    
+
     enum CodingKeys: String, CodingKey {
         case streak
         case startDate = "start_date"
@@ -446,14 +490,14 @@ struct UserStatsAPIResponse: Decodable {
         case todayMiles = "today_miles"
         case goalMiles = "goal_miles"
     }
-    
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.streak = try container.decode(Int.self, forKey: .streak)
         self.startDate = try container.decode(String.self, forKey: .startDate)
         self.totalMiles = try container.decode(Double.self, forKey: .totalMiles)
         self.bestMilesDay = try? container.decode(BestMilesDay.self, forKey: .bestMilesDay)
-        
+
         // best_split_time may be a number, null, or an object like {"workout":{}}; capture only if it's a number
         // Try to decode as Double first
         if let numeric = try? container.decode(Double.self, forKey: .bestSplitTime) {
@@ -462,10 +506,12 @@ struct UserStatsAPIResponse: Decodable {
             // If the key exists but isn't a number, try to decode as a nested dictionary {"workout":{}}
             // This pattern matches the API response structure
             do {
-                let nestedContainer = try container.nestedContainer(keyedBy: DynamicCodingKeys.self, forKey: .bestSplitTime)
+                let nestedContainer = try container.nestedContainer(
+                    keyedBy: DynamicCodingKeys.self, forKey: .bestSplitTime)
                 // If we got here, it's an object - check if it has a "workout" key
                 if let workoutKey = DynamicCodingKeys(stringValue: "workout"),
-                   nestedContainer.contains(workoutKey) {
+                    nestedContainer.contains(workoutKey)
+                {
                     self.bestSplitTimeSeconds = nil
                 } else {
                     self.bestSplitTimeSeconds = nil
@@ -477,12 +523,13 @@ struct UserStatsAPIResponse: Decodable {
         } else {
             self.bestSplitTimeSeconds = nil
         }
-        
-        self.recentWorkouts = (try? container.decode([RecentWorkout].self, forKey: .recentWorkouts)) ?? []
+
+        self.recentWorkouts =
+            (try? container.decode([RecentWorkout].self, forKey: .recentWorkouts)) ?? []
         self.todayMiles = try? container.decode(Double.self, forKey: .todayMiles)
         self.goalMiles = try? container.decode(Double.self, forKey: .goalMiles)
     }
-    
+
     /// Calculates if the user has completed their goal today
     var hasCompletedGoalToday: Bool {
         guard let today = todayMiles, let goal = goalMiles else { return false }
@@ -500,7 +547,7 @@ enum WorkoutServiceError: LocalizedError {
     case serverError(Int)
     case networkError(String)
     case apiError(String)
-    
+
     var errorDescription: String? {
         switch self {
         case .invalidURL:
