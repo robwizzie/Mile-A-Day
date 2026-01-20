@@ -123,6 +123,16 @@ class WorkoutService: ObservableObject {
             // Get split data for this workout
             let splits = await getSplitTimes(for: workout)
 
+            // Convert splits to dictionaries for JSON serialization
+            let splitsData = splits.map { split -> [String: Any] in
+                [
+                    "splitNumber": split.splitNumber,
+                    "distance": split.distance,
+                    "duration": split.duration,
+                    "pace": split.pace
+                ]
+            }
+
             // Calculate timezone offset
             let timezoneOffset = TimeZone.current.secondsFromGMT() / 60
 
@@ -151,7 +161,7 @@ class WorkoutService: ObservableObject {
                 "deviceEndDate": deviceEndDate,
                 "calories": calories,
                 "totalDuration": workout.duration,
-                "splits": splits,
+                "splits": splitsData,
             ]
 
             // Debug: Print the workout data being sent with detailed split information
@@ -272,12 +282,14 @@ class WorkoutService: ObservableObject {
                 var splits: [WorkoutSplit] = []
                 var accumulatedDistance: Double = 0.0
                 var currentMileStartTime: Date = distanceSamples[0].startDate
+                var lastSampleEndDate: Date = distanceSamples[0].endDate
                 let mileInMeters = 1609.34  // One mile in meters
                 let mileInMiles = 1.0
 
                 for sample in distanceSamples {
                     let sampleDistance = sample.quantity.doubleValue(for: HKUnit.meter())
                     let sampleDuration = sample.endDate.timeIntervalSince(sample.startDate)
+                    lastSampleEndDate = sample.endDate
 
                     var remainingDistance = sampleDistance
                     var sampleStartOffset: TimeInterval = 0
@@ -321,6 +333,25 @@ class WorkoutService: ObservableObject {
 
                     // Add any remaining distance to accumulated
                     accumulatedDistance += remainingDistance
+                }
+
+                // Add incomplete final split if there's remaining distance
+                if accumulatedDistance > 0 {
+                    let distanceInMiles = accumulatedDistance / mileInMeters
+                    let duration = lastSampleEndDate.timeIntervalSince(currentMileStartTime)
+                    let pace = duration / distanceInMiles
+
+                    let split = WorkoutSplit(
+                        splitNumber: splits.count + 1,
+                        distance: distanceInMiles,
+                        duration: duration,
+                        pace: pace
+                    )
+                    splits.append(split)
+
+                    print(
+                        "[WorkoutService] ✅ Incomplete Split \(split.splitNumber): \(split.formattedPace)/mile (distance: \(String(format: "%.2f", split.distance)) mi, duration: \(String(format: "%.0f", split.duration))s)"
+                    )
                 }
 
                 print("[WorkoutService] ✅ Total splits calculated: \(splits.count)")

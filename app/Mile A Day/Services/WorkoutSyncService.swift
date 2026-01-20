@@ -17,8 +17,8 @@ enum SyncPhase: Equatable {
     case fetchingFromHealthKit
     case uploadingToBackend
     case complete
-    case error(String) // Store error description instead of Error for Equatable conformance
-    
+    case error(String)  // Store error description instead of Error for Equatable conformance
+
     init(_ error: Error) {
         self = .error(error.localizedDescription)
     }
@@ -66,7 +66,7 @@ class WorkoutSyncService: ObservableObject {
     private let baseURL = "https://mad.mindgoblin.tech"
     private let batchSize = 50
     private let maxRetries = 3
-    private let retryDelay: TimeInterval = 2.0 // seconds
+    private let retryDelay: TimeInterval = 2.0  // seconds
 
     private let healthStore = HKHealthStore()
 
@@ -169,7 +169,8 @@ class WorkoutSyncService: ObservableObject {
     // MARK: - Private Methods
 
     /// Internal initial sync with progress handler
-    private func performInitialSyncInternal(progressHandler: @escaping (SyncProgress) -> Void) async {
+    private func performInitialSyncInternal(progressHandler: @escaping (SyncProgress) -> Void) async
+    {
         guard !isSyncing else {
             print("[WorkoutSyncService] ⚠️ Sync already in progress")
             return
@@ -227,7 +228,9 @@ class WorkoutSyncService: ObservableObject {
             let batches = allWorkouts.chunked(into: batchSize)
 
             for (index, batch) in batches.enumerated() {
-                print("[WorkoutSyncService] 📤 Uploading batch \(index + 1)/\(totalBatches) (\(batch.count) workouts)")
+                print(
+                    "[WorkoutSyncService] 📤 Uploading batch \(index + 1)/\(totalBatches) (\(batch.count) workouts)"
+                )
 
                 // Upload batch with retry logic
                 try await uploadBatchWithRetry(batch)
@@ -250,7 +253,7 @@ class WorkoutSyncService: ObservableObject {
 
                 // Small delay between batches to avoid rate limiting
                 if index < batches.count - 1 {
-                    try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+                    try await Task.sleep(nanoseconds: 500_000_000)  // 0.5 seconds
                 }
             }
 
@@ -271,7 +274,9 @@ class WorkoutSyncService: ObservableObject {
             )
             progressHandler(progress)
 
-            print("[WorkoutSyncService] ✅ Initial sync complete: \(allWorkouts.count) workouts uploaded")
+            print(
+                "[WorkoutSyncService] ✅ Initial sync complete: \(allWorkouts.count) workouts uploaded"
+            )
 
         } catch {
             errorMessage = error.localizedDescription
@@ -305,9 +310,12 @@ class WorkoutSyncService: ObservableObject {
             // Query for running and walking workouts
             let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
             let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
-            let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
+            let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [
+                runningPredicate, walkingPredicate,
+            ])
 
-            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+            let sortDescriptor = NSSortDescriptor(
+                key: HKSampleSortIdentifierEndDate, ascending: false)
 
             let query = HKSampleQuery(
                 sampleType: HKObjectType.workoutType(),
@@ -375,13 +383,13 @@ class WorkoutSyncService: ObservableObject {
         for attempt in 1...maxRetries {
             do {
                 try await uploadBatch(workouts)
-                return // Success!
+                return  // Success!
             } catch {
                 lastError = error
                 print("[WorkoutSyncService] ⚠️ Upload attempt \(attempt) failed: \(error)")
 
                 if attempt < maxRetries {
-                    let delay = retryDelay * pow(2.0, Double(attempt - 1)) // Exponential backoff
+                    let delay = retryDelay * pow(2.0, Double(attempt - 1))  // Exponential backoff
                     print("[WorkoutSyncService] ⏳ Retrying in \(delay) seconds...")
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 }
@@ -406,11 +414,11 @@ class WorkoutSyncService: ObservableObject {
         // Make API request using fancyFetch
         let endpoint = "/workouts/\(userId)/upload"
         let requestBody = try JSONSerialization.data(withJSONObject: workoutData)
-        
+
         struct UploadResponse: Codable {
             let message: String?
         }
-        
+
         do {
             let _: UploadResponse = try await APIClient.fancyFetch(
                 endpoint: endpoint,
@@ -441,15 +449,24 @@ class WorkoutSyncService: ObservableObject {
     }
 
     /// Transform HKWorkout objects to backend format
-    private func transformWorkoutsForBackend(_ workouts: [HKWorkout]) async throws -> [[String: Any]] {
+    private func transformWorkoutsForBackend(_ workouts: [HKWorkout]) async throws -> [[String:
+        Any]]
+    {
         var workoutData: [[String: Any]] = []
 
         for workout in workouts {
             // Get split data for this workout
             let splits = await getSplitTimes(for: workout)
 
-            // Extract duration values for API (backend expects array of durations in seconds)
-            let splitDurations = splits.map { $0.duration }
+            // Convert splits to dictionaries for JSON serialization
+            let splitsData = splits.map { split -> [String: Any] in
+                [
+                    "splitNumber": split.splitNumber,
+                    "distance": split.distance,
+                    "duration": split.duration,
+                    "pace": split.pace
+                ]
+            }
 
             let timezoneOffset = TimeZone.current.secondsFromGMT() / 60
 
@@ -475,7 +492,7 @@ class WorkoutSyncService: ObservableObject {
                 "deviceEndDate": deviceEndDate,
                 "calories": calories,
                 "totalDuration": workout.duration,
-                "splitTimes": splitDurations  // API expects array of durations
+                "splits": splitsData,
             ]
 
             workoutData.append(workoutDict)
@@ -502,7 +519,8 @@ class WorkoutSyncService: ObservableObject {
     private func activeEnergyKilocalories(for workout: HKWorkout) async -> Double {
         if #available(iOS 18.0, *) {
             guard HKHealthStore.isHealthDataAvailable(),
-                  let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) else {
+                let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)
+            else {
                 return 0
             }
 
@@ -514,10 +532,13 @@ class WorkoutSyncService: ObservableObject {
                     options: .cumulativeSum
                 ) { _, statistics, error in
                     if let error = error {
-                        print("[WorkoutSyncService] ⚠️ Active energy query failed: \(error.localizedDescription)")
+                        print(
+                            "[WorkoutSyncService] ⚠️ Active energy query failed: \(error.localizedDescription)"
+                        )
                     }
 
-                    let value = statistics?.sumQuantity()?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
+                    let value =
+                        statistics?.sumQuantity()?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
                     continuation.resume(returning: value)
                 }
 
@@ -537,14 +558,18 @@ class WorkoutSyncService: ObservableObject {
                 return
             }
 
-            guard let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else {
+            guard
+                let distanceType = HKQuantityType.quantityType(
+                    forIdentifier: .distanceWalkingRunning)
+            else {
                 print("[WorkoutSyncService] ⚠️ Distance type not available for split times")
                 continuation.resume(returning: [])
                 return
             }
 
             let workoutPredicate = HKQuery.predicateForObjects(from: workout)
-            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+            let sortDescriptor = NSSortDescriptor(
+                key: HKSampleSortIdentifierStartDate, ascending: true)
 
             print("[WorkoutSyncService] 🔍 Starting split calculation for workout \(workout.uuid)")
 
@@ -555,13 +580,18 @@ class WorkoutSyncService: ObservableObject {
                 sortDescriptors: [sortDescriptor]
             ) { _, results, error in
                 if let error = error {
-                    print("[WorkoutSyncService] ⚠️ Error fetching split times: \(error.localizedDescription)")
+                    print(
+                        "[WorkoutSyncService] ⚠️ Error fetching split times: \(error.localizedDescription)"
+                    )
                     continuation.resume(returning: [])
                     return
                 }
 
-                guard let distanceSamples = results as? [HKQuantitySample], !distanceSamples.isEmpty else {
-                    print("[WorkoutSyncService] ℹ️ No distance samples found for workout \(workout.uuid)")
+                guard let distanceSamples = results as? [HKQuantitySample], !distanceSamples.isEmpty
+                else {
+                    print(
+                        "[WorkoutSyncService] ℹ️ No distance samples found for workout \(workout.uuid)"
+                    )
                     continuation.resume(returning: [])
                     return
                 }
@@ -572,11 +602,13 @@ class WorkoutSyncService: ObservableObject {
                 var splits: [WorkoutSplit] = []
                 var accumulatedDistance: Double = 0.0
                 var startTime: Date?
-                let mileInMeters = 1609.34 // One mile in meters
+                var lastSampleEndDate: Date?
+                let mileInMeters = 1609.34  // One mile in meters
                 let mileInMiles = 1.0
 
                 for sample in distanceSamples {
                     let distance = sample.quantity.doubleValue(for: HKUnit.meter())
+                    lastSampleEndDate = sample.endDate
 
                     if startTime == nil {
                         startTime = sample.startDate
@@ -599,13 +631,34 @@ class WorkoutSyncService: ObservableObject {
                             )
                             splits.append(split)
 
-                            print("[WorkoutSyncService] ✅ Split \(split.splitNumber): \(split.formattedPace)/mile (distance: \(String(format: "%.2f", split.distance)) mi, duration: \(String(format: "%.0f", split.duration))s)")
+                            print(
+                                "[WorkoutSyncService] ✅ Split \(split.splitNumber): \(split.formattedPace)/mile (distance: \(String(format: "%.2f", split.distance)) mi, duration: \(String(format: "%.0f", split.duration))s)"
+                            )
 
                             // Reset for next mile
                             accumulatedDistance -= mileInMeters
                             startTime = endTime
                         }
                     }
+                }
+
+                // Add incomplete final split if there's remaining distance
+                if accumulatedDistance > 0, let start = startTime, let endTime = lastSampleEndDate {
+                    let distanceInMiles = accumulatedDistance / mileInMeters
+                    let duration = endTime.timeIntervalSince(start)
+                    let pace = duration / distanceInMiles
+
+                    let split = WorkoutSplit(
+                        splitNumber: splits.count + 1,
+                        distance: distanceInMiles,
+                        duration: duration,
+                        pace: pace
+                    )
+                    splits.append(split)
+
+                    print(
+                        "[WorkoutSyncService] ✅ Incomplete Split \(split.splitNumber): \(split.formattedPace)/mile (distance: \(String(format: "%.2f", split.distance)) mi, duration: \(String(format: "%.0f", split.duration))s)"
+                    )
                 }
 
                 print("[WorkoutSyncService] ✅ Total splits calculated: \(splits.count)")
@@ -644,7 +697,7 @@ class WorkoutSyncService: ObservableObject {
 extension Array {
     func chunked(into size: Int) -> [[Element]] {
         return stride(from: 0, to: count, by: size).map {
-            Array(self[$0 ..< Swift.min($0 + size, count)])
+            Array(self[$0..<Swift.min($0 + size, count)])
         }
     }
 }
