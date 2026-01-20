@@ -32,12 +32,13 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
     `;
 
 	const splitQuery = `
-        INSERT INTO workout_splits (workout_id, split_number, split_duration, split_distance)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO workout_splits (workout_id, split_number, split_duration, split_distance, split_pace)
+        VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (workout_id, split_number)
         DO UPDATE SET
 			split_duration = EXCLUDED.split_duration,
 			split_distance = EXCLUDED.split_distance
+			split_pace = EXCLUDED.split_pace
       `;
 
 	await db.transaction(
@@ -60,7 +61,7 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
 				},
 				...workout.splits.map(split => ({
 					query: splitQuery,
-					params: [workout.workoutId, split.splitNumber, split.duration, split.distance]
+					params: [workout.workoutId, split.splitNumber, split.duration, split.distance, split.pace]
 				}))
 			];
 		})

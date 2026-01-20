@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct WorkoutSplit {
+struct WorkoutSplit: Codable {
     let splitNumber: Int
     let distance: Double // in miles
     let duration: TimeInterval // in seconds
