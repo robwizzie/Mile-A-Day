@@ -6,27 +6,43 @@ import CoreLocation
 import CoreMotion
 import ActivityKit
 
-// MARK: - Custom Navigation Bar Appearance for iOS 18 Liquid Glass
+// MARK: - iOS 26 Native Liquid Glass Navigation Bar
 
 extension View {
     func liquidGlassNavigationBar() -> some View {
         self.onAppear {
-            let appearance = UINavigationBarAppearance()
-
-            // Fully transparent background with no blur effect
-            appearance.configureWithTransparentBackground()
-            appearance.backgroundColor = .clear
-            appearance.shadowColor = .clear
-            appearance.backgroundEffect = nil
-
-            // Apply to all appearance states
-            UINavigationBar.appearance().standardAppearance = appearance
-            UINavigationBar.appearance().scrollEdgeAppearance = appearance
-            UINavigationBar.appearance().compactAppearance = appearance
-            UINavigationBar.appearance().compactScrollEdgeAppearance = appearance
-
-            // Ensure navbar extends behind status bar and dynamic island
-            UINavigationBar.appearance().isTranslucent = true
+            if #available(iOS 26.0, *) {
+                // iOS 26: Native Liquid Glass - transparent background lets system handle glass
+                let appearance = UINavigationBarAppearance()
+                appearance.configureWithTransparentBackground()
+                appearance.backgroundColor = .clear
+                appearance.shadowColor = .clear
+                appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
+                appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+                
+                UINavigationBar.appearance().standardAppearance = appearance
+                UINavigationBar.appearance().scrollEdgeAppearance = appearance
+                UINavigationBar.appearance().compactAppearance = appearance
+                UINavigationBar.appearance().compactScrollEdgeAppearance = appearance
+                UINavigationBar.appearance().isTranslucent = true
+                UINavigationBar.appearance().tintColor = UIColor(MADTheme.Colors.madRed)
+            } else {
+                // iOS 18 and earlier: Custom transparent styling
+                let appearance = UINavigationBarAppearance()
+                appearance.configureWithTransparentBackground()
+                appearance.backgroundColor = .clear
+                appearance.shadowColor = .clear
+                appearance.backgroundEffect = nil
+                appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
+                appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+                
+                UINavigationBar.appearance().standardAppearance = appearance
+                UINavigationBar.appearance().scrollEdgeAppearance = appearance
+                UINavigationBar.appearance().compactAppearance = appearance
+                UINavigationBar.appearance().compactScrollEdgeAppearance = appearance
+                UINavigationBar.appearance().isTranslucent = true
+                UINavigationBar.appearance().tintColor = UIColor(MADTheme.Colors.madRed)
+            }
         }
     }
 }
@@ -51,6 +67,52 @@ struct DashboardView: View {
     /// but the full‑screen tracker is not currently visible.
     @State private var showInProgressBanner = false
     @AppStorage("lastGoalCompletionDate") private var lastGoalCompletionDate: Date = Date.distantPast
+    
+    /// Navigation state for badges view from celebration
+    @State private var navigateToBadgesFromCelebration = false
+    
+    /// Tracks if we've already checked for goal completion this session
+    @State private var hasCheckedGoalCompletionThisSession = false
+    
+    /// Build goal completion stats for the celebration
+    private func buildGoalCompletionStats() -> GoalCompletionStats {
+        GoalCompletionStats(
+            todaysDistance: healthManager.todaysDistance,
+            goalDistance: userManager.currentUser.goalMiles,
+            currentStreak: userManager.currentUser.streak,
+            totalLifetimeMiles: healthManager.totalLifetimeMiles,
+            bestDayMiles: healthManager.mostMilesInOneDay,
+            todaysPace: healthManager.fastestMilePace > 0 ? healthManager.fastestMilePace : nil,
+            personalBestPace: healthManager.cachedFastestMilePace > 0 ? healthManager.cachedFastestMilePace : nil
+        )
+    }
+    
+    /// Check if goal is completed and show celebration if appropriate
+    private func checkAndShowGoalCelebration() {
+        let today = Calendar.current.startOfDay(for: Date())
+        let lastCompletion = Calendar.current.startOfDay(for: lastGoalCompletionDate)
+        
+        // Only show if:
+        // 1. Goal is actually completed (distance >= goal)
+        // 2. We have meaningful distance data (> 0)
+        // 3. We haven't shown it today
+        // 4. We haven't already checked this session
+        guard currentState.isCompleted,
+              healthManager.todaysDistance > 0,
+              today != lastCompletion,
+              !hasCheckedGoalCompletionThisSession else {
+            return
+        }
+        
+        hasCheckedGoalCompletionThisSession = true
+        
+        print("[Dashboard] 🎉 Goal completion detected! Distance: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles)")
+        
+        // Show celebration with the stats
+        let stats = buildGoalCompletionStats()
+        celebrationManager.addCelebration(.goalCompleted(stats: stats))
+        lastGoalCompletionDate = Date()
+    }
     
     // Simplified state calculation
     private var currentState: (distance: Double, goal: Double, progress: Double, isCompleted: Bool) {
@@ -269,18 +331,12 @@ struct DashboardView: View {
                     healthManager.fetchFastestMilePace()
                 }
 
-                // Check if this is the first time opening the app after completing today's goal
-                let today = Calendar.current.startOfDay(for: Date())
-                let lastCompletion = Calendar.current.startOfDay(for: lastGoalCompletionDate)
-
-                if currentState.isCompleted && today != lastCompletion {
-                    // This is the first time opening after completing today's goal
-                    // Show celebration with minimal delay for smooth UX
-                    Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
-                        celebrationManager.addCelebration(.goalCompleted)
-                        lastGoalCompletionDate = Date()
-                    }
+                // Check for goal completion after a brief delay to allow data to load
+                // This handles the case where the app is opened fresh
+                Task { @MainActor in
+                    // Wait for health data to load
+                    try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
+                    checkAndShowGoalCelebration()
                 }
                 
                 // If there is a persisted in‑progress workout when the dashboard appears,
@@ -325,12 +381,29 @@ struct DashboardView: View {
             .onChange(of: currentState.isCompleted) { oldValue, newValue in
                 if newValue && !oldValue {
                     triggerConfetti()
+                    // Also check for goal celebration when completion status changes
+                    checkAndShowGoalCelebration()
+                }
+            }
+            .onChange(of: healthManager.todaysDistance) { oldValue, newValue in
+                // Check for goal completion when distance updates (e.g., after data loads)
+                if newValue > oldValue && newValue > 0 {
+                    checkAndShowGoalCelebration()
                 }
             }
             .confetti(isShowing: $showConfetti)
             .overlay(
                 CelebrationContainerView()
             )
+            .navigationDestination(isPresented: $navigateToBadgesFromCelebration) {
+                BadgesView(userManager: userManager)
+            }
+            .onChange(of: celebrationManager.pendingAction) { _, newAction in
+                if newAction == .viewBadges {
+                    navigateToBadgesFromCelebration = true
+                    celebrationManager.clearPendingAction()
+                }
+            }
         }
     }
     

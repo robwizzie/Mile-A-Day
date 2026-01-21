@@ -240,4 +240,90 @@ extension View {
     func madTertiaryButton() -> some View {
         buttonStyle(MADTertiaryButtonStyle())
     }
+    
+    // MARK: - Native iOS 26 Liquid Glass Effects
+    
+    /// Applies Apple's native Liquid Glass effect
+    @ViewBuilder
+    func madLiquidGlass(cornerRadius: CGFloat = MADTheme.CornerRadius.large) -> some View {
+        if #available(iOS 26.0, *) {
+            // Native Apple Liquid Glass
+            self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        } else {
+            // Fallback for iOS 18 and earlier
+            self.background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.1), Color.white.opacity(0.03)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.25), Color.white.opacity(0.05)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.5
+                        )
+                }
+            }
+            .shadow(color: .black.opacity(0.15), radius: 12, x: 0, y: 6)
+        }
+    }
+    
+    /// Applies a prominent Liquid Glass effect with interaction feedback
+    @ViewBuilder
+    func madLiquidGlassProminent(cornerRadius: CGFloat = MADTheme.CornerRadius.large) -> some View {
+        if #available(iOS 26.0, *) {
+            // Native Apple Liquid Glass with interactive feedback
+            self.glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        } else {
+            // Fallback for iOS 18 and earlier
+            self.background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(.thinMaterial)
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.15), Color.white.opacity(0.05)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.4), Color.white.opacity(0.1)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                }
+            }
+            .shadow(color: .black.opacity(0.2), radius: 16, x: 0, y: 8)
+        }
+    }
+    
+    /// Applies Liquid Glass card style - great for content cards
+    @ViewBuilder
+    func madLiquidGlassCard() -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+        } else {
+            self.background {
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            }
+            .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+        }
+    }
 }

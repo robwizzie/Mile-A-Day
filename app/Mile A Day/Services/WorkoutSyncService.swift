@@ -433,7 +433,7 @@ class WorkoutSyncService: ObservableObject {
             case .networkError(let message):
                 throw SyncError.networkError(message)
             default:
-                throw SyncError.networkError(error.localizedDescription ?? "Unknown error")
+                throw SyncError.networkError(error.localizedDescription)
             }
         } catch {
             throw SyncError.networkError(error.localizedDescription)

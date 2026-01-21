@@ -108,7 +108,7 @@ struct MainTabView: View {
     }
 }
 
-// MARK: - Apple HIG Floating Liquid Glass Tab Bar
+// MARK: - Apple HIG Floating Liquid Glass Tab Bar (iOS 26+)
 
 struct FloatingTabBar: View {
     @Binding var selectedTab: Int
@@ -141,44 +141,48 @@ struct FloatingTabBar: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 12)
-        .background {
-            // Liquid glass material with blur
-            ZStack {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(.ultraThinMaterial)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .liquidGlassBackground()
+    }
+}
 
-                // Subtle highlight gradient for glass effect
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.1),
-                                Color.white.opacity(0.05)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
+// MARK: - Native iOS 26 Liquid Glass Tab Bar Background
+
+extension View {
+    /// Applies Apple's native Liquid Glass effect for the floating tab bar
+    @ViewBuilder
+    func liquidGlassBackground() -> some View {
+        if #available(iOS 26.0, *) {
+            // Native Apple Liquid Glass - interactive capsule style
+            self.glassEffect(.regular.interactive(), in: .capsule)
+        } else {
+            // Fallback for iOS 18 and earlier
+            self.background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.12), Color.white.opacity(0.04)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
                         )
-                    )
-
-                // Border for definition
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(0.3),
-                                Color.white.opacity(0.1)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 1
-                    )
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.35), Color.white.opacity(0.08)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.5
+                        )
+                }
             }
+            .shadow(color: .black.opacity(0.25), radius: 20, x: 0, y: 10)
         }
-        .shadow(color: .black.opacity(0.2), radius: 16, x: 0, y: 8)
-        .shadow(color: .black.opacity(0.1), radius: 4, x: 0, y: 2)
     }
 }
 
