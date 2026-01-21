@@ -8,33 +8,26 @@ struct CompetitionsListView: View {
     @State private var selectedCompetition: Competition?
 
     var body: some View {
-        ZStack {
-            // Gradient background
-            MADTheme.Colors.appBackgroundGradient
-                .ignoresSafeArea(.all)
+        VStack(spacing: 0) {
+            // Tab Selector
+            tabSelector
 
-            VStack(spacing: 0) {
-                // Tab Selector
-                tabSelector
+            // Content
+            TabView(selection: $selectedTab) {
+                // Competitions Tab
+                competitionsTab
+                    .tag(0)
 
-                // Content
-                TabView(selection: $selectedTab) {
-                    // Competitions Tab
-                    competitionsTab
-                        .tag(0)
-
-                    // Invites Tab
-                    invitesTab
-                        .tag(1)
-                }
-                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                // Invites Tab
+                invitesTab
+                    .tag(1)
             }
+            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
         }
+        .background(MADTheme.Colors.appBackgroundGradient)
         .navigationTitle("Competitions")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbarBackgroundVisibility(.automatic, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
         .sheet(isPresented: $showingCreateCompetition) {
             CreateCompetitionView()
         }

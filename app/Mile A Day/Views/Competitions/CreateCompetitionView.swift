@@ -133,9 +133,7 @@ struct CreateCompetitionView: View {
             }
             .navigationTitle("Challenge")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .toolbarBackgroundVisibility(.automatic, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
             .sheet(isPresented: $showFriendPicker) {
                 friendPickerSheet
             }
@@ -861,8 +859,7 @@ struct CreateCompetitionView: View {
             }
             .navigationTitle("Select Friends")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
@@ -900,8 +897,7 @@ struct CreateCompetitionView: View {
             }
             .navigationTitle("Competition Type")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Cancel") {

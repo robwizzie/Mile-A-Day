@@ -8,37 +8,30 @@ struct FriendsListView: View {
     @State private var selectedUser: BackendUser?
     
     var body: some View {
-        ZStack {
-            // Gradient background
-            MADTheme.Colors.appBackgroundGradient
-                .ignoresSafeArea(.all)
+        VStack(spacing: 0) {
+            // Tab Selector
+            tabSelector
             
-            VStack(spacing: 0) {
-                // Tab Selector
-                tabSelector
+            // Content
+            TabView(selection: $selectedTab) {
+                // Friends Tab
+                friendsTab
+                    .tag(0)
                 
-                // Content
-                TabView(selection: $selectedTab) {
-                    // Friends Tab
-                    friendsTab
-                        .tag(0)
-                    
-                    // Requests Tab
-                    requestsTab
-                        .tag(1)
-                    
-                    // Sent Tab
-                    sentTab
-                        .tag(2)
-                }
-                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
+                // Requests Tab
+                requestsTab
+                    .tag(1)
+                
+                // Sent Tab
+                sentTab
+                    .tag(2)
             }
+            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
         }
+        .background(MADTheme.Colors.appBackgroundGradient)
         .navigationTitle("Friends")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbarBackgroundVisibility(.automatic, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
             .sheet(isPresented: $showingSearch) {
                 FriendSearchView()
             }

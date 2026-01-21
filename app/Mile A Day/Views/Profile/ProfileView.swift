@@ -17,36 +17,30 @@ struct ProfileView: View {
     @State private var showingPrivacySettings = false
     
     var body: some View {
-        ZStack {
-            // Gradient background
-            MADTheme.Colors.appBackgroundGradient
-                .ignoresSafeArea(.all)
-            
-            ScrollView {
-                VStack(spacing: MADTheme.Spacing.xl) {
-                    // Profile Header
-                    profileHeader
-                    
-                    // Stats Summary
-                    statsSection
-                    
-                    // Settings & Actions
-                    settingsSection
-                    
-                    // Development Section (for testing)
-                    #if DEBUG
-                    developmentSection
-                    #endif
-                }
-                .padding(MADTheme.Spacing.lg)
+        ScrollView {
+            VStack(spacing: MADTheme.Spacing.xl) {
+                // Profile Header
+                profileHeader
+                
+                // Stats Summary
+                statsSection
+                
+                // Settings & Actions
+                settingsSection
+                
+                // Development Section (for testing)
+                #if DEBUG
+                developmentSection
+                #endif
             }
+            .padding(MADTheme.Spacing.lg)
+            .padding(.bottom, 100) // Extra padding for tab bar
         }
-        .preferredColorScheme(nil) // Allow system to control color scheme
+        .background(MADTheme.Colors.appBackgroundGradient)
+        .scrollContentBackground(.hidden)
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbarBackgroundVisibility(.automatic, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
         .sheet(isPresented: $showingMostMilesDetail) {
             MostMilesDetailView(miles: userManager.currentUser.mostMilesInOneDay, healthManager: healthManager)
         }

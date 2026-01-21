@@ -7,45 +7,8 @@ import CoreMotion
 import ActivityKit
 
 // MARK: - iOS 26 Native Liquid Glass Navigation Bar
-
-extension View {
-    func liquidGlassNavigationBar() -> some View {
-        self.onAppear {
-            if #available(iOS 26.0, *) {
-                // iOS 26: Native Liquid Glass - transparent background lets system handle glass
-                let appearance = UINavigationBarAppearance()
-                appearance.configureWithTransparentBackground()
-                appearance.backgroundColor = .clear
-                appearance.shadowColor = .clear
-                appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
-                appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
-                
-                UINavigationBar.appearance().standardAppearance = appearance
-                UINavigationBar.appearance().scrollEdgeAppearance = appearance
-                UINavigationBar.appearance().compactAppearance = appearance
-                UINavigationBar.appearance().compactScrollEdgeAppearance = appearance
-                UINavigationBar.appearance().isTranslucent = true
-                UINavigationBar.appearance().tintColor = UIColor(MADTheme.Colors.madRed)
-            } else {
-                // iOS 18 and earlier: Custom transparent styling
-                let appearance = UINavigationBarAppearance()
-                appearance.configureWithTransparentBackground()
-                appearance.backgroundColor = .clear
-                appearance.shadowColor = .clear
-                appearance.backgroundEffect = nil
-                appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
-                appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
-                
-                UINavigationBar.appearance().standardAppearance = appearance
-                UINavigationBar.appearance().scrollEdgeAppearance = appearance
-                UINavigationBar.appearance().compactAppearance = appearance
-                UINavigationBar.appearance().compactScrollEdgeAppearance = appearance
-                UINavigationBar.appearance().isTranslucent = true
-                UINavigationBar.appearance().tintColor = UIColor(MADTheme.Colors.madRed)
-            }
-        }
-    }
-}
+// Note: iOS 26 automatically applies Liquid Glass to native navigation bars.
+// The system handles the glass effect when using .toolbarBackground(.automatic, for: .navigationBar)
 
 struct DashboardView: View {
     @ObservedObject var healthManager: HealthKitManager
@@ -66,7 +29,6 @@ struct DashboardView: View {
     /// Whether to show a compact “Resume workout” banner when an in‑progress workout exists
     /// but the full‑screen tracker is not currently visible.
     @State private var showInProgressBanner = false
-    @AppStorage("lastGoalCompletionDate") private var lastGoalCompletionDate: Date = Date.distantPast
     
     /// Navigation state for badges view from celebration
     @State private var navigateToBadgesFromCelebration = false
@@ -81,7 +43,7 @@ struct DashboardView: View {
             goalDistance: userManager.currentUser.goalMiles,
             currentStreak: userManager.currentUser.streak,
             totalLifetimeMiles: healthManager.totalLifetimeMiles,
-            bestDayMiles: healthManager.mostMilesInOneDay,
+            bestDayMiles: healthManager.cachedMostMilesInOneDay,
             todaysPace: healthManager.fastestMilePace > 0 ? healthManager.fastestMilePace : nil,
             personalBestPace: healthManager.cachedFastestMilePace > 0 ? healthManager.cachedFastestMilePace : nil
         )
@@ -89,17 +51,14 @@ struct DashboardView: View {
     
     /// Check if goal is completed and show celebration if appropriate
     private func checkAndShowGoalCelebration() {
-        let today = Calendar.current.startOfDay(for: Date())
-        let lastCompletion = Calendar.current.startOfDay(for: lastGoalCompletionDate)
-        
         // Only show if:
         // 1. Goal is actually completed (distance >= goal)
         // 2. We have meaningful distance data (> 0)
-        // 3. We haven't shown it today
+        // 3. We haven't shown it today (checked by CelebrationManager)
         // 4. We haven't already checked this session
         guard currentState.isCompleted,
               healthManager.todaysDistance > 0,
-              today != lastCompletion,
+              !celebrationManager.hasShownGoalCelebrationToday,
               !hasCheckedGoalCompletionThisSession else {
             return
         }
@@ -109,9 +68,9 @@ struct DashboardView: View {
         print("[Dashboard] 🎉 Goal completion detected! Distance: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles)")
         
         // Show celebration with the stats
+        // CelebrationManager will mark it as shown internally via markGoalCelebrationShown()
         let stats = buildGoalCompletionStats()
         celebrationManager.addCelebration(.goalCompleted(stats: stats))
-        lastGoalCompletionDate = Date()
     }
     
     // Simplified state calculation
@@ -130,144 +89,127 @@ struct DashboardView: View {
     }
     
     var body: some View {
-        NavigationStack {
-            ZStack {
-                // Gradient background for this view
-                MADTheme.Colors.appBackgroundGradient
-                    .ignoresSafeArea(.all)
-
-                ScrollView {
-                    VStack(spacing: 16) {
-                    // Custom navbar header (scrolls with content)
-                    HStack(spacing: 16) {
-                        Image("mad-logo")
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 36)
-                        
-                        Spacer()
-                        
-                        if userManager.hasNewBadges {
-                            NavigationLink(destination: BadgesView(userManager: userManager)) {
-                                Image(systemName: "trophy.fill")
-                                    .foregroundColor(.yellow)
-                                    .font(.title2)
-                                    .symbolRenderingMode(.hierarchical)
-                            }
+        // iOS 26: Simple ScrollView with background - no ZStack needed
+        // NavigationStack is provided by MainTabView
+        ScrollView {
+            VStack(spacing: 16) {
+                // In‑progress workout banner (if user dismissed full‑screen tracker)
+                if showInProgressBanner, let state = inProgressState, state.isActive {
+                    InProgressWorkoutBanner(
+                        state: state,
+                        onResume: {
+                            // Re‑open the full‑screen workout tracker
+                            showInProgressBanner = false
+                            showWorkoutView = true
                         }
-                        
-                        Button {
-                            showInstructions = true
-                        } label: {
-                            Image(systemName: "info.circle.fill")
-                                .foregroundColor(.white)
-                                .font(.title2)
-                                .symbolRenderingMode(.hierarchical)
-                        }
-                        
-                        Button {
-                            showGoalSheet = true
-                        } label: {
-                            Image(systemName: "gearshape.fill")
-                                .foregroundColor(.white)
-                                .font(.title2)
-                                .symbolRenderingMode(.hierarchical)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 8)
-                    .padding(.bottom, 12)
-                    
-                    // In‑progress workout banner (if user dismissed full‑screen tracker)
-                    if showInProgressBanner, let state = inProgressState, state.isActive {
-                        InProgressWorkoutBanner(
-                            state: state,
-                            onResume: {
-                                // Re‑open the full‑screen workout tracker
-                                showInProgressBanner = false
-                                showWorkoutView = true
-                            }
-                        )
-                    }
-                    
-                    // Instructions banner
-                    InstructionsBanner(
-                        showInstructions: $showInstructions
                     )
+                }
+                
+                // Instructions banner
+                InstructionsBanner(
+                    showInstructions: $showInstructions
+                )
 
-                    // SECTION: Streak Counter (full width at top)
-                    StreakCard(
-                        streak: userManager.currentUser.streak,
-                        isActiveToday: userManager.currentUser.isStreakActiveToday,
-                        isAtRisk: userManager.currentUser.isStreakAtRisk,
-                        user: userManager.currentUser,
-                        progress: currentState.progress,
-                        isGoalCompleted: currentState.isCompleted,
-                        isRefreshing: isRefreshing,
-                        currentDistance: currentState.distance,
-                        fastestPace: healthManager.fastestMilePace,
-                        mostMiles: healthManager.cachedCurrentStreakStats.mostMiles > 0 ? healthManager.cachedCurrentStreakStats.mostMiles : healthManager.mostMilesInOneDay,
-                        totalMiles: healthManager.totalLifetimeMiles
-                    )
+                // SECTION: Streak Counter (full width at top)
+                StreakCard(
+                    streak: userManager.currentUser.streak,
+                    isActiveToday: userManager.currentUser.isStreakActiveToday,
+                    isAtRisk: userManager.currentUser.isStreakAtRisk,
+                    user: userManager.currentUser,
+                    progress: currentState.progress,
+                    isGoalCompleted: currentState.isCompleted,
+                    isRefreshing: isRefreshing,
+                    currentDistance: currentState.distance,
+                    fastestPace: healthManager.fastestMilePace,
+                    mostMiles: healthManager.cachedCurrentStreakStats.mostMiles > 0 ? healthManager.cachedCurrentStreakStats.mostMiles : healthManager.mostMilesInOneDay,
+                    totalMiles: healthManager.totalLifetimeMiles
+                )
 
-                    // SECTION: Today's Progress (full width with Start Mile button)
-                    TodayProgressCard(
-                        currentDistance: currentState.distance,
-                        goalDistance: currentState.goal,
-                        progress: currentState.progress,
-                        didComplete: currentState.isCompleted,
-                        onRefresh: refreshData,
-                        isRefreshing: isRefreshing,
-                        user: userManager.currentUser,
-                        fastestPace: healthManager.fastestMilePace,
-                        mostMiles: healthManager.mostMilesInOneDay,
-                        totalMiles: healthManager.totalLifetimeMiles,
-                        healthManager: healthManager,
-                        userManager: userManager,
-                        showWorkoutView: $showWorkoutView
-                    )
+                // SECTION: Today's Progress (full width with Start Mile button)
+                TodayProgressCard(
+                    currentDistance: currentState.distance,
+                    goalDistance: currentState.goal,
+                    progress: currentState.progress,
+                    didComplete: currentState.isCompleted,
+                    onRefresh: refreshData,
+                    isRefreshing: isRefreshing,
+                    user: userManager.currentUser,
+                    fastestPace: healthManager.fastestMilePace,
+                    mostMiles: healthManager.mostMilesInOneDay,
+                    totalMiles: healthManager.totalLifetimeMiles,
+                    healthManager: healthManager,
+                    userManager: userManager,
+                    showWorkoutView: $showWorkoutView
+                )
 
-                    // SECTION: Steps and Badges (side by side)
-                    HStack(spacing: 12) {
-                        CalendarPreviewCard(
-                            healthManager: healthManager,
-                            userManager: userManager
-                        )
-                        .frame(maxWidth: .infinity)
-
-                        BadgesPreviewCard(
-                            userManager: userManager
-                        )
-                        .frame(maxWidth: .infinity)
-                    }
-
-                    // SECTION: Week at a Glance
-                    WeekAtAGlanceCard(
+                // SECTION: Steps and Badges (side by side)
+                HStack(spacing: 12) {
+                    CalendarPreviewCard(
                         healthManager: healthManager,
                         userManager: userManager
                     )
+                    .frame(maxWidth: .infinity)
 
-                    // SECTION: Statistics & History
-                    VStack(spacing: 12) {
-                        StatsGridView(user: userManager.currentUser, healthManager: healthManager)
+                    BadgesPreviewCard(
+                        userManager: userManager
+                    )
+                    .frame(maxWidth: .infinity)
+                }
 
-                        RecentWorkoutsView(workouts: healthManager.recentWorkouts)
+                // SECTION: Week at a Glance
+                WeekAtAGlanceCard(
+                    healthManager: healthManager,
+                    userManager: userManager
+                )
+
+                // SECTION: Statistics & History
+                VStack(spacing: 12) {
+                    StatsGridView(user: userManager.currentUser, healthManager: healthManager)
+
+                    RecentWorkoutsView(workouts: healthManager.recentWorkouts)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 100) // Extra padding for tab bar
+        }
+        .background(MADTheme.Colors.appBackgroundGradient)
+        .scrollContentBackground(.hidden)
+        .refreshable {
+            await refreshDataAsync()
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Mile A Day")
+        // iOS 26: Liquid Glass is automatic - no modifiers needed
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Image("mad-logo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 28)
+            }
+            
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if userManager.hasNewBadges {
+                    NavigationLink(destination: BadgesView(userManager: userManager)) {
+                        Image(systemName: "trophy.fill")
+                            .foregroundStyle(.yellow)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+                
+                Button {
+                    showInstructions = true
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+                
+                Button {
+                    showGoalSheet = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
             }
-            }
-            .scrollContentBackground(.hidden)
-            .background(MADTheme.Colors.appBackgroundGradient)
-            .refreshable {
-                await refreshDataAsync()
-            }
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .liquidGlassNavigationBar()
+        }
             // Always surface an in‑progress workout as the primary experience.
             .fullScreenCover(isPresented: $showWorkoutView, onDismiss: {
                 // When the user dismisses the workout tracker while a workout is still active,
@@ -404,7 +346,6 @@ struct DashboardView: View {
                     celebrationManager.clearPendingAction()
                 }
             }
-        }
     }
     
     private func syncWidgetData() {

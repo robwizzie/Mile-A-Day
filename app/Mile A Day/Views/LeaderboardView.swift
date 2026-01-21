@@ -45,8 +45,7 @@ struct LeaderboardView: View {
         }
         .navigationTitle("Leaderboard")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
     }
 }
 

@@ -38,9 +38,7 @@ struct CompetitionDetailView: View {
         }
         .navigationTitle(competition.competition_name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-        .toolbarBackgroundVisibility(.automatic, for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 if competition.isOwner {
@@ -417,9 +415,7 @@ struct InviteFriendView: View {
             }
             .navigationTitle("Invite Friends")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .toolbarBackgroundVisibility(.automatic, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Done") {

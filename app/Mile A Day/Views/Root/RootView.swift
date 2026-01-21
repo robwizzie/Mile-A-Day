@@ -75,25 +75,14 @@ struct RootView: View {
     }
     
     private func configureNavigationAppearance() {
-        // Configure navigation bar for iOS 26 Liquid Glass
+        // iOS 26: Liquid Glass is 100% automatic for both navigation bars AND tab bars
+        // Do NOT configure any UIAppearance - it breaks the native glass effect
         if #available(iOS 26.0, *) {
-            // iOS 26: Let system handle Liquid Glass - use transparent background
-            let navAppearance = UINavigationBarAppearance()
-            navAppearance.configureWithTransparentBackground()
-            navAppearance.backgroundColor = .clear
-            navAppearance.shadowColor = .clear
-            navAppearance.titleTextAttributes = [.foregroundColor: UIColor.white]
-            navAppearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
-            
-            UINavigationBar.appearance().standardAppearance = navAppearance
-            UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
-            UINavigationBar.appearance().compactAppearance = navAppearance
+            // Only set tint colors - let system handle all glass effects
             UINavigationBar.appearance().tintColor = UIColor(MADTheme.Colors.madRed)
-            UINavigationBar.appearance().isTranslucent = true
-            // Enable Liquid Glass system styling
-            UINavigationBar.appearance().prefersLargeTitles = false
+            UITabBar.appearance().tintColor = UIColor(MADTheme.Colors.madRed)
         } else {
-            // iOS 18 and earlier: Custom transparent style
+            // iOS 18 and earlier: Custom styling
             let navAppearance = UINavigationBarAppearance()
             navAppearance.configureWithTransparentBackground()
             navAppearance.backgroundColor = .clear
@@ -106,27 +95,24 @@ struct RootView: View {
             UINavigationBar.appearance().compactAppearance = navAppearance
             UINavigationBar.appearance().tintColor = UIColor(MADTheme.Colors.madRed)
             UINavigationBar.appearance().isTranslucent = true
+            
+            // Tab bar for older iOS
+            let tabBarAppearance = UITabBarAppearance()
+            tabBarAppearance.configureWithTransparentBackground()
+            tabBarAppearance.backgroundColor = .clear
+            
+            tabBarAppearance.stackedLayoutAppearance.normal.iconColor = UIColor(MADTheme.Colors.secondaryText)
+            tabBarAppearance.stackedLayoutAppearance.normal.titleTextAttributes = [
+                .foregroundColor: UIColor(MADTheme.Colors.secondaryText)
+            ]
+            tabBarAppearance.stackedLayoutAppearance.selected.iconColor = UIColor(MADTheme.Colors.madRed)
+            tabBarAppearance.stackedLayoutAppearance.selected.titleTextAttributes = [
+                .foregroundColor: UIColor(MADTheme.Colors.madRed)
+            ]
+            
+            UITabBar.appearance().standardAppearance = tabBarAppearance
+            UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
         }
-        
-        // Configure system tab bar (hidden - our custom FloatingTabBar handles visuals)
-        let tabBarAppearance = UITabBarAppearance()
-        tabBarAppearance.configureWithTransparentBackground()
-        tabBarAppearance.backgroundColor = .clear
-        
-        // Normal state
-        tabBarAppearance.stackedLayoutAppearance.normal.iconColor = UIColor(MADTheme.Colors.secondaryText)
-        tabBarAppearance.stackedLayoutAppearance.normal.titleTextAttributes = [
-            .foregroundColor: UIColor(MADTheme.Colors.secondaryText)
-        ]
-        
-        // Selected state
-        tabBarAppearance.stackedLayoutAppearance.selected.iconColor = UIColor(MADTheme.Colors.madRed)
-        tabBarAppearance.stackedLayoutAppearance.selected.titleTextAttributes = [
-            .foregroundColor: UIColor(MADTheme.Colors.madRed)
-        ]
-        
-        UITabBar.appearance().standardAppearance = tabBarAppearance
-        UITabBar.appearance().scrollEdgeAppearance = tabBarAppearance
     }
     
     private func requestHealthPermissions() {
