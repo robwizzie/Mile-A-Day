@@ -2,8 +2,6 @@
 //  MilestoneCelebrationView.swift
 //  Mile A Day
 //
-//  Created by Claude on 1/9/26.
-//
 
 import SwiftUI
 

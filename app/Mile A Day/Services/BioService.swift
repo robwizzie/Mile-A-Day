@@ -31,7 +31,7 @@ class BioService {
             case .badRequest(let message):
                 throw BioError.serverError(message)
             default:
-                throw BioError.serverError(error.localizedDescription ?? "Unknown error")
+                throw BioError.serverError(error.localizedDescription)
             }
         } catch {
             throw BioError.serverError(error.localizedDescription)

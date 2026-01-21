@@ -2,8 +2,6 @@
 //  CelebrationContainerView.swift
 //  Mile A Day
 //
-//  Created by Claude on 1/9/26.
-//
 
 import SwiftUI
 
@@ -27,8 +25,8 @@ struct CelebrationContainerView: View {
     @ViewBuilder
     private func celebrationView(for celebration: CelebrationType) -> some View {
         switch celebration {
-        case .goalCompleted:
-            GoalCompletedCelebrationView()
+        case .goalCompleted(let stats):
+            GoalCompletedCelebrationView(stats: stats)
 
         case .badgeUnlocked(let badge):
             BadgeUnlockCelebrationView(badge: badge)
@@ -46,6 +44,6 @@ struct CelebrationContainerView: View {
 #Preview {
     CelebrationContainerView()
         .onAppear {
-            CelebrationManager.shared.addCelebration(.goalCompleted)
+            CelebrationManager.shared.addCelebration(.goalCompleted(stats: .placeholder))
         }
 }

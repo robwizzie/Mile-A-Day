@@ -75,13 +75,43 @@ struct RootView: View {
     }
     
     private func configureNavigationAppearance() {
-        // Don't configure navigation bar appearance globally
-        // Each view will configure its own navigation bar to prevent extension issues
+        // Configure navigation bar for iOS 26 Liquid Glass
+        if #available(iOS 26.0, *) {
+            // iOS 26: Let system handle Liquid Glass - use transparent background
+            let navAppearance = UINavigationBarAppearance()
+            navAppearance.configureWithTransparentBackground()
+            navAppearance.backgroundColor = .clear
+            navAppearance.shadowColor = .clear
+            navAppearance.titleTextAttributes = [.foregroundColor: UIColor.white]
+            navAppearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+            
+            UINavigationBar.appearance().standardAppearance = navAppearance
+            UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
+            UINavigationBar.appearance().compactAppearance = navAppearance
+            UINavigationBar.appearance().tintColor = UIColor(MADTheme.Colors.madRed)
+            UINavigationBar.appearance().isTranslucent = true
+            // Enable Liquid Glass system styling
+            UINavigationBar.appearance().prefersLargeTitles = false
+        } else {
+            // iOS 18 and earlier: Custom transparent style
+            let navAppearance = UINavigationBarAppearance()
+            navAppearance.configureWithTransparentBackground()
+            navAppearance.backgroundColor = .clear
+            navAppearance.shadowColor = .clear
+            navAppearance.titleTextAttributes = [.foregroundColor: UIColor.white]
+            navAppearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+            
+            UINavigationBar.appearance().standardAppearance = navAppearance
+            UINavigationBar.appearance().scrollEdgeAppearance = navAppearance
+            UINavigationBar.appearance().compactAppearance = navAppearance
+            UINavigationBar.appearance().tintColor = UIColor(MADTheme.Colors.madRed)
+            UINavigationBar.appearance().isTranslucent = true
+        }
         
-        // Configure tab bar appearance
+        // Configure system tab bar (hidden - our custom FloatingTabBar handles visuals)
         let tabBarAppearance = UITabBarAppearance()
-        tabBarAppearance.configureWithOpaqueBackground()
-        tabBarAppearance.backgroundColor = UIColor(MADTheme.Colors.primaryBackground)
+        tabBarAppearance.configureWithTransparentBackground()
+        tabBarAppearance.backgroundColor = .clear
         
         // Normal state
         tabBarAppearance.stackedLayoutAppearance.normal.iconColor = UIColor(MADTheme.Colors.secondaryText)
