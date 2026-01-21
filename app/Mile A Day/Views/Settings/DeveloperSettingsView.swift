@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import HealthKit
 
 struct DeveloperSettingsView: View {
     @StateObject private var syncService = WorkoutSyncService.shared
@@ -21,6 +22,9 @@ struct DeveloperSettingsView: View {
     @State private var successMessage = ""
     @State private var showCelebration = false
     @State private var showWorkoutUploadAlert = false
+    @State private var workoutIdInput = ""
+    @State private var showDistanceSamplesSheet = false
+    @State private var distanceSamplesLog = ""
 
     var body: some View {
         List {
@@ -72,6 +76,34 @@ struct DeveloperSettingsView: View {
                     }
                 }
                 .disabled(workoutService.isLoading)
+            }
+
+            // Workout Debugging Section
+            Section(header: Text("Workout Debugging"), footer: Text("Analyze distance samples for split calculation issues")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Workout ID")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    TextField("Enter workout UUID", text: $workoutIdInput)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                }
+
+                Button(action: {
+                    Task {
+                        await logDistanceSamples()
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .foregroundColor(.purple)
+                        Text("Log Distance Samples")
+                        Spacer()
+                    }
+                }
+                .disabled(workoutIdInput.isEmpty)
             }
 
             // Sync Status Section
@@ -234,6 +266,32 @@ struct DeveloperSettingsView: View {
             }
         }
         .confetti(isShowing: $showCelebration)
+        .sheet(isPresented: $showDistanceSamplesSheet) {
+            NavigationStack {
+                ScrollView {
+                    Text(distanceSamplesLog)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding()
+                }
+                .navigationTitle("Distance Samples JSON")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button(action: {
+                            UIPasteboard.general.string = distanceSamplesLog
+                        }) {
+                            Label("Copy", systemImage: "doc.on.doc")
+                        }
+                    }
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") {
+                            showDistanceSamplesSheet = false
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Subviews
@@ -382,6 +440,156 @@ struct DeveloperSettingsView: View {
                     showWorkoutUploadAlert = true
                 }
             }
+        }
+    }
+
+    private func logDistanceSamples() async {
+        guard !workoutIdInput.isEmpty, let workoutUUID = UUID(uuidString: workoutIdInput) else {
+            await MainActor.run {
+                distanceSamplesLog = "{\"error\": \"Invalid workout UUID\"}"
+                showDistanceSamplesSheet = true
+            }
+            return
+        }
+
+        await MainActor.run {
+            distanceSamplesLog = "{\"status\": \"Fetching workout and distance samples...\"}"
+            showDistanceSamplesSheet = true
+        }
+
+        // Fetch the workout from HealthKit
+        guard let workout = await fetchWorkoutByUUID(workoutUUID) else {
+            await MainActor.run {
+                distanceSamplesLog = "{\"error\": \"Workout not found in HealthKit\"}"
+            }
+            return
+        }
+
+        // Fetch distance samples
+        let samples = await fetchDistanceSamples(for: workout)
+
+        // Build JSON structure
+        var json: [String: Any] = [:]
+
+        // Workout metadata
+        let isoFormatter = ISO8601DateFormatter()
+        json["workoutId"] = workout.uuid.uuidString
+        json["workoutType"] = workout.workoutActivityType.rawValue
+        json["totalDistance"] = workout.totalDistance?.doubleValue(for: .mile()) ?? 0
+        json["totalDistanceMeters"] = workout.totalDistance?.doubleValue(for: .meter()) ?? 0
+        json["duration"] = workout.duration
+        json["startDate"] = isoFormatter.string(from: workout.startDate)
+        json["endDate"] = isoFormatter.string(from: workout.endDate)
+
+        // Distance samples
+        var samplesArray: [[String: Any]] = []
+        var cumulativeDistance = 0.0
+
+        for (index, sample) in samples.enumerated() {
+            let distance = sample.quantity.doubleValue(for: .meter())
+            let distanceMiles = distance / 1609.34
+            cumulativeDistance += distance
+
+            let duration = sample.endDate.timeIntervalSince(sample.startDate)
+            let pace = distanceMiles > 0 ? duration / distanceMiles / 60.0 : 0 // minutes per mile
+
+            let sampleDict: [String: Any] = [
+                "sampleNumber": index + 1,
+                "startDate": isoFormatter.string(from: sample.startDate),
+                "endDate": isoFormatter.string(from: sample.endDate),
+                "durationSeconds": duration,
+                "distanceMiles": distanceMiles,
+                "distanceMeters": distance,
+                "paceMinutesPerMile": pace,
+                "cumulativeDistanceMiles": cumulativeDistance / 1609.34,
+                "cumulativeDistanceMeters": cumulativeDistance
+            ]
+
+            samplesArray.append(sampleDict)
+        }
+
+        json["sampleCount"] = samples.count
+        json["samples"] = samplesArray
+
+        // Summary
+        json["summary"] = [
+            "totalDistanceFromSamplesMiles": cumulativeDistance / 1609.34,
+            "totalDistanceFromSamplesMeters": cumulativeDistance,
+            "workoutTotalDistanceMiles": workout.totalDistance?.doubleValue(for: .mile()) ?? 0,
+            "workoutTotalDistanceMeters": workout.totalDistance?.doubleValue(for: .meter()) ?? 0,
+            "discrepancyMiles": (cumulativeDistance / 1609.34) - (workout.totalDistance?.doubleValue(for: .mile()) ?? 0)
+        ]
+
+        // Convert to JSON string
+        if let jsonData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]),
+           let jsonString = String(data: jsonData, encoding: .utf8) {
+            await MainActor.run {
+                distanceSamplesLog = jsonString
+            }
+        } else {
+            await MainActor.run {
+                distanceSamplesLog = "{\"error\": \"Failed to serialize JSON\"}"
+            }
+        }
+    }
+
+    private func fetchWorkoutByUUID(_ uuid: UUID) async -> HKWorkout? {
+        return await withCheckedContinuation { continuation in
+            guard HKHealthStore.isHealthDataAvailable() else {
+                continuation.resume(returning: nil)
+                return
+            }
+
+            let healthStore = HKHealthStore()
+            let predicate = HKQuery.predicateForObject(with: uuid)
+
+            let query = HKSampleQuery(
+                sampleType: HKObjectType.workoutType(),
+                predicate: predicate,
+                limit: 1,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error = error {
+                    print("[Dev] Error fetching workout: \(error)")
+                    continuation.resume(returning: nil)
+                    return
+                }
+
+                continuation.resume(returning: samples?.first as? HKWorkout)
+            }
+
+            healthStore.execute(query)
+        }
+    }
+
+    private func fetchDistanceSamples(for workout: HKWorkout) async -> [HKQuantitySample] {
+        return await withCheckedContinuation { continuation in
+            guard HKHealthStore.isHealthDataAvailable(),
+                  let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else {
+                continuation.resume(returning: [])
+                return
+            }
+
+            let healthStore = HKHealthStore()
+            let workoutPredicate = HKQuery.predicateForObjects(from: workout)
+            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+
+            let query = HKSampleQuery(
+                sampleType: distanceType,
+                predicate: workoutPredicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: [sortDescriptor]
+            ) { _, results, error in
+                if let error = error {
+                    print("[Dev] Error fetching distance samples: \(error)")
+                    continuation.resume(returning: [])
+                    return
+                }
+
+                continuation.resume(returning: (results as? [HKQuantitySample]) ?? [])
+            }
+
+            healthStore.execute(query)
         }
     }
 }

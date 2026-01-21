@@ -165,7 +165,7 @@ export async function getBestSplit(userId: string, startDate?: string) {
 	}
 
 	bestSplitQuery += `
-    ORDER BY ws.split_time ASC
+    ORDER BY ws.split_pace ASC
     LIMIT 1
 	`;
 
