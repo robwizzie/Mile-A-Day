@@ -117,6 +117,12 @@ extension Date {
         formatter.timeStyle = .short
         return formatter.string(from: self)
     }
+    
+    var formattedShortDate: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        return formatter.string(from: self)
+    }
 }
 
 // Identifiable wrapper for HKWorkout

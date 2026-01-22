@@ -303,16 +303,24 @@ struct GoalCompletedCelebrationView: View {
             // Distance card (main stat)
             distanceCard
             
-            // Secondary stats row
+            // Secondary stats row - Streak and Duration
             HStack(spacing: 12) {
-                // Streak card
                 streakCard
-                
-                // Pace card (if available)
-                if stats.todaysPace != nil {
+                durationCard
+            }
+            
+            // Third row - Pace and Calories (if available)
+            HStack(spacing: 12) {
+                if stats.todaysAveragePace != nil {
                     paceCard
                 } else {
                     lifetimeMilesCard
+                }
+                
+                if stats.todaysCalories > 0 {
+                    caloriesCard
+                } else {
+                    workoutCountCard
                 }
             }
         }
@@ -409,13 +417,13 @@ struct GoalCompletedCelebrationView: View {
                 Image(systemName: "speedometer")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(stats.isPacePB ? .green : .cyan)
-                Text(stats.isPacePB ? "Pace PB!" : "Avg Pace")
+                Text(stats.isPacePB ? "New PB!" : "Avg Pace")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.7))
             }
             
             HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(formatPace(stats.todaysPace ?? 0))
+                Text(formatPace(stats.todaysAveragePace ?? 0))
                     .font(.system(size: 32, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
                 
@@ -432,6 +440,105 @@ struct GoalCompletedCelebrationView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
                         .stroke(stats.isPacePB ? Color.green.opacity(0.4) : .white.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+    
+    private var durationCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "timer")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.mint)
+                Text("Duration")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(stats.formattedDuration)
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                
+                Text("min")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.white.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(.white.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+    
+    private var caloriesCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.red)
+                Text("Calories")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(stats.formattedCalories)
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                
+                Text("cal")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.white.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(.white.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+    
+    private var workoutCountCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "figure.run.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.green)
+                Text("Workouts")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text("\(stats.todaysWorkoutCount)")
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                
+                Text(stats.todaysWorkoutCount == 1 ? "run" : "runs")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(.white.opacity(0.1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(.white.opacity(0.2), lineWidth: 1)
                 )
         )
     }
@@ -842,8 +949,12 @@ struct ConfettiPieceView: View {
             currentStreak: 7,
             totalLifetimeMiles: 156.5,
             bestDayMiles: 3.2,
-            todaysPace: 8.45,
-            personalBestPace: 7.8
+            todaysAveragePace: 8.45,
+            todaysFastestPace: 8.12,
+            personalBestPace: 7.8,
+            todaysTotalDuration: 890, // 14:50
+            todaysCalories: 215,
+            todaysWorkoutCount: 1
         )
     )
 }
@@ -856,8 +967,12 @@ struct ConfettiPieceView: View {
             currentStreak: 30,
             totalLifetimeMiles: 250.0,
             bestDayMiles: 5.0,
-            todaysPace: 7.2,
-            personalBestPace: 7.5
+            todaysAveragePace: 7.2,
+            todaysFastestPace: 6.8,
+            personalBestPace: 7.5,
+            todaysTotalDuration: 2376, // 39:36
+            todaysCalories: 580,
+            todaysWorkoutCount: 2
         )
     )
 }

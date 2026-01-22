@@ -147,180 +147,215 @@ struct User: Identifiable, Codable {
     mutating func checkForMilestoneBadges() -> [Badge] {
         var newBadges: [Badge] = []
 
-        // Streak milestones
-        if streak >= 7 && !hasBadge(id: "streak_7") {
-            let earnedDate = calculateRetroactiveDate(for: 7, type: .streak)
-            let badge = Badge(id: "streak_7", name: "Week Warrior", description: "7 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 10 && !hasBadge(id: "streak_10") {
-            let earnedDate = calculateRetroactiveDate(for: 10, type: .streak)
-            let badge = Badge(id: "streak_10", name: "Ten Days Strong", description: "10 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 14 && !hasBadge(id: "streak_14") {
-            let earnedDate = calculateRetroactiveDate(for: 14, type: .streak)
-            let badge = Badge(id: "streak_14", name: "Fortnight Fighter", description: "14 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 21 && !hasBadge(id: "streak_21") {
-            let earnedDate = calculateRetroactiveDate(for: 21, type: .streak)
-            let badge = Badge(id: "streak_21", name: "Three Week Champion", description: "21 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 30 && !hasBadge(id: "streak_30") {
-            let earnedDate = calculateRetroactiveDate(for: 30, type: .streak)
-            let badge = Badge(id: "streak_30", name: "Monthly Master", description: "30 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 50 && !hasBadge(id: "streak_50") {
-            let earnedDate = calculateRetroactiveDate(for: 50, type: .streak)
-            let badge = Badge(id: "streak_50", name: "Half Century", description: "50 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 60 && !hasBadge(id: "streak_60") {
-            let earnedDate = calculateRetroactiveDate(for: 60, type: .streak)
-            let badge = Badge(id: "streak_60", name: "Two Month Milestone", description: "60 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 75 && !hasBadge(id: "streak_75") {
-            let earnedDate = calculateRetroactiveDate(for: 75, type: .streak)
-            let badge = Badge(id: "streak_75", name: "Consistency King", description: "75 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 90 && !hasBadge(id: "streak_90") {
-            let earnedDate = calculateRetroactiveDate(for: 90, type: .streak)
-            let badge = Badge(id: "streak_90", name: "Quarter Year Hero", description: "90 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 100 && !hasBadge(id: "streak_100") {
-            let earnedDate = calculateRetroactiveDate(for: 100, type: .streak)
-            let badge = Badge(id: "streak_100", name: "Century Club", description: "100 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 150 && !hasBadge(id: "streak_150") {
-            let earnedDate = calculateRetroactiveDate(for: 150, type: .streak)
-            let badge = Badge(id: "streak_150", name: "Unstoppable", description: "150 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 200 && !hasBadge(id: "streak_200") {
-            let earnedDate = calculateRetroactiveDate(for: 200, type: .streak)
-            let badge = Badge(id: "streak_200", name: "Double Century", description: "200 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 250 && !hasBadge(id: "streak_250") {
-            let earnedDate = calculateRetroactiveDate(for: 250, type: .streak)
-            let badge = Badge(id: "streak_250", name: "Legendary Streak", description: "250 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 365 && !hasBadge(id: "streak_365") {
-            let earnedDate = calculateRetroactiveDate(for: 365, type: .streak)
-            let badge = Badge(id: "streak_365", name: "Year Warrior", description: "365 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 500 && !hasBadge(id: "streak_500") {
-            let earnedDate = calculateRetroactiveDate(for: 500, type: .streak)
-            let badge = Badge(id: "streak_500", name: "Elite Runner", description: "500 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if streak >= 1000 && !hasBadge(id: "streak_1000") {
-            let earnedDate = calculateRetroactiveDate(for: 1000, type: .streak)
-            let badge = Badge(id: "streak_1000", name: "Immortal", description: "1000 day streak!", dateAwarded: earnedDate)
-            badges.append(badge)
-            newBadges.append(badge)
+        // MARK: - Streak Milestones
+        let streakMilestones: [(Int, String, String, String)] = [
+            (7, "streak_7", "Week Warrior", "7 day streak! A full week of dedication!"),
+            (10, "streak_10", "Ten Days Strong", "10 day streak! Double digits!"),
+            (14, "streak_14", "Fortnight Fighter", "14 day streak! Two weeks strong!"),
+            (21, "streak_21", "Three Week Champion", "21 day streak! Habits are forming!"),
+            (30, "streak_30", "Monthly Master", "30 day streak! A full month!"),
+            (45, "streak_45", "45 Day Legend", "45 day streak! Halfway to 90!"),
+            (50, "streak_50", "Half Century", "50 day streak! Incredible consistency!"),
+            (60, "streak_60", "Two Month Milestone", "60 day streak! Two months strong!"),
+            (75, "streak_75", "Consistency King", "75 day streak! You're unstoppable!"),
+            (90, "streak_90", "Quarter Year Hero", "90 day streak! A quarter year!"),
+            (100, "streak_100", "Century Club", "100 day streak! Triple digits!"),
+            (120, "streak_120", "Four Month Fury", "120 day streak! Four months!"),
+            (150, "streak_150", "Unstoppable Force", "150 day streak! Nothing can stop you!"),
+            (180, "streak_180", "Half Year Hero", "180 day streak! Six months of glory!"),
+            (200, "streak_200", "Double Century", "200 day streak! Legendary status!"),
+            (250, "streak_250", "Legendary Streak", "250 day streak! You're a legend!"),
+            (300, "streak_300", "300 Club", "300 day streak! Almost a year!"),
+            (365, "streak_365", "Year Warrior", "365 day streak! A FULL YEAR!"),
+            (500, "streak_500", "Elite Runner", "500 day streak! Beyond legendary!"),
+            (730, "streak_730", "Two Year Titan", "730 day streak! TWO YEARS!"),
+            (1000, "streak_1000", "Immortal", "1000 day streak! You're immortal!")
+        ]
+        
+        for (days, id, name, description) in streakMilestones {
+            if streak >= days && !hasBadge(id: id) {
+                let earnedDate = calculateRetroactiveDate(for: days, type: .streak)
+                let badge = Badge(id: id, name: name, description: description, dateAwarded: earnedDate)
+                badges.append(badge)
+                newBadges.append(badge)
+            }
         }
         
-        // Total miles milestones
-        if totalMiles >= 50 && !hasBadge(id: "miles_50") {
-            let badge = Badge(id: "miles_50", name: "50 Mile Club", description: "Ran 50 total miles!", dateAwarded: lastCompletionDate ?? Date())
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if totalMiles >= 100 && !hasBadge(id: "miles_100") {
-            let badge = Badge(id: "miles_100", name: "100 Mile Club", description: "Ran 100 total miles!", dateAwarded: lastCompletionDate ?? Date())
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if totalMiles >= 250 && !hasBadge(id: "miles_250") {
-            let badge = Badge(id: "miles_250", name: "250 Mile Club", description: "Ran 250 total miles!", dateAwarded: lastCompletionDate ?? Date())
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if totalMiles >= 500 && !hasBadge(id: "miles_500") {
-            let badge = Badge(id: "miles_500", name: "500 Mile Club", description: "Ran 500 total miles!", dateAwarded: lastCompletionDate ?? Date())
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if totalMiles >= 1000 && !hasBadge(id: "miles_1000") {
-            let badge = Badge(id: "miles_1000", name: "1000 Mile Club", description: "Ran 1000 total miles!", dateAwarded: lastCompletionDate ?? Date())
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-
-        // Speed milestones (fastest mile pace)
-        if fastestMilePace > 0 && fastestMilePace <= 6.0 && !hasBadge(id: "pace_6min") {
-            let badge = Badge(id: "pace_6min", name: "Speed Demon", description: "Sub-6 minute mile!", dateAwarded: lastCompletionDate ?? Date())
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if fastestMilePace > 0 && fastestMilePace <= 7.0 && !hasBadge(id: "pace_7min") {
-            let badge = Badge(id: "pace_7min", name: "Quick Runner", description: "Sub-7 minute mile!", dateAwarded: lastCompletionDate ?? Date())
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if fastestMilePace > 0 && fastestMilePace <= 8.0 && !hasBadge(id: "pace_8min") {
-            let badge = Badge(id: "pace_8min", name: "Fast Runner", description: "Sub-8 minute mile!", dateAwarded: lastCompletionDate ?? Date())
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-
-        // Distance milestones (most miles in one day)
-        if mostMilesInOneDay >= 5.0 && !hasBadge(id: "daily_5") {
-            let badge = Badge(id: "daily_5", name: "5 Mile Day", description: "Ran 5+ miles in one day!", dateAwarded: lastCompletionDate ?? Date())
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if mostMilesInOneDay >= 10.0 && !hasBadge(id: "daily_10") {
-            let badge = Badge(id: "daily_10", name: "10 Mile Day", description: "Ran 10+ miles in one day!", dateAwarded: lastCompletionDate ?? Date())
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if mostMilesInOneDay >= 13.1 && !hasBadge(id: "daily_half") {
-            let badge = Badge(id: "daily_half", name: "Half Marathon", description: "Ran 13.1+ miles in one day!", dateAwarded: lastCompletionDate ?? Date())
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        if mostMilesInOneDay >= 26.2 && !hasBadge(id: "daily_marathon") {
-            let badge = Badge(id: "daily_marathon", name: "Marathon Runner", description: "Ran 26.2+ miles in one day!", dateAwarded: lastCompletionDate ?? Date())
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-
-        // Consistency milestones (consecutive days)
+        // MARK: - Consistency (Early Streak) Milestones
         if streak >= 3 && !hasBadge(id: "consistency_3") {
             let earnedDate = calculateRetroactiveDate(for: 3, type: .streak)
-            let badge = Badge(id: "consistency_3", name: "Getting Started", description: "3 day streak!", dateAwarded: earnedDate)
+            let badge = Badge(id: "consistency_3", name: "Getting Started", description: "3 day streak! You're on your way!")
             badges.append(badge)
             newBadges.append(badge)
         }
         if streak >= 5 && !hasBadge(id: "consistency_5") {
             let earnedDate = calculateRetroactiveDate(for: 5, type: .streak)
-            let badge = Badge(id: "consistency_5", name: "Building Habits", description: "5 day streak!", dateAwarded: earnedDate)
+            let badge = Badge(id: "consistency_5", name: "Building Habits", description: "5 day streak! Consistency is key!")
+            badges.append(badge)
+            newBadges.append(badge)
+        }
+        
+        // MARK: - Total Miles Milestones
+        let milesMilestones: [(Double, String, String, String)] = [
+            (25, "miles_25", "25 Mile Mark", "Ran 25 total miles!"),
+            (50, "miles_50", "50 Mile Club", "Ran 50 total miles!"),
+            (100, "miles_100", "Century Runner", "Ran 100 total miles!"),
+            (150, "miles_150", "150 Mile Mark", "Ran 150 total miles!"),
+            (200, "miles_200", "200 Mile Mark", "Ran 200 total miles!"),
+            (250, "miles_250", "250 Mile Club", "Ran 250 total miles!"),
+            (500, "miles_500", "500 Mile Club", "Ran 500 total miles!"),
+            (750, "miles_750", "750 Mile Club", "Ran 750 total miles!"),
+            (1000, "miles_1000", "1000 Mile Club", "Ran 1000 total miles!"),
+            (1500, "miles_1500", "1500 Mile Legend", "Ran 1500 total miles!"),
+            (2000, "miles_2000", "2000 Mile Legend", "Ran 2000 total miles!"),
+            (2500, "miles_2500", "Ultra Runner", "Ran 2500 total miles!")
+        ]
+        
+        for (miles, id, name, description) in milesMilestones {
+            if totalMiles >= miles && !hasBadge(id: id) {
+                let badge = Badge(id: id, name: name, description: description, dateAwarded: lastCompletionDate ?? Date())
+                badges.append(badge)
+                newBadges.append(badge)
+            }
+        }
+
+        // MARK: - Speed Milestones (Fastest Mile Pace)
+        let paceMilestones: [(Double, String, String, String)] = [
+            (12.0, "pace_12min", "Getting Faster", "Sub-12 minute mile!"),
+            (11.0, "pace_11min", "Picking Up Speed", "Sub-11 minute mile!"),
+            (10.0, "pace_10min", "Double Digits", "Sub-10 minute mile!"),
+            (9.0, "pace_9min", "Solid Pace", "Sub-9 minute mile!"),
+            (8.0, "pace_8min", "Fast Runner", "Sub-8 minute mile!"),
+            (7.0, "pace_7min", "Quick Runner", "Sub-7 minute mile!"),
+            (6.0, "pace_6min", "Speed Demon", "Sub-6 minute mile!"),
+            (5.0, "pace_5min", "Elite Speed", "Sub-5 minute mile! Incredible!")
+        ]
+        
+        for (pace, id, name, description) in paceMilestones {
+            if fastestMilePace > 0 && fastestMilePace <= pace && !hasBadge(id: id) {
+                let badge = Badge(id: id, name: name, description: description, dateAwarded: lastCompletionDate ?? Date())
+                badges.append(badge)
+                newBadges.append(badge)
+            }
+        }
+
+        // MARK: - Daily Distance Milestones
+        let dailyMilestones: [(Double, String, String, String)] = [
+            (2.0, "daily_2", "2 Mile Day", "Ran 2+ miles in one day!"),
+            (3.0, "daily_3", "5K Runner", "Ran 3+ miles (5K) in one day!"),
+            (5.0, "daily_5", "5 Mile Day", "Ran 5+ miles in one day!"),
+            (6.2, "daily_10k", "10K Runner", "Ran 6.2+ miles (10K) in one day!"),
+            (8.0, "daily_8", "8 Mile Day", "Ran 8+ miles in one day!"),
+            (10.0, "daily_10", "10 Mile Day", "Ran 10+ miles in one day!"),
+            (13.1, "daily_half", "Half Marathon", "Ran 13.1+ miles in one day!"),
+            (15.0, "daily_15", "15 Mile Day", "Ran 15+ miles in one day!"),
+            (20.0, "daily_20", "20 Mile Day", "Ran 20+ miles in one day!"),
+            (26.2, "daily_marathon", "Marathon Runner", "Ran 26.2+ miles in one day!"),
+            (31.0, "daily_50k", "50K Ultra", "Ran 31+ miles (50K) in one day!"),
+            (50.0, "daily_ultra", "Ultra Legend", "Ran 50+ miles in one day!")
+        ]
+        
+        for (miles, id, name, description) in dailyMilestones {
+            if mostMilesInOneDay >= miles && !hasBadge(id: id) {
+                let badge = Badge(id: id, name: name, description: description, dateAwarded: lastCompletionDate ?? Date())
+                badges.append(badge)
+                newBadges.append(badge)
+            }
+        }
+        
+        // MARK: - Special Achievement Badges
+        // These are for specific combinations or milestones
+        
+        // First Mile - awarded on first completion
+        if totalMiles >= 1.0 && !hasBadge(id: "special_first_mile") {
+            let badge = Badge(id: "special_first_mile", name: "First Mile", description: "Completed your first mile! The journey begins!")
+            badges.append(badge)
+            newBadges.append(badge)
+        }
+        
+        // First Week Complete
+        if streak >= 7 && totalMiles >= 7.0 && !hasBadge(id: "special_first_week") {
+            let badge = Badge(id: "special_first_week", name: "Perfect Week", description: "Ran at least a mile every day for a week!")
+            badges.append(badge)
+            newBadges.append(badge)
+        }
+        
+        // MARK: - Hidden/Secret Badges
+        // These don't show in the locked badges list - they're surprises!
+        
+        // Perfect 10 - Exactly 10.00 miles in a day
+        if mostMilesInOneDay >= 10.0 && mostMilesInOneDay < 10.1 && !hasBadge(id: "hidden_perfect_10") {
+            let badge = Badge(id: "hidden_perfect_10", name: "Perfect 10", description: "Ran exactly 10.00 miles in one day!", isHidden: true)
+            badges.append(badge)
+            newBadges.append(badge)
+        }
+        
+        // Lucky Number - 7 miles on day 7 of streak
+        if streak == 7 && mostMilesInOneDay >= 7.0 && !hasBadge(id: "hidden_lucky_7") {
+            let badge = Badge(id: "hidden_lucky_7", name: "Lucky Seven", description: "Ran 7+ miles on day 7 of your streak!", isHidden: true)
+            badges.append(badge)
+            newBadges.append(badge)
+        }
+        
+        // Double Trouble - 22 miles total (2x11)
+        if totalMiles >= 22.0 && totalMiles < 23.0 && !hasBadge(id: "hidden_double_trouble") {
+            let badge = Badge(id: "hidden_double_trouble", name: "Double Trouble", description: "Hit exactly 22 total miles!", isHidden: true)
+            badges.append(badge)
+            newBadges.append(badge)
+        }
+        
+        // Century Double - 100 days AND 100 miles
+        if streak >= 100 && totalMiles >= 100 && !hasBadge(id: "hidden_century_double") {
+            let badge = Badge(id: "hidden_century_double", name: "Century Double", description: "100 day streak AND 100+ total miles!", isHidden: true)
+            badges.append(badge)
+            newBadges.append(badge)
+        }
+        
+        // Speed + Distance combo - Sub 8 pace AND 5+ miles in a day
+        if fastestMilePace > 0 && fastestMilePace <= 8.0 && mostMilesInOneDay >= 5.0 && !hasBadge(id: "hidden_speed_endurance") {
+            let badge = Badge(id: "hidden_speed_endurance", name: "Speed & Endurance", description: "Sub-8 min pace AND 5+ mile day!", isHidden: true)
+            badges.append(badge)
+            newBadges.append(badge)
+        }
+        
+        // Marathon Pace - Sub 10 min pace on a marathon distance
+        if fastestMilePace > 0 && fastestMilePace <= 10.0 && mostMilesInOneDay >= 26.2 && !hasBadge(id: "hidden_marathon_pace") {
+            let badge = Badge(id: "hidden_marathon_pace", name: "Marathon Master", description: "Marathon distance with sub-10 min pace!", isHidden: true)
+            badges.append(badge)
+            newBadges.append(badge)
+        }
+        
+        // Triple Threat - 30 day streak, 30+ miles total, 3+ mile best day
+        if streak >= 30 && totalMiles >= 30 && mostMilesInOneDay >= 3.0 && !hasBadge(id: "hidden_triple_threat") {
+            let badge = Badge(id: "hidden_triple_threat", name: "Triple Threat", description: "30 day streak, 30+ miles, 3+ mile day!", isHidden: true)
+            badges.append(badge)
+            newBadges.append(badge)
+        }
+        
+        // 50/50 Club - 50 day streak AND 50 miles
+        if streak >= 50 && totalMiles >= 50 && !hasBadge(id: "hidden_50_50") {
+            let badge = Badge(id: "hidden_50_50", name: "50/50 Club", description: "50 day streak AND 50+ total miles!", isHidden: true)
+            badges.append(badge)
+            newBadges.append(badge)
+        }
+        
+        // Year of Running - 365 miles total
+        if totalMiles >= 365 && !hasBadge(id: "hidden_year_miles") {
+            let badge = Badge(id: "hidden_year_miles", name: "Year in Miles", description: "Ran 365 total miles - a mile for every day of the year!", isHidden: true)
+            badges.append(badge)
+            newBadges.append(badge)
+        }
+        
+        // Thousand Club - 1000 days OR 1000 miles (either one)
+        if (streak >= 1000 || totalMiles >= 1000) && !hasBadge(id: "hidden_thousand_club") {
+            let badge = Badge(id: "hidden_thousand_club", name: "Thousand Club", description: "Reached 1000 in days OR miles!", isHidden: true)
+            badges.append(badge)
+            newBadges.append(badge)
+        }
+        
+        // Pace Perfectionist - Sub 7 pace on a 10+ mile day
+        if fastestMilePace > 0 && fastestMilePace <= 7.0 && mostMilesInOneDay >= 10.0 && !hasBadge(id: "hidden_pace_perfect") {
+            let badge = Badge(id: "hidden_pace_perfect", name: "Pace Perfectionist", description: "Sub-7 pace AND 10+ mile day!", isHidden: true)
             badges.append(badge)
             newBadges.append(badge)
         }
@@ -405,7 +440,7 @@ struct User: Identifiable, Codable {
         }
         
         // Miles badges
-        let milesMilestones = [50, 100, 250, 500, 1000]
+        let milesMilestones = [25, 50, 100, 150, 200, 250, 500, 750, 1000, 1500, 2000, 2500]
         for milestone in milesMilestones {
             let badgeId = "miles_\(milestone)"
             if !hasBadge(id: badgeId) {
@@ -421,9 +456,9 @@ struct User: Identifiable, Codable {
         }
         
         // Speed badges
-        let paceMilestones = [8.0, 7.0, 6.0]
+        let paceMilestones = [12, 11, 10, 9, 8, 7, 6, 5]
         for milestone in paceMilestones {
-            let badgeId = "pace_\(Int(milestone))min"
+            let badgeId = "pace_\(milestone)min"
             if !hasBadge(id: badgeId) {
                 lockedBadges.append(Badge(
                     id: badgeId,
@@ -436,77 +471,164 @@ struct User: Identifiable, Codable {
             }
         }
         
-        // Distance badges
-        let distanceMilestones = [5.0, 10.0, 13.1, 26.2]
-        for milestone in distanceMilestones {
-            let badgeId = milestone == 13.1 ? "daily_half" : 
-                         milestone == 26.2 ? "daily_marathon" : "daily_\(Int(milestone))"
+        // Distance badges (daily)
+        let distanceBadges: [(String, String, String)] = [
+            ("daily_2", "2 Mile Day", "Ran 2+ miles in one day!"),
+            ("daily_3", "5K Runner", "Ran 3+ miles (5K) in one day!"),
+            ("daily_5", "5 Mile Day", "Ran 5+ miles in one day!"),
+            ("daily_10k", "10K Runner", "Ran 6.2+ miles (10K) in one day!"),
+            ("daily_8", "8 Mile Day", "Ran 8+ miles in one day!"),
+            ("daily_10", "10 Mile Day", "Ran 10+ miles in one day!"),
+            ("daily_half", "Half Marathon", "Ran 13.1+ miles in one day!"),
+            ("daily_15", "15 Mile Day", "Ran 15+ miles in one day!"),
+            ("daily_20", "20 Mile Day", "Ran 20+ miles in one day!"),
+            ("daily_marathon", "Marathon Runner", "Ran 26.2+ miles in one day!"),
+            ("daily_50k", "50K Ultra", "Ran 31+ miles (50K) in one day!"),
+            ("daily_ultra", "Ultra Legend", "Ran 50+ miles in one day!")
+        ]
+        
+        for (badgeId, name, description) in distanceBadges {
             if !hasBadge(id: badgeId) {
                 lockedBadges.append(Badge(
                     id: badgeId,
-                    name: getBadgeName(for: badgeId),
-                    description: getBadgeDescription(for: badgeId),
+                    name: name,
+                    description: description,
                     dateAwarded: Date.distantFuture,
                     isNew: false,
                     isLocked: true
                 ))
             }
         }
+        
+        // Special badges (visible)
+        let specialBadges: [(String, String, String)] = [
+            ("special_first_mile", "First Mile", "Completed your first mile!"),
+            ("special_first_week", "Perfect Week", "Ran every day for a week!")
+        ]
+        
+        for (badgeId, name, description) in specialBadges {
+            if !hasBadge(id: badgeId) {
+                lockedBadges.append(Badge(
+                    id: badgeId,
+                    name: name,
+                    description: description,
+                    dateAwarded: Date.distantFuture,
+                    isNew: false,
+                    isLocked: true
+                ))
+            }
+        }
+        
+        // Note: Hidden badges are NOT shown in locked list - they're surprises!
         
         return lockedBadges
     }
     
     // Helper functions for badge information
     private func getBadgeName(for id: String) -> String {
-        switch id {
-        case "consistency_3": return "Getting Started"
-        case "consistency_5": return "Building Habits"
-        case "streak_7": return "Week Warrior"
-        case "streak_14": return "Fortnight Fighter"
-        case "streak_30": return "Monthly Master"
-        case "streak_50": return "Half Century"
-        case "streak_100": return "Century Club"
-        case "streak_365": return "Year Warrior"
-        case "miles_50": return "50 Mile Club"
-        case "miles_100": return "100 Mile Club"
-        case "miles_250": return "250 Mile Club"
-        case "miles_500": return "500 Mile Club"
-        case "miles_1000": return "1000 Mile Club"
-        case "pace_8min": return "Fast Runner"
-        case "pace_7min": return "Quick Runner"
-        case "pace_6min": return "Speed Demon"
-        case "daily_5": return "5 Mile Day"
-        case "daily_10": return "10 Mile Day"
-        case "daily_half": return "Half Marathon"
-        case "daily_marathon": return "Marathon Runner"
-        default: return "Unknown Badge"
-        }
+        let badgeNames: [String: String] = [
+            // Consistency
+            "consistency_3": "Getting Started",
+            "consistency_5": "Building Habits",
+            // Streaks
+            "streak_7": "Week Warrior",
+            "streak_10": "Ten Days Strong",
+            "streak_14": "Fortnight Fighter",
+            "streak_21": "Three Week Champion",
+            "streak_30": "Monthly Master",
+            "streak_45": "45 Day Legend",
+            "streak_50": "Half Century",
+            "streak_60": "Two Month Milestone",
+            "streak_75": "Consistency King",
+            "streak_90": "Quarter Year Hero",
+            "streak_100": "Century Club",
+            "streak_120": "Four Month Fury",
+            "streak_150": "Unstoppable Force",
+            "streak_180": "Half Year Hero",
+            "streak_200": "Double Century",
+            "streak_250": "Legendary Streak",
+            "streak_300": "300 Club",
+            "streak_365": "Year Warrior",
+            "streak_500": "Elite Runner",
+            "streak_730": "Two Year Titan",
+            "streak_1000": "Immortal",
+            // Miles
+            "miles_25": "25 Mile Mark",
+            "miles_50": "50 Mile Club",
+            "miles_100": "Century Runner",
+            "miles_150": "150 Mile Mark",
+            "miles_200": "200 Mile Mark",
+            "miles_250": "250 Mile Club",
+            "miles_500": "500 Mile Club",
+            "miles_750": "750 Mile Club",
+            "miles_1000": "1000 Mile Club",
+            "miles_1500": "1500 Mile Legend",
+            "miles_2000": "2000 Mile Legend",
+            "miles_2500": "Ultra Runner",
+            // Pace
+            "pace_12min": "Getting Faster",
+            "pace_11min": "Picking Up Speed",
+            "pace_10min": "Double Digits",
+            "pace_9min": "Solid Pace",
+            "pace_8min": "Fast Runner",
+            "pace_7min": "Quick Runner",
+            "pace_6min": "Speed Demon",
+            "pace_5min": "Elite Speed"
+        ]
+        return badgeNames[id] ?? "Unknown Badge"
     }
     
     private func getBadgeDescription(for id: String) -> String {
-        switch id {
-        case "consistency_3": return "3 day streak!"
-        case "consistency_5": return "5 day streak!"
-        case "streak_7": return "7 day streak!"
-        case "streak_14": return "14 day streak!"
-        case "streak_30": return "30 day streak!"
-        case "streak_50": return "50 day streak!"
-        case "streak_100": return "100 day streak!"
-        case "streak_365": return "365 day streak!"
-        case "miles_50": return "Ran 50 total miles!"
-        case "miles_100": return "Ran 100 total miles!"
-        case "miles_250": return "Ran 250 total miles!"
-        case "miles_500": return "Ran 500 total miles!"
-        case "miles_1000": return "Ran 1000 total miles!"
-        case "pace_8min": return "Sub-8 minute mile!"
-        case "pace_7min": return "Sub-7 minute mile!"
-        case "pace_6min": return "Sub-6 minute mile!"
-        case "daily_5": return "Ran 5+ miles in one day!"
-        case "daily_10": return "Ran 10+ miles in one day!"
-        case "daily_half": return "Ran 13.1+ miles in one day!"
-        case "daily_marathon": return "Ran 26.2+ miles in one day!"
-        default: return "Unknown achievement!"
-        }
+        let badgeDescriptions: [String: String] = [
+            // Consistency
+            "consistency_3": "3 day streak!",
+            "consistency_5": "5 day streak!",
+            // Streaks
+            "streak_7": "7 day streak!",
+            "streak_10": "10 day streak!",
+            "streak_14": "14 day streak!",
+            "streak_21": "21 day streak!",
+            "streak_30": "30 day streak!",
+            "streak_45": "45 day streak!",
+            "streak_50": "50 day streak!",
+            "streak_60": "60 day streak!",
+            "streak_75": "75 day streak!",
+            "streak_90": "90 day streak!",
+            "streak_100": "100 day streak!",
+            "streak_120": "120 day streak!",
+            "streak_150": "150 day streak!",
+            "streak_180": "180 day streak!",
+            "streak_200": "200 day streak!",
+            "streak_250": "250 day streak!",
+            "streak_300": "300 day streak!",
+            "streak_365": "365 day streak!",
+            "streak_500": "500 day streak!",
+            "streak_730": "730 day streak!",
+            "streak_1000": "1000 day streak!",
+            // Miles
+            "miles_25": "Ran 25 total miles!",
+            "miles_50": "Ran 50 total miles!",
+            "miles_100": "Ran 100 total miles!",
+            "miles_150": "Ran 150 total miles!",
+            "miles_200": "Ran 200 total miles!",
+            "miles_250": "Ran 250 total miles!",
+            "miles_500": "Ran 500 total miles!",
+            "miles_750": "Ran 750 total miles!",
+            "miles_1000": "Ran 1000 total miles!",
+            "miles_1500": "Ran 1500 total miles!",
+            "miles_2000": "Ran 2000 total miles!",
+            "miles_2500": "Ran 2500 total miles!",
+            // Pace
+            "pace_12min": "Sub-12 minute mile!",
+            "pace_11min": "Sub-11 minute mile!",
+            "pace_10min": "Sub-10 minute mile!",
+            "pace_9min": "Sub-9 minute mile!",
+            "pace_8min": "Sub-8 minute mile!",
+            "pace_7min": "Sub-7 minute mile!",
+            "pace_6min": "Sub-6 minute mile!",
+            "pace_5min": "Sub-5 minute mile!"
+        ]
+        return badgeDescriptions[id] ?? "Unknown achievement!"
     }
     
     private func getBadgeCategory(_ id: String) -> BadgeCategory {
@@ -518,6 +640,10 @@ struct User: Identifiable, Codable {
             return .speed
         } else if id.starts(with: "daily_") {
             return .distance
+        } else if id.starts(with: "special_") {
+            return .special
+        } else if id.starts(with: "hidden_") || id.starts(with: "secret_") {
+            return .hidden
         }
         return .other
     }
@@ -529,7 +655,7 @@ struct User: Identifiable, Codable {
     }
     
     private enum BadgeCategory: Int {
-        case streak = 0, miles = 1, speed = 2, distance = 3, other = 4
+        case streak = 0, miles = 1, speed = 2, distance = 3, special = 4, hidden = 5, other = 6
     }
 }
 
@@ -541,18 +667,25 @@ struct Badge: Identifiable, Codable {
     var dateAwarded: Date = Date()
     var isNew: Bool = true
     var isLocked: Bool = false
+    var isHidden: Bool = false // Secret badges that don't show requirements until earned
     
     // Badge rarity (can be used for visual styling)
     var rarity: BadgeRarity {
         // Legendary badges
-        if id.starts(with: "streak_365") || id.starts(with: "miles_1000") || 
-           id.starts(with: "daily_marathon") || id.starts(with: "pace_6min") {
+        if id.starts(with: "streak_365") || id.starts(with: "streak_500") || id.starts(with: "streak_1000") ||
+           id.starts(with: "miles_1000") || id.starts(with: "miles_2500") ||
+           id.starts(with: "daily_marathon") || id.starts(with: "daily_ultra") ||
+           id.starts(with: "pace_5min") || id.starts(with: "pace_6min") ||
+           id.starts(with: "hidden_") || id.starts(with: "secret_") {
             return .legendary
         }
         // Rare badges
-        else if id.starts(with: "streak_100") || id.starts(with: "streak_50") || 
-                id.starts(with: "miles_500") || id.starts(with: "daily_half") ||
-                id.starts(with: "pace_7min") {
+        else if id.starts(with: "streak_100") || id.starts(with: "streak_150") || id.starts(with: "streak_200") ||
+                id.starts(with: "streak_50") || id.starts(with: "streak_75") ||
+                id.starts(with: "miles_500") || id.starts(with: "miles_750") ||
+                id.starts(with: "daily_half") || id.starts(with: "daily_15") || id.starts(with: "daily_20") ||
+                id.starts(with: "pace_7min") || id.starts(with: "pace_8min") ||
+                id.starts(with: "special_") {
             return .rare
         }
         // Common badges

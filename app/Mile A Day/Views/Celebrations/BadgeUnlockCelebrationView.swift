@@ -12,19 +12,20 @@ struct BadgeUnlockCelebrationView: View {
     // Animation states
     @State private var overlayOpacity: Double = 0
     @State private var showRaysBackground = false
-    @State private var showBadgeContainer = false
-    @State private var badgeContainerScale: CGFloat = 0
-    @State private var showBadgeIcon = false
-    @State private var badgeIconScale: CGFloat = 0
-    @State private var badgeIconRotation: Double = -30
+    @State private var showRibbon = false
+    @State private var showMedal = false
+    @State private var medalScale: CGFloat = 0
+    @State private var showIcon = false
+    @State private var iconScale: CGFloat = 0
+    @State private var iconRotation: Double = -30
     @State private var showRarityBanner = false
     @State private var showConfetti = false
     @State private var showRingPulse = false
     @State private var showContent = false
     @State private var showButtons = false
     @State private var showGlowRings = false
-    @State private var shimmerPhase: CGFloat = 0
-    @State private var continuousRotation: Double = 0
+    @State private var shimmerPhase: CGFloat = -0.5
+    @State private var glowPulse = false
     
     // Haptic generators
     private let impactGenerator = UIImpactFeedbackGenerator(style: .heavy)
@@ -33,37 +34,49 @@ struct BadgeUnlockCelebrationView: View {
     // MARK: - Rarity Properties
     
     var rarityColor: Color {
-        switch badge.rarity {
-        case .common: return Color(red: 0.2, green: 0.6, blue: 1.0)
-        case .rare: return Color(red: 0.7, green: 0.3, blue: 0.9)
-        case .legendary: return Color(red: 1.0, green: 0.7, blue: 0.2)
-        }
+        badge.rarity.color
     }
     
     var rarityGradient: [Color] {
         switch badge.rarity {
         case .common:
-            return [Color(red: 0.3, green: 0.7, blue: 1.0), Color(red: 0.1, green: 0.4, blue: 0.8)]
+            return [Color(red: 0.5, green: 0.7, blue: 1.0), Color(red: 0.35, green: 0.55, blue: 0.85)]
         case .rare:
-            return [Color(red: 0.8, green: 0.4, blue: 1.0), Color(red: 0.5, green: 0.2, blue: 0.8)]
+            return [Color(red: 0.75, green: 0.55, blue: 0.95), Color(red: 0.55, green: 0.35, blue: 0.8)]
         case .legendary:
-            return [Color(red: 1.0, green: 0.85, blue: 0.4), Color(red: 1.0, green: 0.5, blue: 0.2)]
+            return [Color(red: 1.0, green: 0.88, blue: 0.45), Color(red: 0.9, green: 0.6, blue: 0.18)]
+        }
+    }
+    
+    var medalGradient: [Color] {
+        switch badge.rarity {
+        case .legendary:
+            return [
+                Color(red: 1.0, green: 0.88, blue: 0.45),
+                Color(red: 0.9, green: 0.6, blue: 0.18)
+            ]
+        case .rare:
+            return [
+                Color(red: 0.75, green: 0.55, blue: 0.95),
+                Color(red: 0.55, green: 0.35, blue: 0.8)
+            ]
+        case .common:
+            return [
+                Color(red: 0.5, green: 0.7, blue: 1.0),
+                Color(red: 0.35, green: 0.55, blue: 0.85)
+            ]
         }
     }
     
     var rarityText: String {
-        switch badge.rarity {
-        case .common: return "COMMON"
-        case .rare: return "RARE"
-        case .legendary: return "LEGENDARY"
-        }
+        badge.rarity.rawValue.uppercased()
     }
     
     var confettiCount: Int {
         switch badge.rarity {
-        case .common: return 40
-        case .rare: return 70
-        case .legendary: return 120
+        case .common: return 50
+        case .rare: return 80
+        case .legendary: return 130
         }
     }
     
@@ -125,7 +138,7 @@ struct BadgeUnlockCelebrationView: View {
                             GlowRingView(
                                 color: rarityColor,
                                 delay: Double(index) * 0.15,
-                                size: 160 + CGFloat(index * 40)
+                                size: 180 + CGFloat(index * 40)
                             )
                         }
                     }
@@ -135,73 +148,154 @@ struct BadgeUnlockCelebrationView: View {
                         RingPulseView(color: rarityColor)
                     }
                     
-                    // Badge container (background circle)
+                    // Ambient glow
                     Circle()
                         .fill(
-                            LinearGradient(
-                                colors: rarityGradient,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                            RadialGradient(
+                                colors: [
+                                    rarityColor.opacity(glowPulse ? 0.5 : 0.3),
+                                    rarityColor.opacity(0)
+                                ],
+                                center: .center,
+                                startRadius: 50,
+                                endRadius: glowPulse ? 150 : 120
                             )
                         )
-                        .frame(width: 160, height: 160)
-                        .shadow(color: rarityColor.opacity(0.6), radius: 30, x: 0, y: 10)
-                        .overlay(
-                            Circle()
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [.white.opacity(0.6), .clear],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 3
-                                )
-                        )
-                        .scaleEffect(badgeContainerScale)
-                        .opacity(showBadgeContainer ? 1 : 0)
+                        .frame(width: 300, height: 300)
                     
-                    // Badge icon
-                    Image(systemName: badgeIcon)
-                        .font(.system(size: 80, weight: .medium))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.3), radius: 5, x: 0, y: 3)
-                        .scaleEffect(badgeIconScale)
-                        .rotationEffect(.degrees(badgeIconRotation))
-                        .opacity(showBadgeIcon ? 1 : 0)
-                        .overlay(
-                            // Shimmer effect for legendary
-                            badge.rarity == .legendary ? legendaryShimmerOverlay : nil
-                        )
+                    // Ribbon
+                    if showRibbon {
+                        VStack(spacing: 0) {
+                            Rectangle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [rarityColor, rarityColor.opacity(0.8)],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                                .frame(width: 50, height: 70)
+                            
+                            HStack(spacing: 0) {
+                                CelebrationRibbonTail(isLeft: true, color: rarityColor)
+                                CelebrationRibbonTail(isLeft: false, color: rarityColor)
+                            }
+                            .frame(width: 50)
+                        }
+                        .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                        .offset(y: -115)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .top).combined(with: .opacity),
+                            removal: .opacity
+                        ))
+                    }
+                    
+                    // Medal container
+                    ZStack {
+                        // Outer decorative rings
+                        ForEach(0..<3, id: \.self) { i in
+                            Circle()
+                                .stroke(rarityColor.opacity(0.2 - Double(i) * 0.05), lineWidth: 2)
+                                .frame(width: 200 + CGFloat(i * 30), height: 200 + CGFloat(i * 30))
+                        }
+                        
+                        // Main medal
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: medalGradient,
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 170, height: 170)
+                            .overlay(
+                                Circle()
+                                    .stroke(
+                                        LinearGradient(
+                                            colors: [Color.white.opacity(0.7), rarityColor.opacity(0.4)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        lineWidth: 4
+                                    )
+                            )
+                            .shadow(color: rarityColor.opacity(0.6), radius: 30, x: 0, y: 15)
+                        
+                        // Inner decorative ring
+                        Circle()
+                            .stroke(Color.white.opacity(0.35), lineWidth: 2)
+                            .frame(width: 140, height: 140)
+                        
+                        // Badge icon
+                        Image(systemName: badgeIcon)
+                            .font(.system(size: 80, weight: .semibold))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [.white, .white.opacity(0.85)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .shadow(color: .black.opacity(0.35), radius: 5, x: 0, y: 4)
+                            .scaleEffect(iconScale)
+                            .rotationEffect(.degrees(iconRotation))
+                            .opacity(showIcon ? 1 : 0)
+                        
+                        // Shimmer effect
+                        if badge.rarity == .legendary {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.clear, .white.opacity(0.4), .clear],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: 170, height: 170)
+                                .offset(x: shimmerPhase * 200)
+                                .clipShape(Circle())
+                        }
+                    }
+                    .scaleEffect(medalScale)
+                    .opacity(showMedal ? 1 : 0)
                     
                     // Sparkle particles around badge
                     if showContent {
                         BadgeSparkleRing(
                             color: badge.rarity == .legendary ? .yellow : .white,
-                            count: badge.rarity == .legendary ? 8 : 5
+                            count: badge.rarity == .legendary ? 10 : 6
                         )
                     }
                 }
-                .rotation3DEffect(
-                    .degrees(showContent ? 0 : -180),
-                    axis: (x: 0, y: 1, z: 0),
-                    perspective: 0.5
-                )
                 
                 Spacer()
-                    .frame(height: 40)
+                    .frame(height: 50)
                 
                 // Badge info content
                 if showContent {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 20) {
                         // Achievement unlocked text
-                        Text("🏆 BADGE UNLOCKED! 🏆")
-                            .font(.system(size: 16, weight: .black, design: .rounded))
-                            .tracking(2)
-                            .foregroundColor(.white.opacity(0.9))
+                        HStack(spacing: 8) {
+                            Image(systemName: "trophy.fill")
+                                .font(.system(size: 16))
+                            Text("BADGE UNLOCKED!")
+                                .font(.system(size: 16, weight: .black, design: .rounded))
+                                .tracking(2)
+                            Image(systemName: "trophy.fill")
+                                .font(.system(size: 16))
+                        }
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.yellow, .orange],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
                         
                         // Badge name with gradient
                         Text(badge.name)
-                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .font(.system(size: 38, weight: .bold, design: .rounded))
                             .foregroundStyle(
                                 LinearGradient(
                                     colors: [.white, .white.opacity(0.85)],
@@ -212,27 +306,28 @@ struct BadgeUnlockCelebrationView: View {
                             .multilineTextAlignment(.center)
                             .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 4)
                         
-                        // Achievement description (how they unlocked it)
-                        VStack(spacing: 8) {
+                        // Achievement description
+                        VStack(spacing: 10) {
                             Text("You achieved this by:")
                                 .font(.system(size: 14, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.7))
+                                .foregroundColor(.white.opacity(0.6))
                             
                             Text(badge.description)
                                 .font(.system(size: 18, weight: .semibold, design: .rounded))
-                                .foregroundColor(.white)
+                                .foregroundColor(.white.opacity(0.9))
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 32)
                         }
-                        .padding(.top, 4)
                         
                         // Date earned
-                        if !badge.isLocked {
+                        HStack(spacing: 6) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 12))
                             Text("Earned \(badge.dateAwarded.formattedDate)")
-                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.5))
-                                .padding(.top, 4)
                         }
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.45))
+                        .padding(.top, 4)
                     }
                     .transition(.asymmetric(
                         insertion: .scale(scale: 0.9).combined(with: .opacity).combined(with: .offset(y: 30)),
@@ -244,26 +339,36 @@ struct BadgeUnlockCelebrationView: View {
                 
                 // Action buttons
                 if showButtons {
-                    VStack(spacing: 12) {
+                    VStack(spacing: 14) {
                         // View All Badges button
                         Button {
                             triggerHaptic()
                             manager.dismissWithAction(.viewBadges)
                         } label: {
-                            HStack(spacing: 10) {
+                            HStack(spacing: 12) {
                                 Image(systemName: "trophy.fill")
                                     .font(.system(size: 18, weight: .semibold))
                                 Text("View All Badges")
-                                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                                    .font(.system(size: 17, weight: .bold, design: .rounded))
                             }
-                            .foregroundColor(rarityColor)
+                            .foregroundColor(.black)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 54)
+                            .frame(height: 56)
                             .background(
                                 RoundedRectangle(cornerRadius: 16)
-                                    .fill(.white)
-                                    .shadow(color: rarityColor.opacity(0.3), radius: 15, x: 0, y: 8)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: rarityGradient,
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                    )
                             )
+                            .shadow(color: rarityColor.opacity(0.4), radius: 15, x: 0, y: 8)
                         }
                         .padding(.horizontal, 32)
                         
@@ -276,19 +381,19 @@ struct BadgeUnlockCelebrationView: View {
                         } label: {
                             HStack(spacing: 8) {
                                 Text("Continue")
-                                    .font(.system(size: 17, weight: .medium, design: .rounded))
+                                    .font(.system(size: 17, weight: .semibold, design: .rounded))
                                 Image(systemName: "arrow.right")
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .font(.system(size: 14, weight: .bold))
                             }
                             .foregroundColor(.white.opacity(0.9))
                             .frame(maxWidth: .infinity)
-                            .frame(height: 48)
+                            .frame(height: 50)
                             .background(
                                 RoundedRectangle(cornerRadius: 14)
-                                    .fill(.white.opacity(0.15))
+                                    .fill(.white.opacity(0.12))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 14)
-                                            .stroke(.white.opacity(0.3), lineWidth: 1)
+                                            .stroke(.white.opacity(0.2), lineWidth: 1)
                                     )
                             )
                         }
@@ -318,8 +423,8 @@ struct BadgeUnlockCelebrationView: View {
             // Base gradient
             LinearGradient(
                 colors: [
-                    rarityColor.opacity(0.9),
-                    rarityColor.opacity(0.7),
+                    rarityColor.opacity(0.85),
+                    rarityColor.opacity(0.6),
                     Color.black.opacity(0.95)
                 ],
                 startPoint: .top,
@@ -333,10 +438,10 @@ struct BadgeUnlockCelebrationView: View {
             
             // Vignette overlay
             RadialGradient(
-                colors: [.clear, .black.opacity(0.5)],
+                colors: [.clear, .black.opacity(0.6)],
                 center: .center,
-                startRadius: 150,
-                endRadius: 400
+                startRadius: 100,
+                endRadius: 450
             )
         }
         .ignoresSafeArea()
@@ -353,6 +458,8 @@ struct BadgeUnlockCelebrationView: View {
             return "bolt.fill"
         } else if badge.id.starts(with: "daily_") {
             return "figure.run.circle.fill"
+        } else if badge.id.starts(with: "hidden_") || badge.id.starts(with: "secret_") || badge.id.starts(with: "special_") {
+            return "sparkles"
         } else {
             return "star.fill"
         }
@@ -369,26 +476,6 @@ struct BadgeUnlockCelebrationView: View {
         case .legendary:
             return [.yellow, .orange, .red, .pink, .white, .gold]
         }
-    }
-    
-    // MARK: - Shimmer Overlay
-    
-    @ViewBuilder
-    private var legendaryShimmerOverlay: some View {
-        Image(systemName: badgeIcon)
-            .font(.system(size: 80, weight: .medium))
-            .foregroundStyle(
-                LinearGradient(
-                    colors: [.clear, .white.opacity(0.4), .clear],
-                    startPoint: UnitPoint(x: shimmerPhase - 0.5, y: 0),
-                    endPoint: UnitPoint(x: shimmerPhase + 0.5, y: 1)
-                )
-            )
-            .onAppear {
-                withAnimation(.linear(duration: 2).repeatForever(autoreverses: false)) {
-                    shimmerPhase = 1.5
-                }
-            }
     }
     
     // MARK: - Animation Sequence
@@ -418,50 +505,73 @@ struct BadgeUnlockCelebrationView: View {
             impactGenerator.impactOccurred(intensity: 0.5)
         }
         
-        // Phase 4: Badge container scales in
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.65)) {
-                showBadgeContainer = true
-                badgeContainerScale = 1.0
+        // Phase 4: Ribbon drops
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                showRibbon = true
             }
-            impactGenerator.impactOccurred(intensity: 0.7)
         }
         
-        // Phase 5: Badge icon bursts in with rotation
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+        // Phase 5: Medal scales in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.65)) {
+                showMedal = true
+                medalScale = 1.0
+            }
+            impactGenerator.impactOccurred(intensity: 0.8)
+        }
+        
+        // Phase 6: Icon bursts in with rotation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
-                showBadgeIcon = true
-                badgeIconScale = 1.0
-                badgeIconRotation = 0
+                showIcon = true
+                iconScale = 1.0
+                iconRotation = 0
             }
             impactGenerator.impactOccurred(intensity: 1.0)
         }
         
-        // Phase 6: Ring pulse and glow rings
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+        // Phase 7: Ring pulse and glow rings
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.95) {
             showRingPulse = true
             withAnimation(.easeOut(duration: 0.3)) {
                 showGlowRings = true
             }
         }
         
-        // Phase 7: Confetti explosion
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        // Phase 8: Confetti explosion
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.05) {
             showConfetti = true
             notificationGenerator.notificationOccurred(.success)
         }
         
-        // Phase 8: Content reveals with 3D flip
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+        // Phase 9: Content reveals
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
                 showContent = true
             }
         }
         
-        // Phase 9: Buttons appear
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+        // Phase 10: Buttons appear
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 showButtons = true
+            }
+        }
+        
+        // Start continuous shimmer for legendary
+        if badge.rarity == .legendary {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                withAnimation(.linear(duration: 2).repeatForever(autoreverses: false)) {
+                    shimmerPhase = 1.5
+                }
+            }
+        }
+        
+        // Start glow pulse
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
+                glowPulse = true
             }
         }
     }
@@ -469,6 +579,35 @@ struct BadgeUnlockCelebrationView: View {
     private func triggerHaptic() {
         let impact = UIImpactFeedbackGenerator(style: .medium)
         impact.impactOccurred()
+    }
+}
+
+// MARK: - Celebration Ribbon Tail
+
+struct CelebrationRibbonTail: View {
+    let isLeft: Bool
+    let color: Color
+    
+    var body: some View {
+        Path { path in
+            let width: CGFloat = 25
+            let height: CGFloat = 30
+            
+            path.move(to: CGPoint(x: 0, y: 0))
+            path.addLine(to: CGPoint(x: width, y: 0))
+            path.addLine(to: CGPoint(x: width, y: height))
+            path.addLine(to: CGPoint(x: width * 0.5, y: height * 0.6))
+            path.addLine(to: CGPoint(x: 0, y: height))
+            path.closeSubpath()
+        }
+        .fill(
+            LinearGradient(
+                colors: [color, color.opacity(0.7)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .frame(width: 25, height: 30)
     }
 }
 
@@ -489,20 +628,20 @@ struct RarityBannerView: View {
     @State private var shimmer: CGFloat = -1
     
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image(systemName: rarityIcon)
                 .font(.system(size: 14, weight: .bold))
             
             Text(rarityText)
-                .font(.system(size: 14, weight: .black, design: .rounded))
+                .font(.system(size: 15, weight: .black, design: .rounded))
                 .tracking(3)
             
             Image(systemName: rarityIcon)
                 .font(.system(size: 14, weight: .bold))
         }
         .foregroundColor(.white)
-        .padding(.horizontal, 24)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 28)
+        .padding(.vertical, 12)
         .background(
             Capsule()
                 .fill(
@@ -621,7 +760,7 @@ struct RingPulseView: View {
             ForEach(0..<3, id: \.self) { index in
                 Circle()
                     .stroke(color, lineWidth: 4)
-                    .frame(width: 160, height: 160)
+                    .frame(width: 170, height: 170)
                     .scaleEffect(scale)
                     .opacity(opacity)
                     .animation(
@@ -651,8 +790,8 @@ struct BadgeSparkleRing: View {
             ForEach(0..<count, id: \.self) { index in
                 SparkleParticle(color: color)
                     .offset(
-                        x: cos(Double(index) * 2 * .pi / Double(count)) * 100,
-                        y: sin(Double(index) * 2 * .pi / Double(count)) * 100
+                        x: cos(Double(index) * 2 * .pi / Double(count)) * 120,
+                        y: sin(Double(index) * 2 * .pi / Double(count)) * 120
                     )
                     .opacity(isAnimating ? 1 : 0)
                     .scaleEffect(isAnimating ? 1 : 0)
@@ -680,18 +819,18 @@ struct SparkleParticle: View {
             // Horizontal line
             Capsule()
                 .fill(color)
-                .frame(width: 16, height: 3)
+                .frame(width: 18, height: 3)
             
             // Vertical line
             Capsule()
                 .fill(color)
-                .frame(width: 3, height: 16)
+                .frame(width: 3, height: 18)
             
             // Glow
             Circle()
                 .fill(color.opacity(0.5))
-                .frame(width: 8, height: 8)
-                .blur(radius: 2)
+                .frame(width: 10, height: 10)
+                .blur(radius: 3)
         }
         .scaleEffect(twinkle ? 1.2 : 0.8)
         .opacity(twinkle ? 1 : 0.6)

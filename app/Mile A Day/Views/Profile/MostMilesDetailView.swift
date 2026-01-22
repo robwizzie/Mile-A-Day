@@ -87,7 +87,7 @@ struct MostMilesDetailView: View {
                     
                     // Tips and achievements
                     VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-                        Text("Achievements")
+                        Text("Medals")
                             .font(MADTheme.Typography.title3)
                             .fontWeight(.bold)
                             .foregroundColor(MADTheme.Colors.primaryText)

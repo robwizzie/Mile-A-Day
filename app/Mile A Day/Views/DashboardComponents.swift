@@ -225,6 +225,7 @@ struct DayProgressView: View {
 struct BadgesPreviewCard: View {
     @ObservedObject var userManager: UserManager
     @Environment(\.colorScheme) var colorScheme
+    @State private var shimmerPhase: CGFloat = -1
 
     private var recentBadges: [Badge] {
         let earnedBadges = userManager.currentUser.badges.filter { !$0.isLocked }
@@ -241,79 +242,98 @@ struct BadgesPreviewCard: View {
     private var totalCount: Int {
         userManager.currentUser.getAllBadges().count
     }
+    
+    private var progress: Double {
+        totalCount > 0 ? Double(earnedCount) / Double(totalCount) : 0
+    }
 
     var body: some View {
         NavigationLink(destination: BadgesView(userManager: userManager)) {
             VStack(alignment: .leading, spacing: 16) {
-                // Header
-                HStack {
-                    Image(systemName: "trophy.fill")
-                        .font(.title2)
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.yellow, .orange],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                // Header with progress
+                HStack(spacing: 12) {
+                    // Trophy with glow
+                    ZStack {
+                        Circle()
+                            .fill(
+                                RadialGradient(
+                                    colors: [Color.orange.opacity(0.3), Color.clear],
+                                    center: .center,
+                                    startRadius: 5,
+                                    endRadius: 25
+                                )
                             )
-                        )
-                        .shadow(color: .yellow.opacity(0.3), radius: 8, x: 0, y: 4)
+                            .frame(width: 50, height: 50)
+                        
+                        Image(systemName: "trophy.fill")
+                            .font(.title2)
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [.yellow, .orange],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    }
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Badges")
-                            .font(.headline)
-                            .fontWeight(.semibold)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Medals")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundColor(.primary)
 
-                        Text("\(earnedCount) of \(totalCount) earned")
-                            .font(.caption)
+                        // Progress bar
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.white.opacity(0.1))
+                                    .frame(height: 6)
+                                
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [.orange, .yellow],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: geo.size.width * progress, height: 6)
+                            }
+                        }
+                        .frame(height: 6)
+                        
+                        Text("\(earnedCount) of \(totalCount) unlocked")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundColor(.secondary)
                     }
 
                     Spacer()
 
                     Image(systemName: "chevron.right")
-                        .font(.caption)
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.secondary)
                 }
 
                 if recentBadges.isEmpty {
+                    // Empty state
                     HStack {
                         Spacer()
                         VStack(spacing: 8) {
                             Image(systemName: "trophy")
-                                .font(.title)
-                                .foregroundColor(.secondary.opacity(0.5))
+                                .font(.system(size: 32))
+                                .foregroundColor(.secondary.opacity(0.4))
 
-                            Text("No badges yet")
-                                .font(.caption)
+                            Text("Start running to earn badges!")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
                                 .foregroundColor(.secondary)
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 12)
                         Spacer()
                     }
                 } else {
-                    // Recent badges
-                    HStack(spacing: 12) {
+                    // Recent badges with modern styling
+                    HStack(spacing: 8) {
                         ForEach(recentBadges, id: \.id) { badge in
-                            VStack(spacing: 6) {
-                                ZStack {
-                                    Circle()
-                                        .fill(badge.rarity.color.opacity(0.2))
-                                        .frame(width: 50, height: 50)
-
-                                    Image(systemName: badgeIcon(for: badge))
-                                        .font(.title3)
-                                        .foregroundColor(badge.rarity.color)
-                                }
-
-                                Text(badge.name)
-                                    .font(.caption2)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.primary)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            .frame(maxWidth: .infinity)
+                            HomeBadgeItem(badge: badge, shimmerPhase: shimmerPhase)
                         }
                     }
                 }
@@ -329,7 +349,8 @@ struct BadgesPreviewCard: View {
                     // Gradient overlay
                     LinearGradient(
                         colors: [
-                            Color.yellow.opacity(0.05),
+                            Color.orange.opacity(0.08),
+                            Color.yellow.opacity(0.03),
                             Color.clear
                         ],
                         startPoint: .topLeading,
@@ -355,11 +376,127 @@ struct BadgesPreviewCard: View {
             .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
         }
         .buttonStyle(PlainButtonStyle())
+        .onAppear {
+            withAnimation(.linear(duration: 2.5).repeatForever(autoreverses: false)) {
+                shimmerPhase = 1.5
+            }
+        }
     }
+}
 
-    // Helper to get appropriate icon for badge
-    private func badgeIcon(for badge: Badge) -> String {
-        if badge.id.starts(with: "streak_") {
+// MARK: - Home Badge Item
+struct HomeBadgeItem: View {
+    let badge: Badge
+    let shimmerPhase: CGFloat
+    
+    var body: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                // Outer glow
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [badge.rarity.color.opacity(0.35), badge.rarity.color.opacity(0)],
+                            center: .center,
+                            startRadius: 15,
+                            endRadius: 35
+                        )
+                    )
+                    .frame(width: 70, height: 70)
+                
+                // Medal base
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: medalGradientColors,
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 52, height: 52)
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.5), badge.rarity.color.opacity(0.3)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 2
+                            )
+                    )
+                    .shadow(color: badge.rarity.color.opacity(0.4), radius: 8, x: 0, y: 4)
+                
+                // Inner ring
+                Circle()
+                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    .frame(width: 40, height: 40)
+
+                // Icon
+                Image(systemName: badgeIcon)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.white, .white.opacity(0.85)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .shadow(color: .black.opacity(0.25), radius: 1, x: 0, y: 1)
+                
+                // Shimmer
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.clear, .white.opacity(0.25), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 52, height: 52)
+                    .offset(x: (shimmerPhase - 0.25) * 100)
+                    .clipShape(Circle())
+                
+                // Secret indicator
+                if badge.isHidden {
+                    Image(systemName: "eye.slash.fill")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(5)
+                        .background(
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.purple, Color.purple.opacity(0.8)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                        )
+                        .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
+                        .offset(x: 20, y: -20)
+                }
+                
+                // Rarity indicator dot
+                Circle()
+                    .fill(badge.rarity.color)
+                    .frame(width: 8, height: 8)
+                    .overlay(Circle().stroke(Color.white.opacity(0.5), lineWidth: 1))
+                    .offset(y: 30)
+            }
+
+            // Badge name
+            Text(badge.name)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
+    }
+    
+    private var badgeIcon: String {
+        if badge.id.starts(with: "streak_") || badge.id.starts(with: "consistency_") {
             return "flame.fill"
         } else if badge.id.starts(with: "miles_") {
             return "figure.run"
@@ -367,10 +504,30 @@ struct BadgesPreviewCard: View {
             return "bolt.fill"
         } else if badge.id.starts(with: "daily_") {
             return "figure.run.circle.fill"
-        } else if badge.id.starts(with: "consistency_") {
-            return "calendar.badge.clock"
+        } else if badge.id.starts(with: "hidden_") || badge.id.starts(with: "secret_") || badge.id.starts(with: "special_") {
+            return "sparkles"
         } else {
             return "star.fill"
+        }
+    }
+    
+    private var medalGradientColors: [Color] {
+        switch badge.rarity {
+        case .legendary:
+            return [
+                Color(red: 1.0, green: 0.85, blue: 0.4),
+                Color(red: 0.85, green: 0.55, blue: 0.15)
+            ]
+        case .rare:
+            return [
+                Color(red: 0.7, green: 0.5, blue: 0.9),
+                Color(red: 0.5, green: 0.3, blue: 0.75)
+            ]
+        case .common:
+            return [
+                Color(red: 0.45, green: 0.65, blue: 0.95),
+                Color(red: 0.3, green: 0.5, blue: 0.8)
+            ]
         }
     }
 }

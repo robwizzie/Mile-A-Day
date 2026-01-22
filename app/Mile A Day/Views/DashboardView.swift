@@ -44,8 +44,12 @@ struct DashboardView: View {
             currentStreak: userManager.currentUser.streak,
             totalLifetimeMiles: healthManager.totalLifetimeMiles,
             bestDayMiles: healthManager.cachedMostMilesInOneDay,
-            todaysPace: healthManager.fastestMilePace > 0 ? healthManager.fastestMilePace : nil,
-            personalBestPace: healthManager.cachedFastestMilePace > 0 ? healthManager.cachedFastestMilePace : nil
+            todaysAveragePace: healthManager.todaysAveragePace,
+            todaysFastestPace: healthManager.todaysFastestPace,
+            personalBestPace: healthManager.cachedFastestMilePace > 0 ? healthManager.cachedFastestMilePace : nil,
+            todaysTotalDuration: healthManager.todaysTotalDuration,
+            todaysCalories: healthManager.todaysTotalCalories,
+            todaysWorkoutCount: healthManager.todaysWorkoutCount
         )
     }
     
@@ -2195,7 +2199,7 @@ struct CurrentStreakFastestPaceDetailView: View {
                     
                     // Tips and achievements
                     VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-                        Text("Achievements")
+                        Text("Medals")
                             .font(MADTheme.Typography.title3)
                             .fontWeight(.bold)
                             .foregroundColor(MADTheme.Colors.primaryText)
@@ -2449,7 +2453,7 @@ struct CurrentStreakMostMilesDetailView: View {
                     
                     // Tips and achievements
                     VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-                        Text("Achievements")
+                        Text("Medals")
                             .font(MADTheme.Typography.title3)
                             .fontWeight(.bold)
                             .foregroundColor(MADTheme.Colors.primaryText)

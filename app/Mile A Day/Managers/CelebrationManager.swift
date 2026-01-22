@@ -15,8 +15,12 @@ struct GoalCompletionStats: Equatable {
     let currentStreak: Int
     let totalLifetimeMiles: Double
     let bestDayMiles: Double
-    let todaysPace: TimeInterval? // Average pace in minutes per mile
-    let personalBestPace: TimeInterval?
+    let todaysAveragePace: TimeInterval? // Average pace in minutes per mile from today's workouts
+    let todaysFastestPace: TimeInterval? // Fastest pace from today's workouts
+    let personalBestPace: TimeInterval? // All-time fastest pace
+    let todaysTotalDuration: TimeInterval // Total workout duration in seconds
+    let todaysCalories: Double // Total calories burned today
+    let todaysWorkoutCount: Int // Number of workouts completed today
     
     var percentOver: Double {
         guard goalDistance > 0 else { return 0 }
@@ -27,13 +31,29 @@ struct GoalCompletionStats: Equatable {
         todaysDistance > bestDayMiles && bestDayMiles > 0
     }
     
+    /// Check if today's fastest pace is a new personal best
     var isPacePB: Bool {
-        guard let todaysPace = todaysPace, let bestPace = personalBestPace, bestPace > 0 else { return false }
-        return todaysPace < bestPace
+        guard let todaysFastest = todaysFastestPace, let bestPace = personalBestPace, bestPace > 0 else { return false }
+        return todaysFastest < bestPace
     }
     
     var streakMilestone: StreakMilestone? {
         StreakMilestone.allCases.first { $0.days == currentStreak }
+    }
+    
+    /// Formatted total duration string (e.g., "32:15")
+    var formattedDuration: String {
+        let minutes = Int(todaysTotalDuration) / 60
+        let seconds = Int(todaysTotalDuration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+    
+    /// Formatted calories string
+    var formattedCalories: String {
+        if todaysCalories >= 1000 {
+            return String(format: "%.1fk", todaysCalories / 1000)
+        }
+        return String(format: "%.0f", todaysCalories)
     }
     
     static var placeholder: GoalCompletionStats {
@@ -43,8 +63,12 @@ struct GoalCompletionStats: Equatable {
             currentStreak: 7,
             totalLifetimeMiles: 150,
             bestDayMiles: 5.0,
-            todaysPace: 8.5,
-            personalBestPace: 7.5
+            todaysAveragePace: 8.5,
+            todaysFastestPace: 7.8,
+            personalBestPace: 7.5,
+            todaysTotalDuration: 765, // 12:45
+            todaysCalories: 185,
+            todaysWorkoutCount: 1
         )
     }
 }

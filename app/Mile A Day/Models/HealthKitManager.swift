@@ -696,6 +696,54 @@ class HealthKitManager: ObservableObject {
         return todaysDistance >= 0.95
     }
     
+    // MARK: - Today's Stats (Computed Properties)
+    
+    /// Today's total workout duration in seconds
+    var todaysTotalDuration: TimeInterval {
+        return recentWorkouts.reduce(0) { $0 + $1.duration }
+    }
+    
+    /// Today's average pace in minutes per mile (calculated from all today's workouts)
+    var todaysAveragePace: TimeInterval? {
+        guard todaysDistance > 0 else { return nil }
+        let totalDurationMinutes = todaysTotalDuration / 60.0
+        return totalDurationMinutes / todaysDistance
+    }
+    
+    /// Today's fastest pace from individual workouts (best single workout pace today)
+    var todaysFastestPace: TimeInterval? {
+        var fastestPace: TimeInterval = .infinity
+        
+        for workout in recentWorkouts {
+            if let distance = workout.totalDistance {
+                let miles = distance.doubleValue(for: HKUnit.mile())
+                if miles >= 0.5 { // Only consider workouts with at least half a mile
+                    let pace = (workout.duration / 60.0) / miles
+                    if pace < fastestPace {
+                        fastestPace = pace
+                    }
+                }
+            }
+        }
+        
+        return fastestPace == .infinity ? nil : fastestPace
+    }
+    
+    /// Today's total calories burned (estimated from workouts)
+    var todaysTotalCalories: Double {
+        return recentWorkouts.reduce(0) { total, workout in
+            if let energyBurned = workout.totalEnergyBurned {
+                return total + energyBurned.doubleValue(for: HKUnit.kilocalorie())
+            }
+            return total
+        }
+    }
+    
+    /// Number of workouts completed today
+    var todaysWorkoutCount: Int {
+        return recentWorkouts.count
+    }
+    
     // Get distance in miles from a workout
     func distanceInMiles(from workout: HKWorkout) -> Double {
         guard let distance = workout.totalDistance else { return 0 }
