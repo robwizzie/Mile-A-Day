@@ -33,8 +33,6 @@ struct DashboardView: View {
     /// Navigation state for badges view from celebration
     @State private var navigateToBadgesFromCelebration = false
     
-    /// Tracks if we've already checked for goal completion this session
-    @State private var hasCheckedGoalCompletionThisSession = false
     
     /// Build goal completion stats for the celebration
     private func buildGoalCompletionStats() -> GoalCompletionStats {
@@ -58,21 +56,16 @@ struct DashboardView: View {
         // Only show if:
         // 1. Goal is actually completed (distance >= goal)
         // 2. We have meaningful distance data (> 0)
-        // 3. We haven't shown it today (checked by CelebrationManager)
-        // 4. We haven't already checked this session
+        // Note: CelebrationManager handles duplicate prevention via date-based tracking
         guard currentState.isCompleted,
-              healthManager.todaysDistance > 0,
-              !celebrationManager.hasShownGoalCelebrationToday,
-              !hasCheckedGoalCompletionThisSession else {
+              healthManager.todaysDistance > 0 else {
             return
         }
-        
-        hasCheckedGoalCompletionThisSession = true
-        
+
         print("[Dashboard] 🎉 Goal completion detected! Distance: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles)")
-        
+
         // Show celebration with the stats
-        // CelebrationManager will mark it as shown internally via markGoalCelebrationShown()
+        // CelebrationManager will check hasShownGoalCelebrationToday and mark it as shown internally
         let stats = buildGoalCompletionStats()
         celebrationManager.addCelebration(.goalCompleted(stats: stats))
     }

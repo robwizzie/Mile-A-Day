@@ -361,7 +361,18 @@ struct ProfileView: View {
                         iconColor: Color.blue
                     )
                 }
-                
+
+                Divider()
+
+                NavigationLink(destination: BlockedUsersView(friendService: FriendService())) {
+                    MADSettingsRow(
+                        icon: "hand.raised.fill",
+                        title: "Blocked Users",
+                        subtitle: "Manage blocked accounts",
+                        iconColor: Color.orange
+                    )
+                }
+
                 Divider()
                 
                 Button(action: { showingPrivacySettings = true }) {

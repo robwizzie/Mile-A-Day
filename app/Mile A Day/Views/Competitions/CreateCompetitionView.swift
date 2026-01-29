@@ -14,6 +14,8 @@ struct CreateCompetitionView: View {
     @State private var durationHours: Int = 24
     @State private var customDurationDays: Int = 3
     @State private var isCustomDuration: Bool = false
+    @State private var hasEndDate: Bool = true
+    @State private var customEndDate: Date = Calendar.current.date(byAdding: .day, value: 3, to: Date()) ?? Date()
     @State private var selectedWorkouts: Set<CompetitionActivity> = [.run]
     @State private var firstTo: Int = 5
     @State private var interval: CompetitionInterval = .day
@@ -204,6 +206,7 @@ struct CreateCompetitionView: View {
                                     .font(.title2)
                                     .foregroundColor(.white.opacity(0.7))
                             }
+                            .frame(width: 80, height: 80) // Extra space for proper alignment
 
                             Text("Add")
                                 .font(MADTheme.Typography.caption)
@@ -245,9 +248,10 @@ struct CreateCompetitionView: View {
                                                 .frame(width: 20, height: 20)
                                         )
                                 }
-                                .offset(x: 2, y: -2)
+                                .offset(x: 5, y: 0)
                             }
-                            .frame(width: 74, height: 74)
+                            .frame(width: 80, height: 80) // Extra space to prevent cutoff
+                            .padding(.top, 4) // Extra padding at top
 
                             Text(friend.displayName)
                                 .font(MADTheme.Typography.caption)
@@ -423,19 +427,26 @@ struct CreateCompetitionView: View {
 
                     Spacer()
 
-                    // Goal display
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(String(format: "%.0f", goal))
-                            .font(.system(size: 64, weight: .bold, design: .rounded))
+                    // Goal display with text input
+                    VStack(spacing: 8) {
+                        TextField("", value: $goal, format: .number)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.center)
+                            .font(.system(size: 56, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
-                            .fixedSize()
+                            .frame(minWidth: 100)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .onChange(of: goal) { oldValue, newValue in
+                                // Ensure minimum value of 0.1
+                                if newValue < 0.1 {
+                                    goal = 0.1
+                                }
+                            }
 
-                        Text(unit == .steps ? "k" : unit.rawValue)
+                        Text(unit.shortDisplayName)
                             .font(MADTheme.Typography.title2)
                             .foregroundColor(.white.opacity(0.7))
-                            .fixedSize()
                     }
-                    .fixedSize(horizontal: true, vertical: false)
 
                     Spacer()
 
@@ -462,7 +473,7 @@ struct CreateCompetitionView: View {
 
                 // Friend's best
                 if let friend = firstSelectedFriend {
-                    Text("\(friend.displayName)'s best  \(String(format: "%.0f", friendBestDistance))\(unit.rawValue)")
+                    Text("\(friend.displayName)'s best  \(String(format: "%.0f", friendBestDistance)) \(unit.shortDisplayName)")
                         .font(MADTheme.Typography.callout)
                         .foregroundColor(.white.opacity(0.6))
                 }
@@ -489,7 +500,7 @@ struct CreateCompetitionView: View {
                     .font(MADTheme.Typography.subheadline)
                     .foregroundColor(.white.opacity(0.6))
 
-                Text("How long the challenge will run")
+                Text(hasEndDate ? "Choose when the challenge ends" : "Competition runs until manually ended")
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(.white.opacity(0.5))
             }
@@ -502,8 +513,9 @@ struct CreateCompetitionView: View {
                         title: "1 Day",
                         hours: 24,
                         icon: "sun.max.fill",
-                        isSelected: !isCustomDuration && durationHours == 24,
+                        isSelected: hasEndDate && !isCustomDuration && durationHours == 24,
                         action: {
+                            hasEndDate = true
                             isCustomDuration = false
                             durationHours = 24
                         }
@@ -513,8 +525,9 @@ struct CreateCompetitionView: View {
                         title: "3 Days",
                         hours: 72,
                         icon: "calendar",
-                        isSelected: !isCustomDuration && durationHours == 72,
+                        isSelected: hasEndDate && !isCustomDuration && durationHours == 72,
                         action: {
+                            hasEndDate = true
                             isCustomDuration = false
                             durationHours = 72
                         }
@@ -524,94 +537,57 @@ struct CreateCompetitionView: View {
                         title: "1 Week",
                         hours: 168,
                         icon: "calendar.badge.clock",
-                        isSelected: !isCustomDuration && durationHours == 168,
+                        isSelected: hasEndDate && !isCustomDuration && durationHours == 168,
                         action: {
+                            hasEndDate = true
                             isCustomDuration = false
                             durationHours = 168
                         }
                     )
 
                     DurationPreset(
-                        title: "Custom",
+                        title: "Pick Date",
                         hours: 0,
-                        icon: "slider.horizontal.3",
-                        isSelected: isCustomDuration,
+                        icon: "calendar.circle",
+                        isSelected: hasEndDate && isCustomDuration,
                         action: {
+                            hasEndDate = true
                             isCustomDuration = true
-                            durationHours = customDurationDays * 24
                         }
                     )
+
+                    // Only show "No End" option for Streaks and Clash
+                    if selectedType == .streaks || selectedType == .clash {
+                        DurationPreset(
+                            title: "No End",
+                            hours: 0,
+                            icon: "infinity",
+                            isSelected: !hasEndDate,
+                            action: {
+                                hasEndDate = false
+                                isCustomDuration = false
+                            }
+                        )
+                    }
                 }
 
-                // Custom duration picker
-                if isCustomDuration {
+                // Custom date picker
+                if isCustomDuration && hasEndDate {
                     VStack(spacing: MADTheme.Spacing.md) {
-                        Text("Enter custom duration")
+                        Text("Tap to select end date")
                             .font(MADTheme.Typography.caption)
                             .foregroundColor(.white.opacity(0.6))
 
-                        HStack(spacing: MADTheme.Spacing.xl) {
-                            // Minus button
-                            Button {
-                                if customDurationDays > 1 {
-                                    customDurationDays -= 1
-                                    durationHours = customDurationDays * 24
-                                }
-                            } label: {
-                                Image(systemName: "minus")
-                                    .font(.title3)
-                                    .foregroundColor(.white)
-                                    .frame(width: 44, height: 44)
-                                    .background(
-                                        Circle()
-                                            .fill(.ultraThinMaterial)
-                                    )
-                                    .overlay(
-                                        Circle()
-                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                                    )
-                            }
-                            .buttonStyle(ScaleButtonStyle())
-
-                            Spacer()
-
-                            // Days display
-                            VStack(spacing: 4) {
-                                Text("\(customDurationDays)")
-                                    .font(.system(size: 48, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-                                    .fixedSize()
-
-                                Text(customDurationDays == 1 ? "day" : "days")
-                                    .font(MADTheme.Typography.callout)
-                                    .foregroundColor(.white.opacity(0.7))
-                            }
-
-                            Spacer()
-
-                            // Plus button
-                            Button {
-                                if customDurationDays < 90 {
-                                    customDurationDays += 1
-                                    durationHours = customDurationDays * 24
-                                }
-                            } label: {
-                                Image(systemName: "plus")
-                                    .font(.title3)
-                                    .foregroundColor(.white)
-                                    .frame(width: 44, height: 44)
-                                    .background(
-                                        Circle()
-                                            .fill(.ultraThinMaterial)
-                                    )
-                                    .overlay(
-                                        Circle()
-                                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                                    )
-                            }
-                            .buttonStyle(ScaleButtonStyle())
-                        }
-                        .padding(MADTheme.Spacing.lg)
+                        DatePicker(
+                            "",
+                            selection: $customEndDate,
+                            in: Date()...,
+                            displayedComponents: [.date]
+                        )
+                        .datePickerStyle(.graphical)
+                        .tint(MADTheme.Colors.primary)
+                        .colorScheme(.dark)
+                        .padding(MADTheme.Spacing.md)
                         .background(
                             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                                 .fill(.ultraThinMaterial)
@@ -620,6 +596,23 @@ struct CreateCompetitionView: View {
                                         .stroke(Color.white.opacity(0.1), lineWidth: 1)
                                 )
                         )
+                        .onChange(of: customEndDate) { _, newDate in
+                            // Calculate duration in hours
+                            let hours = Calendar.current.dateComponents([.hour], from: Date(), to: newDate).hour ?? 24
+                            durationHours = max(24, hours) // Minimum 24 hours
+                        }
+
+                        // Show calculated duration
+                        let days = Calendar.current.dateComponents([.day], from: Date(), to: customEndDate).day ?? 1
+                        Text("\(max(1, days)) day\(max(1, days) == 1 ? "" : "s") from now")
+                            .font(MADTheme.Typography.callout)
+                            .foregroundColor(MADTheme.Colors.primary)
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                            .padding(.vertical, MADTheme.Spacing.sm)
+                            .background(
+                                Capsule()
+                                    .fill(MADTheme.Colors.primary.opacity(0.2))
+                            )
                     }
                 }
             }
@@ -694,11 +687,19 @@ struct CreateCompetitionView: View {
 
                 Spacer()
 
-                // Value display
-                Text("\(firstTo)")
+                // Value display with text input
+                TextField("", value: $firstTo, format: .number)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.center)
                     .font(.system(size: 48, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
-                    .fixedSize()
+                    .frame(minWidth: 80)
+                    .onChange(of: firstTo) { oldValue, newValue in
+                        // Ensure minimum value of 1
+                        if newValue < 1 {
+                            firstTo = 1
+                        }
+                    }
 
                 Spacer()
 
@@ -938,9 +939,20 @@ struct CreateCompetitionView: View {
         let friendNames = selectedFriends.prefix(2).map { $0.displayName }.joined(separator: " & ")
         let autoName = "\(selectedType.displayName) with \(friendNames)"
 
-        // Calculate end date based on duration
+        // Calculate end date based on duration selection
         let startDate = Date()
-        let endDate = Calendar.current.date(byAdding: .hour, value: durationHours, to: startDate) ?? Date()
+        let endDate: Date
+
+        if !hasEndDate {
+            // No end date - set to far future (10 years)
+            endDate = Calendar.current.date(byAdding: .year, value: 10, to: startDate) ?? Date()
+        } else if isCustomDuration {
+            // Use custom selected date
+            endDate = customEndDate
+        } else {
+            // Use preset duration in hours
+            endDate = Calendar.current.date(byAdding: .hour, value: durationHours, to: startDate) ?? Date()
+        }
 
         Task {
             do {

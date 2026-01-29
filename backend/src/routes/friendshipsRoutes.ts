@@ -17,6 +17,7 @@ router.post('/request', requireSelfAccess('fromUser'), sendRequest);
 router.patch('/accept', requireSelfAccess('toUser'), getFriendshipHandler('accepted'));
 router.patch('/ignore', requireSelfAccess('toUser'), getFriendshipHandler('ignored'));
 router.delete('/decline', requireSelfAccess('toUser'), getFriendshipHandler('rejected'));
+router.delete('/cancel', requireSelfAccess('fromUser'), getFriendshipHandler('rejected'));
 router.delete('/remove', requireSelfAccess('fromUser'), getFriendshipHandler('removed'));
 
 export default router;

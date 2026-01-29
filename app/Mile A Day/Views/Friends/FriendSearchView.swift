@@ -2,32 +2,35 @@ import SwiftUI
 
 /// View for searching and adding friends
 struct FriendSearchView: View {
-    @StateObject private var friendService = FriendService()
+    @ObservedObject var friendService: FriendService
     @State private var searchText = ""
     @State private var searchResults: [BackendUser] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var selectedUser: BackendUser?
     @State private var searchTask: Task<Void, Never>?
+    @State private var showingUnfriendAlert = false
+    @State private var showingBlockAlert = false
+    @State private var userToUnfriend: BackendUser?
+    @State private var userToBlock: BackendUser?
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Search Header
-            searchHeader
-            
-            // Content
+        Group {
             if isLoading {
                 loadingView
             } else if !searchResults.isEmpty {
                 searchResultsView
             } else if !searchText.isEmpty && searchText.count >= 3 {
                 noResultsView
-            } else if searchText.isEmpty || searchText.count < 3 {
+            } else {
                 recommendationsView
             }
         }
         .navigationTitle("Find Friends")
         .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $searchText, prompt: "Search by username")
+        .autocorrectionDisabled()
+        .textInputAutocapitalization(.never)
         .sheet(item: $selectedUser) { user in
             NavigationStack {
                 UserProfileDetailView(user: user, friendService: friendService)
@@ -39,36 +42,27 @@ struct FriendSearchView: View {
         .onDisappear {
             searchTask?.cancel()
         }
-    }
-    
-    // MARK: - Search Header
-    private var searchHeader: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
-            // Search Bar
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(MADTheme.Colors.secondaryText)
-                
-                TextField("Search by username...", text: $searchText)
-                    .textFieldStyle(PlainTextFieldStyle())
-                
-                if !searchText.isEmpty {
-                    Button(action: clearSearch) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(MADTheme.Colors.secondaryText)
-                    }
+        .alert("Unfriend \(userToUnfriend?.displayName ?? "User")?", isPresented: $showingUnfriendAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Unfriend", role: .destructive) {
+                if let user = userToUnfriend {
+                    handleUnfriend(user)
                 }
             }
-            .padding(MADTheme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                    .fill(MADTheme.Colors.secondaryBackground)
-            )
+        } message: {
+            Text("You will no longer be friends with this person.")
         }
-        .padding(MADTheme.Spacing.md)
-        .background(MADTheme.Colors.primaryBackground)
+        .alert("Block \(userToBlock?.displayName ?? "User")?", isPresented: $showingBlockAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Block", role: .destructive) {
+                if let user = userToBlock {
+                    handleBlock(user)
+                }
+            }
+        } message: {
+            Text("You will unfriend and block this person. They won't be able to see your profile or send you friend requests.")
+        }
     }
-    
     // MARK: - Search Results View
     private var searchResultsView: some View {
         ScrollView {
@@ -82,20 +76,62 @@ struct FriendSearchView: View {
                             selectedUser = user
                         },
                         actionButton: AnyView(
-                            FriendActionButton(
-                                title: getActionButtonTitle(for: user),
-                                style: getActionButtonStyle(for: user),
-                                isLoading: false,
-                                action: {
-                                    handleFriendAction(for: user)
+                            Group {
+                                if friendService.isFriend(user) {
+                                    // Show dropdown menu for friends
+                                    Menu {
+                                        Button(role: .destructive) {
+                                            userToUnfriend = user
+                                            showingUnfriendAlert = true
+                                        } label: {
+                                            Label("Unfriend", systemImage: "person.fill.xmark")
+                                        }
+
+                                        Button(role: .destructive) {
+                                            userToBlock = user
+                                            showingBlockAlert = true
+                                        } label: {
+                                            Label("Block", systemImage: "hand.raised.fill")
+                                        }
+                                    } label: {
+                                        HStack(spacing: MADTheme.Spacing.xs) {
+                                            Text("Friends")
+                                                .font(MADTheme.Typography.smallBold)
+                                            Image(systemName: "chevron.down")
+                                                .font(.caption2)
+                                        }
+                                        .foregroundColor(.green)
+                                        .padding(.horizontal, MADTheme.Spacing.md)
+                                        .padding(.vertical, MADTheme.Spacing.sm)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                                                .fill(Color.green.opacity(0.1))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                                                        .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                                                )
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    // Show regular action button for non-friends
+                                    FriendActionButton(
+                                        title: getActionButtonTitle(for: user),
+                                        style: getActionButtonStyle(for: user),
+                                        isLoading: false,
+                                        action: {
+                                            handleFriendAction(for: user)
+                                        }
+                                    )
                                 }
-                            )
+                            }
                         )
                     )
                 }
             }
             .padding(MADTheme.Spacing.md)
         }
+        .background(MADTheme.Colors.appBackgroundGradient)
     }
     
     // MARK: - Loading View
@@ -104,59 +140,64 @@ struct FriendSearchView: View {
             ProgressView()
                 .scaleEffect(1.5)
                 .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
-            
+
             Text("Searching...")
                 .font(MADTheme.Typography.body)
                 .foregroundColor(MADTheme.Colors.secondaryText)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(MADTheme.Colors.appBackgroundGradient)
     }
-    
+
     // MARK: - No Results View
     private var noResultsView: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 48))
                 .foregroundColor(MADTheme.Colors.secondaryText)
-            
+
             VStack(spacing: MADTheme.Spacing.sm) {
                 Text("No Results Found")
                     .font(MADTheme.Typography.title3)
                     .foregroundColor(MADTheme.Colors.primaryText)
-                
-                Text("We couldn't find any users matching '\(searchText)'. Try a different search term or check the suggestions below.")
+
+                Text("We couldn't find any users matching '\(searchText)'. Try a different search term.")
+                    .font(MADTheme.Typography.body)
+                    .foregroundColor(MADTheme.Colors.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, MADTheme.Spacing.lg)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(MADTheme.Spacing.xl)
+        .background(MADTheme.Colors.appBackgroundGradient)
+    }
+
+    // MARK: - Recommendations View
+    private var recommendationsView: some View {
+        VStack(spacing: MADTheme.Spacing.lg) {
+            Spacer()
+
+            VStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "person.2.circle.fill")
+                    .font(.system(size: 48))
+                    .foregroundColor(MADTheme.Colors.madRed)
+
+                Text("Discover Runners")
+                    .font(MADTheme.Typography.title2)
+                    .foregroundColor(MADTheme.Colors.primaryText)
+
+                Text("Type at least 3 letters to search for users")
                     .font(MADTheme.Typography.body)
                     .foregroundColor(MADTheme.Colors.secondaryText)
                     .multilineTextAlignment(.center)
             }
-            
+
+            Spacer()
         }
-        .padding(MADTheme.Spacing.xl)
-    }
-    
-    // MARK: - Recommendations View
-    private var recommendationsView: some View {
-        ScrollView {
-            VStack(spacing: MADTheme.Spacing.lg) {
-                // Header
-                VStack(spacing: MADTheme.Spacing.sm) {
-                    Image(systemName: "person.2.circle.fill")
-                        .font(.system(size: 48))
-                        .foregroundColor(MADTheme.Colors.madRed)
-                    
-                    Text("Discover Runners")
-                        .font(MADTheme.Typography.title2)
-                        .foregroundColor(MADTheme.Colors.primaryText)
-                    
-                    Text("Type at least 3 letters to search for users")
-                        .font(MADTheme.Typography.body)
-                        .foregroundColor(MADTheme.Colors.secondaryText)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(MADTheme.Spacing.lg)
-            }
-            .padding(MADTheme.Spacing.md)
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(MADTheme.Spacing.lg)
+        .background(MADTheme.Colors.appBackgroundGradient)
     }
     
     // MARK: - Helper Methods
@@ -168,9 +209,9 @@ struct FriendSearchView: View {
         
         // Only search if we have at least 3 characters
         if trimmedText.count >= 3 {
-            // Debounce the search by 300ms
+            // Debounce the search by 150ms for faster response
             searchTask = Task {
-                try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+                try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
                 
                 if !Task.isCancelled {
                     await MainActor.run {
@@ -186,25 +227,34 @@ struct FriendSearchView: View {
     }
     
     private func performSearch() {
-        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            searchResults = []
+            isLoading = false
+            return
+        }
+
         let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         print("[FriendSearchView] 🔍 Starting search for: '\(trimmedSearch)'")
-        
+
         isLoading = true
         errorMessage = nil
-        
+
         Task {
             do {
                 let users = try await friendService.searchUsers(byUsername: trimmedSearch)
                 print("[FriendSearchView] ✅ Search successful, found \(users.count) user(s)")
+
+                // Only update if this search is still relevant
+                guard !Task.isCancelled else { return }
+
                 await MainActor.run {
                     searchResults = users
                     isLoading = false
                 }
             } catch {
+                guard !Task.isCancelled else { return }
+
                 print("[FriendSearchView] ❌ Search failed with error: \(error)")
-                print("[FriendSearchView] 📝 Error localized description: \(error.localizedDescription)")
                 await MainActor.run {
                     errorMessage = error.localizedDescription
                     searchResults = []
@@ -212,12 +262,6 @@ struct FriendSearchView: View {
                 }
             }
         }
-    }
-    
-    private func clearSearch() {
-        searchText = ""
-        searchResults = []
-        errorMessage = nil
     }
     
     private func getActionButtonTitle(for user: BackendUser) -> String {
@@ -258,10 +302,42 @@ struct FriendSearchView: View {
                 } else {
                     try await friendService.sendFriendRequest(to: user)
                 }
-                
+
                 // Refresh the search results to update button states
                 await MainActor.run {
                     performSearch()
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func handleUnfriend(_ user: BackendUser) {
+        Task {
+            do {
+                try await friendService.removeFriend(user)
+                // Refresh the search results to update button states
+                await MainActor.run {
+                    performSearch()
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func handleBlock(_ user: BackendUser) {
+        Task {
+            do {
+                try await friendService.blockUser(user)
+                // Remove from search results
+                await MainActor.run {
+                    searchResults.removeAll { $0.user_id == user.user_id }
                 }
             } catch {
                 await MainActor.run {
@@ -275,6 +351,6 @@ struct FriendSearchView: View {
 // MARK: - Preview
 struct FriendSearchView_Previews: PreviewProvider {
     static var previews: some View {
-        FriendSearchView()
+        FriendSearchView(friendService: FriendService())
     }
 }

@@ -142,6 +142,14 @@ enum CompetitionUnit: String, Codable, CaseIterable {
         rawValue.capitalized
     }
 
+    var shortDisplayName: String {
+        switch self {
+        case .miles: return "mi"
+        case .kilometers: return "km"
+        case .steps: return "k"
+        }
+    }
+
     var icon: String {
         switch self {
         case .miles: return "figure.run"

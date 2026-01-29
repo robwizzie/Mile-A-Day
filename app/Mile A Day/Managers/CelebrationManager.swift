@@ -181,6 +181,8 @@ class CelebrationManager: ObservableObject {
     private func formatDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
+        formatter.calendar = Calendar.current
+        formatter.timeZone = TimeZone.current
         return formatter.string(from: date)
     }
 
@@ -189,16 +191,24 @@ class CelebrationManager: ObservableObject {
         // Special handling for goal completion - only allow once per day
         if case .goalCompleted = celebration {
             guard !hasShownGoalCelebrationToday else {
-                print("[CelebrationManager] Goal celebration already shown today, skipping")
+                print("[CelebrationManager] ⏭️  Goal celebration already shown today (\(lastGoalCelebrationDateString)), skipping")
                 return
             }
+            print("[CelebrationManager] ✅ Goal celebration will be shown (last shown: \(lastGoalCelebrationDateString.isEmpty ? "never" : lastGoalCelebrationDateString), today: \(formatDate(Date())))")
             markGoalCelebrationShown()
         }
-        
-        // Avoid duplicates in queue
-        guard !celebrationQueue.contains(where: { $0 == celebration }) else { return }
-        guard currentCelebration != celebration else { return }
 
+        // Avoid duplicates in queue
+        guard !celebrationQueue.contains(where: { $0 == celebration }) else {
+            print("[CelebrationManager] ⏭️  Celebration already in queue, skipping")
+            return
+        }
+        guard currentCelebration != celebration else {
+            print("[CelebrationManager] ⏭️  Celebration already showing, skipping")
+            return
+        }
+
+        print("[CelebrationManager] 🎉 Adding celebration to queue: \(celebration.id)")
         celebrationQueue.append(celebration)
 
         // If nothing is currently showing, show the next one

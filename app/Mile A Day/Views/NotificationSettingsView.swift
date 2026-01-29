@@ -31,6 +31,8 @@ struct NotificationSettingsView: View {
             Section(header: Text("Instant Notifications")) {
                 Toggle("When I complete a mile", isOn: $prefs.mileCompletedEnabled)
                 Toggle("When a friend completes a mile", isOn: $prefs.friendCompletedEnabled)
+                Toggle("When I receive a friend request", isOn: $prefs.friendRequestReceivedEnabled)
+                Toggle("When a friend request is accepted", isOn: $prefs.friendRequestAcceptedEnabled)
             }
         }
         .navigationTitle("Notifications")

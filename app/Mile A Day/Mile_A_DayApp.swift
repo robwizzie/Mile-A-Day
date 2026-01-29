@@ -6,10 +6,13 @@
 //
 
 import SwiftUI
+import UIKit
 import BackgroundTasks
 
 @main
 struct Mile_A_DayApp: App {
+    
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     init() {
         // Register background tasks when app launches

@@ -128,7 +128,7 @@ struct CompetitionCard: View {
                 // Goal info
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Label(
-                        "\(competition.options.goalFormatted) \(competition.options.unit.rawValue)",
+                        "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)",
                         systemImage: "target"
                     )
                     .font(MADTheme.Typography.callout)
@@ -237,7 +237,7 @@ struct InviteCard: View {
 
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Label(
-                        "\(competition.options.goalFormatted) \(competition.options.unit.rawValue)",
+                        "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)",
                         systemImage: "target"
                     )
                     .font(MADTheme.Typography.callout)

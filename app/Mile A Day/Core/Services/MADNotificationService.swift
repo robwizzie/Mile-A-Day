@@ -65,6 +65,10 @@ final class MADNotificationService: NSObject, ObservableObject {
     /// Immediately sends a local notification celebrating mile completion.
     /// Prevents duplicate notifications for the same day.
     func sendMileCompletedNotification() {
+        // Respect user preferences
+        let prefs = NotificationPreferences.load()
+        guard prefs.mileCompletedEnabled else { return }
+        
         // Check if we already sent a notification today
         if let lastDate = lastCompletionNotificationDate,
            Calendar.current.isDate(lastDate, inSameDayAs: Date()) {
@@ -86,6 +90,10 @@ final class MADNotificationService: NSObject, ObservableObject {
     /// Sends a local push announcing a friend's mile completion.
     /// - Parameter friendName: The friend's display name.
     func sendFriendCompletedNotification(friendName: String) {
+        // Respect user preferences
+        let prefs = NotificationPreferences.load()
+        guard prefs.friendCompletedEnabled else { return }
+        
         let content = UNMutableNotificationContent()
         content.title = "\(friendName) just ran a mile!"
         content.body = "Send a high-five and keep each other motivated."
@@ -155,6 +163,36 @@ final class MADNotificationService: NSObject, ObservableObject {
         return shouldSend
     }
     
+    /// Sends a notification when a new friend request is received.
+    /// Intended to be called on the device that detects a new incoming request.
+    /// - Parameter fromName: Display name of the user who sent the request.
+    func sendFriendRequestReceivedNotification(fromName: String) {
+        let prefs = NotificationPreferences.load()
+        guard prefs.friendRequestReceivedEnabled else { return }
+        
+        let content = UNMutableNotificationContent()
+        content.title = "New friend request"
+        content.body = "\(fromName) just sent you a friend request."
+        content.sound = .default
+        
+        schedule(content: content, trigger: .none, identifier: Identifier.friendRequestReceived(fromName))
+    }
+    
+    /// Sends a notification when a friendship is created (a request is accepted).
+    /// This can be triggered on whichever device first sees the new friendship.
+    /// - Parameter friendName: Display name of the new friend.
+    func sendFriendRequestAcceptedNotification(friendName: String) {
+        let prefs = NotificationPreferences.load()
+        guard prefs.friendRequestAcceptedEnabled else { return }
+        
+        let content = UNMutableNotificationContent()
+        content.title = "You're now friends!"
+        content.body = "You and \(friendName) are now friends."
+        content.sound = .default
+        
+        schedule(content: content, trigger: .none, identifier: Identifier.friendRequestAccepted(friendName))
+    }
+    
     /// Resets the daily notification tracking (call at midnight or app launch)
     func resetDailyNotificationTracking() {
         if let lastDate = lastCompletionNotificationDate,
@@ -203,6 +241,8 @@ extension MADNotificationService {
         static let mileCompleted = "mileCompleted"
         static let dailyReminder = "dailyReminder"
         static func friendCompleted(_ friend: String) -> String { "friendCompleted_\(friend)" }
+        static func friendRequestReceived(_ from: String) -> String { "friendRequestReceived_\(from)" }
+        static func friendRequestAccepted(_ friend: String) -> String { "friendRequestAccepted_\(friend)" }
     }
 }
 

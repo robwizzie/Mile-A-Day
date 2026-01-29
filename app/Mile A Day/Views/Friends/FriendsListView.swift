@@ -6,47 +6,76 @@ struct FriendsListView: View {
     @State private var selectedTab = 0
     @State private var showingSearch = false
     @State private var selectedUser: BackendUser?
+    @State private var showingUnfriendAlert = false
+    @State private var showingBlockAlert = false
+    @State private var userToUnfriend: BackendUser?
+    @State private var userToBlock: BackendUser?
     
     var body: some View {
         VStack(spacing: 0) {
             // Tab Selector
             tabSelector
-            
-            // Content
-            TabView(selection: $selectedTab) {
-                // Friends Tab
-                friendsTab
-                    .tag(0)
-                
-                // Requests Tab
-                requestsTab
-                    .tag(1)
-                
-                // Sent Tab
-                sentTab
-                    .tag(2)
+
+            // Content - Use conditional rendering for better performance
+            Group {
+                switch selectedTab {
+                case 0:
+                    friendsTab
+                        .id("friends-tab")
+                case 1:
+                    requestsTab
+                        .id("requests-tab")
+                case 2:
+                    sentTab
+                        .id("sent-tab")
+                default:
+                    friendsTab
+                        .id("friends-tab")
+                }
             }
-            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
         }
         .background(MADTheme.Colors.appBackgroundGradient)
         .navigationTitle("Friends")
         .navigationBarTitleDisplayMode(.inline)
         // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
             .sheet(isPresented: $showingSearch) {
-                FriendSearchView()
+                NavigationStack {
+                    FriendSearchView(friendService: friendService)
+                }
             }
             .sheet(item: $selectedUser) { user in
                 NavigationStack {
                     UserProfileDetailView(user: user, friendService: friendService)
                 }
             }
-            .onAppear {
-                Task {
+            .task {
+                // Only load once when view first appears
+                if friendService.friends.isEmpty && friendService.friendRequests.isEmpty && friendService.sentRequests.isEmpty {
                     await friendService.refreshAllData()
                 }
             }
             .refreshable {
                 await friendService.refreshAllData()
+            }
+            .alert("Unfriend \(userToUnfriend?.displayName ?? "User")?", isPresented: $showingUnfriendAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Unfriend", role: .destructive) {
+                    if let user = userToUnfriend {
+                        handleUnfriend(user)
+                    }
+                }
+            } message: {
+                Text("You will no longer be friends with this person.")
+            }
+            .alert("Block \(userToBlock?.displayName ?? "User")?", isPresented: $showingBlockAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Block", role: .destructive) {
+                    if let user = userToBlock {
+                        handleBlock(user)
+                    }
+                }
+            } message: {
+                Text("You will unfriend and block this person. They won't be able to see your profile or send you friend requests.")
             }
     }
     
@@ -58,21 +87,21 @@ struct FriendsListView: View {
                     title: "Friends",
                     count: friendService.friends.count,
                     isSelected: selectedTab == 0,
-                    action: { withAnimation { selectedTab = 0 } }
+                    action: { selectedTab = 0 }
                 )
-                
+
                 TabButton(
                     title: "Requests",
                     count: friendService.friendRequests.count,
                     isSelected: selectedTab == 1,
-                    action: { withAnimation { selectedTab = 1 } }
+                    action: { selectedTab = 1 }
                 )
-                
+
                 TabButton(
                     title: "Sent",
                     count: friendService.sentRequests.count,
                     isSelected: selectedTab == 2,
-                    action: { withAnimation { selectedTab = 2 } }
+                    action: { selectedTab = 2 }
                 )
             }
             
@@ -112,11 +141,40 @@ struct FriendsListView: View {
                                     selectedUser = friend
                                 },
                                 actionButton: AnyView(
-                                    FriendActionButton(
-                                        title: "Friends",
-                                        style: .success,
-                                        action: {}
-                                    )
+                                    Menu {
+                                        Button(role: .destructive) {
+                                            userToUnfriend = friend
+                                            showingUnfriendAlert = true
+                                        } label: {
+                                            Label("Unfriend", systemImage: "person.fill.xmark")
+                                        }
+
+                                        Button(role: .destructive) {
+                                            userToBlock = friend
+                                            showingBlockAlert = true
+                                        } label: {
+                                            Label("Block", systemImage: "hand.raised.fill")
+                                        }
+                                    } label: {
+                                        HStack(spacing: MADTheme.Spacing.xs) {
+                                            Text("Friends")
+                                                .font(MADTheme.Typography.smallBold)
+                                            Image(systemName: "chevron.down")
+                                                .font(.caption2)
+                                        }
+                                        .foregroundColor(.green)
+                                        .padding(.horizontal, MADTheme.Spacing.md)
+                                        .padding(.vertical, MADTheme.Spacing.sm)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                                                .fill(Color.green.opacity(0.1))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                                                        .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                                                )
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
                                 )
                             )
                         }
@@ -148,22 +206,45 @@ struct FriendsListView: View {
                                     selectedUser = request
                                 },
                                 actionButton: AnyView(
-                                    HStack(spacing: MADTheme.Spacing.sm) {
-                                        FriendActionButton(
-                                            title: "Accept",
-                                            style: .primary,
-                                            action: {
-                                                handleAcceptRequest(request)
+                                    HStack(spacing: MADTheme.Spacing.md) {
+                                        // Accept button
+                                        Button(action: {
+                                            handleAcceptRequest(request)
+                                        }) {
+                                            HStack(spacing: MADTheme.Spacing.xs) {
+                                                Image(systemName: "checkmark")
+                                                    .font(.system(size: 14, weight: .semibold))
+                                                Text("Accept")
+                                                    .font(MADTheme.Typography.smallBold)
                                             }
-                                        )
-                                        
-                                        FriendActionButton(
-                                            title: "Decline",
-                                            style: .destructive,
-                                            action: {
-                                                handleDeclineRequest(request)
-                                            }
-                                        )
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, MADTheme.Spacing.md)
+                                            .padding(.vertical, MADTheme.Spacing.sm)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                                                    .fill(Color.green)
+                                            )
+                                        }
+                                        .buttonStyle(.plain)
+
+                                        // Decline button
+                                        Button(action: {
+                                            handleDeclineRequest(request)
+                                        }) {
+                                            Image(systemName: "xmark")
+                                                .font(.system(size: 14, weight: .semibold))
+                                                .foregroundColor(.white.opacity(0.8))
+                                                .frame(width: 36, height: 36)
+                                                .background(
+                                                    Circle()
+                                                        .fill(Color.red.opacity(0.2))
+                                                        .overlay(
+                                                            Circle()
+                                                                .stroke(Color.red.opacity(0.4), lineWidth: 1)
+                                                        )
+                                                )
+                                        }
+                                        .buttonStyle(.plain)
                                     }
                                 )
                             )
@@ -252,6 +333,26 @@ struct FriendsListView: View {
         Task {
             do {
                 try await friendService.cancelFriendRequest(to: user)
+            } catch {
+                // Handle error
+            }
+        }
+    }
+
+    private func handleUnfriend(_ user: BackendUser) {
+        Task {
+            do {
+                try await friendService.removeFriend(user)
+            } catch {
+                // Handle error
+            }
+        }
+    }
+
+    private func handleBlock(_ user: BackendUser) {
+        Task {
+            do {
+                try await friendService.blockUser(user)
             } catch {
                 // Handle error
             }

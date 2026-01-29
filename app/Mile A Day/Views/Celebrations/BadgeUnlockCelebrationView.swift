@@ -336,7 +336,8 @@ struct BadgeUnlockCelebrationView: View {
                 }
                 
                 Spacer()
-                
+                    .frame(minHeight: 20)
+
                 // Action buttons
                 if showButtons {
                     VStack(spacing: 14) {
@@ -404,9 +405,10 @@ struct BadgeUnlockCelebrationView: View {
                         removal: .opacity
                     ))
                 }
-                
+
+                // Safe area spacing for bottom (tab bar + home indicator)
                 Spacer()
-                    .frame(height: 50)
+                    .frame(height: 100)
             }
         }
         .ignoresSafeArea()

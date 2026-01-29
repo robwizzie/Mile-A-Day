@@ -24,45 +24,47 @@ struct UserProfileCard: View {
     }
     
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: MADTheme.Spacing.md) {
-                // Profile Image
-                ProfileImageView(user: user, size: 60)
-                
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
-                    // Username and Name
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(user.username ?? "Unknown")
-                            .font(MADTheme.Typography.headline)
-                            .foregroundColor(MADTheme.Colors.primaryText)
-                        
-                        if user.displayName != user.username {
-                            Text(user.displayName)
+        HStack(spacing: MADTheme.Spacing.md) {
+            // Profile Image and Info - Tappable area
+            Button(action: onTap) {
+                HStack(spacing: MADTheme.Spacing.md) {
+                    ProfileImageView(user: user, size: 60)
+
+                    VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
+                        // Username and Name
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(user.username ?? "Unknown")
+                                .font(MADTheme.Typography.headline)
+                                .foregroundColor(MADTheme.Colors.primaryText)
+
+                            if user.displayName != user.username {
+                                Text(user.displayName)
+                                    .font(MADTheme.Typography.caption)
+                                    .foregroundColor(MADTheme.Colors.secondaryText)
+                            }
+                        }
+
+                        // Bio
+                        if let bio = user.bio, !bio.isEmpty {
+                            Text(bio)
                                 .font(MADTheme.Typography.caption)
                                 .foregroundColor(MADTheme.Colors.secondaryText)
+                                .lineLimit(2)
                         }
                     }
-                    
-                    // Bio
-                    if let bio = user.bio, !bio.isEmpty {
-                        Text(bio)
-                            .font(MADTheme.Typography.caption)
-                            .foregroundColor(MADTheme.Colors.secondaryText)
-                            .lineLimit(2)
-                    }
-                }
-                
-                Spacer()
-                
-                // Action Button
-                if let actionButton = actionButton {
-                    actionButton
                 }
             }
-            .padding(MADTheme.Spacing.md)
-            .madCard()
+            .buttonStyle(PlainButtonStyle())
+
+            Spacer()
+
+            // Action Button - Separate from the profile tap area
+            if let actionButton = actionButton {
+                actionButton
+            }
         }
-        .buttonStyle(PlainButtonStyle())
+        .padding(MADTheme.Spacing.md)
+        .madCard()
     }
 }
 
@@ -560,7 +562,10 @@ struct FriendEmptyStateView: View {
     let systemImage: String
     let actionTitle: String?
     let action: (() -> Void)?
-    
+
+    @State private var iconScale: CGFloat = 0.8
+    @State private var glowOpacity: Double = 0.3
+
     init(
         title: String,
         message: String,
@@ -574,32 +579,98 @@ struct FriendEmptyStateView: View {
         self.actionTitle = actionTitle
         self.action = action
     }
-    
+
     var body: some View {
-        VStack(spacing: MADTheme.Spacing.lg) {
-            Image(systemName: systemImage)
-                .font(.system(size: 64))
-                .foregroundColor(MADTheme.Colors.madRed.opacity(0.6))
-            
-            VStack(spacing: MADTheme.Spacing.sm) {
+        VStack(spacing: MADTheme.Spacing.xl) {
+            // Animated icon with glow effect
+            ZStack {
+                // Outer glow rings
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .stroke(
+                            MADTheme.Colors.madRed.opacity(glowOpacity * (0.3 - Double(index) * 0.1)),
+                            lineWidth: 2
+                        )
+                        .frame(width: 140 + CGFloat(index * 20), height: 140 + CGFloat(index * 20))
+                        .scaleEffect(iconScale)
+                }
+
+                // Icon container
+                ZStack {
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [
+                                    MADTheme.Colors.madRed.opacity(0.3),
+                                    MADTheme.Colors.madRed.opacity(0.1),
+                                    Color.clear
+                                ],
+                                center: .center,
+                                startRadius: 30,
+                                endRadius: 70
+                            )
+                        )
+                        .frame(width: 140, height: 140)
+
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .frame(width: 100, height: 100)
+
+                    Image(systemName: systemImage)
+                        .font(.system(size: 50, weight: .medium))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [MADTheme.Colors.madRed, .orange],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                }
+                .scaleEffect(iconScale)
+            }
+            .onAppear {
+                withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
+                    iconScale = 1.1
+                    glowOpacity = 0.6
+                }
+            }
+
+            VStack(spacing: MADTheme.Spacing.md) {
                 Text(title)
-                    .font(MADTheme.Typography.title3)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundColor(MADTheme.Colors.primaryText)
-                
+                    .multilineTextAlignment(.center)
+
                 Text(message)
                     .font(MADTheme.Typography.body)
                     .foregroundColor(MADTheme.Colors.secondaryText)
                     .multilineTextAlignment(.center)
+                    .padding(.horizontal, MADTheme.Spacing.lg)
             }
-            
+
             if let actionTitle = actionTitle, let action = action {
                 Button(action: action) {
-                    Text(actionTitle)
+                    HStack(spacing: MADTheme.Spacing.sm) {
+                        Image(systemName: "person.badge.plus")
+                            .font(.title3)
+                        Text(actionTitle)
+                            .font(MADTheme.Typography.callout)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, MADTheme.Spacing.xl)
+                    .padding(.vertical, MADTheme.Spacing.md)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .fill(MADTheme.Colors.primaryGradient)
+                            .shadow(color: MADTheme.Colors.madRed.opacity(0.4), radius: 15, x: 0, y: 8)
+                    )
                 }
-                .madPrimaryButton()
+                .buttonStyle(ScaleButtonStyle())
             }
         }
         .padding(MADTheme.Spacing.xl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

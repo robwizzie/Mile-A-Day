@@ -53,7 +53,7 @@ struct GoalCompletedCelebrationView: View {
             // Content
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    Spacer(minLength: 60)
+                    Spacer(minLength: 80)
                     
                     // Main trophy/checkmark icon
                     mainIconView
@@ -107,8 +107,9 @@ struct GoalCompletedCelebrationView: View {
                         buttonSection
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    
-                    Spacer(minLength: 50)
+
+                    // Safe area spacing for bottom (tab bar + home indicator)
+                    Spacer(minLength: 100)
                 }
                 .padding(.horizontal, 24)
             }

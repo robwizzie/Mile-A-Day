@@ -6,6 +6,13 @@ struct NotificationPreferences: Codable {
 
     var mileCompletedEnabled: Bool = true
     var friendCompletedEnabled: Bool = true
+    
+    /// Notify when someone sends me a friend request.
+    var friendRequestReceivedEnabled: Bool = true
+    
+    /// Notify when a friend request results in a new friendship.
+    /// (Used on devices that detect a new friend relationship.)
+    var friendRequestAcceptedEnabled: Bool = true
 
     static let `default` = NotificationPreferences()
 }

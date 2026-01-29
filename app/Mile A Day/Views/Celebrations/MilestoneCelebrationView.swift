@@ -162,8 +162,9 @@ struct MilestoneCelebrationView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
+                // Safe area spacing for bottom (tab bar + home indicator)
                 Spacer()
-                    .frame(height: 60)
+                    .frame(height: 100)
             }
         }
         .ignoresSafeArea()

@@ -124,25 +124,30 @@ class FriendService: ObservableObject {
         guard let currentUserId = getCurrentUserId() else {
             throw FriendServiceError.notAuthenticated
         }
-        
+
         let endpoint = "/friends/request"
         let body = [
             "fromUser": currentUserId,
             "toUser": user.user_id
         ]
-        
+
         let jsonData = try JSONSerialization.data(withJSONObject: body)
-        
+
         struct Response: Codable {
             let message: String
         }
-        
+
         let _: Response = try await makeRequest(
             endpoint: endpoint,
             method: .POST,
             body: jsonData,
             responseType: Response.self
         )
+
+        // Optimistic update: Add to sent requests
+        if !sentRequests.contains(where: { $0.user_id == user.user_id }) {
+            sentRequests.append(user)
+        }
     }
     
     /// Get all friends
@@ -161,10 +166,24 @@ class FriendService: ObservableObject {
             throw FriendServiceError.notAuthenticated
         }
         
+        // Capture existing request IDs so we can detect newly arrived requests
+        let existingRequestIds = Set(friendRequests.map { $0.user_id })
+        
         let endpoint = "/friends/requests/\(currentUserId)"
         let response: FriendRequestsResponse = try await makeRequest(endpoint: endpoint, responseType: FriendRequestsResponse.self)
         
+        // Update local state
         friendRequests = response.requests
+        
+        // Detect any brand new incoming requests and trigger notifications
+        let newRequests = response.requests.filter { !existingRequestIds.contains($0.user_id) }
+        if !newRequests.isEmpty {
+            let notificationService = MADNotificationService.shared
+            newRequests.forEach { user in
+                let displayName = user.displayName
+                notificationService.sendFriendRequestReceivedNotification(fromName: displayName)
+            }
+        }
     }
     
     /// Get sent friend requests
@@ -205,6 +224,10 @@ class FriendService: ObservableObject {
         // Remove from friend requests and add to friends
         friendRequests.removeAll { $0.user_id == user.user_id }
         friends.append(user)
+        
+         // Notify that this friendship is now established
+        let notificationService = MADNotificationService.shared
+        notificationService.sendFriendRequestAcceptedNotification(friendName: user.displayName)
     }
     
     /// Decline a friend request
@@ -300,7 +323,7 @@ class FriendService: ObservableObject {
             throw FriendServiceError.notAuthenticated
         }
         
-        let endpoint = "/friends/decline"
+        let endpoint = "/friends/cancel"
         let body = [
             "fromUser": currentUserId,
             "toUser": user.user_id
@@ -322,7 +345,77 @@ class FriendService: ObservableObject {
         // Remove from sent requests
         sentRequests.removeAll { $0.user_id == user.user_id }
     }
-    
+
+    // MARK: - Block/Unblock Management
+
+    /// Block a user
+    func blockUser(_ user: BackendUser) async throws {
+        guard let currentUserId = getCurrentUserId() else {
+            throw FriendServiceError.notAuthenticated
+        }
+
+        let endpoint = "/friends/block"
+        let body = [
+            "fromUser": currentUserId,
+            "toUser": user.user_id
+        ]
+
+        let jsonData = try JSONSerialization.data(withJSONObject: body)
+
+        struct Response: Codable {
+            let message: String
+        }
+
+        let _: Response = try await makeRequest(
+            endpoint: endpoint,
+            method: .POST,
+            body: jsonData,
+            responseType: Response.self
+        )
+
+        // Remove from friends if they were a friend
+        friends.removeAll { $0.user_id == user.user_id }
+        // Remove from requests
+        friendRequests.removeAll { $0.user_id == user.user_id }
+        sentRequests.removeAll { $0.user_id == user.user_id }
+    }
+
+    /// Unblock a user
+    func unblockUser(_ user: BackendUser) async throws {
+        guard let currentUserId = getCurrentUserId() else {
+            throw FriendServiceError.notAuthenticated
+        }
+
+        let endpoint = "/friends/unblock"
+        let body = [
+            "fromUser": currentUserId,
+            "toUser": user.user_id
+        ]
+
+        let jsonData = try JSONSerialization.data(withJSONObject: body)
+
+        struct Response: Codable {
+            let message: String
+        }
+
+        let _: Response = try await makeRequest(
+            endpoint: endpoint,
+            method: .DELETE,
+            body: jsonData,
+            responseType: Response.self
+        )
+    }
+
+    /// Get blocked users list
+    func loadBlockedUsers() async throws -> [BackendUser] {
+        guard let currentUserId = getCurrentUserId() else {
+            throw FriendServiceError.notAuthenticated
+        }
+
+        let endpoint = "/friends/blocked/\(currentUserId)"
+        return try await makeRequest(endpoint: endpoint, responseType: [BackendUser].self)
+    }
+
     // MARK: - Convenience Methods
     /// Refresh all friend data
     func refreshAllData() async {

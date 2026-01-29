@@ -122,7 +122,7 @@ struct CompetitionDetailView: View {
             InfoRow(
                 icon: "target",
                 title: "Goal",
-                value: "\(competition.options.goalFormatted) \(competition.options.unit.rawValue)"
+                value: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
             )
 
             // Duration
