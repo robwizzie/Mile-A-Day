@@ -1753,73 +1753,17 @@ class HealthKitManager: ObservableObject {
         }
     }
     
-    /// Fetches workout splits by analyzing distance samples for a given workout
-    /// Returns split times in minutes per mile, or nil if no splits available
+    /// Fetches workout splits using the shared SplitCalculator.
+    /// Returns split times in minutes per mile (only full-mile splits), or nil if no splits available.
     private func fetchWorkoutSplits(for workout: HKWorkout, completion: @escaping ([TimeInterval]?) -> Void) {
-        guard let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else {
-            completion(nil)
-            return
-        }
-        
-        let workoutPredicate = HKQuery.predicateForObjects(from: workout)
-        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
-        
-        let query = HKSampleQuery(
-            sampleType: distanceType,
-            predicate: workoutPredicate,
-            limit: HKObjectQueryNoLimit,
-            sortDescriptors: [sortDescriptor]
-        ) { [weak self] _, results, error in
-            guard let self = self else {
-                completion(nil)
-                return
-            }
-            
-            if let error = error {
-                log("[HealthKit] ❌ Failed to fetch distance samples for splits: \(error.localizedDescription)")
-                completion(nil)
-                return
-            }
-            
-            guard let distanceSamples = results as? [HKQuantitySample], !distanceSamples.isEmpty else {
-                completion(nil)
-                return
-            }
-            
-            // Calculate mile splits from distance samples
-            var mileSplits: [TimeInterval] = []
-            var accumulatedDistance: Double = 0.0
-            var startTime: Date?
-            let mileInMeters = 1609.34 // One mile in meters
-            
-            for sample in distanceSamples {
-                let distance = sample.quantity.doubleValue(for: HKUnit.meter())
-                
-                if startTime == nil {
-                    startTime = sample.startDate
-                }
-                
-                accumulatedDistance += distance
-                
-                // Check if we've completed a mile
-                if accumulatedDistance >= mileInMeters {
-                    if let start = startTime {
-                        let endTime = sample.endDate
-                        let mileDuration = endTime.timeIntervalSince(start)
-                        let minutesPerMile = mileDuration / 60.0
-                        mileSplits.append(minutesPerMile)
-                        
-                        // Reset for next mile
-                        accumulatedDistance -= mileInMeters
-                        startTime = endTime
-                    }
-                }
-            }
-            
+        Task {
+            let splits = await SplitCalculator.calculateSplits(for: workout)
+            // Convert WorkoutSplit pace (seconds/mile) to minutes/mile, only for full-mile splits
+            let mileSplits: [TimeInterval] = splits
+                .filter { $0.distance >= 1.0 }
+                .map { $0.pace / 60.0 }
             completion(mileSplits.isEmpty ? nil : mileSplits)
         }
-        
-        healthStore.execute(query)
     }
     
     /// Calculates the fastest mile time from split times or falls back to average pace
