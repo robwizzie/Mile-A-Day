@@ -2,9 +2,13 @@ import SwiftUI
 
 struct BadgesView: View {
     @ObservedObject var userManager: UserManager
+    /// Optional badge to immediately drill into when this screen first appears.
+    let initialBadge: Badge?
+    
     @State private var showConfetti = false
     @State private var selectedFilter: BadgeFilter = .all
     @State private var selectedBadge: Badge?
+    @State private var isShowingDetail = false
     
     var body: some View {
         ZStack {
@@ -45,10 +49,20 @@ struct BadgesView: View {
                     userManager.markBadgesAsViewed()
                 }
             }
+            
+            // If we were given an initial badge from the home screen,
+            // immediately navigate to its detail inside the Badges nav stack.
+            if let initialBadge, selectedBadge == nil {
+                selectedBadge = initialBadge
+                isShowingDetail = true
+            }
         }
         .confetti(isShowing: $showConfetti)
-        .sheet(item: $selectedBadge) { badge in
-            BadgeDetailView(badge: badge)
+        .navigationDestination(isPresented: $isShowingDetail) {
+            // Only show when we actually have a badge selected
+            if let badge = selectedBadge {
+                BadgeDetailView(badge: badge, userManager: userManager)
+            }
         }
     }
     
@@ -215,6 +229,7 @@ struct BadgesView: View {
                 Button {
                     UIImpactFeedbackGenerator(style: badge.isLocked ? .light : .medium).impactOccurred()
                     selectedBadge = badge
+                    isShowingDetail = true
                 } label: {
                     PremiumBadgeCard(badge: badge)
                 }
@@ -627,6 +642,6 @@ struct BadgeCardButtonStyle: ButtonStyle {
 
 #Preview {
     NavigationStack {
-        BadgesView(userManager: UserManager())
+        BadgesView(userManager: UserManager(), initialBadge: nil)
     }
 }

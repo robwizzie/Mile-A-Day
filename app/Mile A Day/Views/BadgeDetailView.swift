@@ -7,6 +7,7 @@ import SwiftUI
 
 struct BadgeDetailView: View {
     let badge: Badge
+    var userManager: UserManager?
     @Environment(\.dismiss) private var dismiss
     
     // Animation states
@@ -403,6 +404,11 @@ struct BadgeDetailView: View {
                 .multilineTextAlignment(.center)
                 .lineSpacing(4)
             
+            // Your progress (when we have user stats)
+            if let um = userManager {
+                lockedProgressCard(user: um.currentUser)
+            }
+            
             // How to unlock card
             VStack(spacing: 12) {
                 HStack(spacing: 6) {
@@ -429,6 +435,195 @@ struct BadgeDetailView: View {
                             .stroke(Color.orange.opacity(0.25), lineWidth: 1)
                     )
             )
+        }
+    }
+    
+    // MARK: - Locked Progress Card
+    
+    @ViewBuilder
+    private func lockedProgressCard(user: User) -> some View {
+        let id = badge.id
+        if badge.isHidden {
+            EmptyView()
+        } else if (id.hasPrefix("streak_") || id.hasPrefix("consistency_")), let target = getNumber(from: id) {
+            let current = user.streak
+            let progress = target > 0 ? min(Double(current) / Double(target), 1.0) : 0
+            let need = max(0, target - current)
+            progressBlock(
+                icon: "flame.fill",
+                title: "Your progress",
+                primary: "Your streak: \(current) day\(current == 1 ? "" : "s")",
+                secondary: "Need: \(target) days",
+                delta: need > 0 ? "\(need) more day\(need == 1 ? "" : "s") to go" : "Unlock by maintaining your streak!",
+                progress: progress,
+                useBar: true
+            )
+        } else if id.hasPrefix("miles_"), let target = getNumber(from: id) {
+            let targetD = Double(target)
+            let current = user.totalMiles
+            let progress = targetD > 0 ? min(current / targetD, 1.0) : 0
+            let need = max(0, targetD - current)
+            progressBlock(
+                icon: "figure.run",
+                title: "Your progress",
+                primary: "You've run \(String(format: "%.1f", current)) mi",
+                secondary: "Need: \(target) mi total",
+                delta: need > 0 ? "\(String(format: "%.1f", need)) more miles to go" : "Keep running to lock it in!",
+                progress: progress,
+                useBar: true
+            )
+        } else if id.hasPrefix("pace_"), let targetMin = getNumber(from: id) {
+            let targetD = Double(targetMin)
+            let current = user.fastestMilePace
+            if current <= 0 {
+                progressBlock(
+                    icon: "bolt.fill",
+                    title: "Your progress",
+                    primary: "No mile pace recorded yet",
+                    secondary: "Need: sub-\(targetMin):00 /mi",
+                    delta: "Run a timed mile to see how close you are",
+                    progress: 0,
+                    useBar: false
+                )
+            } else {
+                let needMin = current - targetD
+                let needSec = Int(needMin * 60)
+                let m = needSec / 60
+                let s = needSec % 60
+                let deltaStr = needMin > 0
+                    ? "\(m):\(String(format: "%02d", s)) faster per mile needed"
+                    : "You've hit the pace — complete a sub-\(targetMin):00 mile to unlock!"
+                let progress = targetD > 0 && current >= targetD ? min(targetD / current, 1.0) : 0
+                progressBlock(
+                    icon: "bolt.fill",
+                    title: "Your progress",
+                    primary: "Your best mile: \(current.paceFormatted) /mi",
+                    secondary: "Need: sub-\(targetMin):00 /mi",
+                    delta: deltaStr,
+                    progress: progress,
+                    useBar: false
+                )
+            }
+        } else if id.hasPrefix("daily_"), let target = dailyTargetMiles(for: id) {
+            let current = user.mostMilesInOneDay
+            let progress = target > 0 ? min(current / target, 1.0) : 0
+            let need = max(0, target - current)
+            let targetStr = dailyTargetLabel(for: id)
+            progressBlock(
+                icon: "figure.run.circle.fill",
+                title: "Your progress",
+                primary: "Your best day: \(String(format: "%.1f", current)) mi",
+                secondary: "Need: \(targetStr)",
+                delta: need > 0 ? "\(String(format: "%.1f", need)) more miles in a single run" : "Run \(targetStr) in one day to unlock!",
+                progress: progress,
+                useBar: true
+            )
+        } else {
+            EmptyView()
+        }
+    }
+    
+    private func progressBlock(
+        icon: String,
+        title: String,
+        primary: String,
+        secondary: String,
+        delta: String,
+        progress: Double,
+        useBar: Bool
+    ) -> some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                Text(title.uppercased())
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .tracking(1.2)
+            }
+            .foregroundColor(.cyan)
+            
+            VStack(spacing: 8) {
+                HStack {
+                    Text(primary)
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.9))
+                    Spacer()
+                    Text(secondary)
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.6))
+                }
+                
+                if useBar {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.white.opacity(0.12))
+                                .frame(height: 8)
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.cyan, .cyan.opacity(0.7)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: max(0, geo.size.width * progress), height: 8)
+                        }
+                    }
+                    .frame(height: 8)
+                }
+                
+                Text(delta)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.cyan.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.cyan.opacity(0.2), lineWidth: 1)
+                    )
+            )
+        }
+    }
+    
+    private func dailyTargetMiles(for id: String) -> Double? {
+        switch id {
+        case "daily_2": return 2
+        case "daily_3": return 3.1
+        case "daily_5": return 5
+        case "daily_8": return 8
+        case "daily_10": return 10
+        case "daily_10k": return 6.2
+        case "daily_half": return 13.1
+        case "daily_15": return 15
+        case "daily_20": return 20
+        case "daily_marathon": return 26.2
+        case "daily_50k": return 31
+        case "daily_ultra": return 50
+        default: return nil
+        }
+    }
+    
+    private func dailyTargetLabel(for id: String) -> String {
+        switch id {
+        case "daily_2": return "2+ mi"
+        case "daily_3": return "5K (3.1 mi)"
+        case "daily_5": return "5+ mi"
+        case "daily_8": return "8+ mi"
+        case "daily_10": return "10+ mi"
+        case "daily_10k": return "10K (6.2 mi)"
+        case "daily_half": return "half marathon (13.1 mi)"
+        case "daily_15": return "15+ mi"
+        case "daily_20": return "20+ mi"
+        case "daily_marathon": return "marathon (26.2 mi)"
+        case "daily_50k": return "50K (31 mi)"
+        case "daily_ultra": return "50+ mi"
+        default: return "?"
         }
     }
     

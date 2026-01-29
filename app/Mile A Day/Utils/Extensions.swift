@@ -102,6 +102,18 @@ extension Double {
     }
 }
 
+// TimeInterval (minutes per mile) → "M:SS" pace string
+extension TimeInterval {
+    /// Format pace as "M:SS" (e.g. 7.5 → "7:30") for minutes per mile.
+    var paceFormatted: String {
+        guard self > 0, self < 60 else { return "—" }
+        let totalSeconds = Int(self * 60)
+        let m = totalSeconds / 60
+        let s = totalSeconds % 60
+        return String(format: "%d:%02d", m, s)
+    }
+}
+
 // Date extension for formatting
 extension Date {
     var formattedDate: String {

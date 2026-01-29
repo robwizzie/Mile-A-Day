@@ -248,9 +248,9 @@ struct BadgesPreviewCard: View {
     }
 
     var body: some View {
-        NavigationLink(destination: BadgesView(userManager: userManager)) {
-            VStack(alignment: .leading, spacing: 16) {
-                // Header with progress
+        VStack(alignment: .leading, spacing: 16) {
+            // Header with progress — tap to open full Badges view
+            NavigationLink(destination: BadgesView(userManager: userManager, initialBadge: nil)) {
                 HStack(spacing: 12) {
                     // Trophy with glow
                     ZStack {
@@ -312,9 +312,12 @@ struct BadgesPreviewCard: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.secondary)
                 }
+            }
+            .buttonStyle(PlainButtonStyle())
 
-                if recentBadges.isEmpty {
-                    // Empty state
+            if recentBadges.isEmpty {
+                // Empty state — tap to open Badges view
+                NavigationLink(destination: BadgesView(userManager: userManager, initialBadge: nil)) {
                     HStack {
                         Spacer()
                         VStack(spacing: 8) {
@@ -329,53 +332,56 @@ struct BadgesPreviewCard: View {
                         .padding(.vertical, 12)
                         Spacer()
                     }
-                } else {
-                    // Recent badges with modern styling
-                    HStack(spacing: 8) {
-                        ForEach(recentBadges, id: \.id) { badge in
+                }
+                .buttonStyle(PlainButtonStyle())
+            } else {
+                // 3 most recent unlocked — each medal taps to Badges page then that specific medal
+                HStack(spacing: 8) {
+                    ForEach(recentBadges, id: \.id) { badge in
+                        NavigationLink(destination: BadgesView(userManager: userManager, initialBadge: badge)) {
                             HomeBadgeItem(badge: badge, shimmerPhase: shimmerPhase)
                         }
+                        .buttonStyle(PlainButtonStyle())
                     }
                 }
             }
-            .padding()
-            .frame(minHeight: 180)
-            .background(
-                ZStack {
-                    // Liquid glass background
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(.ultraThinMaterial)
-
-                    // Gradient overlay
-                    LinearGradient(
-                        colors: [
-                            Color.orange.opacity(0.08),
-                            Color.yellow.opacity(0.03),
-                            Color.clear
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                    // Glass border
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
-                                    Color.clear
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                }
-            )
-            .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
         }
-        .buttonStyle(PlainButtonStyle())
+        .padding()
+        .frame(minHeight: 180)
+        .background(
+            ZStack {
+                // Liquid glass background
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+
+                // Gradient overlay
+                LinearGradient(
+                    colors: [
+                        Color.orange.opacity(0.08),
+                        Color.yellow.opacity(0.03),
+                        Color.clear
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                // Glass border
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
+        )
+        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
         .onAppear {
             withAnimation(.linear(duration: 2.5).repeatForever(autoreverses: false)) {
                 shimmerPhase = 1.5

@@ -83,6 +83,14 @@ struct WorkoutIndex: Codable {
         return workoutsByDate.keys.compactMap { dateFromKey($0) }.sorted()
     }
     
+    /// Pre-computed max miles in a single day (for badges and progress)
+    var mostMilesInOneDay: Double {
+        workoutsByDate.values.reduce(0.0) { best, records in
+            let dayMiles = records.reduce(0.0) { $0 + $1.distance }
+            return max(best, dayMiles)
+        }
+    }
+    
     // MARK: - Helper Methods
     
     private func dateKey(from date: Date) -> String {

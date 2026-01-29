@@ -1010,11 +1010,12 @@ class HealthKitManager: ObservableObject {
         #if !os(watchOS)
         // CRITICAL FIX: If index exists, DON'T run old streak calculation (use index value instead)
         if let index = workoutIndex {
-            log("[HealthKit] ✅ Index available, skipping old streak calculation. Using index streak: \(index.currentStreak)")
+            let indexMostMiles = index.mostMilesInOneDay
+            log("[HealthKit] ✅ Index available, skipping old streak calculation. Using index streak: \(index.currentStreak), mostMilesInOneDay: \(indexMostMiles)")
             DispatchQueue.main.async {
                 self.retroactiveStreak = index.currentStreak
-                self.mostMilesInOneDay = mostMilesInDay
-                self.mostMilesWorkouts = mostMilesWorkouts
+                self.mostMilesInOneDay = indexMostMiles
+                self.mostMilesWorkouts = [] // Index has no HKWorkouts; use empty (stats still correct)
                 self.saveCachedData() // Save correct value from index
             }
             return // Skip old calculation entirely
@@ -2747,6 +2748,8 @@ class HealthKitManager: ObservableObject {
         await MainActor.run {
             self.workoutIndex = finalIndex
             self.retroactiveStreak = finalStreak
+            self.totalLifetimeMiles = finalIndex.totalLifetimeMiles
+            self.mostMilesInOneDay = finalIndex.mostMilesInOneDay
             
             // Update dailyMileGoals from index for calendar
             var goals: [Date: Bool] = [:]
@@ -2758,10 +2761,13 @@ class HealthKitManager: ObservableObject {
             }
             self.dailyMileGoals = goals
             
+            self.saveCachedData()
+            
             print("[WorkoutIndex] ✅ Index built successfully:")
             print("  - Total workouts: \(finalTotalWorkouts)")
             print("  - Qualifying days: \(finalQualifyingDays)")
             print("  - Current streak: \(finalStreak) days")
+            print("  - Most miles in one day: \(finalIndex.mostMilesInOneDay)")
             
             // CRITICAL: Post notification that index is ready
             NotificationCenter.default.post(name: NSNotification.Name("WorkoutIndexReady"), object: nil)
@@ -2857,6 +2863,8 @@ class HealthKitManager: ObservableObject {
         await MainActor.run {
             self.workoutIndex = finalUpdatedIndex
             self.retroactiveStreak = finalUpdatedStreak
+            self.totalLifetimeMiles = finalUpdatedIndex.totalLifetimeMiles
+            self.mostMilesInOneDay = finalUpdatedIndex.mostMilesInOneDay
             
             // Update dailyMileGoals from index
             var goals: [Date: Bool] = [:]
@@ -2868,7 +2876,9 @@ class HealthKitManager: ObservableObject {
             }
             self.dailyMileGoals = goals
             
-            print("[WorkoutIndex] ✅ Index updated: \(finalUpdatedStreak) day streak")
+            self.saveCachedData()
+            
+            print("[WorkoutIndex] ✅ Index updated: \(finalUpdatedStreak) day streak, most miles in one day: \(finalUpdatedIndex.mostMilesInOneDay)")
             
             // Post notification that index was updated
             NotificationCenter.default.post(name: NSNotification.Name("WorkoutIndexReady"), object: nil)

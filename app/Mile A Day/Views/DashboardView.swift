@@ -89,86 +89,7 @@ struct DashboardView: View {
         // iOS 26: Simple ScrollView with background - no ZStack needed
         // NavigationStack is provided by MainTabView
         ScrollView {
-            VStack(spacing: 16) {
-                // In‑progress workout banner (if user dismissed full‑screen tracker)
-                if showInProgressBanner, let state = inProgressState, state.isActive {
-                    InProgressWorkoutBanner(
-                        state: state,
-                        onResume: {
-                            // Re‑open the full‑screen workout tracker
-                            showInProgressBanner = false
-                            showWorkoutView = true
-                        }
-                    )
-                }
-                
-                // Instructions banner
-                InstructionsBanner(
-                    showInstructions: $showInstructions
-                )
-
-                // SECTION: Streak Counter (full width at top)
-                StreakCard(
-                    streak: userManager.currentUser.streak,
-                    isActiveToday: userManager.currentUser.isStreakActiveToday,
-                    isAtRisk: userManager.currentUser.isStreakAtRisk,
-                    user: userManager.currentUser,
-                    progress: currentState.progress,
-                    isGoalCompleted: currentState.isCompleted,
-                    isRefreshing: isRefreshing,
-                    currentDistance: currentState.distance,
-                    fastestPace: healthManager.fastestMilePace,
-                    mostMiles: healthManager.cachedCurrentStreakStats.mostMiles > 0 ? healthManager.cachedCurrentStreakStats.mostMiles : healthManager.mostMilesInOneDay,
-                    totalMiles: healthManager.totalLifetimeMiles
-                )
-
-                // SECTION: Today's Progress (full width with Start Mile button)
-                TodayProgressCard(
-                    currentDistance: currentState.distance,
-                    goalDistance: currentState.goal,
-                    progress: currentState.progress,
-                    didComplete: currentState.isCompleted,
-                    onRefresh: refreshData,
-                    isRefreshing: isRefreshing,
-                    user: userManager.currentUser,
-                    fastestPace: healthManager.fastestMilePace,
-                    mostMiles: healthManager.mostMilesInOneDay,
-                    totalMiles: healthManager.totalLifetimeMiles,
-                    healthManager: healthManager,
-                    userManager: userManager,
-                    showWorkoutView: $showWorkoutView
-                )
-
-                // SECTION: Steps and Badges (side by side)
-                HStack(spacing: 12) {
-                    CalendarPreviewCard(
-                        healthManager: healthManager,
-                        userManager: userManager
-                    )
-                    .frame(maxWidth: .infinity)
-
-                    BadgesPreviewCard(
-                        userManager: userManager
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-
-                // SECTION: Week at a Glance
-                WeekAtAGlanceCard(
-                    healthManager: healthManager,
-                    userManager: userManager
-                )
-
-                // SECTION: Statistics & History
-                VStack(spacing: 12) {
-                    StatsGridView(user: userManager.currentUser, healthManager: healthManager)
-
-                    RecentWorkoutsView(workouts: healthManager.recentWorkouts)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 100) // Extra padding for tab bar
+            dashboardContent
         }
         .background(MADTheme.Colors.appBackgroundGradient)
         .scrollContentBackground(.hidden)
@@ -188,7 +109,7 @@ struct DashboardView: View {
             
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if userManager.hasNewBadges {
-                    NavigationLink(destination: BadgesView(userManager: userManager)) {
+                    NavigationLink(destination: BadgesView(userManager: userManager, initialBadge: nil)) {
                         Image(systemName: "trophy.fill")
                             .foregroundStyle(.yellow)
                     }
@@ -335,7 +256,7 @@ struct DashboardView: View {
                 CelebrationContainerView()
             )
             .navigationDestination(isPresented: $navigateToBadgesFromCelebration) {
-                BadgesView(userManager: userManager)
+                BadgesView(userManager: userManager, initialBadge: nil)
             }
             .onChange(of: celebrationManager.pendingAction) { _, newAction in
                 if newAction == .viewBadges {
@@ -455,6 +376,109 @@ struct DashboardView: View {
                     workoutService.errorMessage = message
                 }
             }
+        }
+    }
+
+    // MARK: - Extracted dashboard sections to help Swift type‑check
+
+    @ViewBuilder
+    private var dashboardContent: some View {
+        VStack(spacing: 16) {
+            inProgressBannerSection
+            instructionsSection
+            streakSection
+            todayProgressSection
+            stepsAndBadgesSection
+            weekAtAGlanceSection
+            statsAndHistorySection
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 100) // Extra padding for tab bar
+    }
+
+    @ViewBuilder
+    private var inProgressBannerSection: some View {
+        if showInProgressBanner, let state = inProgressState, state.isActive {
+            InProgressWorkoutBanner(
+                state: state,
+                onResume: {
+                    // Re‑open the full‑screen workout tracker
+                    showInProgressBanner = false
+                    showWorkoutView = true
+                }
+            )
+        }
+    }
+
+    private var instructionsSection: some View {
+        InstructionsBanner(
+            showInstructions: $showInstructions
+        )
+    }
+
+    private var streakSection: some View {
+        StreakCard(
+            streak: userManager.currentUser.streak,
+            isActiveToday: userManager.currentUser.isStreakActiveToday,
+            isAtRisk: userManager.currentUser.isStreakAtRisk,
+            user: userManager.currentUser,
+            progress: currentState.progress,
+            isGoalCompleted: currentState.isCompleted,
+            isRefreshing: isRefreshing,
+            currentDistance: currentState.distance,
+            fastestPace: healthManager.fastestMilePace,
+            mostMiles: healthManager.cachedCurrentStreakStats.mostMiles > 0 ? healthManager.cachedCurrentStreakStats.mostMiles : healthManager.mostMilesInOneDay,
+            totalMiles: healthManager.totalLifetimeMiles
+        )
+    }
+
+    private var todayProgressSection: some View {
+        TodayProgressCard(
+            currentDistance: currentState.distance,
+            goalDistance: currentState.goal,
+            progress: currentState.progress,
+            didComplete: currentState.isCompleted,
+            onRefresh: refreshData,
+            isRefreshing: isRefreshing,
+            user: userManager.currentUser,
+            fastestPace: healthManager.fastestMilePace,
+            mostMiles: healthManager.mostMilesInOneDay,
+            totalMiles: healthManager.totalLifetimeMiles,
+            healthManager: healthManager,
+            userManager: userManager,
+            showWorkoutView: $showWorkoutView
+        )
+    }
+
+    private var stepsAndBadgesSection: some View {
+        // Always side by side, equal width, clear gap between panes
+        HStack(spacing: 20) {
+            CalendarPreviewCard(
+                healthManager: healthManager,
+                userManager: userManager
+            )
+            .frame(maxWidth: .infinity)
+
+            BadgesPreviewCard(
+                userManager: userManager
+            )
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var weekAtAGlanceSection: some View {
+        WeekAtAGlanceCard(
+            healthManager: healthManager,
+            userManager: userManager
+        )
+    }
+
+    private var statsAndHistorySection: some View {
+        VStack(spacing: 12) {
+            StatsGridView(user: userManager.currentUser, healthManager: healthManager)
+
+            RecentWorkoutsView(workouts: healthManager.recentWorkouts)
         }
     }
 }
