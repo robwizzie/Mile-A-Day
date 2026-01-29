@@ -732,8 +732,14 @@ class HealthKitManager: ObservableObject {
     /// Today's total calories burned (estimated from workouts)
     var todaysTotalCalories: Double {
         return recentWorkouts.reduce(0) { total, workout in
-            if let energyBurned = workout.totalEnergyBurned {
-                return total + energyBurned.doubleValue(for: HKUnit.kilocalorie())
+            if #available(iOS 18.0, *) {
+                if let statistics = workout.statistics(for: HKQuantityType(.activeEnergyBurned)),
+                   let energy = statistics.sumQuantity() {
+                    return total + energy.doubleValue(for: .kilocalorie())
+                }
+            } else if let energyBurned = workout.totalEnergyBurned {
+                // Fallback for iOS versions before the deprecation of totalEnergyBurned
+                return total + energyBurned.doubleValue(for: .kilocalorie())
             }
             return total
         }

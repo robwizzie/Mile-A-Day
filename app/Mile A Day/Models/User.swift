@@ -184,13 +184,23 @@ struct User: Identifiable, Codable {
         // MARK: - Consistency (Early Streak) Milestones
         if streak >= 3 && !hasBadge(id: "consistency_3") {
             let earnedDate = calculateRetroactiveDate(for: 3, type: .streak)
-            let badge = Badge(id: "consistency_3", name: "Getting Started", description: "3 day streak! You're on your way!")
+            let badge = Badge(
+                id: "consistency_3",
+                name: "Getting Started",
+                description: "3 day streak! You're on your way!",
+                dateAwarded: earnedDate
+            )
             badges.append(badge)
             newBadges.append(badge)
         }
         if streak >= 5 && !hasBadge(id: "consistency_5") {
             let earnedDate = calculateRetroactiveDate(for: 5, type: .streak)
-            let badge = Badge(id: "consistency_5", name: "Building Habits", description: "5 day streak! Consistency is key!")
+            let badge = Badge(
+                id: "consistency_5",
+                name: "Building Habits",
+                description: "5 day streak! Consistency is key!",
+                dateAwarded: earnedDate
+            )
             badges.append(badge)
             newBadges.append(badge)
         }

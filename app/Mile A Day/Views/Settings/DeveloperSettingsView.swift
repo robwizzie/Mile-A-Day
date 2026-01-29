@@ -512,12 +512,16 @@ struct DeveloperSettingsView: View {
         json["samples"] = samplesArray
 
         // Summary
+        let workoutTotalDistanceMiles = workout.totalDistance?.doubleValue(for: .mile()) ?? 0
+        let workoutTotalDistanceMeters = workout.totalDistance?.doubleValue(for: .meter()) ?? 0
+        let discrepancyMiles = (cumulativeDistance / 1609.34) - workoutTotalDistanceMiles
+
         json["summary"] = [
             "totalDistanceFromSamplesMiles": cumulativeDistance / 1609.34,
             "totalDistanceFromSamplesMeters": cumulativeDistance,
-            "workoutTotalDistanceMiles": workout.totalDistance?.doubleValue(for: .mile()) ?? 0,
-            "workoutTotalDistanceMeters": workout.totalDistance?.doubleValue(for: .meter()) ?? 0,
-            "discrepancyMiles": (cumulativeDistance / 1609.34) - (workout.totalDistance?.doubleValue(for: .mile()) ?? 0)
+            "workoutTotalDistanceMiles": workoutTotalDistanceMiles,
+            "workoutTotalDistanceMeters": workoutTotalDistanceMeters,
+            "discrepancyMiles": discrepancyMiles
         ]
 
         // Convert to JSON string
