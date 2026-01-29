@@ -111,6 +111,8 @@
 				Models/UserManager.swift,
 				Models/WorkoutIndex.swift,
 				Models/WorkoutProcessor.swift,
+				Models/WorkoutSplit.swift,
+				Utils/SplitCalculator.swift,
 			);
 			target = B20E1DC32ED544BB0041BC19 /* Mile A Day Watch Watch App */;
 		};
