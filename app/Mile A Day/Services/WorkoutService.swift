@@ -193,7 +193,7 @@ class WorkoutService: ObservableObject {
         return distance.doubleValue(for: HKUnit.mile())
     }
 
-    /// Get split data for a workout with detailed information about each split
+    /// Get split data for a workout using cumulative distance with overflow interpolation
     private func getSplitTimes(for workout: HKWorkout) async -> [WorkoutSplit] {
         return await withCheckedContinuation { continuation in
             guard HKHealthStore.isHealthDataAvailable() else {
@@ -202,44 +202,6 @@ class WorkoutService: ObservableObject {
                 return
             }
 
-            print("[WorkoutService] 🔍 Starting split calculation for workout \(workout.uuid)")
-
-            // First, try to get splits from workout events (segment markers)
-            if #available(iOS 11.0, *) {
-                let segmentEvents = workout.workoutEvents?.filter { $0.type == .segment } ?? []
-                if !segmentEvents.isEmpty {
-                    print("[WorkoutService] 📊 Found \(segmentEvents.count) segment events")
-
-                    var splits: [WorkoutSplit] = []
-                    var previousTime = workout.startDate
-                    let mileDistance = 1.0  // Assuming each segment is 1 mile
-
-                    for (index, event) in segmentEvents.enumerated() {
-                        let duration = event.dateInterval.start.timeIntervalSince(previousTime)
-                        let pace = duration / mileDistance
-
-                        let split = WorkoutSplit(
-                            splitNumber: index + 1,
-                            distance: mileDistance,
-                            duration: duration,
-                            pace: pace
-                        )
-                        splits.append(split)
-
-                        print(
-                            "[WorkoutService] ✅ Split \(split.splitNumber): \(split.formattedPace)/mile"
-                        )
-                        previousTime = event.dateInterval.start
-                    }
-
-                    continuation.resume(returning: splits)
-                    return
-                }
-            }
-
-            print("[WorkoutService] ℹ️ No segment events found, calculating from distance samples")
-
-            // Fallback: Calculate from distance samples
             guard
                 let distanceType = HKQuantityType.quantityType(
                     forIdentifier: .distanceWalkingRunning)
@@ -248,6 +210,8 @@ class WorkoutService: ObservableObject {
                 continuation.resume(returning: [])
                 return
             }
+
+            print("[WorkoutService] 🔍 Starting split calculation for workout \(workout.uuid)")
 
             let healthStore = HKHealthStore()
             let workoutPredicate = HKQuery.predicateForObjects(from: workout)
@@ -278,79 +242,87 @@ class WorkoutService: ObservableObject {
 
                 print("[WorkoutService] 📊 Found \(distanceSamples.count) distance samples")
 
-                // Calculate mile splits from distance samples
+                // Filter out bad samples: negative distance or inhumane pace (> 13.4 m/s ≈ 2:00/mile)
+                let maxHumanSpeed = 13.4 // meters per second, faster than Usain Bolt's 100m average
+                let validSamples = distanceSamples.filter { sample in
+                    let dist = sample.quantity.doubleValue(for: HKUnit.meter())
+                    let dur = sample.endDate.timeIntervalSince(sample.startDate)
+                    if dist <= 0 { return false }
+                    if dur <= 0 { return false }
+                    let speed = dist / dur
+                    return speed <= maxHumanSpeed
+                }
+
+                guard !validSamples.isEmpty else {
+                    print("[WorkoutService] ℹ️ No valid distance samples after filtering for workout \(workout.uuid)")
+                    continuation.resume(returning: [])
+                    return
+                }
+
+                let filteredCount = distanceSamples.count - validSamples.count
+                if filteredCount > 0 {
+                    print("[WorkoutService] ⚠️ Filtered out \(filteredCount) bad sample(s)")
+                }
+
+                // Use timestamp-based durations anchored to workout start
+                let mileInMeters = 1609.34
                 var splits: [WorkoutSplit] = []
-                var accumulatedDistance: Double = 0.0
-                var currentMileStartTime: Date = distanceSamples[0].startDate
-                var lastSampleEndDate: Date = distanceSamples[0].endDate
-                let mileInMeters = 1609.34  // One mile in meters
-                let mileInMiles = 1.0
+                var cumulativeDistance = 0.0
+                var currentSplitDuration = 0.0
+                var previousEndDate = workout.startDate
 
-                for sample in distanceSamples {
+                for sample in validSamples {
                     let sampleDistance = sample.quantity.doubleValue(for: HKUnit.meter())
-                    let sampleDuration = sample.endDate.timeIntervalSince(sample.startDate)
-                    lastSampleEndDate = sample.endDate
+                    let sampleDuration = sample.endDate.timeIntervalSince(previousEndDate)
+                    cumulativeDistance += sampleDistance
+                    previousEndDate = sample.endDate
 
-                    var remainingDistance = sampleDistance
-                    var sampleStartOffset: TimeInterval = 0
+                    // Track how much of this sample's time is still unassigned
+                    var remainingDuration = sampleDuration
 
-                    // Handle cases where a single sample might cross multiple mile boundaries
-                    while accumulatedDistance + remainingDistance >= mileInMeters {
-                        // Calculate distance needed to complete current mile
-                        let distanceToMile = mileInMeters - accumulatedDistance
-
-                        // Calculate time proportion for this segment of the sample
-                        let timeProportion =
-                            sampleDistance > 0 ? distanceToMile / sampleDistance : 0
-                        let timeToMile = sampleDuration * timeProportion
-
-                        // Calculate when the mile was completed
-                        let mileCompletionTime = sample.startDate.addingTimeInterval(
-                            sampleStartOffset + timeToMile)
-
-                        // Calculate split duration and pace
-                        let duration = mileCompletionTime.timeIntervalSince(currentMileStartTime)
-                        let pace = duration / mileInMiles
+                    // Loop to handle samples that cross multiple mile boundaries
+                    while cumulativeDistance >= Double(splits.count + 1) * mileInMeters {
+                        let nextFullMile = Double(splits.count + 1) * mileInMeters
+                        let extraMeters = cumulativeDistance - nextFullMile
+                        let overflowRatio = sampleDistance > 0 ? extraMeters / sampleDistance : 0
+                        let durationForThisMile = remainingDuration - (sampleDuration * overflowRatio)
+                        currentSplitDuration += durationForThisMile
+                        remainingDuration = sampleDuration * overflowRatio
 
                         let split = WorkoutSplit(
                             splitNumber: splits.count + 1,
-                            distance: mileInMiles,
-                            duration: duration,
-                            pace: pace
+                            distance: 1.0,
+                            duration: currentSplitDuration,
+                            pace: currentSplitDuration
                         )
                         splits.append(split)
 
                         print(
-                            "[WorkoutService] ✅ Split \(split.splitNumber): \(split.formattedPace)/mile (distance: \(String(format: "%.2f", split.distance)) mi, duration: \(String(format: "%.0f", split.duration))s)"
+                            "[WorkoutService] ✅ Split \(split.splitNumber): \(split.formattedPace)/mile (\(String(format: "%.0f", split.duration))s)"
                         )
 
-                        // Update for next mile
-                        remainingDistance -= distanceToMile
-                        sampleStartOffset += timeToMile
-                        accumulatedDistance = 0
-                        currentMileStartTime = mileCompletionTime
+                        currentSplitDuration = 0
                     }
 
-                    // Add any remaining distance to accumulated
-                    accumulatedDistance += remainingDistance
+                    currentSplitDuration += remainingDuration
                 }
 
-                // Add incomplete final split if there's remaining distance
-                if accumulatedDistance > 0 {
-                    let distanceInMiles = accumulatedDistance / mileInMeters
-                    let duration = lastSampleEndDate.timeIntervalSince(currentMileStartTime)
-                    let pace = duration / distanceInMiles
+                // Add incomplete final split if there's remaining time
+                if currentSplitDuration > 0 {
+                    let remainingMeters = cumulativeDistance.truncatingRemainder(dividingBy: mileInMeters)
+                    let distanceInMiles = remainingMeters / mileInMeters
+                    let pace = distanceInMiles > 0 ? (mileInMeters / remainingMeters) * currentSplitDuration : 0
 
                     let split = WorkoutSplit(
                         splitNumber: splits.count + 1,
                         distance: distanceInMiles,
-                        duration: duration,
+                        duration: currentSplitDuration,
                         pace: pace
                     )
                     splits.append(split)
 
                     print(
-                        "[WorkoutService] ✅ Incomplete Split \(split.splitNumber): \(split.formattedPace)/mile (distance: \(String(format: "%.2f", split.distance)) mi, duration: \(String(format: "%.0f", split.duration))s)"
+                        "[WorkoutService] ✅ Partial Split \(split.splitNumber): \(split.formattedPace)/mile (\(String(format: "%.2f", split.distance)) mi in \(String(format: "%.0f", split.duration))s)"
                     )
                 }
 
