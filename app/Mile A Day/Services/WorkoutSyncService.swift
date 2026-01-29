@@ -598,66 +598,87 @@ class WorkoutSyncService: ObservableObject {
 
                 print("[WorkoutSyncService] 📊 Found \(distanceSamples.count) distance samples")
 
-                // Calculate mile splits from distance samples
-                var splits: [WorkoutSplit] = []
-                var accumulatedDistance: Double = 0.0
-                var startTime: Date?
-                var lastSampleEndDate: Date?
-                let mileInMeters = 1609.34  // One mile in meters
-                let mileInMiles = 1.0
-
-                for sample in distanceSamples {
-                    let distance = sample.quantity.doubleValue(for: HKUnit.meter())
-                    lastSampleEndDate = sample.endDate
-
-                    if startTime == nil {
-                        startTime = sample.startDate
-                    }
-
-                    accumulatedDistance += distance
-
-                    // Check if we've completed a mile
-                    if accumulatedDistance >= mileInMeters {
-                        if let start = startTime {
-                            let endTime = sample.endDate
-                            let duration = endTime.timeIntervalSince(start)
-                            let pace = duration / mileInMiles
-
-                            let split = WorkoutSplit(
-                                splitNumber: splits.count + 1,
-                                distance: mileInMiles,
-                                duration: duration,
-                                pace: pace
-                            )
-                            splits.append(split)
-
-                            print(
-                                "[WorkoutSyncService] ✅ Split \(split.splitNumber): \(split.formattedPace)/mile (distance: \(String(format: "%.2f", split.distance)) mi, duration: \(String(format: "%.0f", split.duration))s)"
-                            )
-
-                            // Reset for next mile
-                            accumulatedDistance -= mileInMeters
-                            startTime = endTime
-                        }
-                    }
+                // Filter out bad samples: negative distance or inhumane pace (> 13.4 m/s ≈ 2:00/mile)
+                let maxHumanSpeed = 13.4 // meters per second, faster than Usain Bolt's 100m average
+                let validSamples = distanceSamples.filter { sample in
+                    let dist = sample.quantity.doubleValue(for: HKUnit.meter())
+                    let dur = sample.endDate.timeIntervalSince(sample.startDate)
+                    if dist <= 0 { return false }
+                    if dur <= 0 { return false }
+                    let speed = dist / dur
+                    return speed <= maxHumanSpeed
                 }
 
-                // Add incomplete final split if there's remaining distance
-                if accumulatedDistance > 0, let start = startTime, let endTime = lastSampleEndDate {
-                    let distanceInMiles = accumulatedDistance / mileInMeters
-                    let duration = endTime.timeIntervalSince(start)
-                    let pace = duration / distanceInMiles
+                guard !validSamples.isEmpty else {
+                    print("[WorkoutSyncService] ℹ️ No valid distance samples after filtering for workout \(workout.uuid)")
+                    continuation.resume(returning: [])
+                    return
+                }
+
+                let filteredCount = distanceSamples.count - validSamples.count
+                if filteredCount > 0 {
+                    print("[WorkoutSyncService] ⚠️ Filtered out \(filteredCount) bad sample(s)")
+                }
+
+                // Use timestamp-based durations anchored to workout start
+                let mileInMeters = 1609.34
+                var splits: [WorkoutSplit] = []
+                var cumulativeDistance = 0.0
+                var currentSplitDuration = 0.0
+                var previousEndDate = workout.startDate
+
+                for sample in validSamples {
+                    let sampleDistance = sample.quantity.doubleValue(for: HKUnit.meter())
+                    let sampleDuration = sample.endDate.timeIntervalSince(previousEndDate)
+                    cumulativeDistance += sampleDistance
+                    previousEndDate = sample.endDate
+
+                    // Track how much of this sample's time is still unassigned
+                    var remainingDuration = sampleDuration
+
+                    // Loop to handle samples that cross multiple mile boundaries
+                    while cumulativeDistance >= Double(splits.count + 1) * mileInMeters {
+                        let nextFullMile = Double(splits.count + 1) * mileInMeters
+                        let extraMeters = cumulativeDistance - nextFullMile
+                        let overflowRatio = sampleDistance > 0 ? extraMeters / sampleDistance : 0
+                        let durationForThisMile = remainingDuration - (sampleDuration * overflowRatio)
+                        currentSplitDuration += durationForThisMile
+                        remainingDuration = sampleDuration * overflowRatio
+
+                        let split = WorkoutSplit(
+                            splitNumber: splits.count + 1,
+                            distance: 1.0,
+                            duration: currentSplitDuration,
+                            pace: currentSplitDuration
+                        )
+                        splits.append(split)
+
+                        print(
+                            "[WorkoutSyncService] ✅ Split \(split.splitNumber): \(split.formattedPace)/mile (\(String(format: "%.0f", split.duration))s)"
+                        )
+
+                        currentSplitDuration = 0
+                    }
+
+                    currentSplitDuration += remainingDuration
+                }
+
+                // Add incomplete final split if there's remaining time
+                if currentSplitDuration > 0 {
+                    let remainingMeters = cumulativeDistance.truncatingRemainder(dividingBy: mileInMeters)
+                    let distanceInMiles = remainingMeters / mileInMeters
+                    let pace = distanceInMiles > 0 ? (mileInMeters / remainingMeters) * currentSplitDuration : 0
 
                     let split = WorkoutSplit(
                         splitNumber: splits.count + 1,
                         distance: distanceInMiles,
-                        duration: duration,
+                        duration: currentSplitDuration,
                         pace: pace
                     )
                     splits.append(split)
 
                     print(
-                        "[WorkoutSyncService] ✅ Incomplete Split \(split.splitNumber): \(split.formattedPace)/mile (distance: \(String(format: "%.2f", split.distance)) mi, duration: \(String(format: "%.0f", split.duration))s)"
+                        "[WorkoutSyncService] ✅ Partial Split \(split.splitNumber): \(split.formattedPace)/mile (\(String(format: "%.2f", split.distance)) mi in \(String(format: "%.0f", split.duration))s)"
                     )
                 }
 
