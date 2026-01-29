@@ -599,6 +599,8 @@ struct CalendarPreviewCard: View {
                     Text("\(todaysSteps)")
                         .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundColor(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                 }
 
                 // Progress bar
@@ -631,7 +633,7 @@ struct CalendarPreviewCard: View {
                 }
             }
             .padding()
-            .frame(minHeight: 180)
+            .frame(height: 180)
             .background(
                 ZStack {
                     // Liquid glass background
