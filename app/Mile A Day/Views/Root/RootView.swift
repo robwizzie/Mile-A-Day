@@ -59,6 +59,8 @@ struct RootView: View {
         }
         .environment(\.appStateManager, appStateManager)
         .animation(MADTheme.Animation.standard, value: appStateManager.currentState)
+        // Force dark mode app-wide - the app is designed with a dark theme
+        .preferredColorScheme(.dark)
         .onAppear {
             setupApp()
         }

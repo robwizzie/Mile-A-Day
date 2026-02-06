@@ -88,9 +88,11 @@ struct DashboardView: View {
     var body: some View {
         // iOS 26: Simple ScrollView with background - no ZStack needed
         // NavigationStack is provided by MainTabView
-        ScrollView {
+        ScrollView(.vertical, showsIndicators: true) {
             dashboardContent
+                .frame(maxWidth: .infinity)
         }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .background(MADTheme.Colors.appBackgroundGradient)
         .scrollContentBackground(.hidden)
         .refreshable {
@@ -395,6 +397,7 @@ struct DashboardView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 100) // Extra padding for tab bar
+        .clipped() // Prevent content overflow from causing horizontal jitter
     }
 
     @ViewBuilder
