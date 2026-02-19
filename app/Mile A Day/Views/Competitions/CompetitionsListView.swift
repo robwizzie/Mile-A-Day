@@ -12,7 +12,7 @@ struct CompetitionsListView: View {
             // Tab Selector
             tabSelector
 
-            // Content - Use conditional rendering instead of TabView for better performance
+            // Content
             Group {
                 if selectedTab == 0 {
                     competitionsTab
@@ -26,7 +26,6 @@ struct CompetitionsListView: View {
         .background(MADTheme.Colors.appBackgroundGradient)
         .navigationTitle("Competitions")
         .navigationBarTitleDisplayMode(.inline)
-        // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
         .sheet(isPresented: $showingCreateCompetition) {
             CreateCompetitionView()
         }
@@ -36,13 +35,20 @@ struct CompetitionsListView: View {
             }
         }
         .task {
-            // Only load once when view first appears
             if competitionService.competitions.isEmpty && competitionService.invites.isEmpty {
                 await competitionService.refreshAllData()
             }
         }
         .refreshable {
             await competitionService.refreshAllData()
+        }
+        .onChange(of: showingCreateCompetition) { _, isPresented in
+            if !isPresented {
+                // Refresh after creating a competition
+                Task {
+                    await competitionService.refreshAllData()
+                }
+            }
         }
     }
 
@@ -94,13 +100,37 @@ struct CompetitionsListView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: MADTheme.Spacing.md) {
-                        ForEach(competitionService.competitions) { competition in
-                            CompetitionCard(
-                                competition: competition,
-                                action: {
+                        // Lobby section
+                        let lobbyComps = competitionService.competitions.filter { $0.status == .lobby || $0.status == .scheduled }
+                        if !lobbyComps.isEmpty {
+                            SectionHeader(title: "Waiting to Start", icon: "hourglass", count: lobbyComps.count)
+                            ForEach(lobbyComps) { competition in
+                                CompetitionCard(competition: competition, action: {
                                     selectedCompetition = competition
-                                }
-                            )
+                                })
+                            }
+                        }
+
+                        // Active section
+                        let activeComps = competitionService.competitions.filter { $0.status == .active }
+                        if !activeComps.isEmpty {
+                            SectionHeader(title: "Active", icon: "bolt.fill", count: activeComps.count)
+                            ForEach(activeComps) { competition in
+                                CompetitionCard(competition: competition, action: {
+                                    selectedCompetition = competition
+                                })
+                            }
+                        }
+
+                        // Finished section
+                        let finishedComps = competitionService.competitions.filter { $0.status == .finished }
+                        if !finishedComps.isEmpty {
+                            SectionHeader(title: "Finished", icon: "checkmark.circle", count: finishedComps.count)
+                            ForEach(finishedComps) { competition in
+                                CompetitionCard(competition: competition, action: {
+                                    selectedCompetition = competition
+                                })
+                            }
                         }
                     }
                     .padding(MADTheme.Spacing.md)
@@ -161,7 +191,6 @@ struct CompetitionsListView: View {
             do {
                 try await competitionService.acceptInvite(competitionId: competition.competition_id)
             } catch {
-                // Handle error - could show an alert here
                 print("Error accepting invite: \(error)")
             }
         }
@@ -172,10 +201,37 @@ struct CompetitionsListView: View {
             do {
                 try await competitionService.declineInvite(competitionId: competition.competition_id)
             } catch {
-                // Handle error
                 print("Error declining invite: \(error)")
             }
         }
+    }
+}
+
+// MARK: - Section Header
+
+struct SectionHeader: View {
+    let title: String
+    let icon: String
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: MADTheme.Spacing.sm) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundColor(MADTheme.Colors.madRed)
+
+            Text(title)
+                .font(MADTheme.Typography.subheadline)
+                .foregroundColor(.white.opacity(0.7))
+
+            Text("\(count)")
+                .font(MADTheme.Typography.caption)
+                .foregroundColor(.white.opacity(0.5))
+
+            Spacer()
+        }
+        .padding(.horizontal, MADTheme.Spacing.sm)
+        .padding(.top, MADTheme.Spacing.md)
     }
 }
 

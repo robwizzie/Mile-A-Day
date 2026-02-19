@@ -8,9 +8,11 @@ import {
 	getCompetitions,
 	sendCompetitionInvite,
 	updateCompetitionInvite,
-	updateCompetition
+	updateCompetition,
+	deleteCompetition
 } from '../services/competitionService.js';
 import { getUser } from '../services/userService.js';
+import { CompetitionUser } from '../types/competitions.js';
 
 export async function createComp(req: AuthenticatedRequest, res: Response) {
 	if (!hasRequiredKeys(['competition_name', 'type'], req, res)) return;
@@ -39,7 +41,76 @@ export async function createComp(req: AuthenticatedRequest, res: Response) {
 	}
 }
 
-export async function startComp(req: AuthenticatedRequest, res: Response) {}
+export async function startComp(req: AuthenticatedRequest, res: Response) {
+	if (!hasRequiredKeys(['competitionId'], req, res)) return;
+
+	const competitionId = req.params.competitionId;
+
+	try {
+		const competition = await getCompetition(competitionId);
+
+		if (!competition) {
+			return res.status(404).json({ error: `No competition found with id: ${competitionId}` });
+		}
+
+		// Only owner can start
+		if (competition.owner !== req.userId!) {
+			return res.status(403).json({ error: 'Only the competition owner can start it' });
+		}
+
+		// Must not be already started
+		if (competition.start_date && new Date(competition.start_date + ' EST') <= new Date()) {
+			return res.status(400).json({ error: 'Competition has already started' });
+		}
+
+		// Need at least 2 accepted participants
+		const acceptedCount = competition.users.filter(
+			(u: CompetitionUser) => u.invite_status === 'accepted'
+		).length;
+
+		if (acceptedCount < 2) {
+			return res.status(400).json({
+				error: `Need at least 2 accepted participants to start. Currently have ${acceptedCount}.`
+			});
+		}
+
+		// Calculate dates
+		const now = new Date();
+		const startDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+
+		let endDate: string | undefined;
+		if (competition.options.duration_hours) {
+			const end = new Date(now.getTime() + competition.options.duration_hours * 60 * 60 * 1000);
+			endDate = end.toISOString().split('T')[0];
+		}
+
+		const updatedCompetition = await updateCompetition({
+			competitionId,
+			start_date: startDate,
+			...(endDate ? { end_date: endDate } : {})
+		});
+
+		res.status(200).json({ competition: updatedCompetition });
+	} catch (error: any) {
+		console.error('Error starting competition:', error.message);
+		res.status(500).json({ error: 'Error starting competition: ' + error.message });
+	}
+}
+
+export async function deleteComp(req: AuthenticatedRequest, res: Response) {
+	if (!hasRequiredKeys(['competitionId'], req, res)) return;
+
+	try {
+		await deleteCompetition(req.params.competitionId, req.userId!);
+		res.status(200).json({ message: 'Competition deleted successfully' });
+	} catch (error: any) {
+		if (error instanceof BadRequestError) {
+			return res.status(400).json({ error: error.message });
+		}
+		console.error('Error deleting competition:', error.message);
+		res.status(500).json({ error: 'Error deleting competition: ' + error.message });
+	}
+}
 
 export async function getComp(req: AuthenticatedRequest, res: Response) {
 	if (!hasRequiredKeys(['competitionId'], req, res)) return;
@@ -67,7 +138,7 @@ export async function getAllComps(req: AuthenticatedRequest, res: Response) {
 		const competitions = await getCompetitions(req.userId!, {
 			page: page ? parseInt(page) : 1,
 			pageSize: pageSize ? parseInt(pageSize) : 25,
-			status
+			status: status || 'active'
 		});
 
 		res.status(200).json({ competitions });
@@ -190,7 +261,7 @@ export function getCompInviteHandler(status: 'accepted' | 'declined') {
 
 			const updatedUserInfo = await updateCompetitionInvite(competitionId, req.userId!, status);
 
-			competition.users = competition.users.map(u => (u.user_id === req.userId! ? updatedUserInfo : u));
+			competition.users = competition.users.map(u => (u.user_id === req.userId! ? { ...u, ...updatedUserInfo } : u));
 
 			res.status(200).json({ competition });
 		} catch (error: any) {

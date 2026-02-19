@@ -44,7 +44,7 @@ struct DashboardView: View {
             bestDayMiles: healthManager.cachedMostMilesInOneDay,
             todaysAveragePace: healthManager.todaysAveragePace,
             todaysFastestPace: healthManager.todaysFastestPace,
-            personalBestPace: healthManager.cachedFastestMilePace > 0 ? healthManager.cachedFastestMilePace : nil,
+            personalBestPace: userManager.currentUser.fastestMilePace > 0 ? userManager.currentUser.fastestMilePace : nil,
             todaysTotalDuration: healthManager.todaysTotalDuration,
             todaysCalories: healthManager.todaysTotalCalories,
             todaysWorkoutCount: healthManager.todaysWorkoutCount
@@ -188,10 +188,8 @@ struct DashboardView: View {
                     print("[Dashboard] ✅ User data and widgets updated with streak: \(userManager.currentUser.streak)")
                 }
 
-                // Fetch fastest mile data immediately in background
-                Task {
-                    healthManager.fetchFastestMilePace()
-                }
+                // Fetch fastest mile pace from backend database
+                fetchFastestPaceFromBackend()
 
                 // Check for goal completion after a brief delay to allow data to load
                 // This handles the case where the app is opened fresh
@@ -283,6 +281,9 @@ struct DashboardView: View {
         // Fetch data in order to ensure consistency
         healthManager.fetchAllWorkoutData()
 
+        // Refresh fastest pace from backend
+        fetchFastestPaceFromBackend()
+
         // Use Task for better performance than DispatchQueue
         Task { @MainActor in
             // Reduced delay for faster UI responsiveness (from 2.5s to 1s)
@@ -310,6 +311,9 @@ struct DashboardView: View {
         isRefreshing = true
         healthManager.fetchAllWorkoutData()
 
+        // Refresh fastest pace from backend
+        fetchFastestPaceFromBackend()
+
         // Reduced delay for faster UI responsiveness (from 2.5s to 1s)
         try? await Task.sleep(nanoseconds: 1_000_000_000)
 
@@ -330,6 +334,24 @@ struct DashboardView: View {
         isRefreshing = false
     }
     
+    /// Fetch fastest mile pace from backend database (authoritative source)
+    private func fetchFastestPaceFromBackend() {
+        guard let userId = UserDefaults.standard.string(forKey: "backendUserId") else { return }
+        Task {
+            do {
+                let stats = try await workoutService.getUserStats(userId: userId)
+                if let bestSplitSeconds = stats.bestSplitTimeSeconds, bestSplitSeconds > 0 {
+                    let paceMinutesPerMile = bestSplitSeconds / 60.0
+                    await MainActor.run {
+                        userManager.updateFastestPaceFromBackend(paceMinutesPerMile)
+                    }
+                }
+            } catch {
+                print("[Dashboard] ⚠️ Failed to fetch stats from backend: \(error)")
+            }
+        }
+    }
+
     private func triggerConfetti() {
         showConfetti = true
         Task { @MainActor in
@@ -430,7 +452,7 @@ struct DashboardView: View {
             isGoalCompleted: currentState.isCompleted,
             isRefreshing: isRefreshing,
             currentDistance: currentState.distance,
-            fastestPace: healthManager.fastestMilePace,
+            fastestPace: userManager.currentUser.fastestMilePace,
             mostMiles: healthManager.cachedCurrentStreakStats.mostMiles > 0 ? healthManager.cachedCurrentStreakStats.mostMiles : healthManager.mostMilesInOneDay,
             totalMiles: healthManager.totalLifetimeMiles
         )
@@ -445,7 +467,7 @@ struct DashboardView: View {
             onRefresh: refreshData,
             isRefreshing: isRefreshing,
             user: userManager.currentUser,
-            fastestPace: healthManager.fastestMilePace,
+            fastestPace: userManager.currentUser.fastestMilePace,
             mostMiles: healthManager.mostMilesInOneDay,
             totalMiles: healthManager.totalLifetimeMiles,
             healthManager: healthManager,
@@ -1218,8 +1240,8 @@ struct UnifiedStatsGrid: View {
         }
         
         if statsType == .allTime {
-            if healthManager.fastestMilePace > 0 {
-                let totalMinutes = healthManager.fastestMilePace
+            if user.fastestMilePace > 0 {
+                let totalMinutes = user.fastestMilePace
                 let minutes = Int(totalMinutes)
                 let seconds = Int((totalMinutes - Double(minutes)) * 60)
                 return String(format: "%d:%02d /mi", minutes, seconds)
@@ -1410,7 +1432,7 @@ struct UnifiedStatsGrid: View {
                                     .font(.caption2)
                                     .foregroundColor(.green)
                             }
-                        } else if (statsType == .allTime ? healthManager.fastestMilePace : statsData.fastestPace) > 0 {
+                        } else if (statsType == .allTime ? user.fastestMilePace : statsData.fastestPace) > 0 {
                             Text(statsType == .allTime ? "All time" : "Current streak")
                                 .font(.caption2)
                                 .foregroundColor(.green)
@@ -1428,19 +1450,6 @@ struct UnifiedStatsGrid: View {
                     )
                 }
                 .buttonStyle(PlainButtonStyle())
-                .onLongPressGesture {
-                    if statsType == .allTime {
-                        // Manual refresh of fastest mile data
-                        isRefreshingFastestPace = true
-                        healthManager.fetchFastestMilePace()
-
-                        // Set a timeout to stop refreshing indicator
-                        Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds (reduced from 2s)
-                            isRefreshingFastestPace = false
-                        }
-                    }
-                }
                 
                 // Most Miles Card
                 Button {

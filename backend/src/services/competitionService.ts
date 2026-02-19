@@ -21,13 +21,13 @@ export async function createCompetition(params: CreateCompetitionParams) {
 	const { competition_name, start_date, end_date, workouts = ['run', 'walk'], type, options, owner } = params;
 
 	const [competition] = await db.query(
-		`INSERT INTO competitions ( 
-            competition_name, start_date, end_date, 
-            workouts, type, options, owner 
-        ) VALUES ( 
+		`INSERT INTO competitions (
+            competition_name, start_date, end_date,
+            workouts, type, options, owner
+        ) VALUES (
 			$1, $2, $3, $4, $5, $6, $7
 		) RETURNING *;`,
-		[competition_name, start_date, end_date, JSON.stringify(workouts), type, JSON.stringify(options), owner]
+		[competition_name, start_date || null, end_date || null, JSON.stringify(workouts), type, JSON.stringify(options), owner]
 	);
 
 	await db.query(
@@ -62,14 +62,20 @@ function checkKeys(params: CreateCompetitionParams) {
 	} else if (type === 'apex') {
 		requiredKeys.push('unit');
 
-		if (end_date === undefined) {
-			missingKeys.push('end_date');
+		if (end_date === undefined && options.duration_hours === undefined) {
+			missingKeys.push('(end_date or duration_hours)');
 		}
-	} else if (type === 'clash' || type === 'targets') {
+	} else if (type === 'clash') {
+		requiredKeys.push('unit', 'interval');
+
+		if (end_date === undefined && options.first_to === undefined && options.duration_hours === undefined) {
+			missingKeys.push('(first_to, end_date, or duration_hours)');
+		}
+	} else if (type === 'targets') {
 		requiredKeys.push('goal', 'unit', 'interval');
 
-		if (end_date === undefined && options.first_to === undefined) {
-			missingKeys.push('(first_to or end_date)');
+		if (end_date === undefined && options.first_to === undefined && options.duration_hours === undefined) {
+			missingKeys.push('(first_to, end_date, or duration_hours)');
 		}
 	} else if (type === 'race') {
 		requiredKeys.push('goal', 'unit');
@@ -86,26 +92,42 @@ function checkKeys(params: CreateCompetitionParams) {
 	}
 }
 
+// User-enriched query fragment for competition_users JOIN
+const USERS_AGG_SQL = `
+	COALESCE(
+		jsonb_agg(
+			jsonb_build_object(
+				'competition_id', cu.competition_id,
+				'user_id', cu.user_id,
+				'invite_status', cu.invite_status,
+				'progress', cu.progress,
+				'username', u.username
+			)
+		) FILTER (WHERE cu.competition_id IS NOT NULL),
+		'[]'::jsonb
+	) as users`;
+
 export async function getCompetition(competitionId: string): Promise<Competition> {
 	const competition = (
 		await db.query(
-			`SELECT 
-		c.*,
-		COALESCE(
-			jsonb_agg(
-				cu.*
-			) FILTER (WHERE c.id IS NOT NULL),
-			'[]'
-		) as users
-		FROM competitions c
-		LEFT JOIN competition_users cu ON cu.competition_id = c.id
-		WHERE c.id = $1
-		GROUP BY c.id;`,
+			`SELECT
+				c.*,
+				${USERS_AGG_SQL}
+			FROM competitions c
+			LEFT JOIN competition_users cu ON cu.competition_id = c.id
+			LEFT JOIN users u ON u.user_id = cu.user_id
+			WHERE c.id = $1
+			GROUP BY c.id;`,
 			[competitionId]
 		)
 	)[0];
 
-	if (new Date(competition.start_date + ' EST') > new Date()) {
+	if (!competition) {
+		return competition;
+	}
+
+	// Calculate scores for started competitions (start_date in the past)
+	if (competition.start_date && new Date(competition.start_date + ' EST') <= new Date()) {
 		const userScores = await getUserScores(competition);
 		competition.users = competition.users.map((user: CompetitionUser) => ({ ...user, ...userScores[user.user_id] }));
 	}
@@ -115,37 +137,40 @@ export async function getCompetition(competitionId: string): Promise<Competition
 
 export async function getCompetitions(
 	userId: string,
-	{ page = 1, status = 'go', pageSize = 10 }: { page: number; status: string; pageSize: number }
+	{ page = 1, status = 'active', pageSize = 10 }: { page: number; status: string; pageSize: number }
 ): Promise<Competition[]> {
 	let statusCondition = '';
 
-	if (status === 'get_set') {
-		statusCondition = 'AND (start_date IS NULL OR start_date > NOW())';
+	if (status === 'get_set' || status === 'lobby') {
+		statusCondition = 'AND (c.start_date IS NULL OR c.start_date > NOW())';
 	} else if (status === 'go') {
-		statusCondition = 'AND start_date < NOW() AND (end_date IS NULL OR end_date > NOW())';
+		statusCondition = 'AND c.start_date <= NOW() AND (c.end_date IS NULL OR c.end_date > NOW())';
+	} else if (status === 'active') {
+		// Lobby + currently running (excludes finished)
+		statusCondition = 'AND (c.start_date IS NULL OR c.end_date IS NULL OR c.end_date > NOW())';
 	} else if (status === 'finished') {
-		statusCondition = 'AND (end_date < NOW())';
+		statusCondition = 'AND (c.end_date IS NOT NULL AND c.end_date < NOW())';
 	}
+	// status === 'all' or 'on_your_mark' => no date filter from statusCondition
 
-	const query = `SELECT 
+	const query = `SELECT
 			c.*,
-  			COALESCE(
-				jsonb_agg(cu.*) FILTER (WHERE c.id IS NOT NULL),
-				'[]'
-			) as users
+			${USERS_AGG_SQL}
 		FROM competitions c
 		LEFT JOIN competition_users cu ON cu.competition_id = c.id
+		LEFT JOIN users u ON u.user_id = cu.user_id
 		WHERE c.id IN (
-			SELECT competition_id 
-	  		FROM competition_users 
+			SELECT competition_id
+	  		FROM competition_users
 	  		WHERE user_id = $1
 			${status === 'on_your_mark' ? "AND invite_status = 'pending'" : "AND invite_status = 'accepted'"}
 		)
-		GROUP BY c.id
 		${statusCondition}
+		GROUP BY c.id
+		ORDER BY c.start_date DESC NULLS FIRST
 		LIMIT $2 OFFSET $3`;
 
-	const competitions = await db.query(query, [userId, pageSize, page - 1]);
+	const competitions = await db.query(query, [userId, pageSize, (page - 1) * pageSize]);
 
 	return competitions;
 }
@@ -202,7 +227,7 @@ export async function updateCompetition(params: UpdateCompetitionParams): Promis
 
 	for (const [key, value] of Object.entries(updateFields)) {
 		if (value !== undefined) {
-			if (key === 'workouts' || options) {
+			if (key === 'workouts') {
 				updates.push(`${key} = $${paramIndex}`);
 				values.push(JSON.stringify(value));
 			} else {
@@ -241,6 +266,22 @@ export async function updateCompetition(params: UpdateCompetitionParams): Promis
 	return getCompetition(updatedCompetition.id);
 }
 
+export async function deleteCompetition(competitionId: string, userId: string): Promise<void> {
+	const competition = await getCompetition(competitionId);
+
+	if (!competition) {
+		throw new BadRequestError(`Competition with id ${competitionId} not found`);
+	}
+
+	if (competition.owner !== userId) {
+		throw new BadRequestError('Only the competition owner can delete it');
+	}
+
+	// Delete competition_users first (foreign key), then competition
+	await db.query('DELETE FROM competition_users WHERE competition_id = $1', [competitionId]);
+	await db.query('DELETE FROM competitions WHERE id = $1', [competitionId]);
+}
+
 interface UserData {
 	[userId: string]: {
 		intervals: {
@@ -251,20 +292,29 @@ interface UserData {
 }
 
 export async function getUserScores(competition: Competition): Promise<UserData> {
-	const userData: UserData = competition.users.reduce(async (allUsers, { user_id }) => {
-		const userData = await getQuantityDateRange(user_id, competition.start_date, competition.end_date, competition.workouts);
+	const userData: UserData = {};
 
-		const intervals = userData.reduce((groupedData, dayData) => {
-			const intervalKey = getCurrentInterval(dayData.local_date);
+	// Only called when start_date is non-null (guarded by caller)
+	if (!competition.start_date) return userData;
+
+	// Fix: use for...of loop instead of async reduce (reduce doesn't await)
+	// Only process accepted users
+	const acceptedUsers = competition.users.filter((u: CompetitionUser) => u.invite_status === 'accepted');
+
+	for (const { user_id } of acceptedUsers) {
+		const rawData = await getQuantityDateRange(user_id, competition.start_date, competition.end_date ?? undefined, competition.workouts);
+
+		const intervals: { [key: string]: number } = rawData.reduce((groupedData: any, dayData: any) => {
+			const intervalKey = getCurrentInterval(dayData.local_date, competition.options.interval);
 			if (!groupedData[intervalKey]) {
-				groupedData[intervalKey] = { interval: intervalKey, quantity: 0 };
+				groupedData[intervalKey] = 0;
 			}
-			groupedData[intervalKey].quantity += dayData.total_quantity;
+			groupedData[intervalKey] += dayData.total_quantity;
 			return groupedData;
 		}, {});
 
-		return { ...allUsers, [user_id]: { intervals, score: 0 } };
-	}, {});
+		userData[user_id] = { intervals, score: 0 };
+	}
 
 	const intervals = getIntervalRange(competition);
 	const todaysInterval = getCurrentInterval(new Date(), competition.options.interval);
@@ -282,10 +332,7 @@ export async function getUserScores(competition: Competition): Promise<UserData>
 	}
 
 	if (competition.type === 'streaks') {
-		let activeStreak = 0;
-
 		for (let interval of intervals) {
-			// TODO: handle losses, wins, ties
 			Object.entries(userData).forEach(([userId, { intervals }]) => {
 				if (intervals[interval] >= competition.options.goal) {
 					userData[userId].score++;
@@ -297,8 +344,6 @@ export async function getUserScores(competition: Competition): Promise<UserData>
 			if (todaysInterval === interval) {
 				break;
 			}
-
-			activeStreak++;
 		}
 	} else if (competition.type === 'apex') {
 		Object.entries(userData).forEach(([userId, { intervals }]) => {
@@ -325,7 +370,9 @@ export async function getUserScores(competition: Competition): Promise<UserData>
 
 			const maxQuantity = Math.max(...Object.keys(userQuantities).map(q => parseFloat(q)));
 
-			userQuantities[maxQuantity].forEach(userId => userData[userId].score++);
+			if (maxQuantity > 0) {
+				userQuantities[maxQuantity].forEach(userId => userData[userId].score++);
+			}
 		}
 	} else if (competition.type === 'targets') {
 		for (let interval of intervals) {
@@ -370,8 +417,9 @@ function getCurrentInterval(currentDate: Date | string | number, interval?: 'day
 }
 
 function getIntervalRange(competition: Competition): string[] {
+	if (!competition.start_date) return [];
 	const currentDate = new Date(competition.start_date + ' EST');
-	const endDate = new Date(competition.end_date + ' EST');
+	const endDate = competition.end_date ? new Date(competition.end_date + ' EST') : new Date();
 
 	const intervals = [];
 
@@ -391,14 +439,11 @@ function getIntervalRange(competition: Competition): string[] {
 			currentDate.setDate(currentDate.getDate() + 7);
 		} else if (competition.options.interval === 'month') {
 			currentDate.setMonth(currentDate.getMonth() + 1);
+		} else {
+			// Default to day if no interval specified
+			currentDate.setDate(currentDate.getDate() + 1);
 		}
 	}
 
 	return intervals;
 }
-
-// TODO: you can only invite friends to competitions
-
-// TODO: order get competitions by start/end dates
-
-// TODO: end competitions

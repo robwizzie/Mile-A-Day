@@ -75,36 +75,33 @@ class CompetitionService: ObservableObject {
 
     // MARK: - Competition CRUD Operations
 
-    /// Create a new competition
+    /// Create a new competition (lobby mode - no start_date)
     func createCompetition(
         name: String,
         type: CompetitionType,
-        startDate: Date,
-        endDate: Date,
         workouts: [CompetitionActivity],
         goal: Double,
         unit: CompetitionUnit,
         firstTo: Int,
         history: Bool,
-        interval: CompetitionInterval
+        interval: CompetitionInterval,
+        durationHours: Int?
     ) async throws -> String {
-        print("[CompetitionService] 🎯 Creating competition: \(name)")
-
-        let dateFormatter = ISO8601DateFormatter()
-        dateFormatter.formatOptions = [.withFullDate]
+        print("[CompetitionService] Creating competition: \(name)")
 
         let request = CreateCompetitionRequest(
             competition_name: name,
             type: type,
-            start_date: dateFormatter.string(from: startDate),
-            end_date: dateFormatter.string(from: endDate),
+            start_date: nil,
+            end_date: nil,
             workouts: workouts,
             options: CompetitionOptionsRequest(
                 goal: goal,
                 unit: unit,
                 first_to: firstTo,
                 history: history,
-                interval: interval
+                interval: interval,
+                duration_hours: durationHours
             )
         )
 
@@ -118,7 +115,7 @@ class CompetitionService: ObservableObject {
             responseType: CreateCompetitionResponse.self
         )
 
-        print("[CompetitionService] ✅ Competition created: \(response.competition_id)")
+        print("[CompetitionService] Competition created: \(response.competition_id)")
 
         // Refresh competitions list
         try await loadCompetitions()
@@ -128,7 +125,7 @@ class CompetitionService: ObservableObject {
 
     /// Get all competitions for the authenticated user
     func loadCompetitions(page: Int = 1, pageSize: Int = 25, status: String? = nil) async throws {
-        print("[CompetitionService] 📋 Loading competitions")
+        print("[CompetitionService] Loading competitions")
 
         var endpoint = "/competitions?page=\(page)&pageSize=\(pageSize)"
         if let status = status {
@@ -141,19 +138,19 @@ class CompetitionService: ObservableObject {
         )
 
         competitions = response.competitions
-        print("[CompetitionService] ✅ Loaded \(competitions.count) competitions")
+        print("[CompetitionService] Loaded \(competitions.count) competitions")
     }
 
     /// Get a specific competition
     func loadCompetition(id: String) async throws -> Competition {
-        print("[CompetitionService] 🔍 Loading competition: \(id)")
+        print("[CompetitionService] Loading competition: \(id)")
 
         let response: CompetitionResponse = try await makeRequest(
             endpoint: "/competitions/\(id)",
             responseType: CompetitionResponse.self
         )
 
-        print("[CompetitionService] ✅ Competition loaded: \(response.competition.competition_name)")
+        print("[CompetitionService] Competition loaded: \(response.competition.competition_name)")
         return response.competition
     }
 
@@ -171,7 +168,7 @@ class CompetitionService: ObservableObject {
         history: Bool? = nil,
         interval: CompetitionInterval? = nil
     ) async throws -> Competition {
-        print("[CompetitionService] ✏️ Updating competition: \(id)")
+        print("[CompetitionService] Updating competition: \(id)")
 
         let dateFormatter = ISO8601DateFormatter()
         dateFormatter.formatOptions = [.withFullDate]
@@ -201,7 +198,7 @@ class CompetitionService: ObservableObject {
             responseType: CompetitionResponse.self
         )
 
-        print("[CompetitionService] ✅ Competition updated")
+        print("[CompetitionService] Competition updated")
 
         // Update local cache
         if let index = competitions.firstIndex(where: { $0.competition_id == id }) {
@@ -211,11 +208,47 @@ class CompetitionService: ObservableObject {
         return response.competition
     }
 
+    /// Start a competition (owner only, requires 2+ accepted participants)
+    func startCompetition(id: String) async throws -> Competition {
+        print("[CompetitionService] Starting competition: \(id)")
+
+        let response: CompetitionResponse = try await makeRequest(
+            endpoint: "/competitions/\(id)/start",
+            method: .POST,
+            responseType: CompetitionResponse.self
+        )
+
+        print("[CompetitionService] Competition started successfully")
+
+        // Update local cache
+        if let index = competitions.firstIndex(where: { $0.competition_id == id }) {
+            competitions[index] = response.competition
+        }
+
+        return response.competition
+    }
+
+    /// Delete a competition (owner only)
+    func deleteCompetition(id: String) async throws {
+        print("[CompetitionService] Deleting competition: \(id)")
+
+        let _: DeleteCompetitionResponse = try await makeRequest(
+            endpoint: "/competitions/\(id)",
+            method: .DELETE,
+            responseType: DeleteCompetitionResponse.self
+        )
+
+        print("[CompetitionService] Competition deleted")
+
+        // Remove from local cache
+        competitions.removeAll { $0.competition_id == id }
+    }
+
     // MARK: - Competition Invitations
 
     /// Get all pending invites
     func loadInvites(page: Int = 1) async throws {
-        print("[CompetitionService] 📨 Loading invites")
+        print("[CompetitionService] Loading invites")
 
         let response: CompetitionInvitesResponse = try await makeRequest(
             endpoint: "/competitions/invites?page=\(page)",
@@ -223,12 +256,12 @@ class CompetitionService: ObservableObject {
         )
 
         invites = response.competitionInvites
-        print("[CompetitionService] ✅ Loaded \(invites.count) invites")
+        print("[CompetitionService] Loaded \(invites.count) invites")
     }
 
     /// Invite a user to a competition
     func inviteUser(competitionId: String, userId: String) async throws {
-        print("[CompetitionService] 📤 Inviting user \(userId) to competition \(competitionId)")
+        print("[CompetitionService] Inviting user \(userId) to competition \(competitionId)")
 
         let request = InviteUserRequest(inviteUser: userId)
         let encoder = JSONEncoder()
@@ -241,7 +274,7 @@ class CompetitionService: ObservableObject {
             responseType: InviteUserResponse.self
         )
 
-        print("[CompetitionService] ✅ User invited successfully")
+        print("[CompetitionService] User invited successfully")
 
         // Refresh competition to get updated user list
         let updatedCompetition = try await loadCompetition(id: competitionId)
@@ -252,7 +285,7 @@ class CompetitionService: ObservableObject {
 
     /// Accept a competition invite
     func acceptInvite(competitionId: String) async throws {
-        print("[CompetitionService] ✅ Accepting invite for competition \(competitionId)")
+        print("[CompetitionService] Accepting invite for competition \(competitionId)")
 
         let response: CompetitionResponse = try await makeRequest(
             endpoint: "/competitions/\(competitionId)/accept",
@@ -260,7 +293,7 @@ class CompetitionService: ObservableObject {
             responseType: CompetitionResponse.self
         )
 
-        print("[CompetitionService] ✅ Invite accepted")
+        print("[CompetitionService] Invite accepted")
 
         // Remove from invites and add to competitions
         invites.removeAll { $0.competition_id == competitionId }
@@ -271,7 +304,7 @@ class CompetitionService: ObservableObject {
 
     /// Decline a competition invite
     func declineInvite(competitionId: String) async throws {
-        print("[CompetitionService] ❌ Declining invite for competition \(competitionId)")
+        print("[CompetitionService] Declining invite for competition \(competitionId)")
 
         let _: CompetitionResponse = try await makeRequest(
             endpoint: "/competitions/\(competitionId)/decline",
@@ -279,7 +312,7 @@ class CompetitionService: ObservableObject {
             responseType: CompetitionResponse.self
         )
 
-        print("[CompetitionService] ✅ Invite declined")
+        print("[CompetitionService] Invite declined")
 
         // Remove from invites
         invites.removeAll { $0.competition_id == competitionId }

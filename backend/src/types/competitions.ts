@@ -8,6 +8,7 @@ export interface CompetitionOptions {
 	goal: number;
 	unit: 'miles' | 'steps';
 	first_to: number;
+	duration_hours?: number;
 }
 
 export interface CompetitionUser {
@@ -16,12 +17,13 @@ export interface CompetitionUser {
 	invite_status: string;
 	intervals?: { [intervalKey: string]: number };
 	score?: number;
+	username?: string;
 }
 
 export interface Competition {
 	competition_name: string;
-	start_date: string;
-	end_date: string;
+	start_date: string | null;
+	end_date: string | null;
 	workouts: CompetitionActivity[];
 	type: CompetitionType;
 	options: CompetitionOptions;

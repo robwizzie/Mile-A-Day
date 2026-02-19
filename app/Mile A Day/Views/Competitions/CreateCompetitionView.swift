@@ -31,7 +31,7 @@ struct CreateCompetitionView: View {
 
     var canCreate: Bool {
         !selectedFriends.isEmpty &&
-        goal > 0
+        (selectedType == .clash || goal > 0)
     }
 
     var firstSelectedFriend: BackendUser? {
@@ -53,7 +53,7 @@ struct CreateCompetitionView: View {
         case .targets:
             return "Daily Goal to Score"
         case .clash:
-            return "Daily Goal to Win Day"
+            return "" // Clash doesn't use a goal
         case .race:
             return "Total Distance to Win"
         }
@@ -68,10 +68,14 @@ struct CreateCompetitionView: View {
         case .targets:
             return "Distance needed per interval to score a point"
         case .clash:
-            return "Highest distance wins that day's point"
+            return "" // Clash doesn't use a goal
         case .race:
             return "First to reach this distance wins"
         }
+    }
+
+    var needsGoal: Bool {
+        selectedType != .clash
     }
 
     var needsInterval: Bool {
@@ -99,8 +103,13 @@ struct CreateCompetitionView: View {
                         // Activity Selection
                         activitySelectionSection
 
-                        // Goal Selection
-                        goalSelectionSection
+                        // Goal Selection (not needed for Clash - whoever goes further wins)
+                        if needsGoal {
+                            goalSelectionSection
+                        } else {
+                            // Clash only needs a unit selector
+                            unitOnlySection
+                        }
 
                         // Type-Specific Options
                         if needsInterval {
@@ -147,12 +156,12 @@ struct CreateCompetitionView: View {
             } message: {
                 Text(errorMessage)
             }
-            .alert("Success!", isPresented: $showSuccess) {
-                Button("OK") {
+            .alert("Challenge Created!", isPresented: $showSuccess) {
+                Button("View Lobby") {
                     dismiss()
                 }
             } message: {
-                Text("Your competition has been created successfully!")
+                Text("Your competition is ready! Waiting for friends to accept.")
             }
             .task {
                 // Load friends when view appears
@@ -351,6 +360,51 @@ struct CreateCompetitionView: View {
                             }
                         }
                     )
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.xl)
+        }
+    }
+
+    // MARK: - Unit Only Section (for Clash)
+
+    var unitOnlySection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Distance Unit")
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
+
+                Text("Whoever goes further in a day wins the point")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .padding(.horizontal, MADTheme.Spacing.xl)
+
+            HStack(spacing: MADTheme.Spacing.sm) {
+                ForEach([CompetitionUnit.miles, CompetitionUnit.kilometers, CompetitionUnit.steps], id: \.self) { unitOption in
+                    Button {
+                        unit = unitOption
+                    } label: {
+                        Text(unitOption == .steps ? "Steps" : unitOption.rawValue.capitalized)
+                            .font(MADTheme.Typography.callout)
+                            .fontWeight(unit == unitOption ? .semibold : .regular)
+                            .foregroundColor(unit == unitOption ? .white : .white.opacity(0.6))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, MADTheme.Spacing.sm)
+                            .background(
+                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                    .fill(unit == unitOption ? MADTheme.Colors.primary.opacity(0.3) : Color.white.opacity(0.05))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                    .stroke(
+                                        unit == unitOption ? MADTheme.Colors.primary : Color.white.opacity(0.1),
+                                        lineWidth: unit == unitOption ? 2 : 1
+                                    )
+                            )
+                    }
+                    .buttonStyle(ScaleButtonStyle())
                 }
             }
             .padding(.horizontal, MADTheme.Spacing.xl)
@@ -597,9 +651,11 @@ struct CreateCompetitionView: View {
                                 )
                         )
                         .onChange(of: customEndDate) { _, newDate in
-                            // Calculate duration in hours
-                            let hours = Calendar.current.dateComponents([.hour], from: Date(), to: newDate).hour ?? 24
-                            durationHours = max(24, hours) // Minimum 24 hours
+                            // Total elapsed hours between now and selected end date
+                            let now = Date()
+                            let totalSeconds = newDate.timeIntervalSince(now)
+                            let hours = Int(totalSeconds / 3600)
+                            durationHours = max(24, hours)
                         }
 
                         // Show calculated duration
@@ -772,35 +828,27 @@ struct CreateCompetitionView: View {
             createCompetition()
         } label: {
             HStack(spacing: MADTheme.Spacing.md) {
-                Text("Send Invite to")
+                if isCreating {
+                    ProgressView()
+                        .tint(.black)
+                } else {
+                    Image(systemName: "trophy.fill")
+                        .foregroundColor(.black)
+                }
+
+                Text("Create Challenge")
                     .font(MADTheme.Typography.headline)
                     .foregroundColor(.black)
 
-                if let friend = firstSelectedFriend {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(MADTheme.Colors.primary)
-                            .frame(width: 24, height: 24)
-                            .overlay(
-                                Text(friend.displayName.prefix(1).uppercased())
-                                    .font(.caption2)
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.white)
-                            )
-
-                        Text(friend.displayName)
-                            .font(MADTheme.Typography.headline)
-                            .foregroundColor(.black)
-                    }
-                } else {
-                    Text("Select Friend")
-                        .font(MADTheme.Typography.headline)
-                        .foregroundColor(.black.opacity(0.5))
-                }
-
                 Spacer()
 
-                Image(systemName: "paperplane.fill")
+                if selectedFriends.count > 0 {
+                    Text("\(selectedFriends.count) challenger\(selectedFriends.count == 1 ? "" : "s")")
+                        .font(MADTheme.Typography.callout)
+                        .foregroundColor(.black.opacity(0.6))
+                }
+
+                Image(systemName: "arrow.right.circle.fill")
                     .foregroundColor(.black)
             }
             .padding(MADTheme.Spacing.lg)
@@ -939,19 +987,18 @@ struct CreateCompetitionView: View {
         let friendNames = selectedFriends.prefix(2).map { $0.displayName }.joined(separator: " & ")
         let autoName = "\(selectedType.displayName) with \(friendNames)"
 
-        // Calculate end date based on duration selection
-        let startDate = Date()
-        let endDate: Date
-
-        if !hasEndDate {
-            // No end date - set to far future (10 years)
-            endDate = Calendar.current.date(byAdding: .year, value: 10, to: startDate) ?? Date()
+        // Calculate duration_hours from the UI selection (lobby mode - no start/end dates)
+        let computedDurationHours: Int?
+        if selectedType == .race {
+            computedDurationHours = nil  // Race has no time limit
+        } else if !hasEndDate {
+            computedDurationHours = nil  // Open-ended
         } else if isCustomDuration {
-            // Use custom selected date
-            endDate = customEndDate
+            let totalSeconds = customEndDate.timeIntervalSince(Date())
+            let hours = Int(totalSeconds / 3600)
+            computedDurationHours = max(24, hours)
         } else {
-            // Use preset duration in hours
-            endDate = Calendar.current.date(byAdding: .hour, value: durationHours, to: startDate) ?? Date()
+            computedDurationHours = durationHours
         }
 
         Task {
@@ -959,14 +1006,13 @@ struct CreateCompetitionView: View {
                 let competitionId = try await competitionService.createCompetition(
                     name: competitionName.isEmpty ? autoName : competitionName,
                     type: selectedType,
-                    startDate: startDate,
-                    endDate: endDate,
                     workouts: Array(selectedWorkouts),
                     goal: goal,
                     unit: unit,
                     firstTo: firstTo,
                     history: includeHistory,
-                    interval: interval
+                    interval: interval,
+                    durationHours: computedDurationHours
                 )
 
                 // Invite all selected friends

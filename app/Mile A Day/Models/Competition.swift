@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - Competition Models
 
@@ -6,8 +7,8 @@ import Foundation
 struct Competition: Codable, Identifiable {
     let competition_id: String
     let competition_name: String
-    let start_date: String
-    let end_date: String
+    let start_date: String?
+    let end_date: String?
     let workouts: [CompetitionActivity]
     let type: CompetitionType
     let options: CompetitionOptions
@@ -36,11 +37,80 @@ struct Competition: Codable, Identifiable {
     }
 
     var startDateFormatted: Date? {
-        ISO8601DateFormatter().date(from: start_date)
+        guard let dateStr = start_date else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        return formatter.date(from: dateStr)
     }
 
     var endDateFormatted: Date? {
-        ISO8601DateFormatter().date(from: end_date)
+        guard let dateStr = end_date else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        return formatter.date(from: dateStr)
+    }
+
+    /// Computed competition status based on dates
+    var status: CompetitionStatus {
+        guard let startStr = start_date else {
+            return .lobby
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        let now = Date()
+
+        guard let startDate = formatter.date(from: startStr) else {
+            return .lobby
+        }
+
+        if startDate > now {
+            return .scheduled
+        }
+
+        // Start date is in the past - check end date
+        if let endStr = end_date, let endDate = formatter.date(from: endStr) {
+            if endDate < now {
+                return .finished
+            }
+        }
+
+        return .active
+    }
+}
+
+/// Competition lifecycle status - derived from dates
+enum CompetitionStatus: String {
+    case lobby       // start_date is nil - waiting for owner to start
+    case scheduled   // start_date is in the future
+    case active      // start_date is in the past, end_date is nil or in the future
+    case finished    // end_date is in the past
+
+    var displayName: String {
+        switch self {
+        case .lobby: return "Lobby"
+        case .scheduled: return "Scheduled"
+        case .active: return "Active"
+        case .finished: return "Finished"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .lobby: return "hourglass"
+        case .scheduled: return "calendar.badge.clock"
+        case .active: return "bolt.fill"
+        case .finished: return "checkmark.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .lobby: return .orange
+        case .scheduled: return .blue
+        case .active: return .green
+        case .finished: return .gray
+        }
     }
 }
 
@@ -71,7 +141,7 @@ enum CompetitionType: String, Codable, CaseIterable {
         case .targets:
             return "Anyone who completes the goal in a given day gets a point. Whoever has the most points at the end of the period wins"
         case .clash:
-            return "Whoever gets the most distance in a day gets a point. Whoever has the most points at the end of the period or whoever reaches a certain amount of points first wins. Same as 'targets' but only one person can score on a given day"
+            return "Whoever goes the furthest each day wins a point. First to reach the target score or most points at the end wins"
         case .race:
             return "There is a distance goal set and whoever gets there first wins"
         }
@@ -122,6 +192,7 @@ struct CompetitionOptions: Codable {
     let first_to: Int
     let history: Bool?
     let interval: CompetitionInterval?
+    let duration_hours: Int?
 
     var goalFormatted: String {
         if unit == .miles {
@@ -129,6 +200,18 @@ struct CompetitionOptions: Codable {
         } else {
             return String(format: "%.0f", goal)
         }
+    }
+
+    var durationFormatted: String? {
+        guard let hours = duration_hours else { return nil }
+        if hours < 24 {
+            return "\(hours) hour\(hours == 1 ? "" : "s")"
+        }
+        let days = hours / 24
+        if days == 7 { return "1 week" }
+        if days == 14 { return "2 weeks" }
+        if days == 30 { return "1 month" }
+        return "\(days) day\(days == 1 ? "" : "s")"
     }
 }
 
@@ -170,13 +253,23 @@ enum CompetitionInterval: String, Codable, CaseIterable {
     }
 }
 
-/// Competition user
+/// Competition user with enriched data from backend
 struct CompetitionUser: Codable, Identifiable {
     let competition_id: String
     let user_id: String
     let invite_status: InviteStatus
+    let username: String?
+    let score: Double?
+    let intervals: [String: Double]?
 
     var id: String { "\(competition_id)-\(user_id)" }
+
+    var displayName: String {
+        if let uname = username, !uname.isEmpty {
+            return uname
+        }
+        return "Unknown"
+    }
 }
 
 /// Invite status
@@ -196,8 +289,8 @@ enum InviteStatus: String, Codable, CaseIterable {
 struct CreateCompetitionRequest: Codable {
     let competition_name: String
     let type: CompetitionType
-    let start_date: String
-    let end_date: String
+    let start_date: String?
+    let end_date: String?
     let workouts: [CompetitionActivity]
     let options: CompetitionOptionsRequest
 }
@@ -208,6 +301,7 @@ struct CompetitionOptionsRequest: Codable {
     let first_to: Int
     let history: Bool
     let interval: CompetitionInterval
+    let duration_hours: Int?
 }
 
 /// Request to update a competition
@@ -252,5 +346,9 @@ struct CompetitionInvitesResponse: Codable {
 }
 
 struct InviteUserResponse: Codable {
+    let message: String
+}
+
+struct DeleteCompetitionResponse: Codable {
     let message: String
 }
