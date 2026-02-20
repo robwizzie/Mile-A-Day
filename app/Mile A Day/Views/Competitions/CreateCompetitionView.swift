@@ -17,7 +17,7 @@ struct CreateCompetitionView: View {
     @State private var hasEndDate: Bool = true
     @State private var customEndDate: Date = Calendar.current.date(byAdding: .day, value: 3, to: Date()) ?? Date()
     @State private var selectedWorkouts: Set<CompetitionActivity> = [.run]
-    @State private var firstTo: Int = 5
+    @State private var firstTo: Int = 1
     @State private var interval: CompetitionInterval = .day
     @State private var includeHistory = false
 
@@ -26,12 +26,13 @@ struct CreateCompetitionView: View {
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var showSuccess = false
+    @State private var failedInviteCount = 0
     @State private var showFriendPicker = false
     @State private var showTypeSelector = false
 
     var canCreate: Bool {
         !selectedFriends.isEmpty &&
-        (selectedType == .clash || goal > 0)
+        (selectedType == .clash || selectedType == .apex || goal > 0)
     }
 
     var firstSelectedFriend: BackendUser? {
@@ -48,14 +49,12 @@ struct CreateCompetitionView: View {
         switch selectedType {
         case .streaks:
             return "Daily Goal"
-        case .apex:
-            return "Total Distance Target"
         case .targets:
-            return "Daily Goal to Score"
-        case .clash:
-            return "" // Clash doesn't use a goal
+            return "Goal to Score a Point"
         case .race:
             return "Total Distance to Win"
+        case .apex, .clash:
+            return "" // These don't use a goal
         }
     }
 
@@ -63,27 +62,48 @@ struct CreateCompetitionView: View {
         switch selectedType {
         case .streaks:
             return "Minimum distance to maintain streak each day"
-        case .apex:
-            return "Optional milestone distance for the competition"
         case .targets:
             return "Distance needed per interval to score a point"
-        case .clash:
-            return "" // Clash doesn't use a goal
         case .race:
             return "First to reach this distance wins"
+        case .apex, .clash:
+            return ""
         }
     }
 
+    /// Clash: no goal (whoever goes further wins the point)
+    /// Apex: no goal (whoever has most total distance wins)
     var needsGoal: Bool {
-        selectedType != .clash
+        selectedType != .clash && selectedType != .apex
     }
 
+    /// Apex, Targets, Clash use interval-based scoring
     var needsInterval: Bool {
         selectedType == .apex || selectedType == .targets || selectedType == .clash
     }
 
     var needsFirstTo: Bool {
         selectedType == .streaks || selectedType == .clash
+    }
+
+    /// Only Apex and Targets need a fixed duration
+    /// Clash ends when point target is reached
+    /// Streaks end when someone breaks their streak
+    /// Race ends when someone reaches the distance
+    var needsDuration: Bool {
+        selectedType == .apex || selectedType == .targets
+    }
+
+    /// Description for the unit-only section (Clash and Apex)
+    var unitOnlyDescription: String {
+        switch selectedType {
+        case .clash:
+            return "Whoever goes further each interval wins the point"
+        case .apex:
+            return "Whoever covers the most total distance wins"
+        default:
+            return ""
+        }
     }
 
     var body: some View {
@@ -120,25 +140,27 @@ struct CreateCompetitionView: View {
                             firstToSection
                         }
 
-                        // Duration (not needed for race)
-                        if selectedType != .race {
+                        // Duration (only for apex and targets - others end by condition)
+                        if needsDuration {
                             durationSection
                         }
 
                         // Historical Data Toggle
                         historyToggleSection
 
-                        Spacer(minLength: MADTheme.Spacing.xxl)
+                        // Extra space so content is never hidden behind the fixed bottom button
+                        Spacer(minLength: 100)
                     }
+                    .padding(.horizontal, MADTheme.Spacing.md)
                     .padding(.top, MADTheme.Spacing.md)
-                    .padding(.bottom, MADTheme.Spacing.xl)
+                    .padding(.bottom, MADTheme.Spacing.md)
                 }
 
                 // Send Invite Button (Fixed at bottom)
                 VStack {
                     Spacer()
                     sendInviteButton
-                        .padding(.horizontal, MADTheme.Spacing.xl)
+                        .padding(.horizontal, MADTheme.Spacing.lg)
                         .padding(.bottom, MADTheme.Spacing.lg)
                 }
             }
@@ -161,7 +183,11 @@ struct CreateCompetitionView: View {
                     dismiss()
                 }
             } message: {
-                Text("Your competition is ready! Waiting for friends to accept.")
+                if failedInviteCount > 0 {
+                    Text("Competition created, but \(failedInviteCount) invite\(failedInviteCount == 1 ? "" : "s") failed to send. You can invite friends from the lobby.")
+                } else {
+                    Text("Your competition is ready! Waiting for friends to accept.")
+                }
             }
             .task {
                 // Load friends when view appears
@@ -169,6 +195,34 @@ struct CreateCompetitionView: View {
                     try await friendService.loadFriends()
                 } catch {
                     print("Failed to load friends: \(error)")
+                }
+            }
+            .onChange(of: selectedType) { _, newType in
+                // Reset to sensible defaults for each type
+                switch newType {
+                case .streaks:
+                    firstTo = 1           // Default: first miss = lose
+                    goal = 1.0            // 1 mile daily minimum
+                    interval = .day       // Always daily for streaks
+                    hasEndDate = false
+                case .clash:
+                    firstTo = 5           // First to 5 points
+                    interval = .day       // Daily matchups
+                    hasEndDate = false
+                case .apex:
+                    interval = .day
+                    durationHours = 168   // 1 week default
+                    hasEndDate = true
+                    isCustomDuration = false
+                case .targets:
+                    goal = 1.0
+                    interval = .day
+                    durationHours = 168   // 1 week default
+                    hasEndDate = true
+                    isCustomDuration = false
+                case .race:
+                    goal = 26.2           // Marathon
+                    hasEndDate = false
                 }
             }
         }
@@ -193,7 +247,7 @@ struct CreateCompetitionView: View {
                         .foregroundColor(.white.opacity(0.6))
                 }
             }
-            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.horizontal, MADTheme.Spacing.sm)
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: MADTheme.Spacing.md) {
@@ -271,7 +325,7 @@ struct CreateCompetitionView: View {
                         }
                     }
                 }
-                .padding(.horizontal, MADTheme.Spacing.xl)
+                .padding(.horizontal, MADTheme.Spacing.sm)
             }
         }
     }
@@ -283,7 +337,7 @@ struct CreateCompetitionView: View {
             Text("Competition Type")
                 .font(MADTheme.Typography.subheadline)
                 .foregroundColor(.white.opacity(0.6))
-                .padding(.horizontal, MADTheme.Spacing.xl)
+                .padding(.horizontal, MADTheme.Spacing.sm)
 
             Button {
                 showTypeSelector = true
@@ -332,7 +386,7 @@ struct CreateCompetitionView: View {
                 )
             }
             .buttonStyle(ScaleButtonStyle())
-            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.horizontal, MADTheme.Spacing.sm)
         }
     }
 
@@ -343,7 +397,7 @@ struct CreateCompetitionView: View {
             Text("Allowed Activities")
                 .font(MADTheme.Typography.subheadline)
                 .foregroundColor(.white.opacity(0.6))
-                .padding(.horizontal, MADTheme.Spacing.xl)
+                .padding(.horizontal, MADTheme.Spacing.sm)
 
             HStack(spacing: MADTheme.Spacing.md) {
                 ForEach(CompetitionActivity.allCases, id: \.self) { activity in
@@ -362,7 +416,7 @@ struct CreateCompetitionView: View {
                     )
                 }
             }
-            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.horizontal, MADTheme.Spacing.sm)
         }
     }
 
@@ -375,11 +429,11 @@ struct CreateCompetitionView: View {
                     .font(MADTheme.Typography.subheadline)
                     .foregroundColor(.white.opacity(0.6))
 
-                Text("Whoever goes further in a day wins the point")
+                Text(unitOnlyDescription)
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(.white.opacity(0.5))
             }
-            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.horizontal, MADTheme.Spacing.sm)
 
             HStack(spacing: MADTheme.Spacing.sm) {
                 ForEach([CompetitionUnit.miles, CompetitionUnit.kilometers, CompetitionUnit.steps], id: \.self) { unitOption in
@@ -407,7 +461,7 @@ struct CreateCompetitionView: View {
                     .buttonStyle(ScaleButtonStyle())
                 }
             }
-            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.horizontal, MADTheme.Spacing.sm)
         }
     }
 
@@ -424,7 +478,7 @@ struct CreateCompetitionView: View {
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(.white.opacity(0.5))
             }
-            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.horizontal, MADTheme.Spacing.sm)
 
             VStack(spacing: MADTheme.Spacing.lg) {
                 // Unit selector
@@ -454,7 +508,7 @@ struct CreateCompetitionView: View {
                         .buttonStyle(ScaleButtonStyle())
                     }
                 }
-                .padding(.horizontal, MADTheme.Spacing.xl)
+                .padding(.horizontal, MADTheme.Spacing.sm)
 
                 // Goal picker with +/- buttons
                 HStack(spacing: MADTheme.Spacing.xl) {
@@ -523,7 +577,7 @@ struct CreateCompetitionView: View {
                     }
                     .buttonStyle(ScaleButtonStyle())
                 }
-                .padding(.horizontal, MADTheme.Spacing.xl)
+                .padding(.horizontal, MADTheme.Spacing.sm)
 
                 // Friend's best
                 if let friend = firstSelectedFriend {
@@ -541,7 +595,7 @@ struct CreateCompetitionView: View {
                             .stroke(Color.white.opacity(0.1), lineWidth: 1)
                     )
             )
-            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.horizontal, MADTheme.Spacing.sm)
         }
     }
 
@@ -558,7 +612,7 @@ struct CreateCompetitionView: View {
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(.white.opacity(0.5))
             }
-            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.horizontal, MADTheme.Spacing.sm)
 
             VStack(spacing: MADTheme.Spacing.md) {
                 // Quick presets
@@ -610,19 +664,7 @@ struct CreateCompetitionView: View {
                         }
                     )
 
-                    // Only show "No End" option for Streaks and Clash
-                    if selectedType == .streaks || selectedType == .clash {
-                        DurationPreset(
-                            title: "No End",
-                            hours: 0,
-                            icon: "infinity",
-                            isSelected: !hasEndDate,
-                            action: {
-                                hasEndDate = false
-                                isCustomDuration = false
-                            }
-                        )
-                    }
+                    // No "No End" option - Apex and Targets always have a fixed duration
                 }
 
                 // Custom date picker
@@ -672,7 +714,7 @@ struct CreateCompetitionView: View {
                     }
                 }
             }
-            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.horizontal, MADTheme.Spacing.sm)
         }
     }
 
@@ -689,7 +731,7 @@ struct CreateCompetitionView: View {
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(.white.opacity(0.5))
             }
-            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.horizontal, MADTheme.Spacing.sm)
 
             HStack(spacing: MADTheme.Spacing.md) {
                 ForEach(CompetitionInterval.allCases, id: \.self) { intervalOption in
@@ -700,7 +742,7 @@ struct CreateCompetitionView: View {
                     )
                 }
             }
-            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.horizontal, MADTheme.Spacing.sm)
         }
     }
 
@@ -713,11 +755,13 @@ struct CreateCompetitionView: View {
                     .font(MADTheme.Typography.subheadline)
                     .foregroundColor(.white.opacity(0.6))
 
-                Text(selectedType == .streaks ? "First to break this many days loses" : "First to reach this score wins")
+                Text(selectedType == .streaks
+                    ? (firstTo == 1 ? "Miss one day and you're out" : "Miss \(firstTo) days and you're out")
+                    : "First to reach this score wins")
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(.white.opacity(0.5))
             }
-            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.horizontal, MADTheme.Spacing.sm)
 
             HStack(spacing: MADTheme.Spacing.xl) {
                 // Minus button
@@ -787,7 +831,7 @@ struct CreateCompetitionView: View {
                             .stroke(Color.white.opacity(0.1), lineWidth: 1)
                     )
             )
-            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.horizontal, MADTheme.Spacing.sm)
         }
     }
 
@@ -818,7 +862,7 @@ struct CreateCompetitionView: View {
                     )
             )
         }
-        .padding(.horizontal, MADTheme.Spacing.xl)
+        .padding(.horizontal, MADTheme.Spacing.sm)
     }
 
     // MARK: - Send Invite Button
@@ -987,12 +1031,11 @@ struct CreateCompetitionView: View {
         let friendNames = selectedFriends.prefix(2).map { $0.displayName }.joined(separator: " & ")
         let autoName = "\(selectedType.displayName) with \(friendNames)"
 
-        // Calculate duration_hours from the UI selection (lobby mode - no start/end dates)
+        // Calculate duration_hours from the UI selection
+        // Only Apex and Targets have fixed durations; others end by condition
         let computedDurationHours: Int?
-        if selectedType == .race {
-            computedDurationHours = nil  // Race has no time limit
-        } else if !hasEndDate {
-            computedDurationHours = nil  // Open-ended
+        if !needsDuration {
+            computedDurationHours = nil  // Streaks, Clash, Race end by condition
         } else if isCustomDuration {
             let totalSeconds = customEndDate.timeIntervalSince(Date())
             let hours = Int(totalSeconds / 3600)
@@ -1007,7 +1050,7 @@ struct CreateCompetitionView: View {
                     name: competitionName.isEmpty ? autoName : competitionName,
                     type: selectedType,
                     workouts: Array(selectedWorkouts),
-                    goal: goal,
+                    goal: needsGoal ? goal : 0,
                     unit: unit,
                     firstTo: firstTo,
                     history: includeHistory,
@@ -1016,15 +1059,24 @@ struct CreateCompetitionView: View {
                 )
 
                 // Invite all selected friends
+                var inviteFailures = 0
                 for friend in selectedFriends {
-                    try? await competitionService.inviteUser(
-                        competitionId: competitionId,
-                        userId: friend.user_id
-                    )
+                    do {
+                        print("[CreateCompetition] Inviting \(friend.displayName) (\(friend.user_id))")
+                        try await competitionService.inviteUser(
+                            competitionId: competitionId,
+                            userId: friend.user_id
+                        )
+                        print("[CreateCompetition] Successfully invited \(friend.displayName)")
+                    } catch {
+                        inviteFailures += 1
+                        print("[CreateCompetition] Failed to invite \(friend.displayName): \(error.localizedDescription)")
+                    }
                 }
 
                 await MainActor.run {
                     isCreating = false
+                    failedInviteCount = inviteFailures
                     showSuccess = true
                 }
             } catch {

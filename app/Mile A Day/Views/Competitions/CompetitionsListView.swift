@@ -6,6 +6,9 @@ struct CompetitionsListView: View {
     @State private var selectedTab = 0
     @State private var showingCreateCompetition = false
     @State private var selectedCompetition: Competition?
+    @State private var activeExpanded = true
+    @State private var waitingExpanded = true
+    @State private var finishedExpanded = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -99,41 +102,63 @@ struct CompetitionsListView: View {
                 )
             } else {
                 ScrollView {
-                    LazyVStack(spacing: MADTheme.Spacing.md) {
-                        // Lobby section
-                        let lobbyComps = competitionService.competitions.filter { $0.status == .lobby || $0.status == .scheduled }
-                        if !lobbyComps.isEmpty {
-                            SectionHeader(title: "Waiting to Start", icon: "hourglass", count: lobbyComps.count)
-                            ForEach(lobbyComps) { competition in
-                                CompetitionCard(competition: competition, action: {
-                                    selectedCompetition = competition
-                                })
+                    LazyVStack(spacing: MADTheme.Spacing.sm) {
+                        // Active section (priority)
+                        let activeComps = competitionService.competitions.filter { $0.status == .active }
+                        if !activeComps.isEmpty {
+                            CollapsibleSection(
+                                title: "Active",
+                                icon: "bolt.fill",
+                                count: activeComps.count,
+                                iconColor: .green,
+                                isExpanded: $activeExpanded
+                            ) {
+                                ForEach(activeComps) { competition in
+                                    CompetitionCard(competition: competition, action: {
+                                        selectedCompetition = competition
+                                    })
+                                }
                             }
                         }
 
-                        // Active section
-                        let activeComps = competitionService.competitions.filter { $0.status == .active }
-                        if !activeComps.isEmpty {
-                            SectionHeader(title: "Active", icon: "bolt.fill", count: activeComps.count)
-                            ForEach(activeComps) { competition in
-                                CompetitionCard(competition: competition, action: {
-                                    selectedCompetition = competition
-                                })
+                        // Waiting to start section
+                        let lobbyComps = competitionService.competitions.filter { $0.status == .lobby || $0.status == .scheduled }
+                        if !lobbyComps.isEmpty {
+                            CollapsibleSection(
+                                title: "Waiting to Start",
+                                icon: "hourglass",
+                                count: lobbyComps.count,
+                                iconColor: .orange,
+                                isExpanded: $waitingExpanded
+                            ) {
+                                ForEach(lobbyComps) { competition in
+                                    CompetitionCard(competition: competition, action: {
+                                        selectedCompetition = competition
+                                    })
+                                }
                             }
                         }
 
                         // Finished section
                         let finishedComps = competitionService.competitions.filter { $0.status == .finished }
                         if !finishedComps.isEmpty {
-                            SectionHeader(title: "Finished", icon: "checkmark.circle", count: finishedComps.count)
-                            ForEach(finishedComps) { competition in
-                                CompetitionCard(competition: competition, action: {
-                                    selectedCompetition = competition
-                                })
+                            CollapsibleSection(
+                                title: "Finished",
+                                icon: "checkmark.circle",
+                                count: finishedComps.count,
+                                iconColor: .gray,
+                                isExpanded: $finishedExpanded
+                            ) {
+                                ForEach(finishedComps) { competition in
+                                    CompetitionCard(competition: competition, action: {
+                                        selectedCompetition = competition
+                                    })
+                                }
                             }
                         }
                     }
-                    .padding(MADTheme.Spacing.md)
+                    .padding(.horizontal, MADTheme.Spacing.md)
+                    .padding(.vertical, MADTheme.Spacing.md)
                 }
             }
         }
@@ -152,7 +177,7 @@ struct CompetitionsListView: View {
                 )
             } else {
                 ScrollView {
-                    LazyVStack(spacing: MADTheme.Spacing.md) {
+                    LazyVStack(spacing: MADTheme.Spacing.lg) {
                         ForEach(competitionService.invites) { competition in
                             InviteCard(
                                 competition: competition,
@@ -165,7 +190,8 @@ struct CompetitionsListView: View {
                             )
                         }
                     }
-                    .padding(MADTheme.Spacing.md)
+                    .padding(.horizontal, MADTheme.Spacing.md)
+                    .padding(.vertical, MADTheme.Spacing.lg)
                 }
             }
         }
@@ -207,31 +233,62 @@ struct CompetitionsListView: View {
     }
 }
 
-// MARK: - Section Header
+// MARK: - Collapsible Section
 
-struct SectionHeader: View {
+struct CollapsibleSection<Content: View>: View {
     let title: String
     let icon: String
     let count: Int
+    let iconColor: Color
+    @Binding var isExpanded: Bool
+    @ViewBuilder let content: () -> Content
 
     var body: some View {
-        HStack(spacing: MADTheme.Spacing.sm) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundColor(MADTheme.Colors.madRed)
+        VStack(spacing: MADTheme.Spacing.sm) {
+            // Tappable header
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: icon)
+                        .font(.caption)
+                        .foregroundColor(iconColor)
 
-            Text(title)
-                .font(MADTheme.Typography.subheadline)
-                .foregroundColor(.white.opacity(0.7))
+                    Text(title)
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.white.opacity(0.85))
 
-            Text("\(count)")
-                .font(MADTheme.Typography.caption)
-                .foregroundColor(.white.opacity(0.5))
+                    Text("\(count)")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.white.opacity(0.4))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(Color.white.opacity(0.08))
+                        )
 
-            Spacer()
+                    Spacer()
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.3))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+                .padding(.horizontal, MADTheme.Spacing.sm)
+                .padding(.vertical, MADTheme.Spacing.sm)
+            }
+            .buttonStyle(.plain)
+
+            // Collapsible content
+            if isExpanded {
+                content()
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .padding(.horizontal, MADTheme.Spacing.sm)
-        .padding(.top, MADTheme.Spacing.md)
+        .padding(.top, MADTheme.Spacing.xs)
     }
 }
 

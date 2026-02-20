@@ -212,12 +212,24 @@ class CompetitionService: ObservableObject {
     }
 
     /// Start a competition (owner only, requires 2+ accepted participants)
+    /// Starts at the beginning of the next day to avoid mid-day edge cases
     func startCompetition(id: String) async throws -> Competition {
-        print("[CompetitionService] Starting competition: \(id)")
+        // Calculate tomorrow midnight in ISO8601 format
+        let calendar = Calendar.current
+        let tomorrow = calendar.startOfDay(for: calendar.date(byAdding: .day, value: 1, to: Date())!)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        let startDateStr = formatter.string(from: tomorrow)
+
+        print("[CompetitionService] Starting competition: \(id) with start_date: \(startDateStr)")
+
+        let body: [String: String] = ["start_date": startDateStr]
+        let jsonData = try JSONEncoder().encode(body)
 
         let response: CompetitionResponse = try await makeRequest(
             endpoint: "/competitions/\(id)/start",
             method: .POST,
+            body: jsonData,
             responseType: CompetitionResponse.self
         )
 

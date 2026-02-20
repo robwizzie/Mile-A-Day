@@ -84,195 +84,262 @@ struct CompetitionTypeCard: View {
 struct CompetitionCard: View {
     let competition: Competition
     let action: () -> Void
-    @Environment(\.colorScheme) var colorScheme
+
+    private var typeGradient: LinearGradient {
+        LinearGradient(
+            colors: competition.type.gradient.map { Color(hex: $0) },
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
+
+    private var ownerUsername: String? {
+        competition.users.first(where: { $0.user_id == competition.owner })?.username
+    }
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                // Header with icon, type, and status
-                HStack {
-                    Image(systemName: competition.type.icon)
-                        .font(.title2)
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: competition.type.gradient.map { Color(hex: $0) },
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 40, height: 40)
-                        .background(
-                            Circle()
-                                .fill(Color(hex: competition.type.gradient[0]).opacity(0.15))
-                        )
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(competition.competition_name)
-                            .font(MADTheme.Typography.headline)
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-
-                        Text(competition.type.displayName)
-                            .font(MADTheme.Typography.caption)
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-
-                    Spacer()
-
-                    // Status badge
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(competition.status.color)
-                            .frame(width: 6, height: 6)
-                        Text(competition.status.displayName)
-                            .font(MADTheme.Typography.caption)
-                            .foregroundColor(competition.status.color)
-                    }
-                    .padding(.horizontal, MADTheme.Spacing.sm)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule()
-                            .fill(competition.status.color.opacity(0.15))
-                    )
-
-                    if competition.isOwner {
-                        Image(systemName: "crown.fill")
-                            .font(.caption)
-                            .foregroundColor(.yellow)
-                    }
-                }
-
-                // Goal info
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    Label(
-                        "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)",
-                        systemImage: "target"
-                    )
-                    .font(MADTheme.Typography.callout)
-                    .foregroundColor(.white.opacity(0.9))
-
-                    Spacer()
-
-                    Label(
-                        "\(competition.acceptedUsersCount) participant\(competition.acceptedUsersCount == 1 ? "" : "s")",
-                        systemImage: "person.2.fill"
-                    )
-                    .font(MADTheme.Typography.callout)
-                    .foregroundColor(.white.opacity(0.9))
-                }
-
-                // Time info based on status
-                competitionTimeInfo
-            }
-            .padding(MADTheme.Spacing.lg)
-            .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .fill(.ultraThinMaterial)
-
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .stroke(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
-                                    Color.clear
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                }
-            )
-            .overlay(alignment: .leading) {
+            HStack(spacing: 0) {
+                // Type color accent on left edge
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(
-                        LinearGradient(
-                            colors: competition.type.gradient.map { Color(hex: $0) },
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+                    .fill(typeGradient)
                     .frame(width: 4)
                     .padding(.vertical, MADTheme.Spacing.md)
-                    .padding(.leading, 2)
+
+                VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                    // Header: Icon + Name + Owner badge
+                    HStack(spacing: MADTheme.Spacing.md) {
+                        Image(systemName: competition.type.icon)
+                            .font(.title3)
+                            .foregroundStyle(typeGradient)
+                            .frame(width: 40, height: 40)
+                            .background(
+                                Circle()
+                                    .fill(Color(hex: competition.type.gradient[0]).opacity(0.12))
+                            )
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(competition.competition_name)
+                                .font(MADTheme.Typography.headline)
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+
+                            HStack(spacing: MADTheme.Spacing.xs) {
+                                Text(competition.type.displayName)
+                                    .font(MADTheme.Typography.caption)
+                                    .foregroundColor(.white.opacity(0.5))
+
+                                Text("\u{00B7}")
+                                    .foregroundColor(.white.opacity(0.3))
+
+                                Label(
+                                    "\(competition.acceptedUsersCount)",
+                                    systemImage: "person.2"
+                                )
+                                .font(MADTheme.Typography.caption)
+                                .foregroundColor(.white.opacity(0.5))
+                            }
+                        }
+
+                        Spacer()
+
+                        if competition.isOwner {
+                            Image(systemName: "crown.fill")
+                                .font(.caption)
+                                .foregroundColor(.yellow)
+                        }
+                    }
+
+                    // Stats chips
+                    HStack(spacing: MADTheme.Spacing.sm) {
+                        // Goal chip (not for Clash or Apex)
+                        if competition.type != .clash && competition.type != .apex {
+                            StatChip(
+                                icon: "target",
+                                text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
+                            )
+                        }
+
+                        // Points chip (Clash/Streaks)
+                        if competition.type == .clash || competition.type == .streaks {
+                            if competition.options.first_to > 0 {
+                                StatChip(
+                                    icon: competition.type == .clash ? "star" : "heart",
+                                    text: competition.type == .clash
+                                        ? "First to \(competition.options.first_to)"
+                                        : "\(competition.options.first_to) miss\(competition.options.first_to == 1 ? "" : "es")"
+                                )
+                            }
+                        }
+
+                        if let durationStr = competition.options.durationFormatted {
+                            StatChip(icon: "clock", text: durationStr)
+                        }
+
+                        if let interval = competition.options.interval {
+                            StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
+                        }
+
+                        Spacer()
+                    }
+
+                    // Divider
+                    Rectangle()
+                        .fill(Color.white.opacity(0.06))
+                        .frame(height: 1)
+
+                    competitionStatusFooter
+                }
+                .padding(.horizontal, MADTheme.Spacing.md)
+                .padding(.vertical, MADTheme.Spacing.md)
             }
-            .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+            )
         }
         .buttonStyle(ScaleButtonStyle())
     }
 
     @ViewBuilder
-    private var competitionTimeInfo: some View {
+    private var competitionStatusFooter: some View {
+        VStack(spacing: MADTheme.Spacing.sm) {
+            // Participant avatars with status indicators
+            HStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(Array(competition.users.prefix(6)), id: \.id) { user in
+                    ParticipantAvatar(user: user, isOwner: user.user_id == competition.owner)
+                }
+
+                if competition.users.count > 6 {
+                    Text("+\(competition.users.count - 6)")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                        .frame(width: 28, height: 28)
+                        .background(
+                            Circle()
+                                .fill(Color.white.opacity(0.08))
+                        )
+                }
+
+                Spacer()
+
+                // Status label
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(competition.status.color)
+                        .frame(width: 6, height: 6)
+
+                    Text(statusText)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(competition.status.color)
+                }
+            }
+        }
+    }
+
+    private var statusText: String {
         switch competition.status {
         case .lobby:
-            if let durationStr = competition.options.durationFormatted {
-                HStack(spacing: MADTheme.Spacing.xs) {
-                    Image(systemName: "clock")
-                        .font(.caption)
-                        .foregroundColor(.orange.opacity(0.8))
-                    Text("Duration: \(durationStr) \u{00B7} Waiting to start")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(.orange.opacity(0.8))
-                }
-            } else {
-                HStack(spacing: MADTheme.Spacing.xs) {
-                    Image(systemName: "hourglass")
-                        .font(.caption)
-                        .foregroundColor(.orange.opacity(0.8))
-                    Text("Open-ended \u{00B7} Waiting to start")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(.orange.opacity(0.8))
-                }
-            }
+            return "\(competition.acceptedUsersCount)/\(competition.users.count) joined"
         case .scheduled:
             if let startDate = competition.startDateFormatted {
-                HStack(spacing: MADTheme.Spacing.xs) {
-                    Image(systemName: "calendar.badge.clock")
-                        .font(.caption)
-                        .foregroundColor(.blue.opacity(0.8))
-                    Text("Starts \(startDate.formatted(date: .abbreviated, time: .omitted))")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(.blue.opacity(0.8))
-                }
+                return "Starts \(startDate.formatted(date: .abbreviated, time: .omitted))"
             }
+            return "Scheduled"
         case .active:
             if let endDate = competition.endDateFormatted {
                 let remaining = endDate.timeIntervalSince(Date())
                 if remaining > 0 {
                     let days = Int(remaining / 86400)
                     let hours = Int(remaining.truncatingRemainder(dividingBy: 86400) / 3600)
-                    HStack(spacing: MADTheme.Spacing.xs) {
-                        Image(systemName: "timer")
-                            .font(.caption)
-                            .foregroundColor(.green.opacity(0.9))
-                        Text(days > 0 ? "\(days)d \(hours)h left" : "\(hours)h left")
-                            .font(MADTheme.Typography.caption)
-                            .foregroundColor(.green.opacity(0.9))
-                    }
-                }
-            } else {
-                HStack(spacing: MADTheme.Spacing.xs) {
-                    Image(systemName: "bolt.fill")
-                        .font(.caption)
-                        .foregroundColor(.green.opacity(0.9))
-                    Text("In progress")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(.green.opacity(0.9))
+                    return days > 0 ? "\(days)d \(hours)h left" : "\(hours)h left"
                 }
             }
+            return "In progress"
         case .finished:
-            if let startDate = competition.startDateFormatted,
-               let endDate = competition.endDateFormatted {
-                HStack(spacing: MADTheme.Spacing.xs) {
-                    Image(systemName: "calendar")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.5))
-                    Text("\(startDate.formatted(date: .abbreviated, time: .omitted)) - \(endDate.formatted(date: .abbreviated, time: .omitted))")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(.white.opacity(0.5))
-                }
-            }
+            return "Completed"
+        }
+    }
+}
+
+// MARK: - Stat Chip
+
+struct StatChip: View {
+    let icon: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+            Text(text)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+        }
+        .foregroundColor(.white.opacity(0.7))
+        .padding(.horizontal, MADTheme.Spacing.sm)
+        .padding(.vertical, 5)
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.08))
+        )
+    }
+}
+
+// MARK: - Participant Avatar
+
+struct ParticipantAvatar: View {
+    let user: CompetitionUser
+    let isOwner: Bool
+
+    private var statusColor: Color {
+        switch user.invite_status {
+        case .accepted: return .green
+        case .pending: return .orange
+        case .declined: return .red
+        }
+    }
+
+    private var statusIcon: String {
+        switch user.invite_status {
+        case .accepted: return "checkmark"
+        case .pending: return "clock"
+        case .declined: return "xmark"
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Circle()
+                .fill(Color.white.opacity(0.12))
+                .frame(width: 28, height: 28)
+                .overlay(
+                    Text(user.displayName.prefix(1).uppercased())
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white)
+                )
+                .overlay(
+                    Circle()
+                        .stroke(statusColor.opacity(0.8), lineWidth: 2)
+                )
+
+            // Status badge
+            Image(systemName: statusIcon)
+                .font(.system(size: 6, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 12, height: 12)
+                .background(
+                    Circle()
+                        .fill(statusColor)
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color(white: 0.1), lineWidth: 1)
+                )
+                .offset(x: 2, y: 2)
         }
     }
 }
@@ -283,113 +350,141 @@ struct InviteCard: View {
     let competition: Competition
     let onAccept: () -> Void
     let onDecline: () -> Void
-    @Environment(\.colorScheme) var colorScheme
+
+    private var typeGradient: LinearGradient {
+        LinearGradient(
+            colors: competition.type.gradient.map { Color(hex: $0) },
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+    }
+
+    private var ownerUsername: String? {
+        competition.users.first(where: { $0.user_id == competition.owner })?.username
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            // Header
-            HStack {
-                Image(systemName: competition.type.icon)
-                    .font(.title2)
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: competition.type.gradient.map { Color(hex: $0) },
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+        HStack(spacing: 0) {
+            // Type color accent on left edge
+            RoundedRectangle(cornerRadius: 2)
+                .fill(typeGradient)
+                .frame(width: 4)
+                .padding(.vertical, MADTheme.Spacing.md)
+
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                // Header: Icon + Name + From
+                HStack(spacing: MADTheme.Spacing.md) {
+                    Image(systemName: competition.type.icon)
+                        .font(.title3)
+                        .foregroundStyle(typeGradient)
+                        .frame(width: 40, height: 40)
+                        .background(
+                            Circle()
+                                .fill(Color(hex: competition.type.gradient[0]).opacity(0.12))
                         )
-                    )
-                    .frame(width: 40, height: 40)
-                    .background(
-                        Circle()
-                            .fill(Color(hex: competition.type.gradient[0]).opacity(0.15))
-                    )
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(competition.competition_name)
-                        .font(MADTheme.Typography.headline)
-                        .foregroundColor(.white)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(competition.competition_name)
+                            .font(MADTheme.Typography.headline)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
 
-                    Text("from \(competition.owner)")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(.white.opacity(0.7))
+                        HStack(spacing: MADTheme.Spacing.xs) {
+                            Text(competition.type.displayName)
+                                .font(MADTheme.Typography.caption)
+                                .foregroundColor(.white.opacity(0.5))
+
+                            Text("\u{00B7}")
+                                .foregroundColor(.white.opacity(0.3))
+
+                            HStack(spacing: 2) {
+                                Image(systemName: "person.fill")
+                                    .font(.system(size: 9))
+                                Text("from \(ownerUsername ?? "someone")")
+                            }
+                            .font(MADTheme.Typography.caption)
+                            .foregroundColor(.white.opacity(0.5))
+                        }
+                    }
+
+                    Spacer()
                 }
 
-                Spacer()
-            }
-
-            // Type and goal
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
-                Text(competition.type.displayName)
-                    .font(MADTheme.Typography.subheadline)
-                    .foregroundColor(.white.opacity(0.9))
-
-                Text(competition.type.description)
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(.white.opacity(0.7))
-                    .lineLimit(2)
-
+                // Stats chips
                 HStack(spacing: MADTheme.Spacing.sm) {
-                    Label(
-                        "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)",
-                        systemImage: "target"
-                    )
-                    .font(MADTheme.Typography.callout)
-                    .foregroundColor(.white.opacity(0.9))
-                }
-            }
+                    if competition.type != .clash {
+                        StatChip(
+                            icon: "target",
+                            text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
+                        )
+                    }
 
-            // Action buttons
-            HStack(spacing: MADTheme.Spacing.md) {
-                Button(action: onDecline) {
-                    Text("Decline")
-                        .font(MADTheme.Typography.callout)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
+                    if let durationStr = competition.options.durationFormatted {
+                        StatChip(icon: "clock", text: durationStr)
+                    }
+
+                    Spacer()
+                }
+
+                // Divider
+                Rectangle()
+                    .fill(Color.white.opacity(0.06))
+                    .frame(height: 1)
+
+                // Action buttons
+                HStack(spacing: MADTheme.Spacing.md) {
+                    Button(action: onDecline) {
+                        HStack(spacing: MADTheme.Spacing.xs) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Decline")
+                                .font(MADTheme.Typography.callout)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.white.opacity(0.7))
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, MADTheme.Spacing.sm)
+                        .padding(.vertical, 12)
                         .background(
                             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                .fill(Color.white.opacity(0.06))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                                )
                         )
-                }
-                .buttonStyle(ScaleButtonStyle())
+                    }
+                    .buttonStyle(ScaleButtonStyle())
 
-                Button(action: onAccept) {
-                    Text("Accept")
-                        .font(MADTheme.Typography.callout)
-                        .fontWeight(.semibold)
+                    Button(action: onAccept) {
+                        HStack(spacing: MADTheme.Spacing.xs) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Accept")
+                                .font(MADTheme.Typography.callout)
+                                .fontWeight(.semibold)
+                        }
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, MADTheme.Spacing.sm)
+                        .padding(.vertical, 12)
                         .background(
                             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                                 .fill(MADTheme.Colors.primaryGradient)
                         )
+                    }
+                    .buttonStyle(ScaleButtonStyle())
                 }
-                .buttonStyle(ScaleButtonStyle())
             }
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.vertical, MADTheme.Spacing.md)
         }
-        .padding(MADTheme.Spacing.lg)
         .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
-
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
-                                Color.clear
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            }
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
         )
-        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
     }
 }
 

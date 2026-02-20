@@ -56,14 +56,14 @@ struct Competition: Codable, Identifiable {
 
     // Computed properties
     var isOwner: Bool {
-        guard let currentUserId = UserDefaults.standard.string(forKey: "user_id") else {
+        guard let currentUserId = UserDefaults.standard.string(forKey: "backendUserId") else {
             return false
         }
         return owner == currentUserId
     }
 
     var currentUserInviteStatus: InviteStatus? {
-        guard let currentUserId = UserDefaults.standard.string(forKey: "user_id") else {
+        guard let currentUserId = UserDefaults.standard.string(forKey: "backendUserId") else {
             return nil
         }
         return users.first(where: { $0.user_id == currentUserId })?.invite_status

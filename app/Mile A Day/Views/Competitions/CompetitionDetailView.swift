@@ -7,6 +7,7 @@ struct CompetitionDetailView: View {
     @StateObject private var friendService = FriendService()
 
     @State private var showingInviteFriend = false
+    @State private var showingEditSettings = false
     @State private var isStarting = false
     @State private var isDeleting = false
     @State private var showError = false
@@ -46,6 +47,12 @@ struct CompetitionDetailView: View {
                 competition: competition,
                 competitionService: competitionService,
                 friendService: friendService
+            )
+        }
+        .sheet(isPresented: $showingEditSettings) {
+            EditCompetitionSettingsView(
+                competition: $competition,
+                competitionService: competitionService
             )
         }
         .alert("Error", isPresented: $showError) {
@@ -132,11 +139,42 @@ struct CompetitionDetailView: View {
     // MARK: - Lobby Content
     private var lobbyContent: some View {
         VStack(spacing: MADTheme.Spacing.xl) {
-            // Waiting indicator
-            lobbyWaitingBanner
+            // Status banner - countdown if scheduled, waiting banner if lobby
+            if competition.status == .scheduled {
+                scheduledCountdownBanner
+            } else {
+                lobbyWaitingBanner
+            }
 
             // Competition settings summary
             infoSection
+
+            // Edit settings button (owner only, lobby only)
+            if competition.isOwner && competition.status == .lobby {
+                Button {
+                    showingEditSettings = true
+                } label: {
+                    HStack(spacing: MADTheme.Spacing.sm) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.callout)
+                        Text("Edit Settings")
+                            .font(MADTheme.Typography.callout)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, MADTheme.Spacing.md)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                            .fill(Color.white.opacity(0.08))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                            )
+                    )
+                }
+                .buttonStyle(ScaleButtonStyle())
+            }
 
             // Participants with invite statuses
             lobbyParticipantsSection
@@ -146,8 +184,8 @@ struct CompetitionDetailView: View {
                 inviteButton
             }
 
-            // Start button (owner only)
-            if competition.isOwner {
+            // Start button (owner only, lobby only - not if already scheduled)
+            if competition.isOwner && competition.status == .lobby {
                 startCompetitionButton
             }
         }
@@ -181,6 +219,64 @@ struct CompetitionDetailView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                         .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                )
+        )
+    }
+
+    private var scheduledCountdownBanner: some View {
+        let startDate = competition.startDateFormatted ?? Date()
+        let remaining = startDate.timeIntervalSince(Date())
+        let hours = max(0, Int(remaining / 3600))
+        let minutes = max(0, Int(remaining.truncatingRemainder(dividingBy: 3600) / 60))
+
+        return VStack(spacing: MADTheme.Spacing.md) {
+            Image(systemName: "calendar.badge.clock")
+                .font(.system(size: 32))
+                .foregroundColor(.blue)
+
+            Text("Competition Starts Soon")
+                .font(MADTheme.Typography.headline)
+                .foregroundColor(.white)
+
+            // Countdown display
+            HStack(spacing: MADTheme.Spacing.lg) {
+                VStack(spacing: 2) {
+                    Text("\(hours)")
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("hours")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.white.opacity(0.5))
+                }
+
+                Text(":")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.3))
+
+                VStack(spacing: 2) {
+                    Text("\(minutes)")
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("min")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            }
+
+            if let startDate = competition.startDateFormatted {
+                Text("Begins \(startDate.formatted(date: .abbreviated, time: .omitted))")
+                    .font(MADTheme.Typography.callout)
+                    .foregroundColor(.white.opacity(0.6))
+            }
+        }
+        .padding(MADTheme.Spacing.xl)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .stroke(Color.blue.opacity(0.3), lineWidth: 1)
                 )
         )
     }
@@ -236,6 +332,10 @@ struct CompetitionDetailView: View {
                     if !canStart {
                         let needed = 2 - competition.acceptedUsersCount
                         Text("Need \(needed) more participant\(needed == 1 ? "" : "s")")
+                            .font(MADTheme.Typography.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    } else {
+                        Text("Begins tomorrow at midnight")
                             .font(MADTheme.Typography.caption)
                             .foregroundColor(.white.opacity(0.7))
                     }
@@ -315,7 +415,7 @@ struct CompetitionDetailView: View {
     }
 
     private var competitionLeaderboard: some View {
-        let currentUserId = UserDefaults.standard.string(forKey: "user_id")
+        let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
         let rankedUsers = competition.users
             .filter { $0.invite_status == .accepted }
             .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
@@ -421,8 +521,8 @@ struct CompetitionDetailView: View {
     // MARK: - Info Section (shared)
     private var infoSection: some View {
         VStack(spacing: MADTheme.Spacing.md) {
-            // Goal (not shown for Clash - whoever goes furthest wins)
-            if competition.type != .clash {
+            // Goal (not shown for Clash or Apex - they don't have distance targets)
+            if competition.type != .clash && competition.type != .apex {
                 InfoRow(
                     icon: "target",
                     title: "Goal",
@@ -540,6 +640,14 @@ struct CompetitionDetailView: View {
                             showingInviteFriend = true
                         } label: {
                             Label("Invite Friends", systemImage: "person.badge.plus")
+                        }
+                    }
+
+                    if competition.status == .lobby {
+                        Button {
+                            showingEditSettings = true
+                        } label: {
+                            Label("Edit Settings", systemImage: "slider.horizontal.3")
                         }
                     }
 
@@ -818,6 +926,317 @@ struct FriendInviteRow: View {
                         .stroke(Color.white.opacity(0.2), lineWidth: 1)
                 )
         )
+    }
+}
+
+// MARK: - Edit Competition Settings View
+struct EditCompetitionSettingsView: View {
+    @Binding var competition: Competition
+    @ObservedObject var competitionService: CompetitionService
+    @Environment(\.dismiss) var dismiss
+
+    // Editable fields initialized from competition
+    @State private var name: String = ""
+    @State private var goal: Double = 1.0
+    @State private var unit: CompetitionUnit = .miles
+    @State private var interval: CompetitionInterval = .day
+    @State private var firstTo: Int = 5
+    @State private var durationHours: Int? = nil
+    @State private var history: Bool = false
+    @State private var selectedWorkouts: Set<CompetitionActivity> = [.run]
+
+    @State private var isSaving = false
+    @State private var showError = false
+    @State private var errorMessage = ""
+
+    private var needsGoal: Bool {
+        competition.type != .clash && competition.type != .apex
+    }
+
+    private var needsInterval: Bool {
+        competition.type == .apex || competition.type == .targets || competition.type == .clash
+    }
+
+    private var needsFirstTo: Bool {
+        competition.type == .streaks || competition.type == .clash
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                MADTheme.Colors.appBackgroundGradient
+                    .ignoresSafeArea(.all)
+
+                ScrollView {
+                    VStack(spacing: MADTheme.Spacing.xl) {
+                        // Competition Name
+                        settingsGroup(title: "Competition Name") {
+                            TextField("Competition name", text: $name)
+                                .foregroundColor(.white)
+                                .font(MADTheme.Typography.body)
+                                .padding(MADTheme.Spacing.md)
+                                .background(
+                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                        .fill(Color.white.opacity(0.08))
+                                )
+                        }
+
+                        // Goal (not for Clash)
+                        if needsGoal {
+                            settingsGroup(title: "Goal") {
+                                HStack(spacing: MADTheme.Spacing.lg) {
+                                    Button {
+                                        if goal > 1 { goal -= 1 }
+                                    } label: {
+                                        Image(systemName: "minus")
+                                            .font(.title3)
+                                            .foregroundColor(.white)
+                                            .frame(width: 40, height: 40)
+                                            .background(Circle().fill(Color.white.opacity(0.1)))
+                                    }
+
+                                    TextField("", value: $goal, format: .number)
+                                        .keyboardType(.decimalPad)
+                                        .multilineTextAlignment(.center)
+                                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                                        .foregroundColor(.white)
+                                        .frame(minWidth: 80)
+
+                                    Button {
+                                        goal += 1
+                                    } label: {
+                                        Image(systemName: "plus")
+                                            .font(.title3)
+                                            .foregroundColor(.white)
+                                            .frame(width: 40, height: 40)
+                                            .background(Circle().fill(Color.white.opacity(0.1)))
+                                    }
+                                }
+
+                                // Unit selector
+                                HStack(spacing: MADTheme.Spacing.sm) {
+                                    ForEach([CompetitionUnit.miles, .kilometers, .steps], id: \.self) { u in
+                                        Button {
+                                            unit = u
+                                        } label: {
+                                            Text(u == .steps ? "Steps" : u.rawValue.capitalized)
+                                                .font(MADTheme.Typography.callout)
+                                                .fontWeight(unit == u ? .semibold : .regular)
+                                                .foregroundColor(unit == u ? .white : .white.opacity(0.5))
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.vertical, MADTheme.Spacing.sm)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                                        .fill(unit == u ? MADTheme.Colors.primary.opacity(0.3) : Color.white.opacity(0.05))
+                                                )
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // Unit only for Clash
+                            settingsGroup(title: "Distance Unit") {
+                                HStack(spacing: MADTheme.Spacing.sm) {
+                                    ForEach([CompetitionUnit.miles, .kilometers, .steps], id: \.self) { u in
+                                        Button {
+                                            unit = u
+                                        } label: {
+                                            Text(u == .steps ? "Steps" : u.rawValue.capitalized)
+                                                .font(MADTheme.Typography.callout)
+                                                .fontWeight(unit == u ? .semibold : .regular)
+                                                .foregroundColor(unit == u ? .white : .white.opacity(0.5))
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.vertical, MADTheme.Spacing.sm)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                                        .fill(unit == u ? MADTheme.Colors.primary.opacity(0.3) : Color.white.opacity(0.05))
+                                                )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Interval
+                        if needsInterval {
+                            settingsGroup(title: "Scoring Interval") {
+                                HStack(spacing: MADTheme.Spacing.sm) {
+                                    ForEach(CompetitionInterval.allCases, id: \.self) { i in
+                                        Button {
+                                            interval = i
+                                        } label: {
+                                            Text(i.displayName)
+                                                .font(MADTheme.Typography.callout)
+                                                .fontWeight(interval == i ? .semibold : .regular)
+                                                .foregroundColor(interval == i ? .white : .white.opacity(0.5))
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.vertical, MADTheme.Spacing.sm)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                                        .fill(interval == i ? MADTheme.Colors.primary.opacity(0.3) : Color.white.opacity(0.05))
+                                                )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // First To
+                        if needsFirstTo {
+                            settingsGroup(title: competition.type == .streaks ? "Breaks to Lose" : "Points to Win") {
+                                HStack(spacing: MADTheme.Spacing.lg) {
+                                    Button {
+                                        if firstTo > 1 { firstTo -= 1 }
+                                    } label: {
+                                        Image(systemName: "minus")
+                                            .font(.title3)
+                                            .foregroundColor(.white)
+                                            .frame(width: 40, height: 40)
+                                            .background(Circle().fill(Color.white.opacity(0.1)))
+                                    }
+
+                                    Text("\(firstTo)")
+                                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                                        .foregroundColor(.white)
+                                        .frame(minWidth: 60)
+
+                                    Button {
+                                        firstTo += 1
+                                    } label: {
+                                        Image(systemName: "plus")
+                                            .font(.title3)
+                                            .foregroundColor(.white)
+                                            .frame(width: 40, height: 40)
+                                            .background(Circle().fill(Color.white.opacity(0.1)))
+                                    }
+                                }
+                            }
+                        }
+
+                        // Activities
+                        settingsGroup(title: "Allowed Activities") {
+                            HStack(spacing: MADTheme.Spacing.md) {
+                                ForEach(CompetitionActivity.allCases, id: \.self) { activity in
+                                    ActivityToggle(
+                                        activity: activity,
+                                        isSelected: selectedWorkouts.contains(activity),
+                                        action: {
+                                            if selectedWorkouts.contains(activity) {
+                                                if selectedWorkouts.count > 1 {
+                                                    selectedWorkouts.remove(activity)
+                                                }
+                                            } else {
+                                                selectedWorkouts.insert(activity)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        // History toggle
+                        settingsGroup(title: "Historical Data") {
+                            Toggle(isOn: $history) {
+                                Text("Include workout data from before start")
+                                    .font(MADTheme.Typography.callout)
+                                    .foregroundColor(.white)
+                            }
+                            .tint(MADTheme.Colors.primary)
+                        }
+
+                        Spacer(minLength: MADTheme.Spacing.xxl)
+                    }
+                    .padding(MADTheme.Spacing.lg)
+                }
+            }
+            .navigationTitle("Edit Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundColor(.white)
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        saveSettings()
+                    } label: {
+                        if isSaving {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Text("Save")
+                                .fontWeight(.semibold)
+                                .foregroundColor(MADTheme.Colors.madRed)
+                        }
+                    }
+                    .disabled(isSaving)
+                }
+            }
+            .alert("Error", isPresented: $showError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(errorMessage)
+            }
+            .onAppear {
+                // Initialize state from current competition
+                name = competition.competition_name
+                goal = competition.options.goal
+                unit = competition.options.unit
+                interval = competition.options.interval ?? .day
+                firstTo = competition.options.first_to
+                durationHours = competition.options.duration_hours
+                history = competition.options.history ?? false
+                selectedWorkouts = Set(competition.workouts)
+            }
+        }
+    }
+
+    private func settingsGroup<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            Text(title)
+                .font(MADTheme.Typography.subheadline)
+                .foregroundColor(.white.opacity(0.6))
+
+            content()
+        }
+        .padding(MADTheme.Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        )
+    }
+
+    private func saveSettings() {
+        isSaving = true
+        Task {
+            do {
+                let updated = try await competitionService.updateCompetition(
+                    id: competition.competition_id,
+                    name: name,
+                    workouts: Array(selectedWorkouts),
+                    goal: goal,
+                    unit: unit,
+                    firstTo: firstTo,
+                    history: history,
+                    interval: interval
+                )
+                await MainActor.run {
+                    competition = updated
+                    isSaving = false
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    isSaving = false
+                    errorMessage = error.localizedDescription
+                    showError = true
+                }
+            }
+        }
     }
 }
 
