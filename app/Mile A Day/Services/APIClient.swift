@@ -121,8 +121,28 @@ class APIClient {
         
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        
-        return try decoder.decode(T.self, from: data)
+
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch let decodingError as DecodingError {
+            // Log detailed decoding error for debugging
+            switch decodingError {
+            case .keyNotFound(let key, let context):
+                print("[APIClient] ❌ Decode error - Missing key '\(key.stringValue)' at path: \(context.codingPath.map(\.stringValue).joined(separator: "."))")
+            case .valueNotFound(let type, let context):
+                print("[APIClient] ❌ Decode error - Null value for type '\(type)' at path: \(context.codingPath.map(\.stringValue).joined(separator: "."))")
+            case .typeMismatch(let type, let context):
+                print("[APIClient] ❌ Decode error - Type mismatch, expected '\(type)' at path: \(context.codingPath.map(\.stringValue).joined(separator: "."))")
+            case .dataCorrupted(let context):
+                print("[APIClient] ❌ Decode error - Data corrupted at path: \(context.codingPath.map(\.stringValue).joined(separator: "."))")
+            @unknown default:
+                print("[APIClient] ❌ Decode error - Unknown: \(decodingError)")
+            }
+            if let jsonString = String(data: data, encoding: .utf8) {
+                print("[APIClient] 📄 Raw response: \(jsonString.prefix(2000))")
+            }
+            throw decodingError
+        }
     }
     
     // MARK: - Token Management Helpers

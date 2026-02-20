@@ -17,6 +17,43 @@ struct Competition: Codable, Identifiable {
 
     var id: String { competition_id }
 
+    enum CodingKeys: String, CodingKey {
+        case competition_id = "id"
+        case competition_name
+        case start_date
+        case end_date
+        case workouts
+        case type
+        case options
+        case owner
+        case users
+    }
+
+    init(competition_id: String, competition_name: String, start_date: String?, end_date: String?, workouts: [CompetitionActivity], type: CompetitionType, options: CompetitionOptions, owner: String, users: [CompetitionUser]) {
+        self.competition_id = competition_id
+        self.competition_name = competition_name
+        self.start_date = start_date
+        self.end_date = end_date
+        self.workouts = workouts
+        self.type = type
+        self.options = options
+        self.owner = owner
+        self.users = users
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        competition_id = try container.decode(String.self, forKey: .competition_id)
+        competition_name = try container.decode(String.self, forKey: .competition_name)
+        start_date = try container.decodeIfPresent(String.self, forKey: .start_date)
+        end_date = try container.decodeIfPresent(String.self, forKey: .end_date)
+        workouts = try container.decodeIfPresent([CompetitionActivity].self, forKey: .workouts) ?? []
+        type = try container.decode(CompetitionType.self, forKey: .type)
+        options = try container.decodeIfPresent(CompetitionOptions.self, forKey: .options) ?? CompetitionOptions.defaults
+        owner = try container.decode(String.self, forKey: .owner)
+        users = try container.decodeIfPresent([CompetitionUser].self, forKey: .users) ?? []
+    }
+
     // Computed properties
     var isOwner: Bool {
         guard let currentUserId = UserDefaults.standard.string(forKey: "user_id") else {
@@ -194,6 +231,31 @@ struct CompetitionOptions: Codable {
     let interval: CompetitionInterval?
     let duration_hours: Int?
 
+    /// Default values for when the server returns null options
+    static let defaults = CompetitionOptions(
+        goal: 0, unit: .miles, first_to: 0,
+        history: nil, interval: nil, duration_hours: nil
+    )
+
+    init(goal: Double, unit: CompetitionUnit, first_to: Int, history: Bool?, interval: CompetitionInterval?, duration_hours: Int?) {
+        self.goal = goal
+        self.unit = unit
+        self.first_to = first_to
+        self.history = history
+        self.interval = interval
+        self.duration_hours = duration_hours
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        goal = try container.decodeIfPresent(Double.self, forKey: .goal) ?? 0
+        unit = try container.decodeIfPresent(CompetitionUnit.self, forKey: .unit) ?? .miles
+        first_to = try container.decodeIfPresent(Int.self, forKey: .first_to) ?? 0
+        history = try container.decodeIfPresent(Bool.self, forKey: .history)
+        interval = try container.decodeIfPresent(CompetitionInterval.self, forKey: .interval)
+        duration_hours = try container.decodeIfPresent(Int.self, forKey: .duration_hours)
+    }
+
     var goalFormatted: String {
         if unit == .miles {
             return String(format: "%.1f", goal)
@@ -269,6 +331,25 @@ struct CompetitionUser: Codable, Identifiable {
             return uname
         }
         return "Unknown"
+    }
+
+    init(competition_id: String, user_id: String, invite_status: InviteStatus, username: String?, score: Double?, intervals: [String: Double]?) {
+        self.competition_id = competition_id
+        self.user_id = user_id
+        self.invite_status = invite_status
+        self.username = username
+        self.score = score
+        self.intervals = intervals
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        competition_id = try container.decodeIfPresent(String.self, forKey: .competition_id) ?? ""
+        user_id = try container.decode(String.self, forKey: .user_id)
+        invite_status = try container.decodeIfPresent(InviteStatus.self, forKey: .invite_status) ?? .pending
+        username = try container.decodeIfPresent(String.self, forKey: .username)
+        score = try container.decodeIfPresent(Double.self, forKey: .score)
+        intervals = try container.decodeIfPresent([String: Double].self, forKey: .intervals)
     }
 }
 

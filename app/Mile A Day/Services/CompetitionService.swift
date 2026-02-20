@@ -68,6 +68,9 @@ class CompetitionService: ObservableObject {
             case .notFound:
                 throw CompetitionServiceError.competitionNotFound
             }
+        } catch let error as DecodingError {
+            print("[CompetitionService] ❌ Decoding error: \(error)")
+            throw CompetitionServiceError.networkError(error.localizedDescription)
         } catch {
             throw CompetitionServiceError.networkError(error.localizedDescription)
         }
