@@ -4,6 +4,7 @@ import Combine
 /// App State Manager
 /// Manages the overall app flow: Splash -> Onboarding -> Auth -> Main App
 class AppStateManager: ObservableObject {
+    static let shared = AppStateManager()
     
     // MARK: - App States
     enum AppState {

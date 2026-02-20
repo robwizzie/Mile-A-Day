@@ -1,9 +1,9 @@
 import SwiftUI
 
 struct RootView: View {
-    @StateObject private var appStateManager = AppStateManager()
+    @StateObject private var appStateManager = AppStateManager.shared
     @StateObject private var healthManager = HealthKitManager()
-    @StateObject private var userManager = UserManager()
+    @StateObject private var userManager = UserManager.shared
     @StateObject private var notificationService = MADNotificationService.shared
     
     var body: some View {

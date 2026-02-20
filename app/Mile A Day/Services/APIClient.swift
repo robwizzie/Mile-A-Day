@@ -27,26 +27,29 @@ class APIClient {
     ) async throws -> T {
         // Step 1: Check if access token exists
         guard let accessToken = getAccessToken() else {
+            print("[APIClient] ❌ No access token, signing out")
+            signOutUser()
             throw APIError.notAuthenticated
         }
-        
+
         // Step 2: Check if access token is expired
         if TokenUtils.isTokenExpired(accessToken) {
             print("[APIClient] 🔄 Access token expired, refreshing...")
-            
+
             // Step 3: Check if refresh token exists
             guard let refreshToken = getRefreshToken() else {
-                print("[APIClient] ❌ No refresh token available")
+                print("[APIClient] ❌ No refresh token available, signing out")
+                signOutUser()
                 throw APIError.notAuthenticated
             }
-            
+
             // Step 4: Refresh tokens
             do {
                 let (newAccessToken, newRefreshToken) = try await TokenRefreshService.refreshAccessToken(refreshToken: refreshToken)
-                
+
                 // Step 5: Update stored tokens
                 updateTokens(accessToken: newAccessToken, refreshToken: newRefreshToken)
-                
+
                 // Use new access token for the request
                 return try await makeRequest(
                     endpoint: endpoint,
@@ -56,7 +59,8 @@ class APIClient {
                     responseType: responseType
                 )
             } catch {
-                print("[APIClient] ❌ Token refresh failed: \(error)")
+                print("[APIClient] ❌ Token refresh failed, signing out: \(error)")
+                signOutUser()
                 throw APIError.tokenRefreshFailed
             }
         } else {
@@ -156,9 +160,15 @@ class APIClient {
     }
     
     private static func updateTokens(accessToken: String, refreshToken: String) {
-        UserDefaults.standard.set(accessToken, forKey: "authToken")
-        UserDefaults.standard.set(refreshToken, forKey: "refreshToken")
+        UserManager.shared.setTokens(accessToken: accessToken, refreshToken: refreshToken)
         print("[APIClient] ✅ Tokens updated in storage")
+    }
+
+    private static func signOutUser() {
+        DispatchQueue.main.async {
+            UserManager.shared.signOut()
+            AppStateManager.shared.signOut()
+        }
     }
 }
 

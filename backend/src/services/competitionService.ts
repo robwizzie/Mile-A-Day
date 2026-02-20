@@ -302,7 +302,12 @@ export async function getUserScores(competition: Competition): Promise<UserData>
 	const acceptedUsers = competition.users.filter((u: CompetitionUser) => u.invite_status === 'accepted');
 
 	for (const { user_id } of acceptedUsers) {
-		const rawData = await getQuantityDateRange(user_id, competition.start_date, competition.end_date ?? undefined, competition.workouts);
+		const rawData = await getQuantityDateRange(
+			user_id,
+			competition.start_date,
+			competition.end_date ?? undefined,
+			competition.workouts
+		);
 
 		const intervals: { [key: string]: number } = rawData.reduce((groupedData: any, dayData: any) => {
 			const intervalKey = getCurrentInterval(dayData.local_date, competition.options.interval);
