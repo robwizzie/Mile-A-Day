@@ -19,7 +19,6 @@ struct CreateCompetitionView: View {
     @State private var selectedWorkouts: Set<CompetitionActivity> = [.run]
     @State private var firstTo: Int = 1
     @State private var interval: CompetitionInterval = .day
-    @State private var includeHistory = false
 
     // UI state
     @State private var isCreating = false
@@ -144,9 +143,6 @@ struct CreateCompetitionView: View {
                         if needsDuration {
                             durationSection
                         }
-
-                        // Historical Data Toggle
-                        historyToggleSection
 
                         // Extra space so content is never hidden behind the fixed bottom button
                         Spacer(minLength: 100)
@@ -835,36 +831,6 @@ struct CreateCompetitionView: View {
         }
     }
 
-    // MARK: - History Toggle Section
-
-    var historyToggleSection: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            Toggle(isOn: $includeHistory) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Include Historical Data")
-                        .font(MADTheme.Typography.callout)
-                        .foregroundColor(.white)
-
-                    Text("Start the competition with existing workout data from before the start date")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(.white.opacity(0.6))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .tint(MADTheme.Colors.primary)
-            .padding(MADTheme.Spacing.lg)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                    )
-            )
-        }
-        .padding(.horizontal, MADTheme.Spacing.sm)
-    }
-
     // MARK: - Send Invite Button
 
     var sendInviteButton: some View {
@@ -1053,7 +1019,7 @@ struct CreateCompetitionView: View {
                     goal: needsGoal ? goal : 0,
                     unit: unit,
                     firstTo: firstTo,
-                    history: includeHistory,
+                    history: false,
                     interval: interval,
                     durationHours: computedDurationHours
                 )

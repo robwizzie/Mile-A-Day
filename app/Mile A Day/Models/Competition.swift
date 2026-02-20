@@ -433,3 +433,55 @@ struct InviteUserResponse: Codable {
 struct DeleteCompetitionResponse: Codable {
     let message: String
 }
+
+// MARK: - Trophy Models
+
+struct CompetitionTrophy: Codable, Identifiable {
+    let id: String
+    let competitionName: String
+    let competitionType: CompetitionType
+    let placement: Int
+    let score: Double
+    let totalParticipants: Int
+    let completedDate: String
+    let unit: CompetitionUnit
+
+    var medal: TrophyMedal? {
+        switch placement {
+        case 1: return .gold
+        case 2: return .silver
+        case 3: return .bronze
+        default: return nil
+        }
+    }
+}
+
+enum TrophyMedal: String, Codable {
+    case gold, silver, bronze
+
+    var color: Color {
+        switch self {
+        case .gold: return .yellow
+        case .silver: return Color(white: 0.75)
+        case .bronze: return .brown
+        }
+    }
+
+    var gradient: [Color] {
+        switch self {
+        case .gold: return [.yellow, .orange]
+        case .silver: return [Color(white: 0.85), Color(white: 0.6)]
+        case .bronze: return [.brown, Color(red: 0.7, green: 0.4, blue: 0.2)]
+        }
+    }
+
+    var icon: String { "medal.fill" }
+
+    var displayName: String {
+        switch self {
+        case .gold: return "1st Place"
+        case .silver: return "2nd Place"
+        case .bronze: return "3rd Place"
+        }
+    }
+}

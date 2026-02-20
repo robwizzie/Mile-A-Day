@@ -13,6 +13,9 @@ struct CompetitionDetailView: View {
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var showDeleteConfirmation = false
+    @State private var selectedIntervalDate: Date = Date()
+    @State private var showCelebration = false
+    @State private var podiumAnimated = false
 
     var body: some View {
         ZStack {
@@ -364,12 +367,20 @@ struct CompetitionDetailView: View {
     // MARK: - Active Content
     private var activeContent: some View {
         VStack(spacing: MADTheme.Spacing.xl) {
-            // Time remaining countdown
+            // Time remaining countdown (for timed competitions)
             if let endDate = competition.endDateFormatted {
                 timeRemainingBanner(endDate: endDate)
             }
 
-            // Competition leaderboard
+            // Interval navigator + mode content (race has no intervals)
+            if competition.type != .race {
+                intervalNavigator
+                intervalContent
+            } else {
+                raceProgressView
+            }
+
+            // Overall standings
             competitionLeaderboard
 
             // Competition info
@@ -412,6 +423,523 @@ struct CompetitionDetailView: View {
                         .stroke(Color.green.opacity(0.3), lineWidth: 1)
                 )
         )
+    }
+
+    // MARK: - Interval Navigator
+    private var intervalNavigator: some View {
+        let isToday = Calendar.current.isDateInToday(selectedIntervalDate)
+        let canGoForward = !isToday
+        let canGoBack: Bool = {
+            guard let startDate = competition.startDateFormatted else { return true }
+            return selectedIntervalDate > startDate
+        }()
+
+        return HStack {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    moveInterval(by: -1)
+                }
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(canGoBack ? .white : .white.opacity(0.2))
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color.white.opacity(0.08)))
+            }
+            .disabled(!canGoBack)
+
+            Spacer()
+
+            VStack(spacing: 2) {
+                Text(intervalDateLabel)
+                    .font(MADTheme.Typography.headline)
+                    .foregroundColor(.white)
+
+                if !isToday {
+                    Text(selectedIntervalDate.formatted(date: .abbreviated, time: .omitted))
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            }
+
+            Spacer()
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    moveInterval(by: 1)
+                }
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(canGoForward ? .white : .white.opacity(0.2))
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color.white.opacity(0.08)))
+            }
+            .disabled(!canGoForward)
+        }
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.vertical, MADTheme.Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Interval Content (mode-specific)
+    @ViewBuilder
+    private var intervalContent: some View {
+        let key = intervalKey(for: selectedIntervalDate)
+        let acceptedUsers = competition.users.filter { $0.invite_status == .accepted }
+        let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
+
+        switch competition.type {
+        case .clash:
+            clashIntervalView(key: key, users: acceptedUsers, currentUserId: currentUserId)
+        case .streaks:
+            streaksIntervalView(key: key, users: acceptedUsers, currentUserId: currentUserId)
+        case .apex:
+            apexIntervalView(key: key, users: acceptedUsers, currentUserId: currentUserId)
+        case .targets:
+            targetsIntervalView(key: key, users: acceptedUsers, currentUserId: currentUserId)
+        case .race:
+            EmptyView()
+        }
+    }
+
+    // MARK: - Clash Interval View
+    private func clashIntervalView(key: String, users: [CompetitionUser], currentUserId: String?) -> some View {
+        let sortedUsers = users.sorted {
+            ($0.intervals?[key] ?? 0) > ($1.intervals?[key] ?? 0)
+        }
+
+        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            Text("Matchup")
+                .font(MADTheme.Typography.title3)
+                .foregroundColor(.white)
+                .padding(.horizontal, MADTheme.Spacing.sm)
+
+            VStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(Array(sortedUsers.enumerated()), id: \.element.id) { index, user in
+                    let distance = user.intervals?[key] ?? 0
+                    let isLeading = index == 0 && distance > 0
+
+                    HStack(spacing: MADTheme.Spacing.md) {
+                        if isLeading {
+                            Image(systemName: "crown.fill")
+                                .font(.caption)
+                                .foregroundColor(.yellow)
+                                .frame(width: 24)
+                        } else {
+                            Text("\(index + 1)")
+                                .font(MADTheme.Typography.caption)
+                                .foregroundColor(.white.opacity(0.5))
+                                .frame(width: 24)
+                        }
+
+                        Circle()
+                            .fill(Color.white.opacity(0.12))
+                            .frame(width: 36, height: 36)
+                            .overlay(
+                                Text(user.displayName.prefix(1).uppercased())
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                            )
+
+                        Text(user.displayName)
+                            .font(MADTheme.Typography.callout)
+                            .foregroundColor(.white)
+
+                        Spacer()
+
+                        Text(String(format: "%.1f %@", distance, competition.options.unit.shortDisplayName))
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(isLeading ? .green : .white.opacity(0.8))
+                    }
+                    .padding(MADTheme.Spacing.md)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                            .fill(Color.white.opacity(user.user_id == currentUserId ? 0.1 : (isLeading ? 0.05 : 0)))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                    .stroke(user.user_id == currentUserId ? MADTheme.Colors.primary : Color.clear, lineWidth: 1)
+                            )
+                    )
+                }
+            }
+            .padding(MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    // MARK: - Streaks Interval View
+    private func streaksIntervalView(key: String, users: [CompetitionUser], currentUserId: String?) -> some View {
+        let goal = competition.options.goal
+
+        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            Text("Streak Status")
+                .font(MADTheme.Typography.title3)
+                .foregroundColor(.white)
+                .padding(.horizontal, MADTheme.Spacing.sm)
+
+            VStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(users, id: \.id) { user in
+                    let distance = user.intervals?[key] ?? 0
+                    let completed = distance >= goal
+                    let isToday = Calendar.current.isDateInToday(selectedIntervalDate)
+
+                    HStack(spacing: MADTheme.Spacing.md) {
+                        Image(systemName: completed ? "checkmark.circle.fill" : (isToday ? "circle.dotted" : "xmark.circle.fill"))
+                            .font(.title3)
+                            .foregroundColor(completed ? .green : (isToday ? .orange : .red))
+                            .frame(width: 28)
+
+                        Circle()
+                            .fill(Color.white.opacity(0.12))
+                            .frame(width: 36, height: 36)
+                            .overlay(
+                                Text(user.displayName.prefix(1).uppercased())
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                            )
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(user.displayName)
+                                .font(MADTheme.Typography.callout)
+                                .foregroundColor(.white)
+
+                            Text(completed
+                                ? "Completed \u{00B7} \(String(format: "%.1f", distance)) \(competition.options.unit.shortDisplayName)"
+                                : (isToday ? "\(String(format: "%.1f", distance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)" : "Missed"))
+                                .font(MADTheme.Typography.caption)
+                                .foregroundColor(completed ? .green.opacity(0.8) : .white.opacity(0.5))
+                        }
+
+                        Spacer()
+
+                        VStack(spacing: 1) {
+                            Text("\(Int(user.score ?? 0))")
+                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                            Text("streak")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.white.opacity(0.4))
+                        }
+                    }
+                    .padding(MADTheme.Spacing.md)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                            .fill(Color.white.opacity(user.user_id == currentUserId ? 0.1 : 0))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                    .stroke(user.user_id == currentUserId ? MADTheme.Colors.primary : Color.clear, lineWidth: 1)
+                            )
+                    )
+                }
+            }
+            .padding(MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    // MARK: - Apex Interval View
+    private func apexIntervalView(key: String, users: [CompetitionUser], currentUserId: String?) -> some View {
+        let sortedUsers = users.sorted {
+            ($0.intervals?[key] ?? 0) > ($1.intervals?[key] ?? 0)
+        }
+        let intervalLabel = competition.options.interval == .week ? "Weekly" : (competition.options.interval == .month ? "Monthly" : (Calendar.current.isDateInToday(selectedIntervalDate) ? "Today's" : "Daily"))
+
+        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            Text("\(intervalLabel) Activity")
+                .font(MADTheme.Typography.title3)
+                .foregroundColor(.white)
+                .padding(.horizontal, MADTheme.Spacing.sm)
+
+            VStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(sortedUsers, id: \.id) { user in
+                    let distance = user.intervals?[key] ?? 0
+
+                    HStack(spacing: MADTheme.Spacing.md) {
+                        Circle()
+                            .fill(Color.white.opacity(0.12))
+                            .frame(width: 36, height: 36)
+                            .overlay(
+                                Text(user.displayName.prefix(1).uppercased())
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                            )
+
+                        Text(user.displayName)
+                            .font(MADTheme.Typography.callout)
+                            .foregroundColor(.white)
+
+                        Spacer()
+
+                        Text(String(format: "%.1f %@", distance, competition.options.unit.shortDisplayName))
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                    }
+                    .padding(MADTheme.Spacing.md)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                            .fill(Color.white.opacity(user.user_id == currentUserId ? 0.1 : 0))
+                    )
+                }
+            }
+            .padding(MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    // MARK: - Targets Interval View
+    private func targetsIntervalView(key: String, users: [CompetitionUser], currentUserId: String?) -> some View {
+        let goal = competition.options.goal
+        let intervalLabel = competition.options.interval == .week ? "Weekly" : (competition.options.interval == .month ? "Monthly" : "Daily")
+
+        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            Text("\(intervalLabel) Targets")
+                .font(MADTheme.Typography.title3)
+                .foregroundColor(.white)
+                .padding(.horizontal, MADTheme.Spacing.sm)
+
+            VStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(users, id: \.id) { user in
+                    let distance = user.intervals?[key] ?? 0
+                    let hitTarget = distance >= goal
+                    let progress = min(distance / max(goal, 0.1), 1.0)
+
+                    VStack(spacing: MADTheme.Spacing.sm) {
+                        HStack(spacing: MADTheme.Spacing.md) {
+                            Image(systemName: hitTarget ? "target" : "circle")
+                                .font(.title3)
+                                .foregroundColor(hitTarget ? .green : .white.opacity(0.4))
+                                .frame(width: 28)
+
+                            Circle()
+                                .fill(Color.white.opacity(0.12))
+                                .frame(width: 36, height: 36)
+                                .overlay(
+                                    Text(user.displayName.prefix(1).uppercased())
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.white)
+                                )
+
+                            Text(user.displayName)
+                                .font(MADTheme.Typography.callout)
+                                .foregroundColor(.white)
+
+                            Spacer()
+
+                            Text(String(format: "%.1f/%@ %@", distance, competition.options.goalFormatted, competition.options.unit.shortDisplayName))
+                                .font(MADTheme.Typography.callout)
+                                .foregroundColor(hitTarget ? .green : .white.opacity(0.7))
+                        }
+
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.white.opacity(0.08))
+                                    .frame(height: 6)
+
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(hitTarget ? Color.green : MADTheme.Colors.madRed)
+                                    .frame(width: geo.size.width * progress, height: 6)
+                            }
+                        }
+                        .frame(height: 6)
+                    }
+                    .padding(MADTheme.Spacing.md)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                            .fill(Color.white.opacity(user.user_id == currentUserId ? 0.1 : 0))
+                    )
+                }
+            }
+            .padding(MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    // MARK: - Race Progress View
+    private var raceProgressView: some View {
+        let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
+        let goal = competition.options.goal
+        let sortedUsers = competition.users
+            .filter { $0.invite_status == .accepted }
+            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+
+        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            Text("Race Progress")
+                .font(MADTheme.Typography.title3)
+                .foregroundColor(.white)
+                .padding(.horizontal, MADTheme.Spacing.sm)
+
+            VStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(sortedUsers, id: \.id) { user in
+                    let distance = user.score ?? 0
+                    let progress = min(distance / max(goal, 0.1), 1.0)
+
+                    VStack(spacing: MADTheme.Spacing.sm) {
+                        HStack(spacing: MADTheme.Spacing.md) {
+                            Circle()
+                                .fill(Color.white.opacity(0.12))
+                                .frame(width: 36, height: 36)
+                                .overlay(
+                                    Text(user.displayName.prefix(1).uppercased())
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundColor(.white)
+                                )
+
+                            Text(user.displayName)
+                                .font(MADTheme.Typography.callout)
+                                .foregroundColor(.white)
+
+                            Spacer()
+
+                            Text(String(format: "%.1f/%@ %@", distance, competition.options.goalFormatted, competition.options.unit.shortDisplayName))
+                                .font(MADTheme.Typography.callout)
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.white.opacity(0.08))
+                                    .frame(height: 8)
+
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: competition.type.gradient.map { Color(hex: $0) },
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .frame(width: geo.size.width * progress, height: 8)
+                            }
+                        }
+                        .frame(height: 8)
+                    }
+                    .padding(MADTheme.Spacing.md)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                            .fill(Color.white.opacity(user.user_id == currentUserId ? 0.1 : 0))
+                    )
+                }
+            }
+            .padding(MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    // MARK: - Interval Helpers
+    private func intervalKey(for date: Date) -> String {
+        let calendar = Calendar.current
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        let interval = competition.options.interval ?? .day
+
+        switch interval {
+        case .day:
+            return formatter.string(from: calendar.startOfDay(for: date))
+        case .week:
+            var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+            components.weekday = calendar.firstWeekday
+            let startOfWeek = calendar.date(from: components) ?? date
+            return formatter.string(from: startOfWeek)
+        case .month:
+            var components = calendar.dateComponents([.year, .month], from: date)
+            components.day = 1
+            let startOfMonth = calendar.date(from: components) ?? date
+            return formatter.string(from: startOfMonth)
+        }
+    }
+
+    private func moveInterval(by amount: Int) {
+        let calendar = Calendar.current
+        let interval = competition.options.interval ?? .day
+
+        switch interval {
+        case .day:
+            selectedIntervalDate = calendar.date(byAdding: .day, value: amount, to: selectedIntervalDate) ?? selectedIntervalDate
+        case .week:
+            selectedIntervalDate = calendar.date(byAdding: .weekOfYear, value: amount, to: selectedIntervalDate) ?? selectedIntervalDate
+        case .month:
+            selectedIntervalDate = calendar.date(byAdding: .month, value: amount, to: selectedIntervalDate) ?? selectedIntervalDate
+        }
+
+        // Don't go past today
+        if selectedIntervalDate > Date() {
+            selectedIntervalDate = Date()
+        }
+    }
+
+    private var intervalDateLabel: String {
+        let calendar = Calendar.current
+        let interval = competition.options.interval ?? .day
+
+        switch interval {
+        case .day:
+            if calendar.isDateInToday(selectedIntervalDate) {
+                return "Today"
+            } else if calendar.isDateInYesterday(selectedIntervalDate) {
+                return "Yesterday"
+            } else {
+                return selectedIntervalDate.formatted(date: .abbreviated, time: .omitted)
+            }
+        case .week:
+            if calendar.isDate(Date(), equalTo: selectedIntervalDate, toGranularity: .weekOfYear) {
+                return "This Week"
+            }
+            var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedIntervalDate)
+            components.weekday = calendar.firstWeekday
+            let startOfWeek = calendar.date(from: components) ?? selectedIntervalDate
+            let endOfWeek = calendar.date(byAdding: .day, value: 6, to: startOfWeek) ?? selectedIntervalDate
+            return "\(startOfWeek.formatted(.dateTime.month(.abbreviated).day())) - \(endOfWeek.formatted(.dateTime.month(.abbreviated).day()))"
+        case .month:
+            if calendar.isDate(Date(), equalTo: selectedIntervalDate, toGranularity: .month) {
+                return "This Month"
+            }
+            return selectedIntervalDate.formatted(.dateTime.month(.wide).year())
+        }
     }
 
     private var competitionLeaderboard: some View {
@@ -468,53 +996,335 @@ struct CompetitionDetailView: View {
         let rankedUsers = competition.users
             .filter { $0.invite_status == .accepted }
             .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
+        let myPlacement = rankedUsers.firstIndex(where: { $0.user_id == currentUserId }).map { $0 + 1 }
 
         return VStack(spacing: MADTheme.Spacing.xl) {
-            // Winner announcement
-            if let winner = rankedUsers.first {
+            // Celebration header with confetti
+            ZStack {
+                if showCelebration && myPlacement == 1 {
+                    CompetitionConfettiView()
+                }
+
                 VStack(spacing: MADTheme.Spacing.md) {
-                    Image(systemName: "trophy.fill")
-                        .font(.system(size: 50))
+                    Image(systemName: myPlacement == 1 ? "trophy.fill" : "flag.checkered")
+                        .font(.system(size: 60))
                         .foregroundStyle(
                             LinearGradient(
-                                colors: [.yellow, .orange],
+                                colors: medalGradient(for: myPlacement),
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
                         )
+                        .scaleEffect(showCelebration ? 1.0 : 0.3)
+                        .opacity(showCelebration ? 1.0 : 0)
 
-                    Text("\(winner.displayName) Wins!")
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
+                    Text("COMPETITION COMPLETE")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.4))
+                        .tracking(3)
 
-                    Text(scoreLabel(for: winner))
-                        .font(MADTheme.Typography.callout)
-                        .foregroundColor(.white.opacity(0.7))
+                    if let winner = rankedUsers.first {
+                        Text("\(winner.displayName) Wins!")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+
+                        Text(scoreLabel(for: winner))
+                            .font(MADTheme.Typography.callout)
+                            .foregroundColor(.white.opacity(0.6))
+                    }
                 }
-                .padding(MADTheme.Spacing.xl)
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [Color.yellow.opacity(0.4), Color.orange.opacity(0.2), Color.clear],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
-                                )
-                        )
-                )
+            }
+            .onAppear {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.6)) {
+                    showCelebration = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    withAnimation(.spring(response: 0.8, dampingFraction: 0.7)) {
+                        podiumAnimated = true
+                    }
+                }
+                TrophyService.shared.recordResult(from: competition)
             }
 
-            // Final standings
-            competitionLeaderboard
+            // Podium (top 3)
+            if rankedUsers.count >= 2 {
+                podiumView(rankedUsers: rankedUsers, currentUserId: currentUserId)
+            }
+
+            // Your result banner (if below top 3)
+            if let placement = myPlacement, placement > 3 {
+                yourResultBanner(placement: placement, totalParticipants: rankedUsers.count)
+            }
+
+            // Competition recap
+            competitionRecap(rankedUsers: rankedUsers)
+
+            // Full standings (everyone beyond podium)
+            if rankedUsers.count > 3 {
+                remainingStandings(rankedUsers: rankedUsers, currentUserId: currentUserId)
+            }
 
             // Competition info
             infoSection
+        }
+    }
+
+    // MARK: - Podium View
+    private func podiumView(rankedUsers: [CompetitionUser], currentUserId: String?) -> some View {
+        let first = rankedUsers[0]
+        let second = rankedUsers.count > 1 ? rankedUsers[1] : nil
+        let third = rankedUsers.count > 2 ? rankedUsers[2] : nil
+
+        return HStack(alignment: .bottom, spacing: MADTheme.Spacing.sm) {
+            // 2nd place
+            if let user = second {
+                podiumColumn(user: user, rank: 2, pedestalHeight: 80, isCurrentUser: user.user_id == currentUserId)
+            }
+
+            // 1st place
+            podiumColumn(user: first, rank: 1, pedestalHeight: 120, isCurrentUser: first.user_id == currentUserId)
+
+            // 3rd place
+            if let user = third {
+                podiumColumn(user: user, rank: 3, pedestalHeight: 50, isCurrentUser: user.user_id == currentUserId)
+            }
+        }
+        .padding(.horizontal, MADTheme.Spacing.md)
+    }
+
+    private func podiumColumn(user: CompetitionUser, rank: Int, pedestalHeight: CGFloat, isCurrentUser: Bool) -> some View {
+        let medalColors: [Color] = {
+            switch rank {
+            case 1: return [.yellow, .orange]
+            case 2: return [Color(white: 0.85), Color(white: 0.6)]
+            case 3: return [.brown, Color(red: 0.7, green: 0.4, blue: 0.2)]
+            default: return [.gray, .gray]
+            }
+        }()
+
+        return VStack(spacing: 0) {
+            // Medal icon
+            Image(systemName: "medal.fill")
+                .font(.system(size: rank == 1 ? 28 : 22))
+                .foregroundStyle(
+                    LinearGradient(colors: medalColors, startPoint: .top, endPoint: .bottom)
+                )
+                .padding(.bottom, MADTheme.Spacing.xs)
+
+            // Avatar
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: rank == 1 ? 56 : 44, height: rank == 1 ? 56 : 44)
+                    .overlay(
+                        Text(user.displayName.prefix(1).uppercased())
+                            .font(.system(size: rank == 1 ? 22 : 16, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                LinearGradient(colors: medalColors, startPoint: .topLeading, endPoint: .bottomTrailing),
+                                lineWidth: rank == 1 ? 3 : 2
+                            )
+                    )
+
+                if isCurrentUser {
+                    Text("YOU")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(MADTheme.Colors.madRed))
+                        .offset(y: (rank == 1 ? 56 : 44) / 2 + 6)
+                }
+            }
+            .padding(.bottom, MADTheme.Spacing.sm)
+
+            // Name
+            Text(user.displayName)
+                .font(.system(size: rank == 1 ? 14 : 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.white)
+                .lineLimit(1)
+
+            // Score
+            Text(scoreLabel(for: user))
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.6))
+                .padding(.bottom, MADTheme.Spacing.sm)
+
+            // Pedestal
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .fill(
+                    LinearGradient(
+                        colors: [medalColors[0].opacity(0.3), medalColors[1].opacity(0.15)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(height: podiumAnimated ? pedestalHeight : 0)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                        .stroke(
+                            LinearGradient(colors: medalColors.map { $0.opacity(0.4) }, startPoint: .top, endPoint: .bottom),
+                            lineWidth: 1
+                        )
+                )
+                .overlay(
+                    Text("\(rank)")
+                        .font(.system(size: rank == 1 ? 32 : 24, weight: .bold, design: .rounded))
+                        .foregroundColor(medalColors[0].opacity(0.3))
+                )
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Your Result Banner
+    private func yourResultBanner(placement: Int, totalParticipants: Int) -> some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            Text("\(placement)")
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Your Placement")
+                    .font(MADTheme.Typography.headline)
+                    .foregroundColor(.white)
+                Text("out of \(totalParticipants) competitors")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.6))
+            }
+
+            Spacer()
+
+            Image(systemName: "person.fill")
+                .font(.title3)
+                .foregroundColor(MADTheme.Colors.madRed)
+        }
+        .padding(MADTheme.Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .stroke(MADTheme.Colors.madRed.opacity(0.3), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Competition Recap
+    private func competitionRecap(rankedUsers: [CompetitionUser]) -> some View {
+        let totalDistance = rankedUsers.reduce(0.0) { $0 + ($1.score ?? 0) }
+        let avgScore = rankedUsers.isEmpty ? 0 : totalDistance / Double(rankedUsers.count)
+
+        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            Text("Recap")
+                .font(MADTheme.Typography.title3)
+                .foregroundColor(.white)
+                .padding(.horizontal, MADTheme.Spacing.sm)
+
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: MADTheme.Spacing.md) {
+                recapStatCard(
+                    icon: "person.2.fill",
+                    title: "Participants",
+                    value: "\(rankedUsers.count)",
+                    color: .blue
+                )
+
+                recapStatCard(
+                    icon: competition.type.icon,
+                    title: "Type",
+                    value: competition.type.displayName,
+                    color: Color(hex: competition.type.gradient[0])
+                )
+
+                recapStatCard(
+                    icon: "chart.bar.fill",
+                    title: competition.type == .streaks ? "Avg Streak" : "Avg Score",
+                    value: competition.type == .streaks || competition.type == .clash || competition.type == .targets
+                        ? String(format: "%.0f", avgScore)
+                        : String(format: "%.1f %@", avgScore, competition.options.unit.shortDisplayName),
+                    color: .green
+                )
+
+                if let startDate = competition.startDateFormatted, let endDate = competition.endDateFormatted {
+                    let days = Calendar.current.dateComponents([.day], from: startDate, to: endDate).day ?? 0
+                    recapStatCard(
+                        icon: "calendar",
+                        title: "Duration",
+                        value: "\(max(1, days)) day\(days == 1 ? "" : "s")",
+                        color: .purple
+                    )
+                }
+            }
+        }
+    }
+
+    private func recapStatCard(icon: String, title: String, value: String, color: Color) -> some View {
+        VStack(spacing: MADTheme.Spacing.sm) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundColor(color)
+
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+
+            Text(title)
+                .font(MADTheme.Typography.caption)
+                .foregroundColor(.white.opacity(0.5))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                        .stroke(color.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Remaining Standings
+    private func remainingStandings(rankedUsers: [CompetitionUser], currentUserId: String?) -> some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            Text("Full Standings")
+                .font(MADTheme.Typography.title3)
+                .foregroundColor(.white)
+                .padding(.horizontal, MADTheme.Spacing.sm)
+
+            VStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(Array(rankedUsers.dropFirst(3).enumerated()), id: \.element.id) { index, user in
+                    CompetitionLeaderboardRow(
+                        rank: index + 4,
+                        user: user,
+                        competitionType: competition.type,
+                        unit: competition.options.unit,
+                        isCurrentUser: user.user_id == currentUserId
+                    )
+                }
+            }
+            .padding(MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    // MARK: - Medal Helpers
+    private func medalGradient(for placement: Int?) -> [Color] {
+        switch placement {
+        case 1: return [.yellow, .orange]
+        case 2: return [Color(white: 0.85), Color(white: 0.6)]
+        case 3: return [.brown, Color(red: 0.7, green: 0.4, blue: 0.2)]
+        default: return [.white.opacity(0.7), .white.opacity(0.5)]
         }
     }
 
@@ -577,14 +1387,6 @@ struct CompetitionDetailView: View {
                 )
             }
 
-            // History
-            if let history = competition.options.history {
-                InfoRow(
-                    icon: "clock.arrow.circlepath",
-                    title: "Historical Data",
-                    value: history ? "Included" : "Not Included"
-                )
-            }
         }
         .padding(MADTheme.Spacing.lg)
         .background(
@@ -942,7 +1744,6 @@ struct EditCompetitionSettingsView: View {
     @State private var interval: CompetitionInterval = .day
     @State private var firstTo: Int = 5
     @State private var durationHours: Int? = nil
-    @State private var history: Bool = false
     @State private var selectedWorkouts: Set<CompetitionActivity> = [.run]
 
     @State private var isSaving = false
@@ -1134,16 +1935,6 @@ struct EditCompetitionSettingsView: View {
                             }
                         }
 
-                        // History toggle
-                        settingsGroup(title: "Historical Data") {
-                            Toggle(isOn: $history) {
-                                Text("Include workout data from before start")
-                                    .font(MADTheme.Typography.callout)
-                                    .foregroundColor(.white)
-                            }
-                            .tint(MADTheme.Colors.primary)
-                        }
-
                         Spacer(minLength: MADTheme.Spacing.xxl)
                     }
                     .padding(MADTheme.Spacing.lg)
@@ -1185,7 +1976,6 @@ struct EditCompetitionSettingsView: View {
                 interval = competition.options.interval ?? .day
                 firstTo = competition.options.first_to
                 durationHours = competition.options.duration_hours
-                history = competition.options.history ?? false
                 selectedWorkouts = Set(competition.workouts)
             }
         }
@@ -1221,7 +2011,7 @@ struct EditCompetitionSettingsView: View {
                     goal: goal,
                     unit: unit,
                     firstTo: firstTo,
-                    history: history,
+                    history: false,
                     interval: interval
                 )
                 await MainActor.run {
@@ -1237,6 +2027,46 @@ struct EditCompetitionSettingsView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Competition Confetti View
+struct CompetitionConfettiView: View {
+    @State private var animate = false
+    private let colors: [Color] = [.yellow, .orange, .red, .green, .blue, .purple, .white, .yellow, .orange]
+    private let particleCount = 30
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<particleCount, id: \.self) { i in
+                confettiPiece(index: i)
+            }
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 2.5)) {
+                animate = true
+            }
+        }
+    }
+
+    private func confettiPiece(index: Int) -> some View {
+        let angle = Double(index) * (360.0 / Double(particleCount)) + Double(index * 37 % 40) - 20
+        let distance: CGFloat = 80 + CGFloat(index * 17 % 140)
+        let rotationAmount = Double(index * 73 % 720)
+        let pieceWidth: CGFloat = 4 + CGFloat(index * 3 % 5)
+        let delay = Double(index) * 0.03
+
+        return RoundedRectangle(cornerRadius: 1)
+            .fill(colors[index % colors.count])
+            .frame(width: pieceWidth, height: pieceWidth * 2.5)
+            .rotationEffect(.degrees(animate ? rotationAmount : 0))
+            .offset(
+                x: animate ? cos(angle * .pi / 180) * distance : 0,
+                y: animate ? sin(angle * .pi / 180) * distance + 40 : -30
+            )
+            .opacity(animate ? 0 : 1)
+            .scaleEffect(animate ? 0.3 : 1)
+            .animation(.easeOut(duration: 2.0).delay(delay), value: animate)
     }
 }
 

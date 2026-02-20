@@ -3,9 +3,11 @@ import SwiftUI
 /// Main view for managing competitions
 struct CompetitionsListView: View {
     @StateObject private var competitionService = CompetitionService()
+    @ObservedObject private var trophyService = TrophyService.shared
     @State private var selectedTab = 0
     @State private var showingCreateCompetition = false
     @State private var selectedCompetition: Competition?
+    @State private var showingTrophyCase = false
     @State private var activeExpanded = true
     @State private var waitingExpanded = true
     @State private var finishedExpanded = false
@@ -35,6 +37,11 @@ struct CompetitionsListView: View {
         .sheet(item: $selectedCompetition) { competition in
             NavigationStack {
                 CompetitionDetailView(competition: competition, competitionService: competitionService)
+            }
+        }
+        .sheet(isPresented: $showingTrophyCase) {
+            NavigationStack {
+                TrophyCaseView(trophyService: trophyService)
             }
         }
         .task {
@@ -76,10 +83,37 @@ struct CompetitionsListView: View {
 
             Spacer()
 
-            Button(action: { showingCreateCompetition = true }) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.title2)
-                    .foregroundColor(MADTheme.Colors.madRed)
+            HStack(spacing: MADTheme.Spacing.md) {
+                if trophyService.totalCompetitions > 0 {
+                    Button(action: { showingTrophyCase = true }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "trophy.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(
+                                    LinearGradient(
+                                        colors: [.yellow, .orange],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                )
+                            Text("\(trophyService.totalCompetitions)")
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(Color.white.opacity(0.08))
+                        )
+                    }
+                }
+
+                Button(action: { showingCreateCompetition = true }) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(MADTheme.Colors.madRed)
+                }
             }
         }
         .padding(.horizontal, MADTheme.Spacing.md)
