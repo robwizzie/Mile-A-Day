@@ -2,9 +2,7 @@ import Foundation
 import SwiftUI
 
 class UserManager: ObservableObject {
-    #if os(watchOS)
     static let shared = UserManager()
-    #endif
     
     @Published var currentUser: User
     @Published var friends: [User] = []
