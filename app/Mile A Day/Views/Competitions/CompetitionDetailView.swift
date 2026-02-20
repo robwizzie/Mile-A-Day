@@ -1044,7 +1044,6 @@ struct CompetitionDetailView: View {
                         podiumAnimated = true
                     }
                 }
-                TrophyService.shared.recordResult(from: competition)
             }
 
             // Podium (top 3)

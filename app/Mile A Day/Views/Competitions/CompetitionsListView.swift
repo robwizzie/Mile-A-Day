@@ -48,9 +48,11 @@ struct CompetitionsListView: View {
             if competitionService.competitions.isEmpty && competitionService.invites.isEmpty {
                 await competitionService.refreshAllData()
             }
+            trophyService.updateTrophies(from: competitionService.competitions)
         }
         .refreshable {
             await competitionService.refreshAllData()
+            trophyService.updateTrophies(from: competitionService.competitions)
         }
         .onChange(of: showingCreateCompetition) { _, isPresented in
             if !isPresented {
