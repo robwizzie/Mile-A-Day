@@ -209,20 +209,29 @@ export async function getQuantityDateRange(
 	workoutTypes?: ('running' | 'walking')[]
 ) {
 	let query = `
-		SELECT 
-			local_date,
-			SUM(distance) as total_distance,
+		SELECT
+			TO_CHAR(local_date, 'YYYY-MM-DD') as local_date,
+			SUM(distance) as total_distance
 		FROM workouts
 		WHERE user_id = $1
 			AND local_date >= $2
 			AND local_date <= $3
-			AND workout_type = ANY($4)
+			AND workout_type = ANY($4::text[])
 		GROUP BY local_date
 		ORDER BY local_date ASC
 	`;
 
-	const date = new Date();
-	const todaysDate = date.toISOString().split('T')[0];
+	const todaysDate = new Date().toISOString().split('T')[0];
+	const start = new Date(startDate).toISOString().split('T')[0];
+	const end = endDate ? new Date(endDate).toISOString().split('T')[0] : todaysDate;
 
-	return await db.query(query, [userId, startDate, endDate || todaysDate, workoutTypes || ['running', 'walking']]);
+	const typeMap: Record<string, 'running' | 'walking'> = {
+		run: 'running',
+		walk: 'walking',
+		running: 'running',
+		walking: 'walking'
+	};
+	const normalizedTypes = (workoutTypes ?? ['running', 'walking']).map(t => typeMap[t]).filter(Boolean);
+
+	return await db.query(query, [userId, start, end, normalizedTypes]);
 }

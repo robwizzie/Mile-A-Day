@@ -314,7 +314,7 @@ export async function getUserScores(competition: Competition): Promise<UserData>
 			if (!groupedData[intervalKey]) {
 				groupedData[intervalKey] = 0;
 			}
-			groupedData[intervalKey] += dayData.total_quantity;
+			groupedData[intervalKey] += dayData.total_distance;
 			return groupedData;
 		}, {});
 
@@ -402,22 +402,34 @@ export async function getUserScores(competition: Competition): Promise<UserData>
 }
 
 function getCurrentInterval(currentDate: Date | string | number, interval?: 'day' | 'week' | 'month'): string {
-	if (!(currentDate instanceof Date)) {
-		currentDate = new Date(currentDate + ' EST');
+	let year: number, month: number, day: number;
+
+	if (typeof currentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(currentDate)) {
+		[year, month, day] = currentDate.split('-').map(Number);
+	} else {
+		const date = currentDate instanceof Date ? currentDate : new Date(currentDate);
+		const parts = new Intl.DateTimeFormat('en-US', {
+			timeZone: 'America/New_York',
+			year: 'numeric',
+			month: '2-digit',
+			day: '2-digit'
+		}).formatToParts(date);
+		year = parseInt(parts.find(p => p.type === 'year')!.value);
+		month = parseInt(parts.find(p => p.type === 'month')!.value);
+		day = parseInt(parts.find(p => p.type === 'day')!.value);
 	}
 
+	const pad = (n: number) => String(n).padStart(2, '0');
+
 	if (interval === 'week') {
-		const dayOfWeek = currentDate.getDay();
-		const daysUntilSunday = (7 - dayOfWeek) % 7;
-		const sundayDate = new Date(currentDate);
-		sundayDate.setDate(currentDate.getDate() + daysUntilSunday);
-		return sundayDate.toISOString().split('T')[0];
+		const d = new Date(year, month - 1, day);
+		const daysUntilSunday = (7 - d.getDay()) % 7;
+		d.setDate(d.getDate() + daysUntilSunday);
+		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 	} else if (interval === 'month') {
-		const year = currentDate.getFullYear();
-		const month = String(currentDate.getMonth() + 1).padStart(2, '0');
-		return `${year}-${month}`;
+		return `${year}-${pad(month)}`;
 	} else {
-		return currentDate.toISOString().split('T')[0];
+		return `${year}-${pad(month)}-${pad(day)}`;
 	}
 }
 
