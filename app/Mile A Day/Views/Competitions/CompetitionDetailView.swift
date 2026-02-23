@@ -16,6 +16,8 @@ struct CompetitionDetailView: View {
     @State private var selectedIntervalDate: Date = Date()
     @State private var showCelebration = false
     @State private var podiumAnimated = false
+    @State private var heartsAnimated = false
+    @State private var raceAnimated = false
 
     var body: some View {
         ZStack {
@@ -367,6 +369,9 @@ struct CompetitionDetailView: View {
     // MARK: - Active Content
     private var activeContent: some View {
         VStack(spacing: MADTheme.Spacing.xl) {
+            // Tracked activities banner
+            trackedActivitiesBanner
+
             // Time remaining countdown (for timed competitions)
             if let endDate = competition.endDateFormatted {
                 timeRemainingBanner(endDate: endDate)
@@ -386,6 +391,57 @@ struct CompetitionDetailView: View {
             // Competition info
             infoSection
         }
+    }
+
+    // MARK: - Tracked Activities Banner
+    private var trackedActivitiesBanner: some View {
+        VStack(spacing: MADTheme.Spacing.sm) {
+            Text("TRACKED ACTIVITIES")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.4))
+                .tracking(1.5)
+
+            HStack(spacing: MADTheme.Spacing.md) {
+                ForEach(competition.workouts, id: \.self) { activity in
+                    HStack(spacing: 6) {
+                        Image(systemName: activity.icon)
+                            .font(.system(size: 14))
+                        Text(activity.displayName)
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.6) },
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                    )
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                        .stroke(
+                            LinearGradient(
+                                colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) },
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+        )
     }
 
     private func timeRemainingBanner(endDate: Date) -> some View {
@@ -576,7 +632,14 @@ struct CompetitionDetailView: View {
                     .fill(.ultraThinMaterial)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            .stroke(
+                                LinearGradient(
+                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) } + [Color.clear],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
                     )
             )
         }
@@ -585,66 +648,182 @@ struct CompetitionDetailView: View {
     // MARK: - Streaks Interval View
     private func streaksIntervalView(key: String, users: [CompetitionUser], currentUserId: String?) -> some View {
         let goal = competition.options.goal
+        let firstTo = competition.options.first_to
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Streak Status")
-                .font(MADTheme.Typography.title3)
-                .foregroundColor(.white)
-                .padding(.horizontal, MADTheme.Spacing.sm)
+            HStack {
+                Text("Streak Status")
+                    .font(MADTheme.Typography.title3)
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                if firstTo > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "heart.fill")
+                            .font(.system(size: 10))
+                            .foregroundColor(.red)
+                        Text("\(firstTo) lives each")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.sm)
 
             VStack(spacing: MADTheme.Spacing.sm) {
                 ForEach(users, id: \.id) { user in
                     let distance = user.intervals?[key] ?? 0
                     let completed = distance >= goal
                     let isToday = Calendar.current.isDateInToday(selectedIntervalDate)
+                    let misses = missCount(for: user)
+                    let displayMisses = firstTo > 0 ? min(misses, firstTo) : 0
+                    let isEliminated = firstTo > 0 && misses >= firstTo
+                    let heartsRemaining = firstTo > 0 ? max(0, firstTo - displayMisses) : 0
 
-                    HStack(spacing: MADTheme.Spacing.md) {
-                        Image(systemName: completed ? "checkmark.circle.fill" : (isToday ? "circle.dotted" : "xmark.circle.fill"))
-                            .font(.title3)
-                            .foregroundColor(completed ? .green : (isToday ? .orange : .red))
-                            .frame(width: 28)
+                    VStack(spacing: MADTheme.Spacing.sm) {
+                        // Main user info row
+                        HStack(spacing: MADTheme.Spacing.md) {
+                            Image(systemName: isEliminated ? "person.fill.xmark" : (completed ? "checkmark.circle.fill" : (isToday ? "circle.dotted" : "xmark.circle.fill")))
+                                .font(.title3)
+                                .foregroundColor(isEliminated ? .gray : (completed ? .green : (isToday ? .orange : .red)))
+                                .frame(width: 28)
 
-                        Circle()
-                            .fill(Color.white.opacity(0.12))
-                            .frame(width: 36, height: 36)
-                            .overlay(
-                                Text(user.displayName.prefix(1).uppercased())
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.white)
-                            )
+                            ZStack {
+                                Circle()
+                                    .fill(Color.white.opacity(isEliminated ? 0.05 : 0.12))
+                                    .frame(width: 36, height: 36)
+                                    .overlay(
+                                        Text(user.displayName.prefix(1).uppercased())
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(.white.opacity(isEliminated ? 0.3 : 1.0))
+                                    )
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(user.displayName)
-                                .font(MADTheme.Typography.callout)
-                                .foregroundColor(.white)
+                                if isEliminated {
+                                    Circle()
+                                        .stroke(Color.red.opacity(0.3), lineWidth: 1.5)
+                                        .frame(width: 36, height: 36)
+                                }
+                            }
 
-                            Text(completed
-                                ? "Completed \u{00B7} \(String(format: "%.1f", distance)) \(competition.options.unit.shortDisplayName)"
-                                : (isToday ? "\(String(format: "%.1f", distance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)" : "Missed"))
-                                .font(MADTheme.Typography.caption)
-                                .foregroundColor(completed ? .green.opacity(0.8) : .white.opacity(0.5))
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: MADTheme.Spacing.xs) {
+                                    Text(user.displayName)
+                                        .font(MADTheme.Typography.callout)
+                                        .foregroundColor(.white.opacity(isEliminated ? 0.4 : 1.0))
+
+                                    if isEliminated {
+                                        Text("ELIMINATED")
+                                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                                            .foregroundColor(.red)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(
+                                                Capsule()
+                                                    .fill(Color.red.opacity(0.15))
+                                                    .overlay(
+                                                        Capsule()
+                                                            .stroke(Color.red.opacity(0.3), lineWidth: 0.5)
+                                                    )
+                                            )
+                                    }
+                                }
+
+                                if !isEliminated {
+                                    if completed {
+                                        HStack(spacing: 4) {
+                                            Text("\(String(format: "%.1f", distance)) \(competition.options.unit.shortDisplayName)")
+                                                .foregroundColor(.green)
+                                            if distance > goal {
+                                                Text("(+\(String(format: "%.1f", distance - goal)) over)")
+                                                    .foregroundColor(.green.opacity(0.6))
+                                            }
+                                        }
+                                        .font(MADTheme.Typography.caption)
+                                    } else if isToday {
+                                        Text("\(String(format: "%.1f", distance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
+                                            .font(MADTheme.Typography.caption)
+                                            .foregroundColor(.white.opacity(0.5))
+                                    } else {
+                                        Text("Missed")
+                                            .font(MADTheme.Typography.caption)
+                                            .foregroundColor(.red.opacity(0.7))
+                                    }
+                                }
+                            }
+
+                            Spacer()
+
+                            VStack(spacing: 1) {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "flame.fill")
+                                        .font(.system(size: 12))
+                                        .foregroundColor(isEliminated ? .gray.opacity(0.3) : .orange)
+                                    Text("\(Int(user.score ?? 0))")
+                                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                                        .foregroundColor(.white.opacity(isEliminated ? 0.3 : 1.0))
+                                }
+                                Text("streak")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(.white.opacity(isEliminated ? 0.2 : 0.4))
+                            }
                         }
 
-                        Spacer()
+                        // Hearts row showing lives
+                        if firstTo > 0 {
+                            HStack(spacing: 5) {
+                                ForEach(0..<heartsRemaining, id: \.self) { i in
+                                    Image(systemName: "heart.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.red)
+                                        .shadow(color: .red.opacity(0.3), radius: 2)
+                                        .scaleEffect(heartsAnimated ? 1.0 : 0.1)
+                                        .opacity(heartsAnimated ? 1.0 : 0)
+                                        .animation(
+                                            .spring(response: 0.4, dampingFraction: 0.6)
+                                            .delay(Double(i) * 0.06),
+                                            value: heartsAnimated
+                                        )
+                                }
 
-                        VStack(spacing: 1) {
-                            Text("\(Int(user.score ?? 0))")
-                                .font(.system(size: 18, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                            Text("streak")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.white.opacity(0.4))
+                                ForEach(0..<displayMisses, id: \.self) { i in
+                                    Image(systemName: "heart.slash.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.gray.opacity(0.35))
+                                        .scaleEffect(heartsAnimated ? 1.0 : 0.1)
+                                        .opacity(heartsAnimated ? 1.0 : 0)
+                                        .animation(
+                                            .spring(response: 0.5, dampingFraction: i == displayMisses - 1 ? 0.3 : 0.6)
+                                            .delay(Double(heartsRemaining + i) * 0.06),
+                                            value: heartsAnimated
+                                        )
+                                }
+
+                                Spacer()
+
+                                Text(isEliminated ? "No lives left" : "\(heartsRemaining) of \(firstTo)")
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .foregroundColor(isEliminated ? .red.opacity(0.5) : .white.opacity(0.4))
+                            }
                         }
                     }
                     .padding(MADTheme.Spacing.md)
                     .background(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .fill(Color.white.opacity(user.user_id == currentUserId ? 0.1 : 0))
+                            .fill(Color.white.opacity(
+                                isEliminated ? 0.02 : (user.user_id == currentUserId ? 0.1 : 0)
+                            ))
                             .overlay(
                                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                    .stroke(user.user_id == currentUserId ? MADTheme.Colors.primary : Color.clear, lineWidth: 1)
+                                    .stroke(
+                                        isEliminated
+                                            ? Color.red.opacity(0.15)
+                                            : (user.user_id == currentUserId ? MADTheme.Colors.primary : Color.clear),
+                                        lineWidth: 1
+                                    )
                             )
                     )
+                    .opacity(isEliminated ? 0.6 : 1.0)
                 }
             }
             .padding(MADTheme.Spacing.lg)
@@ -653,9 +832,23 @@ struct CompetitionDetailView: View {
                     .fill(.ultraThinMaterial)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            .stroke(
+                                LinearGradient(
+                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) } + [Color.clear],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
                     )
             )
+        }
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                withAnimation {
+                    heartsAnimated = true
+                }
+            }
         }
     }
 
@@ -709,7 +902,14 @@ struct CompetitionDetailView: View {
                     .fill(.ultraThinMaterial)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            .stroke(
+                                LinearGradient(
+                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) } + [Color.clear],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
                     )
             )
         }
@@ -754,9 +954,16 @@ struct CompetitionDetailView: View {
 
                             Spacer()
 
-                            Text(String(format: "%.1f/%@ %@", distance, competition.options.goalFormatted, competition.options.unit.shortDisplayName))
-                                .font(MADTheme.Typography.callout)
-                                .foregroundColor(hitTarget ? .green : .white.opacity(0.7))
+                            VStack(alignment: .trailing, spacing: 1) {
+                                Text(String(format: "%.1f/%@ %@", distance, competition.options.goalFormatted, competition.options.unit.shortDisplayName))
+                                    .font(MADTheme.Typography.callout)
+                                    .foregroundColor(hitTarget ? .green : .white.opacity(0.7))
+                                if hitTarget && distance > goal {
+                                    Text("+\(String(format: "%.1f", distance - goal)) over")
+                                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                                        .foregroundColor(.green.opacity(0.7))
+                                }
+                            }
                         }
 
                         GeometryReader { geo in
@@ -785,7 +992,14 @@ struct CompetitionDetailView: View {
                     .fill(.ultraThinMaterial)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            .stroke(
+                                LinearGradient(
+                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) } + [Color.clear],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
                     )
             )
         }
@@ -798,63 +1012,140 @@ struct CompetitionDetailView: View {
         let sortedUsers = competition.users
             .filter { $0.invite_status == .accepted }
             .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        let gradientColors = competition.type.gradient.map { Color(hex: $0) }
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Race Progress")
-                .font(MADTheme.Typography.title3)
-                .foregroundColor(.white)
-                .padding(.horizontal, MADTheme.Spacing.sm)
+            HStack {
+                Text("Race Progress")
+                    .font(MADTheme.Typography.title3)
+                    .foregroundColor(.white)
 
-            VStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(sortedUsers, id: \.id) { user in
+                Spacer()
+
+                // Finish line indicator
+                HStack(spacing: 4) {
+                    Image(systemName: "flag.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.4))
+                    Text("\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.4))
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.sm)
+
+            VStack(spacing: MADTheme.Spacing.md) {
+                ForEach(Array(sortedUsers.enumerated()), id: \.element.id) { index, user in
                     let distance = user.score ?? 0
                     let progress = min(distance / max(goal, 0.1), 1.0)
+                    let isCurrentUser = user.user_id == currentUserId
+                    let finished = distance >= goal
 
                     VStack(spacing: MADTheme.Spacing.sm) {
-                        HStack(spacing: MADTheme.Spacing.md) {
-                            Circle()
-                                .fill(Color.white.opacity(0.12))
-                                .frame(width: 36, height: 36)
-                                .overlay(
-                                    Text(user.displayName.prefix(1).uppercased())
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(.white)
-                                )
+                        // User info row
+                        HStack(spacing: MADTheme.Spacing.sm) {
+                            // Position badge
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        index == 0
+                                            ? LinearGradient(colors: gradientColors.map { $0.opacity(0.3) }, startPoint: .topLeading, endPoint: .bottomTrailing)
+                                            : LinearGradient(colors: [Color.white.opacity(0.12)], startPoint: .top, endPoint: .bottom)
+                                    )
+                                    .frame(width: 32, height: 32)
+
+                                Text("\(index + 1)")
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                                    .foregroundColor(index == 0 ? gradientColors.first ?? .white : .white.opacity(0.6))
+                            }
 
                             Text(user.displayName)
-                                .font(MADTheme.Typography.callout)
+                                .font(.system(size: 14, weight: .semibold, design: .rounded))
                                 .foregroundColor(.white)
 
                             Spacer()
 
-                            Text(String(format: "%.1f/%@ %@", distance, competition.options.goalFormatted, competition.options.unit.shortDisplayName))
-                                .font(MADTheme.Typography.callout)
-                                .foregroundColor(.white.opacity(0.7))
+                            VStack(alignment: .trailing, spacing: 1) {
+                                Text(String(format: "%.1f/%@ %@", distance, competition.options.goalFormatted, competition.options.unit.shortDisplayName))
+                                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                                    .foregroundColor(finished ? .green : .white.opacity(0.7))
+                                if distance > goal {
+                                    Text("+\(String(format: "%.1f", distance - goal)) over")
+                                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                                        .foregroundColor(.green.opacity(0.7))
+                                }
+                            }
                         }
 
+                        // Animated Race Track
                         GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.white.opacity(0.08))
-                                    .frame(height: 8)
+                            let trackWidth = geo.size.width
+                            let runnerX = raceAnimated ? trackWidth * progress : 0
 
+                            ZStack(alignment: .leading) {
+                                // Track background
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color.white.opacity(0.06))
+                                    .frame(height: 6)
+                                    .offset(y: 8)
+
+                                // Track distance markers
+                                ForEach(1..<4, id: \.self) { i in
+                                    Rectangle()
+                                        .fill(Color.white.opacity(0.08))
+                                        .frame(width: 1, height: 10)
+                                        .offset(x: trackWidth * CGFloat(i) / 4, y: 6)
+                                }
+
+                                // Progress trail with gradient
                                 RoundedRectangle(cornerRadius: 4)
                                     .fill(
                                         LinearGradient(
-                                            colors: competition.type.gradient.map { Color(hex: $0) },
+                                            colors: gradientColors,
                                             startPoint: .leading,
                                             endPoint: .trailing
                                         )
                                     )
-                                    .frame(width: geo.size.width * progress, height: 8)
+                                    .frame(width: max(runnerX, 0), height: 6)
+                                    .offset(y: 8)
+
+                                // Finish flag at the end of track
+                                Image(systemName: "flag.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(
+                                        LinearGradient(
+                                            colors: gradientColors.map { $0.opacity(0.5) },
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                                    .offset(x: trackWidth - 10, y: -2)
+
+                                // Running man that animates to position
+                                Image(systemName: finished ? "figure.run.circle.fill" : "figure.run")
+                                    .font(.system(size: finished ? 20 : 16, weight: .medium))
+                                    .foregroundStyle(
+                                        LinearGradient(
+                                            colors: finished ? [.green, gradientColors.last ?? .green] : gradientColors,
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                                    .shadow(color: (gradientColors.first ?? .purple).opacity(raceAnimated ? 0.5 : 0), radius: 6)
+                                    .offset(x: max(runnerX - 8, 0), y: -4)
                             }
+                            .animation(
+                                .easeOut(duration: 1.0).delay(0.3 + Double(index) * 0.15),
+                                value: raceAnimated
+                            )
                         }
-                        .frame(height: 8)
+                        .frame(height: 28)
                     }
-                    .padding(MADTheme.Spacing.md)
+                    .padding(.horizontal, MADTheme.Spacing.md)
+                    .padding(.vertical, MADTheme.Spacing.sm)
                     .background(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .fill(Color.white.opacity(user.user_id == currentUserId ? 0.1 : 0))
+                            .fill(Color.white.opacity(isCurrentUser ? 0.08 : 0))
                     )
                 }
             }
@@ -864,10 +1155,50 @@ struct CompetitionDetailView: View {
                     .fill(.ultraThinMaterial)
                     .overlay(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            .stroke(
+                                LinearGradient(
+                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) } + [Color.clear],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
                     )
             )
         }
+        .onAppear {
+            raceAnimated = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                raceAnimated = true
+            }
+        }
+    }
+
+    // MARK: - Streak Helpers
+    private func missCount(for user: CompetitionUser) -> Int {
+        guard let startDate = competition.startDateFormatted else { return 0 }
+        let intervals = user.intervals ?? [:]
+
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        var currentDate = calendar.startOfDay(for: startDate)
+        var misses = 0
+        let goal = competition.options.goal
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+
+        while currentDate < today {
+            let key = formatter.string(from: currentDate)
+            let distance = intervals[key] ?? 0
+            if distance < goal {
+                misses += 1
+            }
+            guard let nextDate = calendar.date(byAdding: .day, value: 1, to: currentDate) else { break }
+            currentDate = nextDate
+        }
+
+        return misses
     }
 
     // MARK: - Interval Helpers

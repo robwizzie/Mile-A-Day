@@ -129,13 +129,15 @@ struct CompetitionsListView: View {
             if competitionService.isLoading {
                 loadingView
             } else if competitionService.competitions.isEmpty {
-                CompetitionEmptyStateView(
-                    title: "No Competitions Yet",
-                    message: "Create a competition to challenge your friends!",
-                    systemImage: "trophy",
-                    actionTitle: "Create Competition",
-                    action: { showingCreateCompetition = true }
-                )
+                ScrollView {
+                    CompetitionEmptyStateView(
+                        title: "No Competitions Yet",
+                        message: "Create a competition to challenge your friends!",
+                        systemImage: "trophy",
+                        actionTitle: "Create Competition",
+                        action: { showingCreateCompetition = true }
+                    )
+                }
             } else {
                 ScrollView {
                     LazyVStack(spacing: MADTheme.Spacing.sm) {
@@ -206,11 +208,13 @@ struct CompetitionsListView: View {
             if competitionService.isLoading {
                 loadingView
             } else if competitionService.invites.isEmpty {
-                CompetitionEmptyStateView(
-                    title: "No Invites",
-                    message: "You don't have any pending competition invites at the moment.",
-                    systemImage: "envelope.open"
-                )
+                ScrollView {
+                    CompetitionEmptyStateView(
+                        title: "No Invites",
+                        message: "You don't have any pending competition invites at the moment.",
+                        systemImage: "envelope.open"
+                    )
+                }
             } else {
                 ScrollView {
                     LazyVStack(spacing: MADTheme.Spacing.lg) {
