@@ -127,11 +127,6 @@ enum InProgressWorkoutStore {
 
     /// Save the current in‑progress workout snapshot with validation
     static func save(_ state: InProgressWorkoutState) {
-        guard state.isActive else {
-            clear()
-            return
-        }
-
         // Update last save time
         var updatedState = state
         updatedState.lastSaveTime = Date()
@@ -193,6 +188,7 @@ enum InProgressWorkoutStore {
 
     /// Clear any persisted in‑progress workout and release lock
     static func clear() {
+        routePointBuffer.removeAll()
         UserDefaults.standard.removeObject(forKey: storageKey)
         releaseLock()
         UserDefaults.standard.synchronize()
@@ -214,16 +210,39 @@ enum InProgressWorkoutStore {
 
     // MARK: - Route Point Management
 
-    /// Add a route point to the current workout
+    /// In-memory buffer for route points to avoid encoding/decoding the full state on every GPS update.
+    /// Flushed to persistent storage periodically via `flushRoutePoints()`.
+    private(set) static var routePointBuffer: [WorkoutRoutePoint] = []
+    private static var lastRouteFlush: Date = Date()
+    private static let routeFlushInterval: TimeInterval = 10.0
+
+    /// Add a route point to the in-memory buffer.
+    /// Points are flushed to persistent storage periodically or on demand.
     static func addRoutePoint(_ location: CLLocation) {
+        let point = WorkoutRoutePoint(from: location)
+        routePointBuffer.append(point)
+
+        // Auto-flush every routeFlushInterval seconds
+        if Date().timeIntervalSince(lastRouteFlush) >= routeFlushInterval {
+            flushRoutePoints()
+        }
+    }
+
+    /// Flush buffered route points to persistent storage
+    static func flushRoutePoints() {
+        guard !routePointBuffer.isEmpty else { return }
         guard var state = load() else {
-            print("[InProgressWorkoutStore] ⚠️ Cannot add route point: no active workout")
+            print("[InProgressWorkoutStore] ⚠️ Cannot flush route points: no active workout")
+            routePointBuffer.removeAll()
             return
         }
 
-        let point = WorkoutRoutePoint(from: location)
-        state.routePoints.append(point)
+        let count = routePointBuffer.count
+        state.routePoints.append(contentsOf: routePointBuffer)
+        routePointBuffer.removeAll()
+        lastRouteFlush = Date()
         save(state)
+        print("[InProgressWorkoutStore] 📍 Flushed \(count) route points to disk")
     }
 
     /// Update distance without adding route points (for pedometer mode)

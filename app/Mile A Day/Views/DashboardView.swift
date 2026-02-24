@@ -3565,6 +3565,7 @@ struct WorkoutTrackingView: View {
     @State private var hasReachedPreviousProgress = false // Track if we've reached starting distance
     @State private var showRecap = false
     @State private var showStopConfirmation = false // Confirmation before ending workout
+    @State private var isStopping = false // Prevents double-stop and shows "Ending..." UI
     @State private var workoutSession: HKWorkoutSession?
     @State private var workoutBuilder: HKWorkoutBuilder?
     @State private var workoutActivity: Activity<WorkoutActivityAttributes>?
@@ -3989,24 +3990,33 @@ struct WorkoutTrackingView: View {
                         showStopConfirmation = true
                     }) {
                         HStack(spacing: 12) {
-                            Image(systemName: "stop.fill")
-                                .font(.title2)
-                            Text("Stop Workout")
-                                .font(.title3)
-                                .fontWeight(.semibold)
+                            if isStopping {
+                                ProgressView()
+                                    .tint(.white)
+                                Text("Ending...")
+                                    .font(.title3)
+                                    .fontWeight(.semibold)
+                            } else {
+                                Image(systemName: "stop.fill")
+                                    .font(.title2)
+                                Text("Stop Workout")
+                                    .font(.title3)
+                                    .fontWeight(.semibold)
+                            }
                         }
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 20)
                         .background(
                             RoundedRectangle(cornerRadius: 16)
-                                .fill(Color.red.opacity(0.3))
+                                .fill(Color.red.opacity(isStopping ? 0.15 : 0.3))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 16)
-                                        .stroke(Color.red, lineWidth: 2)
+                                        .stroke(Color.red.opacity(isStopping ? 0.5 : 1.0), lineWidth: 2)
                                 )
                         )
                     }
+                    .disabled(isStopping)
                     .padding(.horizontal, 32)
                     .padding(.bottom, 40)
                     .buttonStyle(PlainButtonStyle())
@@ -4117,9 +4127,15 @@ struct WorkoutTrackingView: View {
             }
         }
         .onDisappear {
-            // When the view disappears (e.g., user switches apps or dismisses the workout),
-            // stop the timer to save battery, but keep the workout state persisted
-            // so we can restore it when they come back.
+            // When the view disappears (e.g., user dismisses to dashboard),
+            // do a final Live Activity update and state save so the Dynamic Island
+            // shows current data while the view is gone.
+            if isTracking && !isStopping {
+                updateLiveActivity()
+            }
+
+            // Stop the timer to save battery. The workout state remains persisted
+            // so we can restore it when the user comes back.
             timer?.invalidate()
             timer = nil
         }
@@ -4161,21 +4177,19 @@ struct WorkoutTrackingView: View {
                     selectedLocationType = locationType
                 }
 
-                // Restore distance into the location manager
-                locationManager.restoreDistance(saved.currentDistance)
-
                 // Jump directly into the tracking UI
                 showActivitySelection = false
                 showLocationTypeSelection = false
                 showCountdown = false
                 isTracking = true
 
-                // Restart location tracking (it was stopped when app was backgrounded/closed)
+                // Restart location tracking FIRST (resets distance to 0),
+                // then restore the saved distance so it's not lost.
                 locationManager.startTracking(locationType: selectedLocationType)
+                locationManager.restoreDistance(saved.currentDistance)
 
                 // CRITICAL: Restart HKWorkoutBuilder for the recovered workout
-                // We create a new builder session that starts now (can't backdate HealthKit sessions)
-                // The accumulated distance will be added when workout ends
+                // Use the original workout start time so HealthKit records the correct duration
                 healthManager.requestAuthorization { authorized in
                     guard authorized else {
                         print("❌ HealthKit authorization denied during recovery")
@@ -4190,8 +4204,8 @@ struct WorkoutTrackingView: View {
                     let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
                     self.workoutBuilder = builder
 
-                    // Start collecting workout data from NOW (recovery time, not original start)
-                    builder.beginCollection(withStart: Date()) { success, error in
+                    // Start collecting from the original workout start time
+                    builder.beginCollection(withStart: saved.startTime) { success, error in
                         if let error = error {
                             print("❌ Failed to restart workout collection: \(error)")
                         } else if success {
@@ -4375,6 +4389,16 @@ struct WorkoutTrackingView: View {
     }
 
     private func stopWorkout() {
+        // Prevent double-stop
+        guard !isStopping else {
+            print("⚠️ stopWorkout() already in progress, ignoring duplicate call")
+            return
+        }
+        isStopping = true
+
+        // Flush any buffered route points before stopping
+        InProgressWorkoutStore.flushRoutePoints()
+
         // Stop timer
         timer?.invalidate()
         timer = nil
@@ -4385,11 +4409,7 @@ struct WorkoutTrackingView: View {
         // End HealthKit workout collection
         guard let builder = workoutBuilder, let startDate = workoutStartDate else {
             // No active builder, just clean up and show recap
-            endLiveActivity()
-            InProgressWorkoutStore.clear() // Release lock and clear state
-            withAnimation {
-                showRecap = true
-            }
+            cleanupWorkout(workoutSaved: false)
             return
         }
 
@@ -4477,31 +4497,37 @@ struct WorkoutTrackingView: View {
                 }
             }
 
-            // Step 4: Clear state and release lock ONLY after successful save
+            // Step 4: Cleanup on main thread
             DispatchQueue.main.async {
-                // End Live Activity
-                self.endLiveActivity()
-
-                // Show recap
-                withAnimation {
-                    self.showRecap = true
-                }
-
-                // Clear workout state and release lock
-                // This is critical - only clear after we've successfully saved to HealthKit
-                if workoutSaved {
-                    InProgressWorkoutStore.clear()
-                    print("✅ Workout completed successfully, state cleared")
-                } else {
-                    print("⚠️ Workout may not have saved properly, keeping state for recovery")
-                    // Keep state but mark as inactive so it can be recovered
-                    if var state = InProgressWorkoutStore.load() {
-                        state.isActive = false // Mark as failed/incomplete
-                        InProgressWorkoutStore.save(state)
-                    }
-                }
+                self.cleanupWorkout(workoutSaved: workoutSaved)
             }
         }
+    }
+
+    // MARK: - Workout Cleanup
+
+    /// Centralized cleanup after a workout ends. Handles Live Activity, state, and UI in the correct order.
+    /// - Parameter workoutSaved: Whether the workout was successfully saved to HealthKit
+    private func cleanupWorkout(workoutSaved: Bool) {
+        // 1. End Live Activity (does NOT touch InProgressWorkoutStore)
+        endLiveActivity()
+
+        // 2. Show recap
+        withAnimation {
+            showRecap = true
+        }
+
+        // 3. Handle state based on save result
+        if workoutSaved {
+            InProgressWorkoutStore.clear()
+            print("✅ Workout completed successfully, state cleared")
+        } else {
+            // Leave state with isActive = true so the next app launch can recover it
+            print("⚠️ Workout may not have saved to HealthKit, keeping state for recovery")
+        }
+
+        // 4. Reset stopping flag
+        isStopping = false
     }
 
     // MARK: - Live Activity Management
@@ -4638,6 +4664,9 @@ struct WorkoutTrackingView: View {
             )
         }
 
+        // Flush any buffered route points before persisting state
+        InProgressWorkoutStore.flushRoutePoints()
+
         // CRITICAL: Persist complete workout snapshot for recovery
         // Load existing state to preserve route points and other accumulated data
         if var existingState = InProgressWorkoutStore.load() {
@@ -4676,7 +4705,9 @@ struct WorkoutTrackingView: View {
     }
 
     private func endLiveActivity() {
-        // CRITICAL FIX: End ALL Live Activities to prevent orphans
+        // End all Live Activities for this workout.
+        // NOTE: This does NOT clear InProgressWorkoutStore — the caller is responsible
+        // for clearing state after confirming HealthKit save status.
         print("🔚 Ending Live Activity...")
 
         // Use FRESH data for the final state
@@ -4692,6 +4723,9 @@ struct WorkoutTrackingView: View {
             activityType: selectedActivityType == .running ? "Running" : "Walking"
         )
 
+        // Capture the ID before clearing the reference so the orphan cleanup can exclude it
+        let endedActivityID = workoutActivity?.id
+
         // End the Live Activity we have a reference to
         if let activity = workoutActivity {
             Task {
@@ -4704,21 +4738,16 @@ struct WorkoutTrackingView: View {
             workoutActivity = nil
         }
 
-        // CRITICAL: Also end any other Live Activities that might be orphaned
-        // This ensures we don't leave behind duplicate activities
+        // Also end any orphaned Live Activities (e.g. from previous crashed sessions)
         Task {
             let allActivities = Activity<WorkoutActivityAttributes>.activities
             for orphanedActivity in allActivities {
-                // End any activity that's still running
-                if orphanedActivity.id != workoutActivity?.id {
+                if orphanedActivity.id != endedActivityID {
                     print("🗑️ Cleaning up orphaned Live Activity: \(orphanedActivity.id)")
                     await orphanedActivity.end(nil, dismissalPolicy: .immediate)
                 }
             }
         }
-
-        // Clear any persisted in‑progress state now that the workout is finished.
-        InProgressWorkoutStore.clear()
     }
 }
 

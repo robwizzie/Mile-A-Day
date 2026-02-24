@@ -160,14 +160,23 @@ struct CompetitionCard: View {
                             )
                         }
 
-                        // Points chip (Clash/Streaks)
-                        if competition.type == .clash || competition.type == .streaks {
-                            if competition.options.first_to > 0 {
+                        // Points chip (Clash) or Lives chip (Streaks)
+                        if competition.type == .clash && competition.options.first_to > 0 {
+                            StatChip(
+                                icon: "star",
+                                text: "First to \(competition.options.first_to)"
+                            )
+                        }
+
+                        if competition.type == .streaks && competition.options.first_to > 0 {
+                            if let currentUserId = UserDefaults.standard.string(forKey: "backendUserId"),
+                               let currentUser = competition.users.first(where: { $0.user_id == currentUserId }),
+                               let lives = currentUser.remaining_lives {
+                                LivesChip(remaining: lives, total: competition.options.first_to)
+                            } else {
                                 StatChip(
-                                    icon: competition.type == .clash ? "star" : "heart",
-                                    text: competition.type == .clash
-                                        ? "First to \(competition.options.first_to)"
-                                        : "\(competition.options.first_to) miss\(competition.options.first_to == 1 ? "" : "es")"
+                                    icon: "heart",
+                                    text: "\(competition.options.first_to) \(competition.options.first_to == 1 ? "life" : "lives")"
                                 )
                             }
                         }
@@ -285,6 +294,39 @@ struct StatChip: View {
         .background(
             Capsule()
                 .fill(Color.white.opacity(0.08))
+        )
+    }
+}
+
+// MARK: - Lives Chip
+
+struct LivesChip: View {
+    let remaining: Int
+    let total: Int
+
+    private var isEliminated: Bool { remaining <= 0 }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<total, id: \.self) { i in
+                let alive = i < remaining
+                Image(systemName: alive ? "heart.fill" : "heart.slash.fill")
+                    .font(.system(size: 8))
+                    .foregroundColor(alive ? .red : .gray.opacity(0.4))
+                    .shadow(color: alive ? .red.opacity(0.3) : .clear, radius: 1)
+            }
+
+            if isEliminated {
+                Text("OUT")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundColor(.red.opacity(0.7))
+            }
+        }
+        .padding(.horizontal, MADTheme.Spacing.sm)
+        .padding(.vertical, 5)
+        .background(
+            Capsule()
+                .fill(isEliminated ? Color.red.opacity(0.1) : Color.white.opacity(0.08))
         )
     }
 }
@@ -573,6 +615,13 @@ struct CompetitionLeaderboardRow: View {
     let competitionType: CompetitionType
     let unit: CompetitionUnit
     let isCurrentUser: Bool
+    var firstTo: Int = 0
+
+    private var isEliminated: Bool {
+        guard competitionType == .streaks, firstTo > 0 else { return false }
+        guard let lives = user.remaining_lives else { return false }
+        return lives <= 0
+    }
 
     var medalColor: Color? {
         switch rank {
@@ -616,28 +665,44 @@ struct CompetitionLeaderboardRow: View {
                 .overlay(
                     Text(user.displayName.prefix(1).uppercased())
                         .font(MADTheme.Typography.callout)
-                        .foregroundColor(.white)
+                        .foregroundColor(.white.opacity(isEliminated ? 0.4 : 1.0))
                 )
                 .overlay(
                     Circle()
                         .stroke(
-                            rank == 1
-                                ? AnyShapeStyle(LinearGradient(colors: [.yellow, .orange], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                : AnyShapeStyle(Color.white.opacity(0.2)),
+                            isEliminated
+                                ? AnyShapeStyle(Color.red.opacity(0.3))
+                                : (rank == 1
+                                    ? AnyShapeStyle(LinearGradient(colors: [.yellow, .orange], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    : AnyShapeStyle(Color.white.opacity(0.2))),
                             lineWidth: rank <= 3 ? 2 : 1
                         )
                 )
 
-            Text(user.displayName)
-                .font(MADTheme.Typography.headline)
-                .foregroundColor(.white)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(user.displayName)
+                    .font(MADTheme.Typography.headline)
+                    .foregroundColor(.white.opacity(isEliminated ? 0.4 : 1.0))
+                    .strikethrough(isEliminated, color: .red.opacity(0.4))
+
+                // Mini lives dots for streaks
+                if competitionType == .streaks && firstTo > 0, let lives = user.remaining_lives {
+                    HStack(spacing: 3) {
+                        ForEach(0..<min(firstTo, 6), id: \.self) { i in
+                            Circle()
+                                .fill(i < lives ? Color.red : Color.gray.opacity(0.3))
+                                .frame(width: 6, height: 6)
+                        }
+                    }
+                }
+            }
 
             Spacer()
 
             Text(scoreText)
                 .font(MADTheme.Typography.callout)
                 .fontWeight(.semibold)
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(.white.opacity(isEliminated ? 0.4 : 0.9))
         }
         .padding(MADTheme.Spacing.md)
         .background(
@@ -646,11 +711,14 @@ struct CompetitionLeaderboardRow: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                         .stroke(
-                            isCurrentUser ? MADTheme.Colors.primary : Color.clear,
+                            isEliminated
+                                ? Color.red.opacity(0.15)
+                                : (isCurrentUser ? MADTheme.Colors.primary : Color.clear),
                             lineWidth: 2
                         )
                 )
         )
+        .opacity(isEliminated ? 0.6 : 1.0)
     }
 }
 

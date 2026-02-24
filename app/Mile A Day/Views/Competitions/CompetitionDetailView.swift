@@ -651,6 +651,7 @@ struct CompetitionDetailView: View {
         let firstTo = competition.options.first_to
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            // Section header
             HStack {
                 Text("Streak Status")
                     .font(MADTheme.Typography.title3)
@@ -659,14 +660,21 @@ struct CompetitionDetailView: View {
                 Spacer()
 
                 if firstTo > 0 {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 5) {
                         Image(systemName: "heart.fill")
                             .font(.system(size: 10))
                             .foregroundColor(.red)
-                        Text("\(firstTo) lives each")
+                            .shadow(color: .red.opacity(0.5), radius: 2)
+                        Text("\(firstTo) \(firstTo == 1 ? "life" : "lives") each")
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.5))
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.06))
+                    )
                 }
             }
             .padding(.horizontal, MADTheme.Spacing.sm)
@@ -676,19 +684,55 @@ struct CompetitionDetailView: View {
                     let distance = user.intervals?[key] ?? 0
                     let completed = distance >= goal
                     let isToday = Calendar.current.isDateInToday(selectedIntervalDate)
-                    let misses = missCount(for: user)
-                    let displayMisses = firstTo > 0 ? min(misses, firstTo) : 0
-                    let isEliminated = firstTo > 0 && misses >= firstTo
-                    let heartsRemaining = firstTo > 0 ? max(0, firstTo - displayMisses) : 0
+                    let missed = missedDates(for: user)
+
+                    // Use server-provided remaining_lives when available, fall back to local calculation
+                    let heartsRemaining: Int = {
+                        if let serverLives = user.remaining_lives {
+                            return max(0, serverLives)
+                        } else if firstTo > 0 {
+                            return max(0, firstTo - min(missed.count, firstTo))
+                        }
+                        return 0
+                    }()
+                    let livesLost: Int = {
+                        if firstTo > 0 {
+                            if let serverLives = user.remaining_lives {
+                                return max(0, firstTo - serverLives)
+                            }
+                            return min(missed.count, firstTo)
+                        }
+                        return 0
+                    }()
+                    let isEliminated: Bool = {
+                        if firstTo > 0 {
+                            if let serverLives = user.remaining_lives {
+                                return serverLives <= 0
+                            }
+                            return missed.count >= firstTo
+                        }
+                        return false
+                    }()
 
                     VStack(spacing: MADTheme.Spacing.sm) {
                         // Main user info row
                         HStack(spacing: MADTheme.Spacing.md) {
-                            Image(systemName: isEliminated ? "person.fill.xmark" : (completed ? "checkmark.circle.fill" : (isToday ? "circle.dotted" : "xmark.circle.fill")))
-                                .font(.title3)
-                                .foregroundColor(isEliminated ? .gray : (completed ? .green : (isToday ? .orange : .red)))
-                                .frame(width: 28)
+                            // Status icon
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        isEliminated ? Color.gray.opacity(0.15) :
+                                        (completed ? Color.green.opacity(0.15) :
+                                        (isToday ? Color.orange.opacity(0.15) : Color.red.opacity(0.15)))
+                                    )
+                                    .frame(width: 32, height: 32)
 
+                                Image(systemName: isEliminated ? "person.fill.xmark" : (completed ? "checkmark.circle.fill" : (isToday ? "circle.dotted" : "xmark.circle.fill")))
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(isEliminated ? .gray : (completed ? .green : (isToday ? .orange : .red)))
+                            }
+
+                            // Avatar
                             ZStack {
                                 Circle()
                                     .fill(Color.white.opacity(isEliminated ? 0.05 : 0.12))
@@ -706,7 +750,8 @@ struct CompetitionDetailView: View {
                                 }
                             }
 
-                            VStack(alignment: .leading, spacing: 2) {
+                            // Name + status text
+                            VStack(alignment: .leading, spacing: 3) {
                                 HStack(spacing: MADTheme.Spacing.xs) {
                                     Text(user.displayName)
                                         .font(MADTheme.Typography.callout)
@@ -714,16 +759,18 @@ struct CompetitionDetailView: View {
 
                                     if isEliminated {
                                         Text("ELIMINATED")
-                                            .font(.system(size: 9, weight: .bold, design: .rounded))
-                                            .foregroundColor(.red)
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
+                                            .font(.system(size: 8, weight: .heavy, design: .rounded))
+                                            .foregroundColor(.white)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
                                             .background(
                                                 Capsule()
-                                                    .fill(Color.red.opacity(0.15))
-                                                    .overlay(
-                                                        Capsule()
-                                                            .stroke(Color.red.opacity(0.3), lineWidth: 0.5)
+                                                    .fill(
+                                                        LinearGradient(
+                                                            colors: [Color.red.opacity(0.7), Color.red.opacity(0.4)],
+                                                            startPoint: .leading,
+                                                            endPoint: .trailing
+                                                        )
                                                     )
                                             )
                                     }
@@ -732,78 +779,142 @@ struct CompetitionDetailView: View {
                                 if !isEliminated {
                                     if completed {
                                         HStack(spacing: 4) {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundColor(.green)
                                             Text("\(String(format: "%.1f", distance)) \(competition.options.unit.shortDisplayName)")
                                                 .foregroundColor(.green)
                                             if distance > goal {
-                                                Text("(+\(String(format: "%.1f", distance - goal)) over)")
+                                                Text("(+\(String(format: "%.1f", distance - goal)))")
                                                     .foregroundColor(.green.opacity(0.6))
                                             }
                                         }
                                         .font(MADTheme.Typography.caption)
                                     } else if isToday {
-                                        Text("\(String(format: "%.1f", distance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
-                                            .font(MADTheme.Typography.caption)
-                                            .foregroundColor(.white.opacity(0.5))
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "clock")
+                                                .font(.system(size: 9))
+                                                .foregroundColor(.orange.opacity(0.8))
+                                            Text("\(String(format: "%.1f", distance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
+                                                .foregroundColor(.orange.opacity(0.8))
+                                            Text("— in progress")
+                                                .foregroundColor(.white.opacity(0.35))
+                                        }
+                                        .font(MADTheme.Typography.caption)
                                     } else {
-                                        Text("Missed")
-                                            .font(MADTheme.Typography.caption)
-                                            .foregroundColor(.red.opacity(0.7))
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "xmark")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundColor(.red.opacity(0.7))
+                                            Text("Missed — broke streak")
+                                                .foregroundColor(.red.opacity(0.7))
+                                        }
+                                        .font(MADTheme.Typography.caption)
+                                    }
+                                } else {
+                                    // Eliminated subtitle
+                                    if !missed.isEmpty {
+                                        Text("Lost all lives by \(formatBreakDate(missed.last!))")
+                                            .font(.system(size: 11, design: .rounded))
+                                            .foregroundColor(.white.opacity(0.25))
                                     }
                                 }
                             }
 
                             Spacer()
 
-                            VStack(spacing: 1) {
+                            // Streak counter
+                            VStack(spacing: 2) {
                                 HStack(spacing: 3) {
                                     Image(systemName: "flame.fill")
-                                        .font(.system(size: 12))
+                                        .font(.system(size: 13))
                                         .foregroundColor(isEliminated ? .gray.opacity(0.3) : .orange)
+                                        .shadow(color: isEliminated ? .clear : .orange.opacity(0.3), radius: 3)
                                     Text("\(Int(user.score ?? 0))")
-                                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                                        .font(.system(size: 20, weight: .bold, design: .rounded))
                                         .foregroundColor(.white.opacity(isEliminated ? 0.3 : 1.0))
                                 }
                                 Text("streak")
-                                    .font(.system(size: 10, weight: .medium))
+                                    .font(.system(size: 10, weight: .medium, design: .rounded))
                                     .foregroundColor(.white.opacity(isEliminated ? 0.2 : 0.4))
                             }
                         }
 
-                        // Hearts row showing lives
+                        // Lives / hearts row
                         if firstTo > 0 {
-                            HStack(spacing: 5) {
-                                ForEach(0..<heartsRemaining, id: \.self) { i in
-                                    Image(systemName: "heart.fill")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.red)
-                                        .shadow(color: .red.opacity(0.3), radius: 2)
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack(spacing: 6) {
+                                    // Unified heart loop — alive then lost
+                                    ForEach(0..<firstTo, id: \.self) { i in
+                                        let isAlive = i < heartsRemaining
+
+                                        ZStack {
+                                            // Soft glow behind alive hearts
+                                            if isAlive {
+                                                Image(systemName: "heart.fill")
+                                                    .font(.system(size: 16))
+                                                    .foregroundColor(.red.opacity(0.25))
+                                                    .blur(radius: 5)
+                                            }
+
+                                            Image(systemName: isAlive ? "heart.fill" : "heart.slash.fill")
+                                                .font(.system(size: 16))
+                                                .foregroundColor(isAlive ? .red : .gray.opacity(0.3))
+                                                .shadow(color: isAlive ? .red.opacity(0.4) : .clear, radius: 3)
+                                        }
                                         .scaleEffect(heartsAnimated ? 1.0 : 0.1)
                                         .opacity(heartsAnimated ? 1.0 : 0)
                                         .animation(
-                                            .spring(response: 0.4, dampingFraction: 0.6)
-                                            .delay(Double(i) * 0.06),
+                                            .spring(response: 0.35, dampingFraction: isAlive ? 0.55 : 0.3)
+                                            .delay(Double(i) * 0.07),
                                             value: heartsAnimated
                                         )
+                                    }
+
+                                    Spacer()
+
+                                    // Lives counter badge
+                                    HStack(spacing: 3) {
+                                        if isEliminated {
+                                            Image(systemName: "xmark.circle.fill")
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.red.opacity(0.6))
+                                            Text("Eliminated")
+                                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                                .foregroundColor(.red.opacity(0.6))
+                                        } else {
+                                            Text("\(heartsRemaining)")
+                                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                                                .foregroundColor(.white)
+                                            Text("of \(firstTo)")
+                                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                                .foregroundColor(.white.opacity(0.4))
+                                        }
+                                    }
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        Capsule()
+                                            .fill(isEliminated ? Color.red.opacity(0.1) : Color.white.opacity(0.06))
+                                    )
                                 }
 
-                                ForEach(0..<displayMisses, id: \.self) { i in
-                                    Image(systemName: "heart.slash.fill")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.gray.opacity(0.35))
-                                        .scaleEffect(heartsAnimated ? 1.0 : 0.1)
-                                        .opacity(heartsAnimated ? 1.0 : 0)
-                                        .animation(
-                                            .spring(response: 0.5, dampingFraction: i == displayMisses - 1 ? 0.3 : 0.6)
-                                            .delay(Double(heartsRemaining + i) * 0.06),
-                                            value: heartsAnimated
-                                        )
+                                // Break date labels (show most recent, capped to firstTo)
+                                if !missed.isEmpty && !isEliminated {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        ForEach(Array(missed.suffix(firstTo)), id: \.self) { dateKey in
+                                            HStack(spacing: 5) {
+                                                Circle()
+                                                    .fill(Color.red.opacity(0.4))
+                                                    .frame(width: 4, height: 4)
+                                                Text("Broke on \(formatBreakDate(dateKey))")
+                                                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                                                    .foregroundColor(.white.opacity(0.3))
+                                            }
+                                        }
+                                    }
+                                    .padding(.leading, 2)
                                 }
-
-                                Spacer()
-
-                                Text(isEliminated ? "No lives left" : "\(heartsRemaining) of \(firstTo)")
-                                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                                    .foregroundColor(isEliminated ? .red.opacity(0.5) : .white.opacity(0.4))
                             }
                         }
                     }
@@ -817,13 +928,19 @@ struct CompetitionDetailView: View {
                                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                                     .stroke(
                                         isEliminated
-                                            ? Color.red.opacity(0.15)
-                                            : (user.user_id == currentUserId ? MADTheme.Colors.primary : Color.clear),
+                                            ? LinearGradient(
+                                                colors: [Color.red.opacity(0.2), Color.red.opacity(0.05)],
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                              )
+                                            : (user.user_id == currentUserId
+                                                ? LinearGradient(colors: [MADTheme.Colors.primary, MADTheme.Colors.primary], startPoint: .leading, endPoint: .trailing)
+                                                : LinearGradient(colors: [Color.clear, Color.clear], startPoint: .leading, endPoint: .trailing)),
                                         lineWidth: 1
                                     )
                             )
                     )
-                    .opacity(isEliminated ? 0.6 : 1.0)
+                    .opacity(isEliminated ? 0.55 : 1.0)
                 }
             }
             .padding(MADTheme.Spacing.lg)
@@ -850,6 +967,19 @@ struct CompetitionDetailView: View {
                 }
             }
         }
+    }
+
+    /// Formats an ISO8601 date key (e.g. "2026-02-20") into a readable label (e.g. "Feb 20")
+    private func formatBreakDate(_ isoKey: String) -> String {
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withFullDate]
+        isoFormatter.timeZone = TimeZone(identifier: "UTC")!
+        guard let date = isoFormatter.date(from: isoKey) else { return isoKey }
+
+        let displayFormatter = DateFormatter()
+        displayFormatter.dateFormat = "MMM d"
+        displayFormatter.timeZone = TimeZone(identifier: "UTC")!
+        return displayFormatter.string(from: date)
     }
 
     // MARK: - Apex Interval View
@@ -1175,30 +1305,43 @@ struct CompetitionDetailView: View {
     }
 
     // MARK: - Streak Helpers
-    private func missCount(for user: CompetitionUser) -> Int {
-        guard let startDate = competition.startDateFormatted else { return 0 }
-        let intervals = user.intervals ?? [:]
 
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        var currentDate = calendar.startOfDay(for: startDate)
-        var misses = 0
+    /// Returns the ISO8601 date keys for days where the user failed to meet the goal.
+    /// Only counts completed past days — the current day is never included.
+    private func missedDates(for user: CompetitionUser) -> [String] {
+        guard let startDateStr = competition.start_date else { return [] }
+        let intervals = user.intervals ?? [:]
         let goal = competition.options.goal
 
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withFullDate]
+        formatter.timeZone = TimeZone(identifier: "UTC")!
 
-        while currentDate < today {
+        guard let startDate = formatter.date(from: startDateStr) else { return [] }
+
+        var utcCalendar = Calendar(identifier: .gregorian)
+        utcCalendar.timeZone = TimeZone(identifier: "UTC")!
+
+        let todayUTC = utcCalendar.startOfDay(for: Date())
+        var currentDate = utcCalendar.startOfDay(for: startDate)
+        var missed: [String] = []
+
+        // Only check completed past days — stop before today
+        while currentDate < todayUTC {
             let key = formatter.string(from: currentDate)
             let distance = intervals[key] ?? 0
             if distance < goal {
-                misses += 1
+                missed.append(key)
             }
-            guard let nextDate = calendar.date(byAdding: .day, value: 1, to: currentDate) else { break }
+            guard let nextDate = utcCalendar.date(byAdding: .day, value: 1, to: currentDate) else { break }
             currentDate = nextDate
         }
 
-        return misses
+        return missed
+    }
+
+    private func missCount(for user: CompetitionUser) -> Int {
+        return missedDates(for: user).count
     }
 
     // MARK: - Interval Helpers
@@ -1298,7 +1441,8 @@ struct CompetitionDetailView: View {
                             user: user,
                             competitionType: competition.type,
                             unit: competition.options.unit,
-                            isCurrentUser: user.user_id == currentUserId
+                            isCurrentUser: user.user_id == currentUserId,
+                            firstTo: competition.options.first_to
                         )
                     }
                 }
@@ -1632,7 +1776,8 @@ struct CompetitionDetailView: View {
                         user: user,
                         competitionType: competition.type,
                         unit: competition.options.unit,
-                        isCurrentUser: user.user_id == currentUserId
+                        isCurrentUser: user.user_id == currentUserId,
+                        firstTo: competition.options.first_to
                     )
                 }
             }
