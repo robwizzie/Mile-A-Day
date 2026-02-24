@@ -288,6 +288,7 @@ interface UserData {
 			[intervalKey: string]: number;
 		};
 		score: number;
+		remaining_lives?: number;
 	};
 }
 
@@ -337,12 +338,23 @@ export async function getUserScores(competition: Competition): Promise<UserData>
 	}
 
 	if (competition.type === 'streaks') {
+		const totalLives = competition.options.lives ?? 1;
+
+		// Initialize remaining_lives for each user
+		Object.keys(userData).forEach(userId => {
+			userData[userId].remaining_lives = totalLives;
+		});
+
 		for (let interval of intervals) {
 			Object.entries(userData).forEach(([userId, { intervals }]) => {
 				if (intervals[interval] >= competition.options.goal) {
 					userData[userId].score++;
 				} else if (todaysInterval != interval) {
-					userData[userId].score = 0;
+					userData[userId].remaining_lives!--;
+					if (userData[userId].remaining_lives! <= 0) {
+						userData[userId].score = 0;
+						userData[userId].remaining_lives = totalLives;
+					}
 				}
 			});
 

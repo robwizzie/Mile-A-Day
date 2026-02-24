@@ -9,6 +9,7 @@ export interface CompetitionOptions {
 	unit: 'miles' | 'steps';
 	first_to: number;
 	duration_hours?: number;
+	lives?: number;
 }
 
 export interface CompetitionUser {
@@ -17,6 +18,7 @@ export interface CompetitionUser {
 	invite_status: string;
 	intervals?: { [intervalKey: string]: number };
 	score?: number;
+	remaining_lives?: number;
 	username?: string;
 }
 
