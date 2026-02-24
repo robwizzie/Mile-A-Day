@@ -1323,6 +1323,7 @@ Creates a new competition. The authenticated user becomes the owner and is autom
 | first_to | Number | Number of wins needed (for some types)   |    ✅    |
 | history  | Boolean| Whether to include historical data       |    ✖️    |
 | interval | String | Time interval: "day", "week", or "month" |    ✖️    |
+| lives    | Number | Number of streak lives (streaks type only, default: 1). Each missed interval costs one life instead of breaking the streak. The streak resets when all lives are lost. |    ✖️    |
 
 #### Examples
 
@@ -1345,7 +1346,8 @@ Creates a new competition. The authenticated user becomes the owner and is autom
 >         "unit": "miles",
 >         "first_to": 5,
 >         "history": false,
->         "interval": "day"
+>         "interval": "day",
+>         "lives": 3
 >     }
 > }
 > ```
@@ -1375,7 +1377,8 @@ Creates a new competition. The authenticated user becomes the owner and is autom
 >         "unit": "miles",
 >         "first_to": 5,
 >         "history": false,
->         "interval": "day"
+>         "interval": "day",
+>         "lives": 3
 >     }
 > }'
 > ```
@@ -1487,14 +1490,17 @@ Retrieves details for a specific competition.
 >             "unit": "miles",
 >             "first_to": 5,
 >             "history": false,
->             "interval": "day"
+>             "interval": "day",
+>             "lives": 3
 >         },
 >         "owner": "peter",
 >         "users": [
 >             {
 >                 "competition_id": "comp_abc123",
 >                 "user_id": "peter",
->                 "invite_status": "accepted"
+>                 "invite_status": "accepted",
+>                 "score": 12,
+>                 "remaining_lives": 2
 >             },
 >             {
 >                 "competition_id": "comp_abc123",
@@ -1505,6 +1511,8 @@ Retrieves details for a specific competition.
 >     }
 > }
 > ```
+>
+> _**Note:** For streaks-type competitions, each accepted user includes a `remaining_lives` field indicating how many lives remain before the streak resets. This field is only present on streaks competitions._
 >
 > ##### Full cURL Example
 >
@@ -1553,6 +1561,7 @@ Any of the following fields can be included. Only specified fields will be updat
 | first_to | Number  | Number of wins needed (for some types)   |
 | history  | Boolean | Whether to include historical data       |
 | interval | String  | Time interval: "day", "week", or "month" |
+| lives    | Number  | Number of streak lives (streaks type only, default: 1) |
 
 #### Examples
 
