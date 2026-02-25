@@ -623,12 +623,12 @@ struct CompetitionLeaderboardRow: View {
         return lives <= 0
     }
 
-    var medalColor: Color? {
+    var rankGradient: [Color] {
         switch rank {
-        case 1: return .yellow
-        case 2: return .gray
-        case 3: return .brown
-        default: return nil
+        case 1: return [.yellow, .orange]
+        case 2: return [Color(white: 0.85), Color(white: 0.6)]
+        case 3: return [Color(red: 0.8, green: 0.5, blue: 0.2), Color(red: 0.6, green: 0.35, blue: 0.15)]
+        default: return []
         }
     }
 
@@ -646,19 +646,36 @@ struct CompetitionLeaderboardRow: View {
 
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
-            if let medal = medalColor {
-                Image(systemName: "medal.fill")
-                    .font(.title3)
-                    .foregroundColor(medal)
-                    .frame(width: 30)
+            // Rank badge
+            if rank <= 3 {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: rankGradient.map { $0.opacity(0.2) },
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 30, height: 30)
+                    Text("\(rank)")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: rankGradient,
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                }
             } else {
                 Text("\(rank)")
-                    .font(MADTheme.Typography.headline)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white.opacity(0.6))
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.4))
                     .frame(width: 30)
             }
 
+            // Avatar
             Circle()
                 .fill(.ultraThinMaterial)
                 .frame(width: 40, height: 40)
@@ -672,26 +689,50 @@ struct CompetitionLeaderboardRow: View {
                         .stroke(
                             isEliminated
                                 ? AnyShapeStyle(Color.red.opacity(0.3))
-                                : (rank == 1
-                                    ? AnyShapeStyle(LinearGradient(colors: [.yellow, .orange], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                    : AnyShapeStyle(Color.white.opacity(0.2))),
+                                : (rank <= 3
+                                    ? AnyShapeStyle(LinearGradient(colors: rankGradient, startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    : AnyShapeStyle(Color.white.opacity(0.15))),
                             lineWidth: rank <= 3 ? 2 : 1
                         )
                 )
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(user.displayName)
-                    .font(MADTheme.Typography.headline)
-                    .foregroundColor(.white.opacity(isEliminated ? 0.4 : 1.0))
-                    .strikethrough(isEliminated, color: .red.opacity(0.4))
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: MADTheme.Spacing.xs) {
+                    Text(user.displayName)
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(isEliminated ? 0.4 : 1.0))
 
-                // Mini lives dots for streaks
+                    if isCurrentUser {
+                        Text("YOU")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(MADTheme.Colors.madRed))
+                    }
+
+                    if isEliminated {
+                        Text("OUT")
+                            .font(.system(size: 8, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white.opacity(0.7))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.red.opacity(0.4)))
+                    }
+                }
+
+                // Lives indicator for streaks - clean heart icons instead of dots
                 if competitionType == .streaks && firstTo > 0, let lives = user.remaining_lives {
-                    HStack(spacing: 3) {
+                    HStack(spacing: 2) {
                         ForEach(0..<min(firstTo, 6), id: \.self) { i in
-                            Circle()
-                                .fill(i < lives ? Color.red : Color.gray.opacity(0.3))
-                                .frame(width: 6, height: 6)
+                            Image(systemName: i < lives ? "heart.fill" : "heart")
+                                .font(.system(size: 7))
+                                .foregroundColor(i < lives ? .red : .white.opacity(0.15))
+                        }
+                        if firstTo > 6 {
+                            Text("+\(firstTo - 6)")
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundColor(.white.opacity(0.3))
                         }
                     }
                 }
@@ -699,22 +740,31 @@ struct CompetitionLeaderboardRow: View {
 
             Spacer()
 
-            Text(scoreText)
-                .font(MADTheme.Typography.callout)
-                .fontWeight(.semibold)
-                .foregroundColor(.white.opacity(isEliminated ? 0.4 : 0.9))
+            // Score with icon
+            HStack(spacing: 4) {
+                if competitionType == .streaks {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(isEliminated ? .gray.opacity(0.3) : .orange)
+                }
+                Text(scoreText)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(isEliminated ? 0.4 : 0.9))
+            }
         }
         .padding(MADTheme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(Color.white.opacity(isCurrentUser ? 0.1 : (rank == 1 ? 0.05 : 0.0)))
+                .fill(Color.white.opacity(isCurrentUser ? 0.08 : (rank == 1 ? 0.04 : 0.0)))
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                         .stroke(
                             isEliminated
-                                ? Color.red.opacity(0.15)
-                                : (isCurrentUser ? MADTheme.Colors.primary : Color.clear),
-                            lineWidth: 2
+                                ? Color.red.opacity(0.1)
+                                : (isCurrentUser
+                                    ? MADTheme.Colors.primary.opacity(0.5)
+                                    : (rank == 1 ? rankGradient.first?.opacity(0.15) ?? Color.clear : Color.clear)),
+                            lineWidth: isCurrentUser ? 1.5 : 1
                         )
                 )
         )
