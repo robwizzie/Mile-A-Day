@@ -86,57 +86,131 @@ struct CompetitionDetailView: View {
 
     // MARK: - Header Section
     private var headerSection: some View {
-        VStack(spacing: MADTheme.Spacing.lg) {
-            // Type icon
-            Image(systemName: competition.type.icon)
-                .font(.system(size: 60))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: competition.type.gradient.map { Color(hex: $0) },
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 120, height: 120)
-                .background(
-                    Circle()
-                        .fill(Color(hex: competition.type.gradient[0]).opacity(0.15))
-                )
+        Group {
+            if competition.status == .active {
+                // Compact header for active competitions - prioritize the content
+                HStack(spacing: MADTheme.Spacing.md) {
+                    Image(systemName: competition.type.icon)
+                        .font(.system(size: 28))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: competition.type.gradient.map { Color(hex: $0) },
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 50, height: 50)
+                        .background(
+                            Circle()
+                                .fill(Color(hex: competition.type.gradient[0]).opacity(0.12))
+                        )
 
-            VStack(spacing: MADTheme.Spacing.sm) {
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    Text(competition.type.displayName)
-                        .font(MADTheme.Typography.title3)
-                        .foregroundColor(.white.opacity(0.7))
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: MADTheme.Spacing.sm) {
+                            Text(competition.type.displayName)
+                                .font(MADTheme.Typography.headline)
+                                .foregroundColor(.white)
 
-                    if competition.isOwner {
-                        Image(systemName: "crown.fill")
-                            .font(.caption)
-                            .foregroundColor(.yellow)
+                            if competition.isOwner {
+                                Image(systemName: "crown.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.yellow)
+                            }
+
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(competition.status.color)
+                                    .frame(width: 6, height: 6)
+                                Text(competition.status.displayName)
+                                    .font(MADTheme.Typography.caption)
+                                    .foregroundColor(competition.status.color)
+                            }
+                            .padding(.horizontal, MADTheme.Spacing.sm)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule()
+                                    .fill(competition.status.color.opacity(0.15))
+                            )
+                        }
+
+                        HStack(spacing: MADTheme.Spacing.xs) {
+                            Label("\(competition.acceptedUsersCount)", systemImage: "person.2")
+                                .font(MADTheme.Typography.caption)
+                                .foregroundColor(.white.opacity(0.5))
+
+                            if competition.type != .clash && competition.type != .apex {
+                                Text("\u{00B7}")
+                                    .foregroundColor(.white.opacity(0.3))
+                                Text("\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
+                                    .font(MADTheme.Typography.caption)
+                                    .foregroundColor(.white.opacity(0.5))
+                            }
+
+                            if let durationStr = competition.options.durationFormatted {
+                                Text("\u{00B7}")
+                                    .foregroundColor(.white.opacity(0.3))
+                                Text(durationStr)
+                                    .font(MADTheme.Typography.caption)
+                                    .foregroundColor(.white.opacity(0.5))
+                            }
+                        }
                     }
 
-                    // Status badge
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(competition.status.color)
-                            .frame(width: 6, height: 6)
-                        Text(competition.status.displayName)
-                            .font(MADTheme.Typography.caption)
-                            .foregroundColor(competition.status.color)
-                    }
-                    .padding(.horizontal, MADTheme.Spacing.sm)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule()
-                            .fill(competition.status.color.opacity(0.15))
-                    )
+                    Spacer()
                 }
+            } else {
+                // Full header for lobby/scheduled/finished
+                VStack(spacing: MADTheme.Spacing.lg) {
+                    Image(systemName: competition.type.icon)
+                        .font(.system(size: 60))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: competition.type.gradient.map { Color(hex: $0) },
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 120, height: 120)
+                        .background(
+                            Circle()
+                                .fill(Color(hex: competition.type.gradient[0]).opacity(0.15))
+                        )
 
-                Text(competition.type.description)
-                    .font(MADTheme.Typography.callout)
-                    .foregroundColor(.white.opacity(0.7))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, MADTheme.Spacing.xl)
+                    VStack(spacing: MADTheme.Spacing.sm) {
+                        HStack(spacing: MADTheme.Spacing.sm) {
+                            Text(competition.type.displayName)
+                                .font(MADTheme.Typography.title3)
+                                .foregroundColor(.white.opacity(0.7))
+
+                            if competition.isOwner {
+                                Image(systemName: "crown.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.yellow)
+                            }
+
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(competition.status.color)
+                                    .frame(width: 6, height: 6)
+                                Text(competition.status.displayName)
+                                    .font(MADTheme.Typography.caption)
+                                    .foregroundColor(competition.status.color)
+                            }
+                            .padding(.horizontal, MADTheme.Spacing.sm)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule()
+                                    .fill(competition.status.color.opacity(0.15))
+                            )
+                        }
+
+                        Text(competition.type.description)
+                            .font(MADTheme.Typography.callout)
+                            .foregroundColor(.white.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, MADTheme.Spacing.xl)
+                    }
+                }
             }
         }
     }
@@ -369,16 +443,13 @@ struct CompetitionDetailView: View {
     // MARK: - Active Content
     private var activeContent: some View {
         VStack(spacing: MADTheme.Spacing.xl) {
-            // Tracked activities banner
-            trackedActivitiesBanner
-
-            // Time remaining countdown (for timed competitions)
-            if let endDate = competition.endDateFormatted {
-                timeRemainingBanner(endDate: endDate)
-            }
-
-            // Streaks get a fully custom active view
+            // Streaks get a fully custom active view with integrated leaderboard
             if competition.type == .streaks {
+                // Time remaining (if timed)
+                if let endDate = competition.endDateFormatted {
+                    timeRemainingBanner(endDate: endDate)
+                }
+
                 intervalNavigator
 
                 StreakActiveView(
@@ -386,22 +457,40 @@ struct CompetitionDetailView: View {
                     selectedIntervalDate: selectedIntervalDate,
                     competitionService: competitionService
                 )
-            } else if competition.type != .race {
-                // Interval navigator + mode content
-                intervalNavigator
-                intervalContent
 
-                // Overall standings
-                competitionLeaderboard
+                // Collapsible info section
+                DisclosureGroup {
+                    infoSection
+                } label: {
+                    HStack(spacing: MADTheme.Spacing.sm) {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.4))
+                        Text("Competition Details")
+                            .font(.system(size: 14, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
+                }
+                .tint(.white.opacity(0.4))
             } else {
-                raceProgressView
+                // Non-streak: original flow
+                trackedActivitiesBanner
 
-                // Overall standings
-                competitionLeaderboard
+                if let endDate = competition.endDateFormatted {
+                    timeRemainingBanner(endDate: endDate)
+                }
+
+                if competition.type != .race {
+                    intervalNavigator
+                    intervalContent
+                    competitionLeaderboard
+                } else {
+                    raceProgressView
+                    competitionLeaderboard
+                }
+
+                infoSection
             }
-
-            // Competition info
-            infoSection
         }
     }
 
@@ -522,11 +611,32 @@ struct CompetitionDetailView: View {
                 Text(intervalDateLabel)
                     .font(MADTheme.Typography.headline)
                     .foregroundColor(.white)
+                    .id(intervalDateLabel)
+                    .transition(.push(from: .leading))
 
                 if !isToday {
-                    Text(selectedIntervalDate.formatted(date: .abbreviated, time: .omitted))
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(.white.opacity(0.5))
+                    HStack(spacing: MADTheme.Spacing.sm) {
+                        Text(selectedIntervalDate.formatted(date: .abbreviated, time: .omitted))
+                            .font(MADTheme.Typography.caption)
+                            .foregroundColor(.white.opacity(0.5))
+
+                        // Jump to today button
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                selectedIntervalDate = Date()
+                            }
+                        } label: {
+                            Text("Today")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundColor(MADTheme.Colors.madRed)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(
+                                    Capsule()
+                                        .fill(MADTheme.Colors.madRed.opacity(0.15))
+                                )
+                        }
+                    }
                 }
             }
 
@@ -554,6 +664,22 @@ struct CompetitionDetailView: View {
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                         .stroke(Color.white.opacity(0.1), lineWidth: 1)
                 )
+        )
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 30, coordinateSpace: .local)
+                .onEnded { value in
+                    let horizontal = value.translation.width
+                    if horizontal > 50 && canGoBack {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            moveInterval(by: -1)
+                        }
+                    } else if horizontal < -50 && canGoForward {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            moveInterval(by: 1)
+                        }
+                    }
+                }
         )
     }
 
