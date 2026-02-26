@@ -7,7 +7,12 @@ struct LeaderboardView: View {
     @State private var showWorkoutDetail = false
     @State private var selectedUser: User?
 
-    private let tabs = ["Streak", "Total Miles", "Fastest Pace", "Most in Day"]
+    private let tabs: [(String, String)] = [
+        ("Streak", "flame.fill"),
+        ("Total Miles", "map.fill"),
+        ("Fastest Pace", "hare.fill"),
+        ("Most in Day", "calendar.badge.clock")
+    ]
 
     var body: some View {
         ZStack {
@@ -15,15 +20,24 @@ struct LeaderboardView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Tab selector
-                Picker("Leaderboard Type", selection: $selectedTab) {
-                    ForEach(0..<tabs.count, id: \.self) { index in
-                        Text(tabs[index]).tag(index)
+                // Custom scrolling tab selector
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(0..<tabs.count, id: \.self) { index in
+                            LeaderboardTabButton(
+                                title: tabs[index].0,
+                                icon: tabs[index].1,
+                                isSelected: selectedTab == index
+                            ) {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    selectedTab = index
+                                }
+                            }
+                        }
                     }
+                    .padding(.horizontal, MADTheme.Spacing.md)
+                    .padding(.vertical, MADTheme.Spacing.sm)
                 }
-                .pickerStyle(.segmented)
-                .padding()
-                .colorMultiply(MADTheme.Colors.primary)
 
                 // Leaderboard content
                 TabView(selection: $selectedTab) {
@@ -45,13 +59,44 @@ struct LeaderboardView: View {
         }
         .navigationTitle("Leaderboard")
         .navigationBarTitleDisplayMode(.inline)
-        // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
+    }
+}
+
+// MARK: - Leaderboard Tab Button
+
+struct LeaderboardTabButton: View {
+    let title: String
+    let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+            }
+            .foregroundColor(isSelected ? .white : .white.opacity(0.5))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(
+                Capsule()
+                    .fill(isSelected ? MADTheme.Colors.madRed : Color.white.opacity(0.06))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(isSelected ? MADTheme.Colors.madRed.opacity(0.5) : Color.white.opacity(0.08), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 }
 
 enum LeaderboardValueType {
     case streak, totalMiles, fastestPace, mostMilesInDay
-    
+
     func getValue(from user: User) -> String {
         switch self {
         case .streak:
@@ -71,7 +116,7 @@ enum LeaderboardValueType {
             return user.mostMilesInOneDay.milesFormatted
         }
     }
-    
+
     var icon: String {
         switch self {
         case .streak:
@@ -84,7 +129,7 @@ enum LeaderboardValueType {
             return "calendar.badge.clock"
         }
     }
-    
+
     var color: Color {
         switch self {
         case .streak:
@@ -105,6 +150,7 @@ struct LeaderboardList: View {
     @ObservedObject var healthManager: HealthKitManager
     @State private var selectedUser: User?
     @State private var showDetail = false
+    @State private var animateRows = false
 
     var topThree: [User] {
         Array(users.prefix(3))
@@ -141,10 +187,18 @@ struct LeaderboardList: View {
                                 rank: index + 1,
                                 user: user,
                                 value: valueType.getValue(from: user),
+                                valueIcon: valueType.icon,
+                                valueColor: valueType.color,
                                 isCurrentUser: user.name == "You"
                             )
                         }
                         .buttonStyle(PlainButtonStyle())
+                        .opacity(animateRows ? 1 : 0)
+                        .offset(y: animateRows ? 0 : 20)
+                        .animation(
+                            .spring(response: 0.5, dampingFraction: 0.8).delay(Double(index) * 0.08),
+                            value: animateRows
+                        )
                     }
                 }
                 .padding(.horizontal, MADTheme.Spacing.lg)
@@ -170,26 +224,42 @@ struct LeaderboardList: View {
                 .padding(.horizontal, MADTheme.Spacing.lg)
 
                 // Remaining positions
-                VStack(spacing: MADTheme.Spacing.sm) {
-                    ForEach(remainingUsers, id: \.user.id) { item in
-                        Button {
-                            if valueType == .mostMilesInDay || valueType == .fastestPace {
-                                selectedUser = item.user
-                                showDetail = true
+                if !remainingUsers.isEmpty {
+                    VStack(spacing: MADTheme.Spacing.sm) {
+                        ForEach(remainingUsers, id: \.user.id) { item in
+                            Button {
+                                if valueType == .mostMilesInDay || valueType == .fastestPace {
+                                    selectedUser = item.user
+                                    showDetail = true
+                                }
+                            } label: {
+                                RegularLeaderboardRow(
+                                    rank: item.index + 1,
+                                    user: item.user,
+                                    value: valueType.getValue(from: item.user),
+                                    valueIcon: valueType.icon,
+                                    valueColor: valueType.color,
+                                    isCurrentUser: item.user.name == "You"
+                                )
                             }
-                        } label: {
-                            RegularLeaderboardRow(
-                                rank: item.index + 1,
-                                user: item.user,
-                                value: valueType.getValue(from: item.user),
-                                isCurrentUser: item.user.name == "You"
+                            .buttonStyle(PlainButtonStyle())
+                            .opacity(animateRows ? 1 : 0)
+                            .offset(y: animateRows ? 0 : 15)
+                            .animation(
+                                .spring(response: 0.5, dampingFraction: 0.8).delay(0.24 + Double(item.index - 3) * 0.05),
+                                value: animateRows
                             )
                         }
-                        .buttonStyle(PlainButtonStyle())
                     }
+                    .padding(.horizontal, MADTheme.Spacing.lg)
+                    .padding(.bottom, MADTheme.Spacing.xl)
                 }
-                .padding(.horizontal, MADTheme.Spacing.lg)
-                .padding(.bottom, MADTheme.Spacing.xl)
+            }
+        }
+        .onAppear {
+            animateRows = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                animateRows = true
             }
         }
         .sheet(isPresented: $showDetail, content: {
@@ -214,234 +284,140 @@ struct PodiumView: View {
     let second: User
     let third: User
     let valueType: LeaderboardValueType
+    @State private var podiumAnimated = false
 
     var body: some View {
         HStack(alignment: .bottom, spacing: MADTheme.Spacing.md) {
             // Second place (left)
-            VStack(spacing: MADTheme.Spacing.sm) {
-                // Avatar with position badge
-                ZStack(alignment: .top) {
-                    Circle()
-                        .fill(.ultraThinMaterial)
-                        .frame(width: 60, height: 60)
-                        .overlay(
-                            Text(second.name.prefix(1).uppercased())
-                                .font(MADTheme.Typography.title3)
-                                .foregroundColor(.white)
-                        )
-                        .overlay(
-                            Circle()
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [Color.gray.opacity(0.8), Color.gray.opacity(0.4)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 3
-                                )
-                        )
-
-                    // Position badge
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.gray.opacity(0.8), Color.gray.opacity(0.6)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: 24, height: 24)
-                        .overlay(
-                            Text("2")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundColor(.white)
-                        )
-                        .offset(y: -8)
-                }
-
-                Text(second.name)
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-
-                // Podium block
-                VStack {
-                    Spacer()
-                    Text("2")
-                        .font(.system(size: 40, weight: .bold))
-                        .foregroundColor(.white)
-                }
-                .frame(width: 80, height: 80)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    MADTheme.Colors.madRed.opacity(0.7),
-                                    MADTheme.Colors.madRed.opacity(0.5)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                )
-            }
+            podiumSlot(
+                user: second,
+                rank: 2,
+                avatarSize: 56,
+                colors: [Color(white: 0.85), Color(white: 0.6)],
+                pedestalHeight: 70
+            )
             .offset(y: 20)
 
             // First place (center)
-            VStack(spacing: MADTheme.Spacing.sm) {
-                // Crown
-                Image(systemName: "crown.fill")
-                    .font(.title2)
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [Color.yellow, Color.orange],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-
-                // Avatar with position badge
-                ZStack(alignment: .top) {
-                    Circle()
-                        .fill(.ultraThinMaterial)
-                        .frame(width: 70, height: 70)
-                        .overlay(
-                            Text(first.name.prefix(1).uppercased())
-                                .font(MADTheme.Typography.title2)
-                                .foregroundColor(.white)
-                        )
-                        .overlay(
-                            Circle()
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [Color.yellow, Color.orange],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 3
-                                )
-                        )
-
-                    // Position badge
-                    Circle()
-                        .fill(
+            VStack(spacing: MADTheme.Spacing.xs) {
+                // Crown with glow
+                ZStack {
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(
                             LinearGradient(
                                 colors: [Color.yellow, Color.orange],
                                 startPoint: .top,
                                 endPoint: .bottom
                             )
                         )
-                        .frame(width: 28, height: 28)
-                        .overlay(
-                            Text("1")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(.white)
-                        )
-                        .offset(y: -8)
+                        .shadow(color: .yellow.opacity(0.4), radius: 6)
                 }
 
-                Text(first.name)
-                    .font(MADTheme.Typography.callout)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-
-                // Podium block
-                VStack {
-                    Spacer()
-                    Text("1")
-                        .font(.system(size: 50, weight: .bold))
-                        .foregroundColor(.white)
-                }
-                .frame(width: 90, height: 110)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    MADTheme.Colors.madRed.opacity(0.9),
-                                    MADTheme.Colors.madRed.opacity(0.7)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                podiumSlot(
+                    user: first,
+                    rank: 1,
+                    avatarSize: 66,
+                    colors: [Color.yellow, Color.orange],
+                    pedestalHeight: 100
                 )
             }
 
             // Third place (right)
-            VStack(spacing: MADTheme.Spacing.sm) {
-                // Avatar with position badge
-                ZStack(alignment: .top) {
-                    Circle()
-                        .fill(.ultraThinMaterial)
-                        .frame(width: 60, height: 60)
-                        .overlay(
-                            Text(third.name.prefix(1).uppercased())
-                                .font(MADTheme.Typography.title3)
-                                .foregroundColor(.white)
-                        )
-                        .overlay(
-                            Circle()
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [Color.brown.opacity(0.8), Color.brown.opacity(0.4)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 3
-                                )
-                        )
-
-                    // Position badge
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.brown.opacity(0.8), Color.brown.opacity(0.6)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .frame(width: 24, height: 24)
-                        .overlay(
-                            Text("3")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundColor(.white)
-                        )
-                        .offset(y: -8)
-                }
-
-                Text(third.name)
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-
-                // Podium block
-                VStack {
-                    Spacer()
-                    Text("3")
-                        .font(.system(size: 40, weight: .bold))
-                        .foregroundColor(.white)
-                }
-                .frame(width: 80, height: 70)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    MADTheme.Colors.madRed.opacity(0.6),
-                                    MADTheme.Colors.madRed.opacity(0.4)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                )
-            }
+            podiumSlot(
+                user: third,
+                rank: 3,
+                avatarSize: 56,
+                colors: [Color(red: 0.8, green: 0.5, blue: 0.2), Color(red: 0.6, green: 0.35, blue: 0.15)],
+                pedestalHeight: 55
+            )
             .offset(y: 30)
         }
         .padding(.horizontal, MADTheme.Spacing.lg)
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                withAnimation(.spring(response: 0.7, dampingFraction: 0.65)) {
+                    podiumAnimated = true
+                }
+            }
+        }
+    }
+
+    private func podiumSlot(user: User, rank: Int, avatarSize: CGFloat, colors: [Color], pedestalHeight: CGFloat) -> some View {
+        VStack(spacing: MADTheme.Spacing.sm) {
+            // Avatar
+            ZStack {
+                // Glow behind avatar
+                if rank == 1 {
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [colors[0].opacity(0.3), Color.clear],
+                                center: .center,
+                                startRadius: avatarSize * 0.3,
+                                endRadius: avatarSize * 0.8
+                            )
+                        )
+                        .frame(width: avatarSize + 20, height: avatarSize + 20)
+                }
+
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .frame(width: avatarSize, height: avatarSize)
+                    .overlay(
+                        Text(user.name.prefix(1).uppercased())
+                            .font(.system(size: avatarSize * 0.35, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                LinearGradient(
+                                    colors: colors,
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: rank == 1 ? 3 : 2.5
+                            )
+                    )
+                    .shadow(color: colors[0].opacity(0.3), radius: 8, y: 4)
+            }
+
+            // Name
+            Text(user.name)
+                .font(.system(size: rank == 1 ? 14 : 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.white)
+                .lineLimit(1)
+
+            // Value
+            Text(valueType.getValue(from: user))
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+
+            // Pedestal
+            RoundedRectangle(cornerRadius: 10)
+                .fill(
+                    LinearGradient(
+                        colors: [colors[0].opacity(0.25), colors[1].opacity(0.1)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(height: podiumAnimated ? pedestalHeight : 0)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(
+                            LinearGradient(colors: colors.map { $0.opacity(0.3) }, startPoint: .top, endPoint: .bottom),
+                            lineWidth: 1
+                        )
+                )
+                .overlay(
+                    Text("\(rank)")
+                        .font(.system(size: pedestalHeight * 0.4, weight: .bold, design: .rounded))
+                        .foregroundColor(colors[0].opacity(0.2))
+                )
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -451,24 +427,38 @@ struct TopThreeRow: View {
     let rank: Int
     let user: User
     let value: String
+    let valueIcon: String
+    let valueColor: Color
     let isCurrentUser: Bool
 
-    var medalColor: Color {
+    var rankGradient: [Color] {
         switch rank {
-        case 1: return .yellow
-        case 2: return .gray
-        case 3: return .brown
-        default: return .clear
+        case 1: return [.yellow, .orange]
+        case 2: return [Color(white: 0.85), Color(white: 0.6)]
+        case 3: return [Color(red: 0.8, green: 0.5, blue: 0.2), Color(red: 0.6, green: 0.35, blue: 0.15)]
+        default: return [.clear]
         }
     }
 
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
-            // Medal icon
-            Image(systemName: "medal.fill")
-                .font(.title3)
-                .foregroundColor(medalColor)
-                .frame(width: 30)
+            // Rank badge
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: rankGradient.map { $0.opacity(0.2) },
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 30, height: 30)
+                Text("\(rank)")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(colors: rankGradient, startPoint: .top, endPoint: .bottom)
+                    )
+            }
 
             // Avatar
             Circle()
@@ -476,36 +466,53 @@ struct TopThreeRow: View {
                 .frame(width: 40, height: 40)
                 .overlay(
                     Text(user.name.prefix(1).uppercased())
-                        .font(MADTheme.Typography.callout)
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
                         .foregroundColor(.white)
                 )
                 .overlay(
                     Circle()
-                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        .stroke(
+                            LinearGradient(colors: rankGradient, startPoint: .topLeading, endPoint: .bottomTrailing),
+                            lineWidth: 2
+                        )
                 )
 
             // Name
-            Text(user.name)
-                .font(MADTheme.Typography.headline)
-                .foregroundColor(.white)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(user.name)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+
+                if isCurrentUser {
+                    Text("You")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundColor(MADTheme.Colors.madRed)
+                }
+            }
 
             Spacer()
 
-            // Value
-            Text(value)
-                .font(MADTheme.Typography.callout)
-                .fontWeight(.semibold)
-                .foregroundColor(.white.opacity(0.9))
+            // Value with icon
+            HStack(spacing: 5) {
+                Image(systemName: valueIcon)
+                    .font(.system(size: 11))
+                    .foregroundColor(valueColor.opacity(0.7))
+                Text(value)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.9))
+            }
         }
         .padding(MADTheme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(Color.white.opacity(isCurrentUser ? 0.1 : 0.0))
+                .fill(Color.white.opacity(isCurrentUser ? 0.08 : 0.0))
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                         .stroke(
-                            isCurrentUser ? MADTheme.Colors.primary : Color.clear,
-                            lineWidth: 2
+                            isCurrentUser
+                                ? MADTheme.Colors.primary.opacity(0.5)
+                                : (rank == 1 ? rankGradient.first?.opacity(0.15) ?? Color.clear : Color.clear),
+                            lineWidth: isCurrentUser ? 1.5 : 1
                         )
                 )
         )
@@ -518,15 +525,16 @@ struct RegularLeaderboardRow: View {
     let rank: Int
     let user: User
     let value: String
+    let valueIcon: String
+    let valueColor: Color
     let isCurrentUser: Bool
 
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
             // Rank number
             Text("\(rank)")
-                .font(MADTheme.Typography.headline)
-                .fontWeight(.bold)
-                .foregroundColor(.white.opacity(0.6))
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.4))
                 .frame(width: 30)
 
             // Avatar
@@ -535,36 +543,48 @@ struct RegularLeaderboardRow: View {
                 .frame(width: 40, height: 40)
                 .overlay(
                     Text(user.name.prefix(1).uppercased())
-                        .font(MADTheme.Typography.callout)
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
                         .foregroundColor(.white)
                 )
                 .overlay(
                     Circle()
-                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
                 )
 
             // Name
-            Text(user.name)
-                .font(MADTheme.Typography.headline)
-                .foregroundColor(.white)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(user.name)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+
+                if isCurrentUser {
+                    Text("You")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundColor(MADTheme.Colors.madRed)
+                }
+            }
 
             Spacer()
 
-            // Value
-            Text(value)
-                .font(MADTheme.Typography.callout)
-                .fontWeight(.semibold)
-                .foregroundColor(.white.opacity(0.9))
+            // Value with icon
+            HStack(spacing: 5) {
+                Image(systemName: valueIcon)
+                    .font(.system(size: 11))
+                    .foregroundColor(valueColor.opacity(0.5))
+                Text(value)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.9))
+            }
         }
         .padding(MADTheme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(Color.white.opacity(isCurrentUser ? 0.05 : 0.0))
+                .fill(Color.white.opacity(isCurrentUser ? 0.06 : 0.0))
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                         .stroke(
-                            isCurrentUser ? MADTheme.Colors.primary : Color.clear,
-                            lineWidth: 2
+                            isCurrentUser ? MADTheme.Colors.primary.opacity(0.4) : Color.clear,
+                            lineWidth: 1.5
                         )
                 )
         )
@@ -575,4 +595,4 @@ struct RegularLeaderboardRow: View {
     NavigationStack {
         LeaderboardView(userManager: UserManager(), healthManager: HealthKitManager())
     }
-} 
+}

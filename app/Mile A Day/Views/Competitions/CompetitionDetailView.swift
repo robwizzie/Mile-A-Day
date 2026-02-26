@@ -717,36 +717,42 @@ struct CompetitionDetailView: View {
                     VStack(spacing: MADTheme.Spacing.sm) {
                         // Main user info row
                         HStack(spacing: MADTheme.Spacing.md) {
-                            // Status icon
-                            ZStack {
-                                Circle()
-                                    .fill(
-                                        isEliminated ? Color.gray.opacity(0.15) :
-                                        (completed ? Color.green.opacity(0.15) :
-                                        (isToday ? Color.orange.opacity(0.15) : Color.red.opacity(0.15)))
-                                    )
-                                    .frame(width: 32, height: 32)
-
-                                Image(systemName: isEliminated ? "person.fill.xmark" : (completed ? "checkmark.circle.fill" : (isToday ? "circle.dotted" : "xmark.circle.fill")))
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundColor(isEliminated ? .gray : (completed ? .green : (isToday ? .orange : .red)))
-                            }
-
-                            // Avatar
+                            // Avatar with status ring
                             ZStack {
                                 Circle()
                                     .fill(Color.white.opacity(isEliminated ? 0.05 : 0.12))
-                                    .frame(width: 36, height: 36)
+                                    .frame(width: 42, height: 42)
                                     .overlay(
                                         Text(user.displayName.prefix(1).uppercased())
-                                            .font(.system(size: 14, weight: .semibold))
+                                            .font(.system(size: 16, weight: .semibold))
                                             .foregroundColor(.white.opacity(isEliminated ? 0.3 : 1.0))
                                     )
+                                    .overlay(
+                                        Circle()
+                                            .stroke(
+                                                LinearGradient(
+                                                    colors: isEliminated ? [Color.red.opacity(0.3), Color.red.opacity(0.1)] :
+                                                        (completed ? [Color.green.opacity(0.8), Color.green.opacity(0.4)] :
+                                                        (isToday ? [Color.orange.opacity(0.6), Color.yellow.opacity(0.3)] :
+                                                        [Color.red.opacity(0.6), Color.red.opacity(0.3)])),
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                ),
+                                                lineWidth: 2.5
+                                            )
+                                    )
 
-                                if isEliminated {
-                                    Circle()
-                                        .stroke(Color.red.opacity(0.3), lineWidth: 1.5)
-                                        .frame(width: 36, height: 36)
+                                // Small status badge
+                                if !isEliminated {
+                                    ZStack {
+                                        Circle()
+                                            .fill(completed ? Color.green : (isToday ? Color.orange : Color.red))
+                                            .frame(width: 16, height: 16)
+                                        Image(systemName: completed ? "checkmark" : (isToday ? "figure.run" : "xmark"))
+                                            .font(.system(size: 8, weight: .bold))
+                                            .foregroundColor(.white)
+                                    }
+                                    .offset(x: 15, y: 15)
                                 }
                             }
 
@@ -754,24 +760,18 @@ struct CompetitionDetailView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack(spacing: MADTheme.Spacing.xs) {
                                     Text(user.displayName)
-                                        .font(MADTheme.Typography.callout)
+                                        .font(.system(size: 15, weight: .semibold, design: .rounded))
                                         .foregroundColor(.white.opacity(isEliminated ? 0.4 : 1.0))
 
                                     if isEliminated {
-                                        Text("ELIMINATED")
+                                        Text("OUT")
                                             .font(.system(size: 8, weight: .heavy, design: .rounded))
-                                            .foregroundColor(.white)
-                                            .padding(.horizontal, 7)
-                                            .padding(.vertical, 3)
+                                            .foregroundColor(.white.opacity(0.8))
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
                                             .background(
                                                 Capsule()
-                                                    .fill(
-                                                        LinearGradient(
-                                                            colors: [Color.red.opacity(0.7), Color.red.opacity(0.4)],
-                                                            startPoint: .leading,
-                                                            endPoint: .trailing
-                                                        )
-                                                    )
+                                                    .fill(Color.red.opacity(0.5))
                                             )
                                     }
                                 }
@@ -779,42 +779,28 @@ struct CompetitionDetailView: View {
                                 if !isEliminated {
                                     if completed {
                                         HStack(spacing: 4) {
-                                            Image(systemName: "checkmark")
-                                                .font(.system(size: 9, weight: .bold))
-                                                .foregroundColor(.green)
                                             Text("\(String(format: "%.1f", distance)) \(competition.options.unit.shortDisplayName)")
                                                 .foregroundColor(.green)
                                             if distance > goal {
-                                                Text("(+\(String(format: "%.1f", distance - goal)))")
-                                                    .foregroundColor(.green.opacity(0.6))
+                                                Text("+\(String(format: "%.1f", distance - goal))")
+                                                    .foregroundColor(.green.opacity(0.5))
                                             }
                                         }
-                                        .font(MADTheme.Typography.caption)
+                                        .font(.system(size: 12, weight: .medium, design: .rounded))
                                     } else if isToday {
                                         HStack(spacing: 4) {
-                                            Image(systemName: "clock")
-                                                .font(.system(size: 9))
-                                                .foregroundColor(.orange.opacity(0.8))
                                             Text("\(String(format: "%.1f", distance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
-                                                .foregroundColor(.orange.opacity(0.8))
-                                            Text("— in progress")
-                                                .foregroundColor(.white.opacity(0.35))
+                                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                                .foregroundColor(.white.opacity(0.6))
                                         }
-                                        .font(MADTheme.Typography.caption)
                                     } else {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "xmark")
-                                                .font(.system(size: 9, weight: .bold))
-                                                .foregroundColor(.red.opacity(0.7))
-                                            Text("Missed — broke streak")
-                                                .foregroundColor(.red.opacity(0.7))
-                                        }
-                                        .font(MADTheme.Typography.caption)
+                                        Text("Missed")
+                                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                                            .foregroundColor(.red.opacity(0.6))
                                     }
                                 } else {
-                                    // Eliminated subtitle
                                     if !missed.isEmpty {
-                                        Text("Lost all lives by \(formatBreakDate(missed.last!))")
+                                        Text("Eliminated \(formatBreakDate(missed.last!))")
                                             .font(.system(size: 11, design: .rounded))
                                             .foregroundColor(.white.opacity(0.25))
                                     }
@@ -823,45 +809,33 @@ struct CompetitionDetailView: View {
 
                             Spacer()
 
-                            // Streak counter
+                            // Streak counter - more prominent
                             VStack(spacing: 2) {
-                                HStack(spacing: 3) {
+                                HStack(spacing: 4) {
                                     Image(systemName: "flame.fill")
-                                        .font(.system(size: 13))
+                                        .font(.system(size: 15))
                                         .foregroundColor(isEliminated ? .gray.opacity(0.3) : .orange)
-                                        .shadow(color: isEliminated ? .clear : .orange.opacity(0.3), radius: 3)
+                                        .shadow(color: isEliminated ? .clear : .orange.opacity(0.4), radius: 4)
                                     Text("\(Int(user.score ?? 0))")
-                                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                                        .font(.system(size: 22, weight: .bold, design: .rounded))
                                         .foregroundColor(.white.opacity(isEliminated ? 0.3 : 1.0))
                                 }
-                                Text("streak")
-                                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                                    .foregroundColor(.white.opacity(isEliminated ? 0.2 : 0.4))
+                                Text("day streak")
+                                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                                    .foregroundColor(.white.opacity(isEliminated ? 0.2 : 0.35))
                             }
                         }
 
-                        // Lives / hearts row
+                        // Lives row - clean capsule style
                         if firstTo > 0 {
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack(spacing: 6) {
-                                    // Unified heart loop — alive then lost
-                                    ForEach(0..<firstTo, id: \.self) { i in
-                                        let isAlive = i < heartsRemaining
+                            HStack(spacing: 5) {
+                                ForEach(0..<firstTo, id: \.self) { i in
+                                    let isAlive = i < heartsRemaining
 
-                                        ZStack {
-                                            // Soft glow behind alive hearts
-                                            if isAlive {
-                                                Image(systemName: "heart.fill")
-                                                    .font(.system(size: 16))
-                                                    .foregroundColor(.red.opacity(0.25))
-                                                    .blur(radius: 5)
-                                            }
-
-                                            Image(systemName: isAlive ? "heart.fill" : "heart.slash.fill")
-                                                .font(.system(size: 16))
-                                                .foregroundColor(isAlive ? .red : .gray.opacity(0.3))
-                                                .shadow(color: isAlive ? .red.opacity(0.4) : .clear, radius: 3)
-                                        }
+                                    Image(systemName: isAlive ? "heart.fill" : "heart")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(isAlive ? .red : .white.opacity(0.15))
+                                        .shadow(color: isAlive ? .red.opacity(0.3) : .clear, radius: 3)
                                         .scaleEffect(heartsAnimated ? 1.0 : 0.1)
                                         .opacity(heartsAnimated ? 1.0 : 0)
                                         .animation(
@@ -869,73 +843,41 @@ struct CompetitionDetailView: View {
                                             .delay(Double(i) * 0.07),
                                             value: heartsAnimated
                                         )
-                                    }
-
-                                    Spacer()
-
-                                    // Lives counter badge
-                                    HStack(spacing: 3) {
-                                        if isEliminated {
-                                            Image(systemName: "xmark.circle.fill")
-                                                .font(.system(size: 10))
-                                                .foregroundColor(.red.opacity(0.6))
-                                            Text("Eliminated")
-                                                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                                                .foregroundColor(.red.opacity(0.6))
-                                        } else {
-                                            Text("\(heartsRemaining)")
-                                                .font(.system(size: 14, weight: .bold, design: .rounded))
-                                                .foregroundColor(.white)
-                                            Text("of \(firstTo)")
-                                                .font(.system(size: 11, weight: .medium, design: .rounded))
-                                                .foregroundColor(.white.opacity(0.4))
-                                        }
-                                    }
-                                    .padding(.horizontal, 9)
-                                    .padding(.vertical, 4)
-                                    .background(
-                                        Capsule()
-                                            .fill(isEliminated ? Color.red.opacity(0.1) : Color.white.opacity(0.06))
-                                    )
                                 }
 
-                                // Break date labels (show most recent, capped to firstTo)
-                                if !missed.isEmpty && !isEliminated {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        ForEach(Array(missed.suffix(firstTo)), id: \.self) { dateKey in
-                                            HStack(spacing: 5) {
-                                                Circle()
-                                                    .fill(Color.red.opacity(0.4))
-                                                    .frame(width: 4, height: 4)
-                                                Text("Broke on \(formatBreakDate(dateKey))")
-                                                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                                                    .foregroundColor(.white.opacity(0.3))
-                                            }
-                                        }
-                                    }
-                                    .padding(.leading, 2)
+                                Spacer()
+
+                                if isEliminated {
+                                    Text("No lives remaining")
+                                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                                        .foregroundColor(.red.opacity(0.4))
+                                } else if livesLost > 0 {
+                                    Text("\(heartsRemaining) remaining")
+                                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                                        .foregroundColor(.white.opacity(0.3))
                                 }
                             }
+                            .padding(.top, 2)
                         }
                     }
                     .padding(MADTheme.Spacing.md)
                     .background(
                         RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                             .fill(Color.white.opacity(
-                                isEliminated ? 0.02 : (user.user_id == currentUserId ? 0.1 : 0)
+                                isEliminated ? 0.02 : (user.user_id == currentUserId ? 0.08 : 0.03)
                             ))
                             .overlay(
                                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                                     .stroke(
                                         isEliminated
                                             ? LinearGradient(
-                                                colors: [Color.red.opacity(0.2), Color.red.opacity(0.05)],
+                                                colors: [Color.red.opacity(0.15), Color.red.opacity(0.05)],
                                                 startPoint: .topLeading,
                                                 endPoint: .bottomTrailing
                                               )
                                             : (user.user_id == currentUserId
-                                                ? LinearGradient(colors: [MADTheme.Colors.primary, MADTheme.Colors.primary], startPoint: .leading, endPoint: .trailing)
-                                                : LinearGradient(colors: [Color.clear, Color.clear], startPoint: .leading, endPoint: .trailing)),
+                                                ? LinearGradient(colors: [MADTheme.Colors.primary.opacity(0.6), MADTheme.Colors.primary.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                                : LinearGradient(colors: [Color.white.opacity(0.06), Color.white.opacity(0.02)], startPoint: .topLeading, endPoint: .bottomTrailing)),
                                         lineWidth: 1
                                     )
                             )
@@ -1421,12 +1363,31 @@ struct CompetitionDetailView: View {
         let rankedUsers = competition.users
             .filter { $0.invite_status == .accepted }
             .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        let gradientColors = competition.type.gradient.map { Color(hex: $0) }
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Leaderboard")
-                .font(MADTheme.Typography.title3)
-                .foregroundColor(.white)
-                .padding(.horizontal, MADTheme.Spacing.sm)
+            // Section header with trophy
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.yellow, .orange],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                Text("Leaderboard")
+                    .font(MADTheme.Typography.title3)
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                Text("\(rankedUsers.count) competing")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+            .padding(.horizontal, MADTheme.Spacing.sm)
 
             if rankedUsers.isEmpty {
                 Text("No participants yet")
@@ -1434,16 +1395,24 @@ struct CompetitionDetailView: View {
                     .foregroundColor(.white.opacity(0.5))
                     .padding(MADTheme.Spacing.lg)
             } else {
-                VStack(spacing: MADTheme.Spacing.sm) {
-                    ForEach(Array(rankedUsers.enumerated()), id: \.element.id) { index, user in
-                        CompetitionLeaderboardRow(
-                            rank: index + 1,
-                            user: user,
-                            competitionType: competition.type,
-                            unit: competition.options.unit,
-                            isCurrentUser: user.user_id == currentUserId,
-                            firstTo: competition.options.first_to
-                        )
+                VStack(spacing: MADTheme.Spacing.md) {
+                    // Mini podium for top 3 when there are enough users
+                    if rankedUsers.count >= 2 {
+                        competitionMiniPodium(rankedUsers: Array(rankedUsers.prefix(3)), gradientColors: gradientColors, currentUserId: currentUserId)
+                    }
+
+                    // All ranked rows
+                    VStack(spacing: MADTheme.Spacing.sm) {
+                        ForEach(Array(rankedUsers.enumerated()), id: \.element.id) { index, user in
+                            CompetitionLeaderboardRow(
+                                rank: index + 1,
+                                user: user,
+                                competitionType: competition.type,
+                                unit: competition.options.unit,
+                                isCurrentUser: user.user_id == currentUserId,
+                                firstTo: competition.options.first_to
+                            )
+                        }
                     }
                 }
                 .padding(MADTheme.Spacing.lg)
@@ -1454,7 +1423,7 @@ struct CompetitionDetailView: View {
                             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                                 .stroke(
                                     LinearGradient(
-                                        colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) } + [Color.clear],
+                                        colors: gradientColors.map { $0.opacity(0.3) } + [Color.clear],
                                         startPoint: .topLeading,
                                         endPoint: .bottomTrailing
                                     ),
@@ -1463,6 +1432,111 @@ struct CompetitionDetailView: View {
                         )
                 )
             }
+        }
+    }
+
+    // MARK: - Competition Mini Podium (Active)
+    private func competitionMiniPodium(rankedUsers: [CompetitionUser], gradientColors: [Color], currentUserId: String?) -> some View {
+        let medalColors: [[Color]] = [
+            [.yellow, .orange],
+            [Color(white: 0.85), Color(white: 0.6)],
+            [.brown, Color(red: 0.7, green: 0.4, blue: 0.2)]
+        ]
+
+        return HStack(alignment: .bottom, spacing: MADTheme.Spacing.md) {
+            // 2nd place
+            if rankedUsers.count > 1 {
+                miniPodiumSlot(user: rankedUsers[1], rank: 2, colors: medalColors[1], height: 44, avatarSize: 36, isCurrentUser: rankedUsers[1].user_id == currentUserId)
+            }
+
+            // 1st place
+            miniPodiumSlot(user: rankedUsers[0], rank: 1, colors: medalColors[0], height: 56, avatarSize: 44, isCurrentUser: rankedUsers[0].user_id == currentUserId)
+
+            // 3rd place
+            if rankedUsers.count > 2 {
+                miniPodiumSlot(user: rankedUsers[2], rank: 3, colors: medalColors[2], height: 36, avatarSize: 36, isCurrentUser: rankedUsers[2].user_id == currentUserId)
+            }
+        }
+        .padding(.vertical, MADTheme.Spacing.sm)
+    }
+
+    private func miniPodiumSlot(user: CompetitionUser, rank: Int, colors: [Color], height: CGFloat, avatarSize: CGFloat, isCurrentUser: Bool) -> some View {
+        VStack(spacing: MADTheme.Spacing.xs) {
+            // Crown for 1st
+            if rank == 1 {
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
+                    )
+            }
+
+            // Avatar
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: avatarSize, height: avatarSize)
+                    .overlay(
+                        Text(user.displayName.prefix(1).uppercased())
+                            .font(.system(size: avatarSize * 0.38, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
+                                lineWidth: rank == 1 ? 2.5 : 2
+                            )
+                    )
+
+                if isCurrentUser {
+                    Text("YOU")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 3)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(MADTheme.Colors.madRed))
+                        .offset(y: avatarSize / 2 + 4)
+                }
+            }
+
+            Text(user.displayName)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.7))
+                .lineLimit(1)
+
+            Text(leaderboardScoreLabel(for: user))
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+
+            // Pedestal
+            RoundedRectangle(cornerRadius: 6)
+                .fill(
+                    LinearGradient(
+                        colors: colors.map { $0.opacity(0.2) },
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(height: podiumAnimated ? height : 0)
+                .overlay(
+                    Text("\(rank)")
+                        .font(.system(size: height * 0.45, weight: .bold, design: .rounded))
+                        .foregroundColor(colors[0].opacity(0.25))
+                )
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func leaderboardScoreLabel(for user: CompetitionUser) -> String {
+        let score = user.score ?? 0
+        switch competition.type {
+        case .streaks:
+            return "\(Int(score))d"
+        case .apex, .race:
+            return String(format: "%.1f %@", score, competition.options.unit.shortDisplayName)
+        case .targets, .clash:
+            return "\(Int(score)) pts"
         }
     }
 

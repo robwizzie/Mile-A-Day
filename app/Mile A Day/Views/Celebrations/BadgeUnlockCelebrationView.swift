@@ -274,16 +274,16 @@ struct BadgeUnlockCelebrationView: View {
                 
                 // Badge info content
                 if showContent {
-                    VStack(spacing: 20) {
-                        // Achievement unlocked text
+                    VStack(spacing: 16) {
+                        // Achievement unlocked banner
                         HStack(spacing: 8) {
                             Image(systemName: "trophy.fill")
-                                .font(.system(size: 16))
-                            Text("BADGE UNLOCKED!")
-                                .font(.system(size: 16, weight: .black, design: .rounded))
-                                .tracking(2)
+                                .font(.system(size: 14))
+                            Text("BADGE UNLOCKED")
+                                .font(.system(size: 13, weight: .black, design: .rounded))
+                                .tracking(2.5)
                             Image(systemName: "trophy.fill")
-                                .font(.system(size: 16))
+                                .font(.system(size: 14))
                         }
                         .foregroundStyle(
                             LinearGradient(
@@ -292,10 +292,20 @@ struct BadgeUnlockCelebrationView: View {
                                 endPoint: .trailing
                             )
                         )
-                        
-                        // Badge name with gradient
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule()
+                                .fill(Color.yellow.opacity(0.1))
+                                .overlay(
+                                    Capsule()
+                                        .stroke(Color.yellow.opacity(0.2), lineWidth: 1)
+                                )
+                        )
+
+                        // Badge name
                         Text(badge.name)
-                            .font(.system(size: 38, weight: .bold, design: .rounded))
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
                             .foregroundStyle(
                                 LinearGradient(
                                     colors: [.white, .white.opacity(0.85)],
@@ -305,29 +315,25 @@ struct BadgeUnlockCelebrationView: View {
                             )
                             .multilineTextAlignment(.center)
                             .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 4)
-                        
-                        // Achievement description
-                        VStack(spacing: 10) {
-                            Text("You achieved this by:")
-                                .font(.system(size: 14, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.6))
-                            
+
+                        // Achievement description in a card
+                        VStack(spacing: 8) {
                             Text(badge.description)
-                                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                                .font(.system(size: 17, weight: .semibold, design: .rounded))
                                 .foregroundColor(.white.opacity(0.9))
                                 .multilineTextAlignment(.center)
-                                .padding(.horizontal, 32)
                         }
-                        
+                        .padding(.horizontal, 32)
+
                         // Date earned
                         HStack(spacing: 6) {
                             Image(systemName: "calendar")
-                                .font(.system(size: 12))
+                                .font(.system(size: 11))
                             Text("Earned \(badge.dateAwarded.formattedDate)")
                         }
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.45))
-                        .padding(.top, 4)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.4))
+                        .padding(.top, 2)
                     }
                     .transition(.asymmetric(
                         insertion: .scale(scale: 0.9).combined(with: .opacity).combined(with: .offset(y: 30)),
@@ -481,86 +487,98 @@ struct BadgeUnlockCelebrationView: View {
     }
     
     // MARK: - Animation Sequence
-    
+
     private func startCelebrationSequence() {
         // Prepare haptics
         impactGenerator.prepare()
         notificationGenerator.prepare()
-        
+
         // Phase 1: Fade in overlay and background
-        withAnimation(.easeOut(duration: 0.3)) {
+        withAnimation(.easeOut(duration: 0.35)) {
             overlayOpacity = 1
         }
-        
+
         // Phase 2: Ray burst background
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             withAnimation(.easeOut(duration: 0.4)) {
                 showRaysBackground = true
             }
         }
-        
-        // Phase 3: Rarity banner drops in
+
+        // Phase 3: Rarity banner drops in with satisfying tap
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.65)) {
                 showRarityBanner = true
             }
-            impactGenerator.impactOccurred(intensity: 0.5)
+            impactGenerator.impactOccurred(intensity: 0.4)
         }
-        
+
         // Phase 4: Ribbon drops
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
                 showRibbon = true
             }
         }
-        
-        // Phase 5: Medal scales in
+
+        // Phase 5: Medal scales in with bounce — this is the big moment
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.65)) {
+            // Overshoot for dramatic effect
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.55)) {
                 showMedal = true
                 medalScale = 1.0
             }
-            impactGenerator.impactOccurred(intensity: 0.8)
+            impactGenerator.impactOccurred(intensity: 0.7)
         }
-        
-        // Phase 6: Icon bursts in with rotation
+
+        // Phase 6: Icon bursts in with rotation + heavy haptic
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.5)) {
                 showIcon = true
                 iconScale = 1.0
                 iconRotation = 0
             }
             impactGenerator.impactOccurred(intensity: 1.0)
         }
-        
-        // Phase 7: Ring pulse and glow rings
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.95) {
+
+        // Phase 7: Ring pulse and glow rings — the "stamp" moment
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
             showRingPulse = true
             withAnimation(.easeOut(duration: 0.3)) {
                 showGlowRings = true
             }
+            // Double-tap haptic for satisfying stamp feel
+            let lightTap = UIImpactFeedbackGenerator(style: .light)
+            lightTap.impactOccurred()
         }
-        
-        // Phase 8: Confetti explosion
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.05) {
+
+        // Phase 8: Confetti explosion — the reward moment
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             showConfetti = true
             notificationGenerator.notificationOccurred(.success)
+
+            // Extra haptic burst for legendary badges
+            if badge.rarity == .legendary {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    let heavy = UIImpactFeedbackGenerator(style: .heavy)
+                    heavy.impactOccurred(intensity: 0.6)
+                }
+            }
         }
-        
-        // Phase 9: Content reveals
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
+
+        // Phase 9: Content reveals with smooth slide
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.15) {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.78)) {
                 showContent = true
             }
         }
-        
+
         // Phase 10: Buttons appear
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 showButtons = true
             }
         }
-        
+
         // Start continuous shimmer for legendary
         if badge.rarity == .legendary {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
@@ -569,7 +587,7 @@ struct BadgeUnlockCelebrationView: View {
                 }
             }
         }
-        
+
         // Start glow pulse
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {

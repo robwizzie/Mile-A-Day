@@ -8,8 +8,7 @@ import SwiftUI
 struct BadgeDetailView: View {
     let badge: Badge
     var userManager: UserManager?
-    @Environment(\.dismiss) private var dismiss
-    
+
     // Animation states
     @State private var showMedal = false
     @State private var showContent = false
@@ -28,10 +27,8 @@ struct BadgeDetailView: View {
             }
             
             VStack(spacing: 0) {
-                // Close button
-                closeButton
-                
                 Spacer()
+                    .frame(height: 16)
                 
                 // Medal display
                 medalSection
@@ -121,28 +118,6 @@ struct BadgeDetailView: View {
             .frame(width: 400, height: 400)
             .offset(y: -50)
             .allowsHitTesting(false)
-    }
-    
-    // MARK: - Close Button
-    
-    private var closeButton: some View {
-        HStack {
-            Spacer()
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.white.opacity(0.5))
-                    .frame(width: 32, height: 32)
-                    .background(
-                        Circle()
-                            .fill(Color.white.opacity(0.1))
-                    )
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
     }
     
     // MARK: - Medal Section
