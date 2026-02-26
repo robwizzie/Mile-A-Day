@@ -377,16 +377,28 @@ struct CompetitionDetailView: View {
                 timeRemainingBanner(endDate: endDate)
             }
 
-            // Interval navigator + mode content (race has no intervals)
-            if competition.type != .race {
+            // Streaks get a fully custom active view
+            if competition.type == .streaks {
+                intervalNavigator
+
+                StreakActiveView(
+                    competition: competition,
+                    selectedIntervalDate: selectedIntervalDate,
+                    competitionService: competitionService
+                )
+            } else if competition.type != .race {
+                // Interval navigator + mode content
                 intervalNavigator
                 intervalContent
+
+                // Overall standings
+                competitionLeaderboard
             } else {
                 raceProgressView
-            }
 
-            // Overall standings
-            competitionLeaderboard
+                // Overall standings
+                competitionLeaderboard
+            }
 
             // Competition info
             infoSection
