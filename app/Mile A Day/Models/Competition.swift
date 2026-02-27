@@ -437,10 +437,6 @@ struct DeleteCompetitionResponse: Codable {
     let message: String
 }
 
-struct FlexNudgeResponse: Codable {
-    let message: String
-}
-
 // MARK: - Trophy Models
 
 struct CompetitionTrophy: Codable, Identifiable {
