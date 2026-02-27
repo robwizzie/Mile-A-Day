@@ -16,6 +16,7 @@ struct DashboardView: View {
     @EnvironmentObject var notificationService: MADNotificationService
     @StateObject private var workoutService = WorkoutService()
     @StateObject private var syncService = WorkoutSyncService.shared
+    @StateObject private var competitionService = CompetitionService()
 
     @State private var showConfetti = false
     @State private var showGoalSheet = false
@@ -412,6 +413,7 @@ struct DashboardView: View {
             instructionsSection
             streakSection
             todayProgressSection
+            activeCompetitionsSection
             stepsAndBadgesSection
             weekAtAGlanceSection
             statsAndHistorySection
@@ -474,6 +476,10 @@ struct DashboardView: View {
             userManager: userManager,
             showWorkoutView: $showWorkoutView
         )
+    }
+
+    private var activeCompetitionsSection: some View {
+        ActiveCompetitionsCard(competitionService: competitionService)
     }
 
     private var stepsAndBadgesSection: some View {
