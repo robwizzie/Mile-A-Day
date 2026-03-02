@@ -9,7 +9,6 @@ struct StreakActiveView: View {
     @State private var showNudgeConfirm = false
     @State private var nudgeTargetUser: CompetitionUser?
     @State private var showFlexConfirm = false
-    @State private var hasSentFlex = false
     @State private var isSendingAction = false
     @State private var actionFeedback: ActionFeedback?
     @State private var showEliminatedUsers = false
@@ -495,7 +494,8 @@ struct StreakActiveView: View {
     // MARK: - Flex Button
 
     private var canFlex: Bool {
-        guard !hasSentFlex, isToday,
+        guard !FlexNudgeTracker.hasSentFlexToday(competitionId: competition.competition_id),
+              isToday,
               let currentUser = acceptedUsers.first(where: { $0.user_id == currentUserId }) else {
             return false
         }
@@ -566,7 +566,7 @@ struct StreakActiveView: View {
                 try await competitionService.sendFlex(competitionId: competition.competition_id)
                 await MainActor.run {
                     isSendingAction = false
-                    hasSentFlex = true
+                    FlexNudgeTracker.markFlexSent(competitionId: competition.competition_id)
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     showFeedback(ActionFeedback(icon: "hand.raised.fill", message: "Flex sent!", isError: false))
                 }
@@ -613,12 +613,4 @@ struct StreakActiveView: View {
         guard firstTo > 0, let lives = user.remaining_lives else { return false }
         return lives <= 0
     }
-}
-
-// MARK: - Supporting Types
-
-struct ActionFeedback: Equatable {
-    let icon: String
-    let message: String
-    let isError: Bool
 }

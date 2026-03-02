@@ -21,7 +21,10 @@ final class MADBackgroundService: NSObject, ObservableObject {
     
     private override init() {
         super.init()
-        setupBackgroundDelivery()
+        // Only set up HealthKit background delivery if user is authenticated
+        if UserDefaults.standard.bool(forKey: "MAD_IsAuthenticated") {
+            setupBackgroundDelivery()
+        }
     }
     
     // MARK: - Public API
@@ -100,15 +103,26 @@ final class MADBackgroundService: NSObject, ObservableObject {
     
     // MARK: - Background Processing
     
+    /// Enable background delivery after user authenticates
+    func enableBackgroundDeliveryAfterAuth() {
+        setupBackgroundDelivery()
+    }
+
     private func handleBackgroundRefresh(task: BGAppRefreshTask) {
+        // Only process if user is authenticated
+        guard UserDefaults.standard.bool(forKey: "MAD_IsAuthenticated") else {
+            task.setTaskCompleted(success: true)
+            return
+        }
+
         // Schedule the next background refresh
         scheduleBackgroundRefresh()
-        
+
         // Set expiration handler
         task.expirationHandler = {
             task.setTaskCompleted(success: false)
         }
-        
+
         // Perform the background work
         Task { [weak self] in
             await self?.performBackgroundWork()
@@ -297,13 +311,19 @@ extension MADBackgroundService {
             print("✅ Workout state synchronized to disk")
         }
 
-        scheduleBackgroundRefresh()
+        // Only schedule background refresh if user is authenticated
+        if UserDefaults.standard.bool(forKey: "MAD_IsAuthenticated") {
+            scheduleBackgroundRefresh()
+        }
     }
     
     /// Call this from App's sceneWillEnterForeground
     func appWillEnterForeground() {
         // Cancel any pending background tasks when app becomes active
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: Self.backgroundTaskIdentifier)
+
+        // Only fetch health data and sync if user is authenticated
+        guard UserDefaults.standard.bool(forKey: "MAD_IsAuthenticated") else { return }
 
         // Perform immediate refresh when app becomes active
         Task { [weak self] in

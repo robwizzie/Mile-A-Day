@@ -29,6 +29,7 @@ struct DashboardView: View {
     /// Whether to show a compact “Resume workout” banner when an in‑progress workout exists
     /// but the full‑screen tracker is not currently visible.
     @State private var showInProgressBanner = false
+    @State private var showForceResetAlert = false
     
     /// Navigation state for badges view from celebration
     @State private var navigateToBadgesFromCelebration = false
@@ -134,11 +135,8 @@ struct DashboardView: View {
             .fullScreenCover(isPresented: $showWorkoutView, onDismiss: {
                 // When the user dismisses the workout tracker while a workout is still active,
                 // show a compact banner so they can easily resume.
-                if let state = InProgressWorkoutStore.load(), state.isActive {
-                    showInProgressBanner = true
-                } else {
-                    showInProgressBanner = false
-                }
+                let hasActive = InProgressWorkoutStore.load()?.isActive == true
+                showInProgressBanner = hasActive
             }) {
                 if let state = InProgressWorkoutStore.load(), state.isActive {
                     WorkoutTrackingView(
@@ -433,6 +431,24 @@ struct DashboardView: View {
                     showWorkoutView = true
                 }
             )
+            .onLongPressGesture(minimumDuration: 2.0) {
+                showForceResetAlert = true
+            }
+            .alert("Force Reset Workout?", isPresented: $showForceResetAlert) {
+                Button("Cancel", role: .cancel) { }
+                Button("Reset", role: .destructive) {
+                    // End any Live Activities
+                    Task {
+                        for activity in Activity<WorkoutActivityAttributes>.activities {
+                            await activity.end(nil, dismissalPolicy: .immediate)
+                        }
+                    }
+                    InProgressWorkoutStore.clear()
+                    showInProgressBanner = false
+                }
+            } message: {
+                Text("This will discard the stuck workout and clear all workout state. Use this if the workout is frozen or won't end properly.")
+            }
         }
     }
 
@@ -3326,12 +3342,27 @@ struct SharePreviewView: View {
 
 // MARK: - Workout Tracking View
 
-// Location Manager for tracking distance during workouts
+// Location Manager for tracking distance during workouts.
+//
+// Distance tracking modes:
+//   - Outdoor (GPS): Incremental — each location update adds a delta to currentDistance.
+//   - Indoor (Pedometer): Cumulative — pedometer reports total distance since its start.
+//     We add a `pedometerOffset` so recovered workouts don't lose prior distance.
+//
+// The key invariant: currentDistance must NEVER be overwritten with a smaller value
+// by the tracking system itself. Only stopTracking() and explicit reset can clear it.
 class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let locationManager = CLLocationManager()
     private let pedometer = CMPedometer()
     private var lastLocation: CLLocation?
     private var isUsingPedometer = false
+    private var isTracking = false
+
+    // For indoor pedometer mode: the pedometer reports cumulative distance from its
+    // start date. When recovering a workout, we set this offset to the previously
+    // accumulated distance so the pedometer's new readings ADD to it instead of
+    // replacing it. For GPS mode this is unused (GPS is incremental).
+    private var pedometerOffset: Double = 0.0
 
     @Published var currentDistance: Double = 0.0 // Distance in miles
     @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
@@ -3350,53 +3381,56 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         locationManager.requestWhenInUseAuthorization()
     }
 
-    func startTracking(locationType: HKWorkoutSessionLocationType = .outdoor) {
-        // Reset distance for new workout
-        currentDistance = 0.0
+    /// Start tracking distance.
+    ///
+    /// - Parameters:
+    ///   - locationType: `.outdoor` for GPS, `.indoor` for pedometer.
+    ///   - initialDistance: Distance already accumulated in a prior session (0 for new workouts).
+    ///     For GPS mode, this becomes the starting value that incremental updates add to.
+    ///     For pedometer mode, this becomes the offset added to the pedometer's readings.
+    func startTracking(locationType: HKWorkoutSessionLocationType = .outdoor, initialDistance: Double = 0.0) {
+        // Prevent double-start
+        guard !isTracking else { return }
+        isTracking = true
+
+        currentDistance = initialDistance
         lastLocation = nil
         isUsingPedometer = (locationType == .indoor)
+        pedometerOffset = initialDistance
 
         if locationType == .indoor {
-            // Use pedometer for indoor tracking
             if CMPedometer.isDistanceAvailable() {
                 pedometer.startUpdates(from: Date()) { [weak self] pedometerData, error in
-                    guard let self = self, let data = pedometerData, error == nil else {
-                        if let error = error {
-                            print("Pedometer error: \(error.localizedDescription)")
-                        }
-                        return
-                    }
+                    guard let self = self, let data = pedometerData, error == nil else { return }
 
-                    // Update distance from pedometer
                     if let distance = data.distance {
-                        let distanceInMiles = distance.doubleValue * 0.000621371 // Convert meters to miles
+                        let distanceInMiles = distance.doubleValue * 0.000621371
+                        let newTotal = self.pedometerOffset + distanceInMiles
                         DispatchQueue.main.async {
-                            self.currentDistance = distanceInMiles
+                            self.currentDistance = newTotal
                         }
                     }
                 }
             } else {
-                print("Distance tracking not available on this device")
-                // Fallback to GPS even for indoor
+                isUsingPedometer = false
                 startGPSTracking()
             }
         } else {
-            // Use GPS for outdoor tracking
             startGPSTracking()
         }
     }
 
     private func startGPSTracking() {
-        // Request permission if not already granted
         if authorizationStatus == .notDetermined {
             requestPermission()
         }
-
-        // Start location updates
         locationManager.startUpdatingLocation()
     }
 
     func stopTracking() {
+        guard isTracking else { return }
+        isTracking = false
+
         if isUsingPedometer {
             pedometer.stopUpdates()
         } else {
@@ -3405,13 +3439,8 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         lastLocation = nil
     }
 
-    /// Restore a previously tracked distance (e.g. after app relaunch)
-    /// so the user never "loses" visible progress for an in‑progress workout.
-    func restoreDistance(_ distance: Double) {
-        currentDistance = distance
-    }
+    // MARK: - CLLocationManagerDelegate
 
-    // CLLocationManagerDelegate methods
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let newLocation = locations.last else { return }
 
@@ -3422,11 +3451,11 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
 
         // Calculate distance if we have a previous location
         if let lastLocation = lastLocation {
-            let distance = newLocation.distance(from: lastLocation) // Distance in meters
-            let distanceInMiles = distance * 0.000621371 // Convert to miles
+            let distance = newLocation.distance(from: lastLocation) // meters
+            let distanceInMiles = distance * 0.000621371
 
             // Only add distance if it's reasonable (not a GPS jump)
-            if distanceInMiles < 0.1 { // Less than 0.1 miles between updates (reasonable for running/walking)
+            if distanceInMiles < 0.1 {
                 DispatchQueue.main.async {
                     self.currentDistance += distanceInMiles
                 }
@@ -3435,13 +3464,12 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
 
         lastLocation = newLocation
 
-        // CRITICAL: Persist route point for recovery (every location update)
-        // This ensures we can rebuild the workout route if app crashes
+        // Persist route point for recovery
         InProgressWorkoutStore.addRoutePoint(newLocation)
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("Location manager failed with error: \(error.localizedDescription)")
+        print("[WorkoutLocationManager] Error: \(error.localizedDescription)")
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
@@ -3566,6 +3594,9 @@ struct WorkoutTrackingView: View {
     @State private var showRecap = false
     @State private var showStopConfirmation = false // Confirmation before ending workout
     @State private var isStopping = false // Prevents double-stop and shows "Ending..." UI
+    @State private var showEndWorkoutError = false // Show error alert when end fails
+    @State private var endWorkoutErrorMessage = "" // Error message for end workout failure
+    @State private var endWorkoutTimeoutTask: DispatchWorkItem? // Timeout for end workout flow
     @State private var workoutSession: HKWorkoutSession?
     @State private var workoutBuilder: HKWorkoutBuilder?
     @State private var workoutActivity: Activity<WorkoutActivityAttributes>?
@@ -4147,98 +4178,63 @@ struct WorkoutTrackingView: View {
         } message: {
             Text("Are you sure you want to end this workout? Your progress will be saved to HealthKit.")
         }
-        .onAppear {
-            // CRITICAL: Workout recovery on app launch
-            // If we have a persisted in‑progress workout, restore it so the user
-            // returns to exactly where they left off (distance + time).
-            if let saved = InProgressWorkoutStore.load(), saved.isActive {
-                print("🔄 Recovering workout from persistent storage...")
-                print("   Start time: \(saved.startTime)")
-                print("   Distance: \(saved.currentDistance) miles")
-                print("   Route points: \(saved.routePoints.count)")
-
-                // Restore core state
-                workoutStartDate = saved.startTime
-
-                // Recompute elapsed time from start time to keep time accurate
-                if Date() > saved.startTime {
-                    elapsedTime = Date().timeIntervalSince(saved.startTime)
-                } else {
-                    elapsedTime = saved.elapsedTime
-                }
-
-                // Restore activity + location type
-                if saved.activityType == "Running" {
-                    selectedActivityType = .running
-                } else if saved.activityType == "Walking" {
-                    selectedActivityType = .walking
-                }
-                if let locationType = HKWorkoutSessionLocationType(rawValue: saved.locationTypeRawValue) {
-                    selectedLocationType = locationType
-                }
-
-                // Jump directly into the tracking UI
-                showActivitySelection = false
-                showLocationTypeSelection = false
-                showCountdown = false
-                isTracking = true
-
-                // Restart location tracking FIRST (resets distance to 0),
-                // then restore the saved distance so it's not lost.
-                locationManager.startTracking(locationType: selectedLocationType)
-                locationManager.restoreDistance(saved.currentDistance)
-
-                // CRITICAL: Restart HKWorkoutBuilder for the recovered workout
-                // Use the original workout start time so HealthKit records the correct duration
-                healthManager.requestAuthorization { authorized in
-                    guard authorized else {
-                        print("❌ HealthKit authorization denied during recovery")
-                        return
-                    }
-
-                    let configuration = HKWorkoutConfiguration()
-                    configuration.activityType = self.selectedActivityType ?? .walking
-                    configuration.locationType = self.selectedLocationType
-
-                    let healthStore = HKHealthStore()
-                    let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
-                    self.workoutBuilder = builder
-
-                    // Start collecting from the original workout start time
-                    builder.beginCollection(withStart: saved.startTime) { success, error in
-                        if let error = error {
-                            print("❌ Failed to restart workout collection: \(error)")
-                        } else if success {
-                            print("✅ Workout builder restarted for recovered workout")
-                        }
-                    }
-                }
-
-                // Ensure any old timer is stopped before starting a new one
-                timer?.invalidate()
-
-                // Restart the timer for elapsed time updates and Live Activity updates
-                timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-                    if let startDate = workoutStartDate {
-                        elapsedTime = Date().timeIntervalSince(startDate)
-                    }
-
-                    // Update Live Activity every second (10 ticks of 0.1s)
-                    if Int(elapsedTime * 10) % 10 == 0 {
-                        updateLiveActivity()
-                    }
-                }
-
-                // CRITICAL: Restore/create Live Activity
-                // startLiveActivity() will intelligently:
-                // 1. Check for existing Live Activities from previous session
-                // 2. Reuse matching activity if found (based on start time)
-                // 3. Clean up any orphaned activities
-                // 4. Create new activity only if needed
-                startLiveActivity()
-
-                print("✅ Workout recovery complete - tracking resumed")
+        .alert("Couldn't Save Workout", isPresented: $showEndWorkoutError) {
+            Button("OK") {
+                // Dismiss back to dashboard since the workout state is already cleared
+                dismiss()
             }
+        } message: {
+            Text(endWorkoutErrorMessage)
+        }
+        .onAppear {
+            // Workout recovery: if there's a persisted in-progress workout, restore it.
+            // Guard: skip if we're currently ending a workout or already tracking.
+            guard !isStopping, !isTracking else { return }
+            guard let saved = InProgressWorkoutStore.load(), saved.isActive else { return }
+
+            // Restore core state
+            workoutStartDate = saved.startTime
+            elapsedTime = max(0, Date().timeIntervalSince(saved.startTime))
+
+            // Restore activity + location type
+            if saved.activityType == "Running" {
+                selectedActivityType = .running
+            } else if saved.activityType == "Walking" {
+                selectedActivityType = .walking
+            }
+            if let locationType = HKWorkoutSessionLocationType(rawValue: saved.locationTypeRawValue) {
+                selectedLocationType = locationType
+            }
+
+            // Jump directly into the tracking UI
+            showActivitySelection = false
+            showLocationTypeSelection = false
+            showCountdown = false
+            isTracking = true
+
+            // Resume tracking with the saved distance as the starting point.
+            // For pedometer: new pedometer readings will ADD to saved.currentDistance.
+            // For GPS: new GPS deltas will add to saved.currentDistance.
+            locationManager.startTracking(locationType: selectedLocationType, initialDistance: saved.currentDistance)
+
+            // Restart HKWorkoutBuilder (non-blocking, best-effort)
+            healthManager.requestAuthorization { authorized in
+                guard authorized else { return }
+
+                let configuration = HKWorkoutConfiguration()
+                configuration.activityType = self.selectedActivityType ?? .walking
+                configuration.locationType = self.selectedLocationType
+
+                let healthStore = HKHealthStore()
+                let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
+                self.workoutBuilder = builder
+
+                builder.beginCollection(withStart: saved.startTime) { _, _ in }
+            }
+
+            // Restart timer and Live Activity
+            startWorkoutTimer()
+            startLiveActivity()
         }
     }
 
@@ -4292,29 +4288,16 @@ struct WorkoutTrackingView: View {
     }
 
     private func startWorkout() {
-        // CRITICAL: Acquire workout lock to enforce single workout at a time
+        // Acquire workout lock to enforce single workout at a time
         guard InProgressWorkoutStore.acquireLock() else {
-            print("⚠️ Cannot start workout: another workout is already in progress")
-            // Show alert to user
-            DispatchQueue.main.async {
-                let alert = UIAlertController(
-                    title: "Workout In Progress",
-                    message: "Another Mile A Day workout is already active. Please finish or cancel that workout before starting a new one.",
-                    preferredStyle: .alert
-                )
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let rootVC = windowScene.windows.first?.rootViewController {
-                    rootVC.present(alert, animated: true)
-                }
-            }
+            endWorkoutErrorMessage = "Another Mile A Day workout is already active. Please finish or cancel that workout first."
+            showEndWorkoutError = true
             return
         }
 
         workoutStartDate = Date()
-        let workoutUUID = UUID().uuidString
 
-        // Immediately persist initial workout state (ZERO DATA LOSS)
+        // Immediately persist initial workout state
         let initialState = InProgressWorkoutState(
             isActive: true,
             isPaused: false,
@@ -4327,207 +4310,163 @@ struct WorkoutTrackingView: View {
             goalDistance: goalDistance,
             activityType: selectedActivityType == .running ? "Running" : "Walking",
             locationTypeRawValue: selectedLocationType.rawValue,
-            workoutUUID: workoutUUID,
+            workoutUUID: UUID().uuidString,
             lastSaveTime: Date(),
             routePoints: [],
             isUsingPedometer: selectedLocationType == .indoor,
             liveActivityID: nil
         )
         InProgressWorkoutStore.save(initialState)
-        print("✅ Workout state persisted immediately on start")
 
-        // Start location tracking with appropriate mode (GPS for outdoor, pedometer for indoor)
-        locationManager.startTracking(locationType: selectedLocationType)
+        // Start location/pedometer tracking (fresh workout, initialDistance = 0)
+        locationManager.startTracking(locationType: selectedLocationType, initialDistance: 0)
 
         // Start Live Activity
         startLiveActivity()
 
-        // Request authorization first
-        healthManager.requestAuthorization { authorized in
-            guard authorized else {
-                print("HealthKit authorization denied")
-                return
-            }
+        // Start the timer IMMEDIATELY — don't wait for HealthKit authorization.
+        // The timer drives both the UI clock and periodic state persistence.
+        startWorkoutTimer()
 
-            // Start HealthKit workout session
-            // Use iOS-compatible API (HKWorkoutBuilder, not HKLiveWorkoutBuilder which is watchOS-only)
+        // Set up HKWorkoutBuilder in the background (non-blocking).
+        // If this fails, the workout still tracks distance; it just won't save to HealthKit.
+        healthManager.requestAuthorization { authorized in
+            guard authorized else { return }
+
             let configuration = HKWorkoutConfiguration()
-            configuration.activityType = self.selectedActivityType ?? .walking // Use selected activity type
-            configuration.locationType = self.selectedLocationType // Use selected location type
+            configuration.activityType = self.selectedActivityType ?? .walking
+            configuration.locationType = self.selectedLocationType
 
             let healthStore = HKHealthStore()
             let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
-
             self.workoutBuilder = builder
 
-            // Start collecting workout data (without live data source - we'll add samples manually)
-            let startDate = Date()
-            builder.beginCollection(withStart: startDate) { success, error in
-                if let error = error {
-                    print("Failed to start workout collection: \(error)")
-                    return
-                }
+            builder.beginCollection(withStart: self.workoutStartDate ?? Date()) { _, _ in }
+        }
+    }
 
-                if success {
-                    // Start timer for elapsed time and Live Activity updates
+    /// Start (or restart) the workout timer that drives the UI clock and periodic state saves.
+    private func startWorkoutTimer() {
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [self] _ in
+            guard let startDate = workoutStartDate else { return }
+            // Don't persist state while we're in the middle of stopping
+            guard !isStopping else { return }
+            elapsedTime = Date().timeIntervalSince(startDate)
+            updateLiveActivity()
+        }
+    }
+
+    private func stopWorkout() {
+        guard !isStopping else { return }
+        isStopping = true
+
+        // Capture final distance before stopping tracking
+        let finalDistance = currentDistance
+
+        // Flush any buffered route points
+        InProgressWorkoutStore.flushRoutePoints()
+
+        // Stop timer and location tracking
+        timer?.invalidate()
+        timer = nil
+        locationManager.stopTracking()
+
+        // Safety timeout: if HealthKit callbacks never fire, force-cleanup after 10s
+        let timeout = DispatchWorkItem { [self] in
+            finishCleanup(workoutSaved: false)
+        }
+        endWorkoutTimeoutTask = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: timeout)
+
+        // If we have no builder (e.g. HK auth failed), skip straight to cleanup
+        guard let builder = workoutBuilder, let startDate = workoutStartDate else {
+            finishCleanup(workoutSaved: false)
+            return
+        }
+
+        // Clear references now (the local `builder` variable keeps the object alive for callbacks)
+        workoutSession = nil
+        workoutBuilder = nil
+
+        let endDate = Date()
+
+        // Async chain: add distance sample → end collection → finish workout → cleanup.
+        // Every step proceeds regardless of whether the previous step failed.
+        let addCompletion: (Bool, Error?) -> Void = { _, _ in
+            builder.endCollection(withEnd: endDate) { _, _ in
+                builder.finishWorkout { workout, error in
+                    let saved = (workout != nil && error == nil)
                     DispatchQueue.main.async {
-                        self.timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-                            if let startDate = self.workoutStartDate {
-                                self.elapsedTime = Date().timeIntervalSince(startDate)
-                            }
-                            // Distance is now tracked by locationManager
-
-                            // Update Live Activity every second (10 ticks of 0.1s)
-                            if Int(self.elapsedTime * 10) % 10 == 0 {
-                                self.updateLiveActivity()
-                            }
+                        self.finishCleanup(workoutSaved: saved)
+                        if saved {
+                            self.healthManager.fetchAllWorkoutData()
                         }
                     }
                 }
             }
         }
-    }
-
-    private func stopWorkout() {
-        // Prevent double-stop
-        guard !isStopping else {
-            print("⚠️ stopWorkout() already in progress, ignoring duplicate call")
-            return
-        }
-        isStopping = true
-
-        // Flush any buffered route points before stopping
-        InProgressWorkoutStore.flushRoutePoints()
-
-        // Stop timer
-        timer?.invalidate()
-        timer = nil
-
-        // Stop location tracking
-        locationManager.stopTracking()
-
-        // End HealthKit workout collection
-        guard let builder = workoutBuilder, let startDate = workoutStartDate else {
-            // No active builder, just clean up and show recap
-            cleanupWorkout(workoutSaved: false)
-            return
-        }
-
-        let endDate = Date()
-        let finalDistance = currentDistance
-
-        // CRITICAL FIX: Proper async workflow to prevent data loss
-        // Step 1: Add distance sample FIRST (if any distance tracked)
-        // Step 2: Only after successful add, end collection
-        // Step 3: Only after successful end, finish workout
-        // Step 4: Only after successful finish, clear state and release lock
 
         if finalDistance > 0 {
-            let distanceMeters = finalDistance / 0.000621371 // Convert miles to meters
+            let distanceMeters = finalDistance / 0.000621371
             let distanceQuantity = HKQuantity(unit: HKUnit.meter(), doubleValue: distanceMeters)
-            let distanceSample = HKQuantitySample(
+            let sample = HKQuantitySample(
                 type: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!,
                 quantity: distanceQuantity,
                 start: startDate,
                 end: endDate
             )
-
-            // Step 1: Add distance sample
-            builder.add([distanceSample]) { success, error in
-                if let error = error {
-                    print("❌ Failed to add distance sample: \(error)")
-                    // Even on error, try to save what we can
-                    self.endCollectionAndFinish(builder: builder, endDate: endDate)
-                } else if success {
-                    print("✅ Successfully added distance sample: \(finalDistance) miles")
-                    // Step 2: Now end collection
-                    self.endCollectionAndFinish(builder: builder, endDate: endDate)
-                } else {
-                    print("⚠️ Distance sample not added, attempting to finish anyway")
-                    self.endCollectionAndFinish(builder: builder, endDate: endDate)
-                }
-            }
+            builder.add([sample], completion: addCompletion)
         } else {
-            // No distance to add, proceed to end collection
-            self.endCollectionAndFinish(builder: builder, endDate: endDate)
+            addCompletion(true, nil)
         }
+    }
 
-        // Clear session references (state will be cleared after successful finish)
+    /// Force-end a stuck workout without saving to HealthKit.
+    private func forceEndWorkout() {
+        endWorkoutTimeoutTask?.cancel()
+        endWorkoutTimeoutTask = nil
+        timer?.invalidate()
+        timer = nil
+        locationManager.stopTracking()
+        endLiveActivity()
+        InProgressWorkoutStore.clear()
         workoutSession = nil
         workoutBuilder = nil
-    }
-
-    // Helper function to ensure proper async workflow
-    private func endCollectionAndFinish(builder: HKWorkoutBuilder, endDate: Date) {
-        // Step 2: End collection
-        builder.endCollection(withEnd: endDate) { success, error in
-            if let error = error {
-                print("❌ Failed to end workout collection: \(error)")
-                // Even on error, try to finish
-                self.finishWorkoutAndCleanup(builder: builder)
-                return
-            }
-
-            if success {
-                print("✅ Successfully ended workout collection")
-                // Step 3: Finish workout
-                self.finishWorkoutAndCleanup(builder: builder)
-            } else {
-                print("⚠️ Collection end reported failure, attempting finish anyway")
-                self.finishWorkoutAndCleanup(builder: builder)
-            }
-        }
-    }
-
-    // Helper function to finish workout and cleanup state
-    private func finishWorkoutAndCleanup(builder: HKWorkoutBuilder) {
-        // Step 3: Finish workout
-        builder.finishWorkout { workout, error in
-            var workoutSaved = false
-
-            if let error = error {
-                print("❌ Failed to finish workout: \(error)")
-            } else if let workout = workout {
-                print("✅ Workout saved to HealthKit: \(workout)")
-                workoutSaved = true
-
-                // Refresh health data
-                DispatchQueue.main.async {
-                    self.healthManager.fetchAllWorkoutData()
-                }
-            }
-
-            // Step 4: Cleanup on main thread
-            DispatchQueue.main.async {
-                self.cleanupWorkout(workoutSaved: workoutSaved)
-            }
-        }
+        isStopping = false
+        isTracking = false
+        dismiss()
     }
 
     // MARK: - Workout Cleanup
 
-    /// Centralized cleanup after a workout ends. Handles Live Activity, state, and UI in the correct order.
-    /// - Parameter workoutSaved: Whether the workout was successfully saved to HealthKit
-    private func cleanupWorkout(workoutSaved: Bool) {
-        // 1. End Live Activity (does NOT touch InProgressWorkoutStore)
+    /// Final cleanup after a workout ends. Always clears persisted state to prevent zombie sessions.
+    private func finishCleanup(workoutSaved: Bool) {
+        // Guard against double-execution (timeout + normal callback both fire)
+        guard isStopping else { return }
+
+        // Cancel timeout (we got here normally)
+        endWorkoutTimeoutTask?.cancel()
+        endWorkoutTimeoutTask = nil
+
+        // End Live Activity
         endLiveActivity()
 
-        // 2. Show recap
-        withAnimation {
-            showRecap = true
-        }
+        // ALWAYS clear persisted state. Leaving it active on failure was causing
+        // permanent corruption that required reinstalling the app.
+        InProgressWorkoutStore.clear()
 
-        // 3. Handle state based on save result
-        if workoutSaved {
-            InProgressWorkoutStore.clear()
-            print("✅ Workout completed successfully, state cleared")
-        } else {
-            // Leave state with isActive = true so the next app launch can recover it
-            print("⚠️ Workout may not have saved to HealthKit, keeping state for recovery")
-        }
-
-        // 4. Reset stopping flag
+        // Mark stopping as done BEFORE showing UI, so no timer/update callbacks can re-save state
         isStopping = false
+        isTracking = false
+
+        // Show result to user
+        if workoutSaved {
+            withAnimation { showRecap = true }
+        } else {
+            endWorkoutErrorMessage = "Your workout couldn't be saved to HealthKit. The distance you covered will still count from GPS/pedometer data on your next sync."
+            showEndWorkoutError = true
+        }
     }
 
     // MARK: - Live Activity Management
@@ -4622,85 +4561,42 @@ struct WorkoutTrackingView: View {
         }
     }
 
+    /// Called once per second by the workout timer.
+    /// Updates the Live Activity and persists current state for recovery.
     private func updateLiveActivity() {
-        // CRITICAL FIX: Ensure we have a Live Activity reference
-        // If we don't have one, try to find/create it
-        if workoutActivity == nil {
-            print("⚠️ No Live Activity reference during update, attempting to recover...")
-            startLiveActivity()
-        }
+        // CRITICAL: Never persist state while stopping — finishCleanup may have already cleared it.
+        guard !isStopping else { return }
 
-        guard let activity = workoutActivity else {
-            print("❌ Cannot update Live Activity: no active activity found")
-            return
-        }
-
-        // Compute real-time elapsed time from start date for MAXIMUM ACCURACY
-        // This ensures the Dynamic Island shows the correct time even if the timer drifts
-        let realTimeElapsed: TimeInterval
-        if let startDate = workoutStartDate {
-            realTimeElapsed = Date().timeIntervalSince(startDate)
-        } else {
-            realTimeElapsed = elapsedTime
-        }
-
-        // CRITICAL: Use FRESH data directly from location manager
-        // Don't rely on cached values that might be stale
         let freshDistance = locationManager.currentDistance
         let freshTotalDaily = startingDistance + freshDistance
+        let realTimeElapsed = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
 
-        let updatedState = WorkoutActivityAttributes.ContentState(
-            distance: freshDistance,
-            totalDailyDistance: freshTotalDaily,
-            elapsedTime: realTimeElapsed,
-            goalDistance: goalDistance,
-            activityType: selectedActivityType == .running ? "Running" : "Walking"
-        )
-
-        // Update the Live Activity with fresh data
-        Task {
-            await activity.update(
-                ActivityContent(state: updatedState, staleDate: nil)
+        // Update Live Activity (if we have one)
+        if workoutActivity == nil {
+            startLiveActivity()
+        }
+        if let activity = workoutActivity {
+            let updatedState = WorkoutActivityAttributes.ContentState(
+                distance: freshDistance,
+                totalDailyDistance: freshTotalDaily,
+                elapsedTime: realTimeElapsed,
+                goalDistance: goalDistance,
+                activityType: selectedActivityType == .running ? "Running" : "Walking"
             )
+            Task {
+                await activity.update(ActivityContent(state: updatedState, staleDate: nil))
+            }
         }
 
-        // Flush any buffered route points before persisting state
+        // Persist state for recovery (only update EXISTING state, never create new).
         InProgressWorkoutStore.flushRoutePoints()
-
-        // CRITICAL: Persist complete workout snapshot for recovery
-        // Load existing state to preserve route points and other accumulated data
         if var existingState = InProgressWorkoutStore.load() {
-            // Update dynamic fields while preserving accumulated data
             existingState.elapsedTime = realTimeElapsed
             existingState.currentDistance = freshDistance
             existingState.totalDailyDistance = freshTotalDaily
             existingState.lastSaveTime = Date()
-            existingState.liveActivityID = activity.id
-
-            // Save updated state
+            existingState.liveActivityID = workoutActivity?.id
             InProgressWorkoutStore.save(existingState)
-        } else {
-            // Fallback: create new state if none exists (shouldn't happen but defensive)
-            print("⚠️ Creating new workout state during update (unexpected)")
-            let snapshot = InProgressWorkoutState(
-                isActive: true,
-                isPaused: false,
-                startTime: workoutStartDate ?? Date(),
-                elapsedTime: realTimeElapsed,
-                pausedTime: 0,
-                currentDistance: freshDistance,
-                startingDistance: startingDistance,
-                totalDailyDistance: freshTotalDaily,
-                goalDistance: goalDistance,
-                activityType: selectedActivityType == .running ? "Running" : "Walking",
-                locationTypeRawValue: selectedLocationType.rawValue,
-                workoutUUID: UUID().uuidString,
-                lastSaveTime: Date(),
-                routePoints: [],
-                isUsingPedometer: selectedLocationType == .indoor,
-                liveActivityID: activity.id
-            )
-            InProgressWorkoutStore.save(snapshot)
         }
     }
 

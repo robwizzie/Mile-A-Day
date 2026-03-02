@@ -23,8 +23,7 @@ struct UsernameSetupView: View {
             
             UsernameInputView(
                 username: $username,
-                onSubmit: handleUsernameSubmit,
-                onCancel: handleSkip
+                onSubmit: handleUsernameSubmit
             )
         }
         .alert("Error", isPresented: $showError) {
@@ -66,11 +65,6 @@ struct UsernameSetupView: View {
         }
     }
     
-    private func handleSkip() {
-        withAnimation(MADTheme.Animation.standard) {
-            appStateManager.completeUsernameSetup()
-        }
-    }
 }
 
 #Preview {

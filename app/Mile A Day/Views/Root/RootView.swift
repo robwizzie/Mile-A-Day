@@ -31,6 +31,15 @@ struct RootView: View {
             case .usernameSetup:
                 UsernameSetupView()
                     .environmentObject(userManager)
+                    .preferredColorScheme(.dark)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+
+            case .healthAccess:
+                HealthAccessView()
+                    .preferredColorScheme(.dark)
                     .transition(.asymmetric(
                         insertion: .move(edge: .trailing).combined(with: .opacity),
                         removal: .move(edge: .leading).combined(with: .opacity)
@@ -40,6 +49,7 @@ struct RootView: View {
                 SyncProgressView(onComplete: {
                     appStateManager.completeWorkoutSync()
                 })
+                .preferredColorScheme(.dark)
                 .transition(.asymmetric(
                     insertion: .scale.combined(with: .opacity),
                     removal: .opacity
@@ -51,6 +61,7 @@ struct RootView: View {
                     .environmentObject(userManager)
                     .environmentObject(notificationService)
                     .environment(\.appStateManager, appStateManager)
+                    .preferredColorScheme(.dark)
                     .transition(.asymmetric(
                         insertion: .scale.combined(with: .opacity),
                         removal: .opacity
@@ -59,8 +70,6 @@ struct RootView: View {
         }
         .environment(\.appStateManager, appStateManager)
         .animation(MADTheme.Animation.standard, value: appStateManager.currentState)
-        // Force dark mode app-wide - the app is designed with a dark theme
-        .preferredColorScheme(.dark)
         .onAppear {
             setupApp()
         }

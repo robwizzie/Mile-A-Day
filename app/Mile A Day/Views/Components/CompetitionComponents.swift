@@ -616,6 +616,9 @@ struct CompetitionLeaderboardRow: View {
     let unit: CompetitionUnit
     let isCurrentUser: Bool
     var firstTo: Int = 0
+    var showNudge: Bool = false
+    var nudgeDisabled: Bool = false
+    var onNudge: (() -> Void)? = nil
 
     private var isEliminated: Bool {
         guard competitionType == .streaks, firstTo > 0 else { return false }
@@ -750,6 +753,21 @@ struct CompetitionLeaderboardRow: View {
                 Text(scoreText)
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(isEliminated ? 0.4 : 0.9))
+            }
+
+            // Nudge button
+            if showNudge && !isCurrentUser && !isEliminated {
+                Button {
+                    onNudge?()
+                } label: {
+                    Image(systemName: nudgeDisabled ? "bell.slash.fill" : "bell.badge")
+                        .font(.system(size: 12))
+                        .foregroundColor(nudgeDisabled ? .white.opacity(0.15) : .orange)
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(nudgeDisabled ? Color.white.opacity(0.03) : Color.orange.opacity(0.1)))
+                }
+                .buttonStyle(ScaleButtonStyle())
+                .disabled(nudgeDisabled)
             }
         }
         .padding(MADTheme.Spacing.md)

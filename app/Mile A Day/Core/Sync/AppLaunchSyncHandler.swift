@@ -30,6 +30,12 @@ class AppLaunchSyncHandler: ObservableObject {
 
     /// Check and sync workouts on app launch
     func checkAndSyncOnLaunch() async {
+        // Only sync if user is authenticated
+        guard UserDefaults.standard.bool(forKey: "MAD_IsAuthenticated") else {
+            print("[AppLaunchSyncHandler] Skipping sync - user not authenticated")
+            return
+        }
+
         guard !isSyncing else {
             print("[AppLaunchSyncHandler] Sync already in progress")
             return

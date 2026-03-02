@@ -12,6 +12,7 @@ class AppStateManager: ObservableObject {
         case onboarding
         case authentication
         case usernameSetup
+        case healthAccess
         case workoutSync
         case main
     }
@@ -83,16 +84,15 @@ class AppStateManager: ObservableObject {
         userDefaults.set(true, forKey: isAuthenticatedKey)
         isAuthenticated = true
 
+        // Now that user is authenticated, enable HealthKit background delivery
+        MADBackgroundService.shared.enableBackgroundDeliveryAfterAuth()
+
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 // Check if user already has a username
                 if userManager.currentUser.hasUsername {
-                    // Check if first-time workout sync is needed
-                    if WorkoutSyncService.shared.isFirstTimeSync() {
-                        self.currentState = .workoutSync
-                    } else {
-                        self.currentState = .main
-                    }
+                    // Go to health access step before sync
+                    self.currentState = .healthAccess
                 } else {
                     self.currentState = .usernameSetup
                 }
@@ -100,11 +100,19 @@ class AppStateManager: ObservableObject {
         }
     }
     
-    /// Complete username setup and check if workout sync is needed
+    /// Complete username setup and move to health access
     func completeUsernameSetup() {
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
-                // Check if first-time workout sync is needed
+                self.currentState = .healthAccess
+            }
+        }
+    }
+
+    /// Complete health access and check if workout sync is needed
+    func completeHealthAccess() {
+        DispatchQueue.main.async {
+            withAnimation(MADTheme.Animation.standard) {
                 if WorkoutSyncService.shared.isFirstTimeSync() {
                     self.currentState = .workoutSync
                 } else {

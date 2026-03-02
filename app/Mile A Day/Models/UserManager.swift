@@ -99,11 +99,16 @@ class UserManager: ObservableObject {
         currentUser.backendUserId = backendResponse.user.user_id
         currentUser.authToken = backendResponse.accessToken
         
+        // Pick up username from backend if it exists
+        if let backendUsername = backendResponse.user.username, !backendUsername.isEmpty {
+            currentUser.username = backendUsername
+        }
+
         // Update name if we have it from Apple
         if let fullName = profile.fullName?.formatted(), !fullName.isEmpty {
             currentUser.name = fullName
-        } else if ((backendResponse.user.username?.isEmpty) == nil) {
-            currentUser.name = backendResponse.user.username ?? "User"
+        } else if let backendUsername = backendResponse.user.username, !backendUsername.isEmpty {
+            currentUser.name = backendUsername
         }
         
         // Save Apple profile image if available

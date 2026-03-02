@@ -333,6 +333,38 @@ class CompetitionService: ObservableObject {
         invites.removeAll { $0.competition_id == competitionId }
     }
 
+    // MARK: - Social Actions
+
+    /// Send a flex to all participants in a competition
+    func sendFlex(competitionId: String) async throws {
+        print("[CompetitionService] Sending flex for competition: \(competitionId)")
+
+        let _: FlexResponse = try await makeRequest(
+            endpoint: "/competitions/\(competitionId)/flex",
+            method: .POST,
+            responseType: FlexResponse.self
+        )
+
+        print("[CompetitionService] Flex sent successfully")
+    }
+
+    /// Send a nudge to a specific user in a competition
+    func sendNudge(competitionId: String, targetUserId: String) async throws {
+        print("[CompetitionService] Sending nudge to \(targetUserId) in competition: \(competitionId)")
+
+        let request = NudgeRequest(targetUserId: targetUserId)
+        let jsonData = try JSONEncoder().encode(request)
+
+        let _: NudgeResponse = try await makeRequest(
+            endpoint: "/competitions/\(competitionId)/nudge",
+            method: .POST,
+            body: jsonData,
+            responseType: NudgeResponse.self
+        )
+
+        print("[CompetitionService] Nudge sent successfully")
+    }
+
     // MARK: - Convenience Methods
 
     /// Refresh all competition data

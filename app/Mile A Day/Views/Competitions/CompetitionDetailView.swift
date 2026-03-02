@@ -19,6 +19,21 @@ struct CompetitionDetailView: View {
     @State private var heartsAnimated = false
     @State private var raceAnimated = false
 
+    // Flex/Nudge state
+    @State private var showNudgeConfirm = false
+    @State private var nudgeTargetUser: CompetitionUser?
+    @State private var isSendingAction = false
+    @State private var actionFeedback: ActionFeedback?
+
+    // Settings dropdown
+    @State private var showSettings = false
+
+    // Leaderboard animation
+    @State private var leaderboardAnimated = false
+
+    // Hero count-up animation
+    @State private var heroAnimated = false
+
     var body: some View {
         ZStack {
             MADTheme.Colors.appBackgroundGradient
@@ -87,24 +102,38 @@ struct CompetitionDetailView: View {
     // MARK: - Header Section
     private var headerSection: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
-            // Type icon
-            Image(systemName: competition.type.icon)
-                .font(.system(size: 60))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: competition.type.gradient.map { Color(hex: $0) },
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+            // Type icon (compact for active competitions since hero shows status)
+            if competition.status != .active {
+                Image(systemName: competition.type.icon)
+                    .font(.system(size: 60))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: competition.type.gradient.map { Color(hex: $0) },
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
-                )
-                .frame(width: 120, height: 120)
-                .background(
-                    Circle()
-                        .fill(Color(hex: competition.type.gradient[0]).opacity(0.15))
-                )
+                    .frame(width: 120, height: 120)
+                    .background(
+                        Circle()
+                            .fill(Color(hex: competition.type.gradient[0]).opacity(0.15))
+                    )
+            }
 
             VStack(spacing: MADTheme.Spacing.sm) {
                 HStack(spacing: MADTheme.Spacing.sm) {
+                    if competition.status == .active {
+                        Image(systemName: competition.type.icon)
+                            .font(.system(size: 16))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: competition.type.gradient.map { Color(hex: $0) },
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    }
+
                     Text(competition.type.displayName)
                         .font(MADTheme.Typography.title3)
                         .foregroundColor(.white.opacity(0.7))
@@ -132,11 +161,13 @@ struct CompetitionDetailView: View {
                     )
                 }
 
-                Text(competition.type.description)
-                    .font(MADTheme.Typography.callout)
-                    .foregroundColor(.white.opacity(0.7))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, MADTheme.Spacing.xl)
+                if competition.status != .active {
+                    Text(competition.type.description)
+                        .font(MADTheme.Typography.callout)
+                        .foregroundColor(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, MADTheme.Spacing.xl)
+                }
             }
         }
     }
@@ -369,15 +400,20 @@ struct CompetitionDetailView: View {
     // MARK: - Active Content
     private var activeContent: some View {
         VStack(spacing: MADTheme.Spacing.xl) {
-            // Tracked activities banner
-            trackedActivitiesBanner
+            // 1. Compact hero status
+            heroStatusSection
 
-            // Time remaining countdown (for timed competitions)
-            if let endDate = competition.endDateFormatted {
-                timeRemainingBanner(endDate: endDate)
+            // 2. Enhanced leaderboard (podium + rows with nudge)
+            enhancedLeaderboard
+
+            // 3. Flex action (if eligible)
+            if canFlex {
+                flexButton
+            } else if FlexNudgeTracker.hasSentFlexToday(competitionId: competition.competition_id) {
+                flexSentIndicator
             }
 
-            // Interval navigator + mode content (race has no intervals)
+            // 4. Mode-specific content
             if competition.type != .race {
                 intervalNavigator
                 intervalContent
@@ -385,98 +421,844 @@ struct CompetitionDetailView: View {
                 raceProgressView
             }
 
-            // Overall standings
-            competitionLeaderboard
-
-            // Competition info
-            infoSection
+            // 5. Collapsible settings dropdown
+            settingsDropdown
+        }
+        .confirmationDialog("Send a nudge?", isPresented: $showNudgeConfirm, titleVisibility: .visible) {
+            Button("Send Nudge") {
+                if let user = nudgeTargetUser { sendNudge(to: user) }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            if let user = nudgeTargetUser {
+                Text("Send \(user.displayName) a reminder to lace up and run. Once per person per day.")
+            }
+        }
+        .overlay(alignment: .top) {
+            if let feedback = actionFeedback {
+                feedbackBanner(feedback)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(10)
+            }
         }
     }
 
-    // MARK: - Tracked Activities Banner
-    private var trackedActivitiesBanner: some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            Text("TRACKED ACTIVITIES")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.4))
-                .tracking(1.5)
+    // MARK: - Hero Status Section
+    private var heroStatusSection: some View {
+        let currentUser = competition.users.first(where: { $0.user_id == UserDefaults.standard.string(forKey: "backendUserId") })
+        let todayKey = intervalKey(for: Date())
+        let todayDistance = currentUser?.intervals?[todayKey] ?? 0
+        let goal = competition.options.goal
+        let gradientColors = competition.type.gradient.map { Color(hex: $0) }
 
-            HStack(spacing: MADTheme.Spacing.md) {
+        return VStack(spacing: MADTheme.Spacing.md) {
+            // Type-specific hero content
+            switch competition.type {
+            case .streaks:
+                streakHeroContent(user: currentUser, todayDistance: todayDistance, goal: goal, gradientColors: gradientColors)
+            case .clash:
+                clashHeroContent(user: currentUser, todayDistance: todayDistance, todayKey: todayKey, gradientColors: gradientColors)
+            case .apex:
+                apexHeroContent(user: currentUser, todayDistance: todayDistance, todayKey: todayKey, gradientColors: gradientColors)
+            case .targets:
+                targetsHeroContent(user: currentUser, todayDistance: todayDistance, goal: goal, gradientColors: gradientColors)
+            case .race:
+                raceHeroContent(user: currentUser, goal: goal, gradientColors: gradientColors)
+            }
+
+            // Compact tracked activities + time remaining
+            HStack(spacing: MADTheme.Spacing.sm) {
                 ForEach(competition.workouts, id: \.self) { activity in
-                    HStack(spacing: 6) {
+                    HStack(spacing: 4) {
                         Image(systemName: activity.icon)
-                            .font(.system(size: 14))
+                            .font(.system(size: 10))
                         Text(activity.displayName)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
                     }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.6) },
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                    )
+                    .foregroundColor(.white.opacity(0.5))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.white.opacity(0.06)))
+                }
+
+                Spacer()
+
+                if let endDate = competition.endDateFormatted {
+                    let remaining = endDate.timeIntervalSince(Date())
+                    let days = Int(remaining / 86400)
+                    let hours = Int(remaining.truncatingRemainder(dividingBy: 86400) / 3600)
+                    HStack(spacing: 4) {
+                        Image(systemName: "timer")
+                            .font(.system(size: 10))
+                        Text(days > 0 ? "\(days)d \(hours)h" : "\(hours)h left")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                    }
+                    .foregroundColor(.green.opacity(0.8))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.green.opacity(0.1)))
                 }
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, MADTheme.Spacing.md)
+        .padding(MADTheme.Spacing.lg)
         .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                 .fill(.ultraThinMaterial)
                 .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                         .stroke(
                             LinearGradient(
-                                colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) },
-                                startPoint: .leading,
-                                endPoint: .trailing
+                                colors: gradientColors.map { $0.opacity(0.3) },
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
                             ),
                             lineWidth: 1
                         )
                 )
         )
+        .onAppear {
+            heroAnimated = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                withAnimation(.easeOut(duration: 0.8)) {
+                    heroAnimated = true
+                }
+            }
+        }
     }
 
-    private func timeRemainingBanner(endDate: Date) -> some View {
-        let remaining = endDate.timeIntervalSince(Date())
-        let days = Int(remaining / 86400)
-        let hours = Int(remaining.truncatingRemainder(dividingBy: 86400) / 3600)
-        let minutes = Int(remaining.truncatingRemainder(dividingBy: 3600) / 60)
+    // MARK: - Hero Content Per Type
 
-        return HStack {
-            Image(systemName: "timer")
-                .foregroundColor(.green)
+    private func streakHeroContent(user: CompetitionUser?, todayDistance: Double, goal: Double, gradientColors: [Color]) -> some View {
+        let streak = Int(user?.score ?? 0)
+        let completed = todayDistance >= goal
+        let remaining = max(0, goal - todayDistance)
+        let firstTo = competition.options.first_to
 
-            if remaining <= 0 {
-                Text("Competition ending...")
-                    .font(MADTheme.Typography.headline)
+        return VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 28))
+                    .foregroundColor(.orange)
+                    .shadow(color: .orange.opacity(0.4), radius: 6)
+
+                CountingText(value: heroAnimated ? Double(streak) : 0, format: "%.0f", suffix: "")
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
-            } else if days > 0 {
-                Text("\(days)d \(hours)h remaining")
-                    .font(MADTheme.Typography.headline)
-                    .foregroundColor(.white)
-            } else {
-                Text("\(hours)h \(minutes)m remaining")
-                    .font(MADTheme.Typography.headline)
-                    .foregroundColor(.white)
+
+                Text("day streak")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.4))
+                    .padding(.top, 14)
             }
 
+            if completed {
+                Label("Done \u{2014} \(String(format: "%.1f", todayDistance)) \(competition.options.unit.shortDisplayName)", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.green)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.green.opacity(0.12)))
+            } else {
+                Label("\(String(format: "%.1f", remaining)) \(competition.options.unit.shortDisplayName) to go", systemImage: "figure.run")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.orange.opacity(0.12)))
+            }
+
+            if firstTo > 0, let user = user {
+                let lives = user.remaining_lives ?? firstTo
+                HStack(spacing: 4) {
+                    ForEach(0..<min(firstTo, 6), id: \.self) { i in
+                        Image(systemName: i < lives ? "heart.fill" : "heart")
+                            .font(.system(size: 12))
+                            .foregroundColor(i < lives ? .red : .white.opacity(0.15))
+                    }
+                    if firstTo > 6 {
+                        Text("+\(firstTo - 6)")
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.3))
+                    }
+                }
+            }
+        }
+    }
+
+    private func clashHeroContent(user: CompetitionUser?, todayDistance: Double, todayKey: String, gradientColors: [Color]) -> some View {
+        let acceptedUsers = competition.users.filter { $0.invite_status == .accepted }
+        let myDistance = todayDistance
+        let bestOpponentDistance = acceptedUsers.filter { $0.user_id != user?.user_id }.map { $0.intervals?[todayKey] ?? 0 }.max() ?? 0
+        let isLeading = myDistance > 0 && myDistance >= bestOpponentDistance
+        let points = Int(user?.score ?? 0)
+
+        return VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .bottom))
+
+                CountingText(value: heroAnimated ? Double(points) : 0, format: "%.0f", suffix: "")
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+
+                Text(points == 1 ? "win" : "wins")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.4))
+                    .padding(.top, 14)
+            }
+
+            if myDistance > 0 {
+                let diff = myDistance - bestOpponentDistance
+                if isLeading && diff > 0 {
+                    Label("Leading by \(String(format: "%.1f", diff)) \(competition.options.unit.shortDisplayName)", systemImage: "crown.fill")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.green)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color.green.opacity(0.12)))
+                } else if diff < 0 {
+                    Label("Behind by \(String(format: "%.1f", abs(diff))) \(competition.options.unit.shortDisplayName)", systemImage: "arrow.up")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color.orange.opacity(0.12)))
+                } else {
+                    Label("Tied at \(String(format: "%.1f", myDistance)) \(competition.options.unit.shortDisplayName)", systemImage: "equal")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.7))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color.white.opacity(0.08)))
+                }
+            } else {
+                Label("No activity yet today", systemImage: "figure.run")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(Color.white.opacity(0.06)))
+            }
+        }
+    }
+
+    private func apexHeroContent(user: CompetitionUser?, todayDistance: Double, todayKey: String, gradientColors: [Color]) -> some View {
+        let totalScore = user?.score ?? 0
+        let acceptedUsers = competition.users.filter { $0.invite_status == .accepted }
+        let myRank = acceptedUsers.sorted { ($0.score ?? 0) > ($1.score ?? 0) }.firstIndex(where: { $0.user_id == user?.user_id }).map { $0 + 1 } ?? 0
+
+        return VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .bottom))
+
+                CountingText(value: heroAnimated ? totalScore : 0, format: "%.1f", suffix: "")
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+
+                Text(competition.options.unit.shortDisplayName)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.4))
+                    .padding(.top, 14)
+            }
+
+            HStack(spacing: MADTheme.Spacing.sm) {
+                if myRank > 0 {
+                    Label(rankOrdinal(myRank) + " of \(acceptedUsers.count)", systemImage: "trophy")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(myRank == 1 ? .yellow : .white.opacity(0.7))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(myRank == 1 ? Color.yellow.opacity(0.12) : Color.white.opacity(0.06)))
+                }
+
+                if todayDistance > 0 {
+                    Label("+\(String(format: "%.1f", todayDistance)) today", systemImage: "figure.run")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.green.opacity(0.8))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color.green.opacity(0.1)))
+                }
+            }
+        }
+    }
+
+    private func targetsHeroContent(user: CompetitionUser?, todayDistance: Double, goal: Double, gradientColors: [Color]) -> some View {
+        let points = Int(user?.score ?? 0)
+        let completed = todayDistance >= goal
+        let progress = min(todayDistance / max(goal, 0.1), 1.0)
+
+        return VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "target")
+                    .font(.system(size: 28))
+                    .foregroundStyle(LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .bottom))
+
+                CountingText(value: heroAnimated ? Double(points) : 0, format: "%.0f", suffix: "")
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+
+                Text(points == 1 ? "point" : "points")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.4))
+                    .padding(.top, 14)
+            }
+
+            // Today's progress bar
+            VStack(spacing: 6) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.white.opacity(0.08))
+                            .frame(height: 8)
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(completed
+                                ? LinearGradient(colors: [.green, .green.opacity(0.8)], startPoint: .leading, endPoint: .trailing)
+                                : LinearGradient(colors: gradientColors, startPoint: .leading, endPoint: .trailing))
+                            .frame(width: geo.size.width * (heroAnimated ? progress : 0), height: 8)
+                            .animation(.easeOut(duration: 0.8).delay(0.3), value: heroAnimated)
+                    }
+                }
+                .frame(height: 8)
+
+                HStack {
+                    if completed {
+                        Label("Target hit!", systemImage: "checkmark.circle.fill")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(.green)
+                    } else {
+                        Text("\(String(format: "%.1f", todayDistance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                    Spacer()
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.sm)
+        }
+    }
+
+    private func raceHeroContent(user: CompetitionUser?, goal: Double, gradientColors: [Color]) -> some View {
+        let totalDistance = user?.score ?? 0
+        let progress = min(totalDistance / max(goal, 0.1), 1.0)
+        let percent = Int(progress * 100)
+        let acceptedUsers = competition.users.filter { $0.invite_status == .accepted }
+        let myRank = acceptedUsers.sorted { ($0.score ?? 0) > ($1.score ?? 0) }.firstIndex(where: { $0.user_id == user?.user_id }).map { $0 + 1 } ?? 0
+
+        return VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "flag.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .bottom))
+
+                CountingText(value: heroAnimated ? Double(percent) : 0, format: "%.0f", suffix: "%")
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+
+                Text("complete")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.4))
+                    .padding(.top, 14)
+            }
+
+            // Progress bar
+            VStack(spacing: 6) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.white.opacity(0.08))
+                            .frame(height: 8)
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(LinearGradient(colors: gradientColors, startPoint: .leading, endPoint: .trailing))
+                            .frame(width: geo.size.width * (heroAnimated ? progress : 0), height: 8)
+                            .animation(.easeOut(duration: 0.8).delay(0.3), value: heroAnimated)
+                    }
+                }
+                .frame(height: 8)
+
+                HStack {
+                    Text("\(String(format: "%.1f", totalDistance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                    Spacer()
+                    if myRank > 0 {
+                        Text(rankOrdinal(myRank) + " place")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(myRank == 1 ? .yellow : .white.opacity(0.6))
+                    }
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.sm)
+        }
+    }
+
+    private func rankOrdinal(_ rank: Int) -> String {
+        switch rank {
+        case 1: return "1st"
+        case 2: return "2nd"
+        case 3: return "3rd"
+        default: return "\(rank)th"
+        }
+    }
+
+    // MARK: - Enhanced Leaderboard
+    private var enhancedLeaderboard: some View {
+        let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
+        let rankedUsers = competition.users
+            .filter { $0.invite_status == .accepted }
+            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        let gradientColors = competition.type.gradient.map { Color(hex: $0) }
+        let todayKey = intervalKey(for: Date())
+
+        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            // Section header
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
+                    )
+                Text("Leaderboard")
+                    .font(MADTheme.Typography.title3)
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                Text("\(rankedUsers.count) competing")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+            .padding(.horizontal, MADTheme.Spacing.sm)
+
+            if rankedUsers.isEmpty {
+                Text("No participants yet")
+                    .font(MADTheme.Typography.callout)
+                    .foregroundColor(.white.opacity(0.5))
+                    .padding(MADTheme.Spacing.lg)
+            } else {
+                VStack(spacing: MADTheme.Spacing.md) {
+                    // Podium for top 3
+                    if rankedUsers.count >= 2 {
+                        enhancedPodium(rankedUsers: Array(rankedUsers.prefix(3)), gradientColors: gradientColors, currentUserId: currentUserId)
+                    }
+
+                    // Ranked rows with nudge
+                    VStack(spacing: MADTheme.Spacing.sm) {
+                        ForEach(Array(rankedUsers.enumerated()), id: \.element.id) { index, user in
+                            let isMe = user.user_id == currentUserId
+                            let showNudge = !isMe && shouldShowNudge(for: user, todayKey: todayKey)
+                            let nudgeDisabled = FlexNudgeTracker.hasSentNudgeToday(competitionId: competition.competition_id, targetUserId: user.user_id)
+
+                            CompetitionLeaderboardRow(
+                                rank: index + 1,
+                                user: user,
+                                competitionType: competition.type,
+                                unit: competition.options.unit,
+                                isCurrentUser: isMe,
+                                firstTo: competition.options.first_to,
+                                showNudge: showNudge,
+                                nudgeDisabled: nudgeDisabled,
+                                onNudge: {
+                                    nudgeTargetUser = user
+                                    showNudgeConfirm = true
+                                }
+                            )
+                            .opacity(leaderboardAnimated ? 1 : 0)
+                            .offset(y: leaderboardAnimated ? 0 : 15)
+                            .animation(
+                                .spring(response: 0.5, dampingFraction: 0.8)
+                                    .delay(0.15 + Double(index) * 0.06),
+                                value: leaderboardAnimated
+                            )
+                        }
+                    }
+                }
+                .padding(MADTheme.Spacing.lg)
+                .background(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                .stroke(
+                                    LinearGradient(
+                                        colors: gradientColors.map { $0.opacity(0.3) } + [Color.clear],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1
+                                )
+                        )
+                )
+            }
+        }
+        .onAppear {
+            leaderboardAnimated = false
+            podiumAnimated = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                    leaderboardAnimated = true
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                withAnimation(.spring(response: 0.7, dampingFraction: 0.65)) {
+                    podiumAnimated = true
+                }
+            }
+        }
+    }
+
+    // MARK: - Enhanced Podium
+    private func enhancedPodium(rankedUsers: [CompetitionUser], gradientColors: [Color], currentUserId: String?) -> some View {
+        let medalColors: [[Color]] = [
+            [.yellow, .orange],
+            [Color(white: 0.85), Color(white: 0.6)],
+            [.brown, Color(red: 0.7, green: 0.4, blue: 0.2)]
+        ]
+
+        return HStack(alignment: .bottom, spacing: MADTheme.Spacing.md) {
+            // 2nd place
+            if rankedUsers.count > 1 {
+                enhancedPodiumSlot(user: rankedUsers[1], rank: 2, colors: medalColors[1], height: 44, avatarSize: 36, isCurrentUser: rankedUsers[1].user_id == currentUserId)
+            }
+
+            // 1st place with glow
+            ZStack {
+                // Radial glow behind 1st place
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [medalColors[0][0].opacity(0.25), Color.clear],
+                            center: .center,
+                            startRadius: 10,
+                            endRadius: 50
+                        )
+                    )
+                    .frame(width: 100, height: 100)
+                    .offset(y: -20)
+                    .opacity(podiumAnimated ? 1 : 0)
+                    .scaleEffect(podiumAnimated ? 1.0 : 0.5)
+
+                enhancedPodiumSlot(user: rankedUsers[0], rank: 1, colors: medalColors[0], height: 56, avatarSize: 44, isCurrentUser: rankedUsers[0].user_id == currentUserId)
+            }
+
+            // 3rd place
+            if rankedUsers.count > 2 {
+                enhancedPodiumSlot(user: rankedUsers[2], rank: 3, colors: medalColors[2], height: 36, avatarSize: 36, isCurrentUser: rankedUsers[2].user_id == currentUserId)
+            }
+        }
+        .padding(.vertical, MADTheme.Spacing.sm)
+    }
+
+    private func enhancedPodiumSlot(user: CompetitionUser, rank: Int, colors: [Color], height: CGFloat, avatarSize: CGFloat, isCurrentUser: Bool) -> some View {
+        VStack(spacing: 3) {
+            // Crown for 1st
+            if rank == 1 {
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
+                    )
+                    .shadow(color: .yellow.opacity(0.4), radius: 4)
+            }
+
+            // Medal icon
+            Image(systemName: "medal.fill")
+                .font(.system(size: rank == 1 ? 16 : 13))
+                .foregroundStyle(
+                    LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom)
+                )
+
+            // Avatar with YOU badge below (fixed height container)
+            VStack(spacing: 2) {
+                Circle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: avatarSize, height: avatarSize)
+                    .overlay(
+                        Text(user.displayName.prefix(1).uppercased())
+                            .font(.system(size: avatarSize * 0.38, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                    )
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
+                                lineWidth: rank == 1 ? 2.5 : 2
+                            )
+                    )
+
+                if isCurrentUser {
+                    Text("YOU")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(MADTheme.Colors.madRed))
+                } else {
+                    // Invisible spacer to keep layout consistent
+                    Color.clear.frame(height: 12)
+                }
+            }
+
+            Text(user.displayName)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.7))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: avatarSize + 20)
+
+            Text(leaderboardScoreLabel(for: user))
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+
+            // Pedestal
+            RoundedRectangle(cornerRadius: 6)
+                .fill(
+                    LinearGradient(
+                        colors: colors.map { $0.opacity(0.2) },
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(height: podiumAnimated ? height : 0)
+                .overlay(
+                    Text("\(rank)")
+                        .font(.system(size: height * 0.45, weight: .bold, design: .rounded))
+                        .foregroundColor(colors[0].opacity(0.25))
+                )
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Nudge Eligibility
+    private func shouldShowNudge(for user: CompetitionUser, todayKey: String) -> Bool {
+        let distance = user.intervals?[todayKey] ?? 0
+        let goal = competition.options.goal
+
+        switch competition.type {
+        case .streaks, .targets:
+            return distance < goal
+        case .clash:
+            return true // Can always nudge opponents in clash
+        case .apex:
+            return distance == 0 // Nudge if they haven't run today
+        case .race:
+            return distance == 0 // Nudge if they haven't run today
+        }
+    }
+
+    // MARK: - Flex Eligibility
+    private var canFlex: Bool {
+        guard !FlexNudgeTracker.hasSentFlexToday(competitionId: competition.competition_id) else {
+            return false
+        }
+
+        let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
+        guard let currentUser = competition.users.first(where: { $0.user_id == currentUserId }) else {
+            return false
+        }
+
+        let todayKey = intervalKey(for: Date())
+        let distance = currentUser.intervals?[todayKey] ?? 0
+        let goal = competition.options.goal
+
+        switch competition.type {
+        case .streaks:
+            return distance >= goal
+        case .targets:
+            return distance >= goal
+        case .clash:
+            let acceptedUsers = competition.users.filter { $0.invite_status == .accepted }
+            let bestOpponent = acceptedUsers
+                .filter { $0.user_id != currentUser.user_id }
+                .map { $0.intervals?[todayKey] ?? 0 }
+                .max() ?? 0
+            return distance > 0 && distance >= bestOpponent
+        case .apex:
+            return distance > 0
+        case .race:
+            return distance > 0
+        }
+    }
+
+    // MARK: - Flex Button
+    private var flexButton: some View {
+        let typeColor = Color(hex: competition.type.gradient[0])
+        let subtitle: String = {
+            switch competition.type {
+            case .streaks: return "Let them know you finished"
+            case .clash: return "Show off your lead"
+            case .apex: return "They'll know you put in work"
+            case .targets: return "You hit your target"
+            case .race: return "You're making progress"
+            }
+        }()
+
+        return Button { sendFlex() } label: {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "hand.raised.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(typeColor)
+                    .shadow(color: typeColor.opacity(0.4), radius: 4)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Flex on everyone")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text(subtitle)
+                        .font(.system(size: 10, design: .rounded))
+                        .foregroundColor(.white.opacity(0.35))
+                }
+
+                Spacer()
+
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.3))
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                            .stroke(typeColor.opacity(0.25), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+
+    // MARK: - Flex Sent Indicator
+    private var flexSentIndicator: some View {
+        HStack(spacing: MADTheme.Spacing.sm) {
+            Image(systemName: "hand.raised.fill")
+                .font(.system(size: 14))
+                .foregroundColor(.green.opacity(0.6))
+
+            Text("Flex sent today")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.35))
+
             Spacer()
+
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 12))
+                .foregroundColor(.green.opacity(0.4))
         }
         .padding(MADTheme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .fill(Color.white.opacity(0.03))
+        )
+    }
+
+    // MARK: - Flex/Nudge Actions
+    private func sendFlex() {
+        isSendingAction = true
+        Task {
+            do {
+                try await competitionService.sendFlex(competitionId: competition.competition_id)
+                await MainActor.run {
+                    isSendingAction = false
+                    FlexNudgeTracker.markFlexSent(competitionId: competition.competition_id)
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    showActionFeedback(ActionFeedback(icon: "hand.raised.fill", message: "Flex sent!", isError: false))
+                }
+            } catch {
+                await MainActor.run {
+                    isSendingAction = false
+                    let msg = (error as? CompetitionServiceError)?.errorDescription ?? "Could not send flex"
+                    showActionFeedback(ActionFeedback(icon: "xmark.circle", message: msg, isError: true))
+                }
+            }
+        }
+    }
+
+    private func sendNudge(to user: CompetitionUser) {
+        isSendingAction = true
+        Task {
+            do {
+                try await competitionService.sendNudge(competitionId: competition.competition_id, targetUserId: user.user_id)
+                await MainActor.run {
+                    isSendingAction = false
+                    FlexNudgeTracker.markNudgeSent(competitionId: competition.competition_id, targetUserId: user.user_id)
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    showActionFeedback(ActionFeedback(icon: "bell.badge.fill", message: "Nudge sent to \(user.displayName)!", isError: false))
+                }
+            } catch {
+                await MainActor.run {
+                    isSendingAction = false
+                    let msg = (error as? CompetitionServiceError)?.errorDescription ?? "Could not send nudge"
+                    showActionFeedback(ActionFeedback(icon: "xmark.circle", message: msg, isError: true))
+                }
+            }
+        }
+    }
+
+    private func showActionFeedback(_ feedback: ActionFeedback) {
+        withAnimation(.easeInOut(duration: 0.2)) { actionFeedback = feedback }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            withAnimation(.easeInOut(duration: 0.2)) { actionFeedback = nil }
+        }
+    }
+
+    private func feedbackBanner(_ feedback: ActionFeedback) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: feedback.icon)
+                .font(.system(size: 12))
+            Text(feedback.message)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+        }
+        .foregroundColor(feedback.isError ? .red : .green)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            Capsule()
+                .fill(feedback.isError ? Color.red.opacity(0.12) : Color.green.opacity(0.12))
+        )
+        .padding(.top, 8)
+    }
+
+    // MARK: - Collapsible Settings Dropdown
+    private var settingsDropdown: some View {
+        VStack(spacing: 0) {
+            // Tappable header
+            HStack {
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.4))
+                Text("Competition Details")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+                Spacer()
+                Image(systemName: showSettings ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.25))
+            }
+            .padding(MADTheme.Spacing.md)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showSettings.toggle()
+                }
+            }
+
+            if showSettings {
+                infoSection
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .padding(.top, -MADTheme.Spacing.sm)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                 .fill(.ultraThinMaterial)
                 .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                        .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
                 )
         )
     }
@@ -903,8 +1685,9 @@ struct CompetitionDetailView: View {
             )
         }
         .onAppear {
+            heartsAnimated = false
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                withAnimation {
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
                     heartsAnimated = true
                 }
             }
@@ -1241,7 +2024,9 @@ struct CompetitionDetailView: View {
         .onAppear {
             raceAnimated = false
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                raceAnimated = true
+                withAnimation(.easeOut(duration: 0.8)) {
+                    raceAnimated = true
+                }
             }
         }
     }
@@ -1358,176 +2143,6 @@ struct CompetitionDetailView: View {
         }
     }
 
-    private var competitionLeaderboard: some View {
-        let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
-        let rankedUsers = competition.users
-            .filter { $0.invite_status == .accepted }
-            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
-        let gradientColors = competition.type.gradient.map { Color(hex: $0) }
-
-        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            // Section header with trophy
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: "trophy.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.yellow, .orange],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                Text("Leaderboard")
-                    .font(MADTheme.Typography.title3)
-                    .foregroundColor(.white)
-
-                Spacer()
-
-                Text("\(rankedUsers.count) competing")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.35))
-            }
-            .padding(.horizontal, MADTheme.Spacing.sm)
-
-            if rankedUsers.isEmpty {
-                Text("No participants yet")
-                    .font(MADTheme.Typography.callout)
-                    .foregroundColor(.white.opacity(0.5))
-                    .padding(MADTheme.Spacing.lg)
-            } else {
-                VStack(spacing: MADTheme.Spacing.md) {
-                    // Mini podium for top 3 when there are enough users
-                    if rankedUsers.count >= 2 {
-                        competitionMiniPodium(rankedUsers: Array(rankedUsers.prefix(3)), gradientColors: gradientColors, currentUserId: currentUserId)
-                    }
-
-                    // All ranked rows
-                    VStack(spacing: MADTheme.Spacing.sm) {
-                        ForEach(Array(rankedUsers.enumerated()), id: \.element.id) { index, user in
-                            CompetitionLeaderboardRow(
-                                rank: index + 1,
-                                user: user,
-                                competitionType: competition.type,
-                                unit: competition.options.unit,
-                                isCurrentUser: user.user_id == currentUserId,
-                                firstTo: competition.options.first_to
-                            )
-                        }
-                    }
-                }
-                .padding(MADTheme.Spacing.lg)
-                .background(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                                .stroke(
-                                    LinearGradient(
-                                        colors: gradientColors.map { $0.opacity(0.3) } + [Color.clear],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 1
-                                )
-                        )
-                )
-            }
-        }
-    }
-
-    // MARK: - Competition Mini Podium (Active)
-    private func competitionMiniPodium(rankedUsers: [CompetitionUser], gradientColors: [Color], currentUserId: String?) -> some View {
-        let medalColors: [[Color]] = [
-            [.yellow, .orange],
-            [Color(white: 0.85), Color(white: 0.6)],
-            [.brown, Color(red: 0.7, green: 0.4, blue: 0.2)]
-        ]
-
-        return HStack(alignment: .bottom, spacing: MADTheme.Spacing.md) {
-            // 2nd place
-            if rankedUsers.count > 1 {
-                miniPodiumSlot(user: rankedUsers[1], rank: 2, colors: medalColors[1], height: 44, avatarSize: 36, isCurrentUser: rankedUsers[1].user_id == currentUserId)
-            }
-
-            // 1st place
-            miniPodiumSlot(user: rankedUsers[0], rank: 1, colors: medalColors[0], height: 56, avatarSize: 44, isCurrentUser: rankedUsers[0].user_id == currentUserId)
-
-            // 3rd place
-            if rankedUsers.count > 2 {
-                miniPodiumSlot(user: rankedUsers[2], rank: 3, colors: medalColors[2], height: 36, avatarSize: 36, isCurrentUser: rankedUsers[2].user_id == currentUserId)
-            }
-        }
-        .padding(.vertical, MADTheme.Spacing.sm)
-    }
-
-    private func miniPodiumSlot(user: CompetitionUser, rank: Int, colors: [Color], height: CGFloat, avatarSize: CGFloat, isCurrentUser: Bool) -> some View {
-        VStack(spacing: MADTheme.Spacing.xs) {
-            // Crown for 1st
-            if rank == 1 {
-                Image(systemName: "crown.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(
-                        LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
-                    )
-            }
-
-            // Avatar
-            ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.12))
-                    .frame(width: avatarSize, height: avatarSize)
-                    .overlay(
-                        Text(user.displayName.prefix(1).uppercased())
-                            .font(.system(size: avatarSize * 0.38, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                    )
-                    .overlay(
-                        Circle()
-                            .stroke(
-                                LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing),
-                                lineWidth: rank == 1 ? 2.5 : 2
-                            )
-                    )
-
-                if isCurrentUser {
-                    Text("YOU")
-                        .font(.system(size: 7, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 3)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(MADTheme.Colors.madRed))
-                        .offset(y: avatarSize / 2 + 4)
-                }
-            }
-
-            Text(user.displayName)
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.7))
-                .lineLimit(1)
-
-            Text(leaderboardScoreLabel(for: user))
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
-
-            // Pedestal
-            RoundedRectangle(cornerRadius: 6)
-                .fill(
-                    LinearGradient(
-                        colors: colors.map { $0.opacity(0.2) },
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(height: podiumAnimated ? height : 0)
-                .overlay(
-                    Text("\(rank)")
-                        .font(.system(size: height * 0.45, weight: .bold, design: .rounded))
-                        .foregroundColor(colors[0].opacity(0.25))
-                )
-        }
-        .frame(maxWidth: .infinity)
-    }
-
     private func leaderboardScoreLabel(for user: CompetitionUser) -> String {
         let score = user.score ?? 0
         switch competition.type {
@@ -1585,6 +2200,8 @@ struct CompetitionDetailView: View {
                 }
             }
             .onAppear {
+                showCelebration = false
+                podiumAnimated = false
                 withAnimation(.spring(response: 0.6, dampingFraction: 0.6)) {
                     showCelebration = true
                 }
@@ -1983,6 +2600,16 @@ struct CompetitionDetailView: View {
     // MARK: - Toolbar
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .navigationBarLeading) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+        }
+
         ToolbarItem(placement: .navigationBarTrailing) {
             if competition.isOwner {
                 Menu {
@@ -2277,6 +2904,57 @@ struct FriendInviteRow: View {
                         .stroke(Color.white.opacity(0.2), lineWidth: 1)
                 )
         )
+    }
+}
+
+// MARK: - Flex/Nudge Tracker
+struct FlexNudgeTracker {
+    private static let flexPrefix = "flex_sent_"
+    private static let nudgePrefix = "nudge_sent_"
+
+    static func hasSentFlexToday(competitionId: String) -> Bool {
+        UserDefaults.standard.bool(forKey: flexPrefix + competitionId + "_" + todayKey())
+    }
+
+    static func markFlexSent(competitionId: String) {
+        UserDefaults.standard.set(true, forKey: flexPrefix + competitionId + "_" + todayKey())
+    }
+
+    static func hasSentNudgeToday(competitionId: String, targetUserId: String) -> Bool {
+        UserDefaults.standard.bool(forKey: nudgePrefix + competitionId + "_" + targetUserId + "_" + todayKey())
+    }
+
+    static func markNudgeSent(competitionId: String, targetUserId: String) {
+        UserDefaults.standard.set(true, forKey: nudgePrefix + competitionId + "_" + targetUserId + "_" + todayKey())
+    }
+
+    private static func todayKey() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
+    }
+}
+
+// MARK: - Action Feedback
+struct ActionFeedback: Equatable {
+    let icon: String
+    let message: String
+    let isError: Bool
+}
+
+// MARK: - Counting Text (Animatable number display)
+struct CountingText: View, Animatable {
+    var value: Double
+    let format: String
+    let suffix: String
+
+    var animatableData: Double {
+        get { value }
+        set { value = newValue }
+    }
+
+    var body: some View {
+        Text(String(format: format, value) + suffix)
     }
 }
 

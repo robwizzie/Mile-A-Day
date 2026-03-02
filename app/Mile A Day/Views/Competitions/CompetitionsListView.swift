@@ -151,7 +151,7 @@ struct CompetitionsListView: View {
                                 iconColor: .green,
                                 isExpanded: $activeExpanded
                             ) {
-                                ForEach(activeComps) { competition in
+                                ForEach(activeComps, id: \.competition_id) { competition in
                                     CompetitionCard(competition: competition, action: {
                                         selectedCompetition = competition
                                     })
@@ -169,7 +169,7 @@ struct CompetitionsListView: View {
                                 iconColor: .orange,
                                 isExpanded: $waitingExpanded
                             ) {
-                                ForEach(lobbyComps) { competition in
+                                ForEach(lobbyComps, id: \.competition_id) { competition in
                                     CompetitionCard(competition: competition, action: {
                                         selectedCompetition = competition
                                     })
@@ -187,7 +187,7 @@ struct CompetitionsListView: View {
                                 iconColor: .gray,
                                 isExpanded: $finishedExpanded
                             ) {
-                                ForEach(finishedComps) { competition in
+                                ForEach(finishedComps, id: \.competition_id) { competition in
                                     CompetitionCard(competition: competition, action: {
                                         selectedCompetition = competition
                                     })
@@ -218,7 +218,7 @@ struct CompetitionsListView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: MADTheme.Spacing.lg) {
-                        ForEach(competitionService.invites) { competition in
+                        ForEach(competitionService.invites, id: \.competition_id) { competition in
                             InviteCard(
                                 competition: competition,
                                 onAccept: {
