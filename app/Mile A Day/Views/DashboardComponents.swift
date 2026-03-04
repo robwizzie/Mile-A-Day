@@ -325,7 +325,7 @@ struct BadgesPreviewCard: View {
                                 .font(.system(size: 32))
                                 .foregroundColor(.secondary.opacity(0.4))
 
-                            Text("Start running to earn badges!")
+                            Text("Start running to earn medals!")
                                 .font(.system(size: 12, weight: .medium, design: .rounded))
                                 .foregroundColor(.secondary)
                         }

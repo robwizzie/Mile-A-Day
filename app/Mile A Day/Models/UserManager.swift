@@ -206,11 +206,14 @@ class UserManager: ObservableObject {
         saveUserData()
     }
     
-    // Update fastest mile pace from backend (authoritative source)
+    // Update fastest mile pace from backend (only if it's actually faster)
     func updateFastestPaceFromBackend(_ paceMinutesPerMile: TimeInterval) {
         guard paceMinutesPerMile > 0 else { return }
-        currentUser.fastestMilePace = paceMinutesPerMile
-        saveUserData()
+        // Only update if we don't have a pace yet OR the backend value is faster (lower)
+        if currentUser.fastestMilePace == 0 || paceMinutesPerMile < currentUser.fastestMilePace {
+            currentUser.fastestMilePace = paceMinutesPerMile
+            saveUserData()
+        }
     }
 
     // Legacy method for backward compatibility

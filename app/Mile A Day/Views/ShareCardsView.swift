@@ -1479,12 +1479,33 @@ struct CustomShareCardView: View {
         Color(hex: config.accentColor)
     }
     
+    // Dynamic sizing based on element count
+    private var elementSpacing: CGFloat {
+        config.elements.count > 5 ? 12 : 20
+    }
+
+    private var titleSize: CGFloat {
+        config.elements.count > 6 ? 26 : 32
+    }
+
+    private var elementFontSize: CGFloat {
+        config.elements.count > 6 ? 17 : 20
+    }
+
+    private var elementIconSize: CGFloat {
+        config.elements.count > 6 ? 17 : 20
+    }
+
+    private var logoSize: CGFloat {
+        config.elements.count > 5 ? 100 : 140
+    }
+
     var body: some View {
         ZStack {
             // Base background color
             RoundedRectangle(cornerRadius: 80)
                 .fill(isDarkMode ? Color.black.opacity(0.95) : Color.white.opacity(0.2))
-            
+
             // Custom color tint overlay
             RoundedRectangle(cornerRadius: 80)
                 .fill(
@@ -1498,7 +1519,7 @@ struct CustomShareCardView: View {
                         endPoint: .bottomTrailing
                     )
                 )
-            
+
             // Custom color glow outline
             RoundedRectangle(cornerRadius: 80)
                 .stroke(
@@ -1513,38 +1534,38 @@ struct CustomShareCardView: View {
                     ),
                     lineWidth: 4
                 )
-            
+
             // Shadow for glow effect
             RoundedRectangle(cornerRadius: 80)
                 .fill(Color.clear)
                 .shadow(color: accentColor.opacity(0.7), radius: 40, x: 0, y: 0)
-            
+
             VStack(spacing: 0) {
                 Spacer()
-                
-                // Custom content - centered
-                VStack(spacing: 24) {
+
+                // Custom content - centered with adaptive sizing
+                VStack(spacing: config.elements.count > 5 ? 16 : 24) {
                     Text(config.name.uppercased())
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .font(.system(size: titleSize, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
-                    
-                    VStack(spacing: 20) {
+
+                    VStack(spacing: elementSpacing) {
                         ForEach(config.elements, id: \.self) { element in
                             elementView(for: element)
                         }
                     }
                 }
-                
+
                 Spacer()
-                
+
                 // MAD icon and slogan at bottom
-                VStack(spacing: 8) {
+                VStack(spacing: 6) {
                     Image("mad-logo")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(width: 140, height: 140)
+                        .frame(width: logoSize, height: logoSize)
                         .shadow(color: .black.opacity(0.4), radius: 15, x: 0, y: 5)
-                    
+
                     Text("Go the Extra Mile")
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.8))
@@ -1564,38 +1585,38 @@ struct CustomShareCardView: View {
         case .streak:
             HStack(spacing: 12) {
                 Image(systemName: element.icon)
-                    .font(.system(size: 20))
+                    .font(.system(size: elementIconSize))
                     .foregroundColor(element.color)
                 Text("\(user.streak) Day Streak")
-                    .font(.system(size: 20, weight: .medium, design: .rounded))
+                    .font(.system(size: elementFontSize, weight: .medium, design: .rounded))
                     .foregroundColor(.white)
             }
         case .todaysDistance:
             HStack(spacing: 12) {
                 Image(systemName: element.icon)
-                    .font(.system(size: 20))
+                    .font(.system(size: elementIconSize))
                     .foregroundColor(element.color)
                 Text("\(String(format: "%.2f", currentDistance)) mi Today")
-                    .font(.system(size: 20, weight: .medium, design: .rounded))
+                    .font(.system(size: elementFontSize, weight: .medium, design: .rounded))
                     .foregroundColor(.white)
             }
         case .todaysProgress:
             HStack(spacing: 12) {
                 Image(systemName: element.icon)
-                    .font(.system(size: 20))
+                    .font(.system(size: elementIconSize))
                     .foregroundColor(element.color)
                 Text("\(Int(progress * 100))% Complete")
-                    .font(.system(size: 20, weight: .medium, design: .rounded))
+                    .font(.system(size: elementFontSize, weight: .medium, design: .rounded))
                     .foregroundColor(.white)
             }
         case .goalStatus:
             if isGoalCompleted {
                 HStack(spacing: 12) {
                     Image(systemName: element.icon)
-                        .font(.system(size: 20))
+                        .font(.system(size: elementIconSize))
                         .foregroundColor(.green)
                     Text("Goal Completed!")
-                        .font(.system(size: 20, weight: .medium, design: .rounded))
+                        .font(.system(size: elementFontSize, weight: .medium, design: .rounded))
                         .foregroundColor(.white)
                 }
             }
@@ -1605,48 +1626,48 @@ struct CustomShareCardView: View {
             let paceStr = String(format: "%d:%02d", minutes, seconds)
             HStack(spacing: 12) {
                 Image(systemName: element.icon)
-                    .font(.system(size: 20))
+                    .font(.system(size: elementIconSize))
                     .foregroundColor(element.color)
                 Text("\(paceStr) /mi Best")
-                    .font(.system(size: 20, weight: .medium, design: .rounded))
+                    .font(.system(size: elementFontSize, weight: .medium, design: .rounded))
                     .foregroundColor(.white)
             }
         case .mostMiles:
             HStack(spacing: 12) {
                 Image(systemName: element.icon)
-                    .font(.system(size: 20))
+                    .font(.system(size: elementIconSize))
                     .foregroundColor(element.color)
                 Text("\(String(format: "%.2f", mostMiles)) mi Record")
-                    .font(.system(size: 20, weight: .medium, design: .rounded))
+                    .font(.system(size: elementFontSize, weight: .medium, design: .rounded))
                     .foregroundColor(.white)
             }
         case .totalMiles:
             HStack(spacing: 12) {
                 Image(systemName: element.icon)
-                    .font(.system(size: 20))
+                    .font(.system(size: elementIconSize))
                     .foregroundColor(element.color)
                 Text("\(String(format: "%.1f", totalMiles)) mi Total")
-                    .font(.system(size: 20, weight: .medium, design: .rounded))
+                    .font(.system(size: elementFontSize, weight: .medium, design: .rounded))
                     .foregroundColor(.white)
             }
         case .averagePerDay:
             let avg = totalMiles / Double(max(user.streak, 1))
             HStack(spacing: 12) {
                 Image(systemName: element.icon)
-                    .font(.system(size: 20))
+                    .font(.system(size: elementIconSize))
                     .foregroundColor(element.color)
                 Text("\(String(format: "%.2f", avg)) mi/day avg")
-                    .font(.system(size: 20, weight: .medium, design: .rounded))
+                    .font(.system(size: elementFontSize, weight: .medium, design: .rounded))
                     .foregroundColor(.white)
             }
         case .marathonEquivalent:
             let marathons = totalMiles / 26.2
             HStack(spacing: 12) {
                 Image(systemName: element.icon)
-                    .font(.system(size: 20))
+                    .font(.system(size: elementIconSize))
                     .foregroundColor(element.color)
                 Text("\(String(format: "%.1f", marathons)) marathons")
-                    .font(.system(size: 20, weight: .medium, design: .rounded))
+                    .font(.system(size: elementFontSize, weight: .medium, design: .rounded))
                     .foregroundColor(.white)
             }
         }

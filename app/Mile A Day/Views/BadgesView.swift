@@ -37,7 +37,7 @@ struct BadgesView: View {
             }
             .scrollDismissesKeyboard(.immediately)
         }
-        .navigationTitle("Badges")
+        .navigationTitle("Medals")
         .navigationBarTitleDisplayMode(.large)
         .onAppear {
             // Show confetti for new badges
@@ -248,11 +248,11 @@ struct BadgesView: View {
                     .font(.system(size: 60))
                     .foregroundColor(.purple.opacity(0.5))
                 
-                Text("No Secret Badges Yet")
+                Text("No Secret Medals Yet")
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
                 
-                Text("Secret badges are hidden achievements that you discover through special accomplishments. Keep running and exploring - you never know when you'll unlock one!")
+                Text("Secret medals are hidden achievements that you discover through special accomplishments. Keep running and exploring - you never know when you'll unlock one!")
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.6))
                     .multilineTextAlignment(.center)
@@ -269,13 +269,13 @@ struct BadgesView: View {
                     .font(.system(size: 60))
                     .foregroundColor(.white.opacity(0.3))
                 
-                Text(selectedFilter == .all ? "No Badges Yet" : "No \(selectedFilter.title) Badges")
+                Text(selectedFilter == .all ? "No Medals Yet" : "No \(selectedFilter.title) Medals")
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
                 
                 Text(selectedFilter == .all 
-                     ? "Complete running goals and milestones to earn badges!"
-                     : "Keep running to unlock badges in this category!")
+                     ? "Complete running goals and milestones to earn medals!"
+                     : "Keep running to unlock medals in this category!")
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.6))
                     .multilineTextAlignment(.center)

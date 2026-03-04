@@ -137,8 +137,8 @@ struct PrivacySettingsView: View {
                     )
                     
                     PrivacyToggleRow(
-                        title: "Achievement Badges",
-                        description: "Your earned badges and milestones",
+                        title: "Achievement Medals",
+                        description: "Your earned medals and milestones",
                         icon: "medal.fill",
                         isOn: $privacySettings.showBadges
                     )

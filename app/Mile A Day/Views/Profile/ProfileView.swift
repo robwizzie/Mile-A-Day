@@ -287,7 +287,7 @@ struct ProfileView: View {
                 } label: {
                     MADStatCard(
                         title: "Fastest Mile",
-                        value: formatPace(healthManager.fastestMilePace),
+                        value: formatPace(bestFastestMilePace),
                         icon: "hare.fill",
                         iconColor: MADTheme.Colors.success,
                         backgroundColor: MADTheme.Colors.success.opacity(0.1)
@@ -456,6 +456,16 @@ struct ProfileView: View {
     #endif
     
     // Helper function for pace formatting
+    /// Best fastest pace from all sources (user stored + HealthKit live)
+    private var bestFastestMilePace: TimeInterval {
+        let userPace = userManager.currentUser.fastestMilePace
+        let hkPace = healthManager.fastestMilePace
+        if userPace > 0 && hkPace > 0 {
+            return min(userPace, hkPace)
+        }
+        return userPace > 0 ? userPace : hkPace
+    }
+
     private func formatPace(_ pace: TimeInterval) -> String {
         guard pace > 0 else { 
             return "Not yet recorded" 

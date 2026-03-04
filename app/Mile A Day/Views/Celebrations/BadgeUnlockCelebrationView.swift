@@ -355,7 +355,7 @@ struct BadgeUnlockCelebrationView: View {
                             HStack(spacing: 12) {
                                 Image(systemName: "trophy.fill")
                                     .font(.system(size: 18, weight: .semibold))
-                                Text("View All Badges")
+                                Text("View All Medals")
                                     .font(.system(size: 17, weight: .bold, design: .rounded))
                             }
                             .foregroundColor(.black)

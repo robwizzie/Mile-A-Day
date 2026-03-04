@@ -348,12 +348,12 @@ struct BadgeDetailView: View {
             HStack(spacing: 6) {
                 Image(systemName: "questionmark.diamond.fill")
                     .font(.system(size: 14))
-                Text("Mystery Badge")
+                Text("Mystery Medal")
                     .font(.system(size: 16, weight: .bold, design: .rounded))
             }
             .foregroundColor(.purple)
             
-            Text("This badge is shrouded in mystery.\nKeep running to discover its secret!")
+            Text("This medal is shrouded in mystery.\nKeep running to discover its secret!")
                 .font(.system(size: 15, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
