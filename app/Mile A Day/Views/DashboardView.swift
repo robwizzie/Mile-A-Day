@@ -1028,6 +1028,17 @@ struct StreakCard: View {
 
             // Compact week-at-a-glance row
             compactWeekRow
+
+            // Share hint
+            HStack(spacing: 6) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 10))
+                Text("Tap to share your streak")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundColor(.white.opacity(0.45))
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 24)
@@ -1190,14 +1201,14 @@ struct StreakCard: View {
                         ZStack {
                             Circle()
                                 .fill(
-                                    completed ? statusColor.opacity(0.8) :
+                                    completed ? Color.green.opacity(0.8) :
                                     isFuture ? Color.white.opacity(0.08) :
                                     Color.white.opacity(0.15)
                                 )
                                 .frame(width: 26, height: 26)
 
                             if completed {
-                                Image(systemName: "checkmark")
+                                Image(systemName: "figure.run")
                                     .font(.system(size: 10, weight: .bold))
                                     .foregroundColor(.white)
                             }
