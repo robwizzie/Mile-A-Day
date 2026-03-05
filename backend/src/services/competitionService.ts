@@ -3,6 +3,8 @@ import { Competition, CompetitionActivity, CompetitionOptions, CompetitionType, 
 import { PostgresService } from './DbService.js';
 import { getQuantityDateRange } from './workoutService.js';
 
+const WORKOUT_TYPE_MAP: Record<string, string> = { run: 'running', walk: 'walking', running: 'running', walking: 'walking' };
+
 const db = PostgresService.getInstance();
 
 interface CreateCompetitionParams {
@@ -475,4 +477,164 @@ function getIntervalRange(competition: Competition): string[] {
 	}
 
 	return intervals;
+}
+
+export async function checkRaceCompletions(userId: string): Promise<void> {
+	const activeRaces = await db.query<Competition & { id: string }>(
+		`SELECT c.*
+		FROM competitions c
+		JOIN competition_users cu ON cu.competition_id = c.id
+		WHERE cu.user_id = $1
+			AND cu.invite_status = 'accepted'
+			AND c.type = 'race'
+			AND c.start_date IS NOT NULL
+			AND c.start_date <= NOW()
+			AND c.winner IS NULL
+			AND (c.end_date IS NULL OR c.end_date > NOW())`,
+		[userId]
+	);
+
+	if (activeRaces.length === 0) return;
+
+	for (const race of activeRaces) {
+		const workoutTypes = (race.workouts ?? ['running', 'walking'])
+			.map((t: string) => WORKOUT_TYPE_MAP[t])
+			.filter(Boolean);
+
+		const startDate = race.start_date!;
+		const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+		const today = formatter.format(new Date());
+		const endDate = race.end_date ?? today;
+
+		const [result] = await db.query<{ total: number }>(
+			`SELECT COALESCE(SUM(distance), 0) as total
+			FROM workouts
+			WHERE user_id = $1
+				AND local_date >= $2
+				AND local_date <= $3
+				AND workout_type = ANY($4::text[])`,
+			[userId, startDate, endDate, workoutTypes]
+		);
+
+		if (result.total >= race.options.goal) {
+			await db.query(
+				`UPDATE competitions SET end_date = $1, winner = $2 WHERE id = $3 AND winner IS NULL`,
+				[today, userId, race.id]
+			);
+			await resolveCompetitionPlacements(race.id);
+		}
+	}
+}
+
+export async function resolveExpiredCompetitions(): Promise<void> {
+	const now = new Date();
+	const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+	const todayStr = formatter.format(now);
+
+	const candidates = await db.query<Competition & { id: string }>(
+		`SELECT c.*, ${USERS_AGG_SQL}
+		FROM competitions c
+		LEFT JOIN competition_users cu ON cu.competition_id = c.id
+		LEFT JOIN users u ON u.user_id = cu.user_id
+		WHERE c.start_date IS NOT NULL
+			AND c.start_date <= NOW()
+			AND c.winner IS NULL
+		GROUP BY c.id`
+	);
+
+	for (const competition of candidates) {
+		try {
+			await resolveIfComplete(competition, now, todayStr);
+		} catch (err: any) {
+			console.error(`[CRON] Error resolving competition ${competition.id}:`, err.message);
+		}
+	}
+}
+
+async function resolveIfComplete(competition: Competition, now: Date, todayStr: string): Promise<void> {
+	let shouldResolve = false;
+	let computedEndDate: string | null = null;
+
+	// Check 1: end_date has passed
+	if (competition.end_date && new Date(competition.end_date + ' EST') <= now) {
+		shouldResolve = true;
+	}
+
+	// Check 2: duration_hours elapsed (no end_date set yet)
+	if (!shouldResolve && !competition.end_date && competition.options.duration_hours) {
+		const startMs = new Date(competition.start_date + ' EST').getTime();
+		const durationMs = competition.options.duration_hours * 60 * 60 * 1000;
+		if (now.getTime() >= startMs + durationMs) {
+			shouldResolve = true;
+			computedEndDate = todayStr;
+		}
+	}
+
+	// Check 3: first_to condition (clash, targets)
+	if (!shouldResolve && competition.options.first_to) {
+		const scores = await getUserScores(competition);
+		const maxScore = Math.max(...Object.values(scores).map(s => s.score));
+		if (maxScore >= competition.options.first_to) {
+			shouldResolve = true;
+			computedEndDate = todayStr;
+		}
+	}
+
+	// Check 4: race goal reached (backup for races not caught on upload)
+	if (!shouldResolve && competition.type === 'race') {
+		const scores = await getUserScores(competition);
+		for (const data of Object.values(scores)) {
+			if (data.score >= competition.options.goal) {
+				shouldResolve = true;
+				computedEndDate = todayStr;
+				break;
+			}
+		}
+	}
+
+	if (!shouldResolve) return;
+
+	if (computedEndDate) {
+		await db.query(
+			`UPDATE competitions SET end_date = $1 WHERE id = $2`,
+			[computedEndDate, competition.id]
+		);
+		competition.end_date = computedEndDate;
+	}
+
+	const finalScores = await getUserScores(competition);
+	const sortedUsers = Object.entries(finalScores).sort(([, a], [, b]) => b.score - a.score);
+
+	if (sortedUsers.length === 0) return;
+
+	const winnerId = sortedUsers[0][0];
+	await db.query(
+		`UPDATE competitions SET winner = $1 WHERE id = $2 AND winner IS NULL`,
+		[winnerId, competition.id]
+	);
+
+	await resolveCompetitionPlacements(competition.id, finalScores);
+}
+
+async function resolveCompetitionPlacements(competitionId: string, precomputedScores?: UserData): Promise<void> {
+	let scores = precomputedScores;
+	if (!scores) {
+		const competition = await getCompetition(competitionId);
+		if (!competition) return;
+		scores = await getUserScores(competition);
+	}
+
+	const sorted = Object.entries(scores).sort(([, a], [, b]) => b.score - a.score);
+
+	let currentPlacement = 1;
+	for (let i = 0; i < sorted.length; i++) {
+		const [userId, data] = sorted[i];
+		if (i > 0 && data.score < sorted[i - 1][1].score) {
+			currentPlacement = i + 1;
+		}
+		await db.query(
+			`UPDATE competition_users SET placement = $1 WHERE competition_id = $2 AND user_id = $3`,
+			[currentPlacement, competitionId, userId]
+		);
+	}
 }

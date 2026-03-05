@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { SignJWT } from 'jose';
+import { resolveExpiredCompetitions } from '../services/competitionService.js';
 
 export async function generateTestToken(req: Request, res: Response) {
 	const env = process.env.NODE_ENV;
@@ -48,5 +49,18 @@ export async function generateTestToken(req: Request, res: Response) {
 		return res.status(500).json({
 			error: 'Failed to generate test token'
 		});
+	}
+}
+
+export async function triggerCompetitionCron(_req: Request, res: Response) {
+	if (process.env.NODE_ENV === 'production') {
+		return res.status(403).json({ error: 'Not available in production' });
+	}
+
+	try {
+		await resolveExpiredCompetitions();
+		return res.json({ success: true });
+	} catch (err: any) {
+		return res.status(500).json({ error: err.message });
 	}
 }
