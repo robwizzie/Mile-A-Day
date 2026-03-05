@@ -217,37 +217,79 @@ struct CompetitionCard: View {
     @ViewBuilder
     private var competitionStatusFooter: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
-            // Participant avatars with status indicators
-            HStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(Array(competition.users.prefix(6)), id: \.id) { user in
-                    ParticipantAvatar(user: user, isOwner: user.user_id == competition.owner)
-                }
-
-                if competition.users.count > 6 {
-                    Text("+\(competition.users.count - 6)")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.5))
-                        .frame(width: 28, height: 28)
-                        .background(
-                            Circle()
-                                .fill(Color.white.opacity(0.08))
+            if competition.status == .finished {
+                // Finished competition footer
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: "trophy.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(
+                            LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
                         )
+
+                    if let winner = winnerName {
+                        Text("\(winner) won")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.8))
+                    } else {
+                        Text("Tap to see results")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+
+                    Spacer()
+
+                    // Status label
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(competition.status.color)
+                            .frame(width: 6, height: 6)
+
+                        Text(statusText)
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundColor(competition.status.color)
+                    }
                 }
+            } else {
+                // Participant avatars with status indicators
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    ForEach(Array(competition.users.prefix(6)), id: \.id) { user in
+                        ParticipantAvatar(user: user, isOwner: user.user_id == competition.owner)
+                    }
 
-                Spacer()
+                    if competition.users.count > 6 {
+                        Text("+\(competition.users.count - 6)")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
+                            .frame(width: 28, height: 28)
+                            .background(
+                                Circle()
+                                    .fill(Color.white.opacity(0.08))
+                            )
+                    }
 
-                // Status label
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(competition.status.color)
-                        .frame(width: 6, height: 6)
+                    Spacer()
 
-                    Text(statusText)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundColor(competition.status.color)
+                    // Status label
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(competition.status.color)
+                            .frame(width: 6, height: 6)
+
+                        Text(statusText)
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundColor(competition.status.color)
+                    }
                 }
             }
         }
+    }
+
+    private var winnerName: String? {
+        guard competition.status == .finished else { return nil }
+        let accepted = competition.users.filter { $0.invite_status == .accepted }
+        guard let winner = accepted.sorted(by: { ($0.score ?? 0) > ($1.score ?? 0) }).first,
+              (winner.score ?? 0) > 0 else { return nil }
+        return winner.displayName
     }
 
     private var statusText: String {
@@ -270,6 +312,9 @@ struct CompetitionCard: View {
             }
             return "In progress"
         case .finished:
+            if let endDate = competition.endDateFormatted {
+                return "Ended \(endDate.formatted(date: .abbreviated, time: .omitted))"
+            }
             return "Completed"
         }
     }

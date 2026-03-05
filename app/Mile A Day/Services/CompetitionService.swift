@@ -127,13 +127,10 @@ class CompetitionService: ObservableObject {
     }
 
     /// Get all competitions for the authenticated user
-    func loadCompetitions(page: Int = 1, pageSize: Int = 25, status: String? = nil) async throws {
+    func loadCompetitions(page: Int = 1, pageSize: Int = 50, status: String = "all") async throws {
         print("[CompetitionService] Loading competitions")
 
-        var endpoint = "/competitions?page=\(page)&pageSize=\(pageSize)"
-        if let status = status {
-            endpoint += "&status=\(status)"
-        }
+        var endpoint = "/competitions?page=\(page)&pageSize=\(pageSize)&status=\(status)"
 
         let response: CompetitionsListResponse = try await makeRequest(
             endpoint: endpoint,
