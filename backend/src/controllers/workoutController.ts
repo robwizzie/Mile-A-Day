@@ -12,6 +12,7 @@ import {
 	getBestSplit,
 	getTodayMiles
 } from '../services/workoutService.js';
+import { checkRaceCompletions } from '../services/competitionService.js';
 
 export async function uploadWorkouts(req: Request, res: Response) {
 	if (!hasRequiredKeys(['userId'], req, res)) return;
@@ -31,6 +32,12 @@ export async function uploadWorkouts(req: Request, res: Response) {
 		}
 
 		await uploadWorkoutsDb(userId, req.body);
+
+		try {
+			await checkRaceCompletions(userId);
+		} catch (raceError: any) {
+			console.error('Error checking race completions:', raceError.message);
+		}
 
 		res.status(200).json({
 			message: 'Successfully uploaded workouts.'

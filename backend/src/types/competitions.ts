@@ -20,9 +20,11 @@ export interface CompetitionUser {
 	score?: number;
 	remaining_lives?: number;
 	username?: string;
+	placement?: number;
 }
 
 export interface Competition {
+	id: string;
 	competition_name: string;
 	start_date: string | null;
 	end_date: string | null;
@@ -30,5 +32,6 @@ export interface Competition {
 	type: CompetitionType;
 	options: CompetitionOptions;
 	owner: string;
+	winner: string | null;
 	users: CompetitionUser[];
 }

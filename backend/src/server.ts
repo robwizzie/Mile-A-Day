@@ -9,6 +9,7 @@ import devRoutes from './routes/devRoutes.js';
 import workoutRoutes from './routes/workoutRoutes.js';
 import competitionRoutes from './routes/competitionRoutes.js';
 import { authenticateToken } from './middleware/auth.js';
+import { startCompetitionCron } from './cron/competitionCron.js';
 import { webcrypto } from 'node:crypto';
 
 (globalThis as any).crypto ??= webcrypto;
@@ -49,4 +50,5 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 const server = http.createServer(app);
 server.listen(PORT, '0.0.0.0', () => {
 	console.log(`Server running on port ${PORT}`);
+	startCompetitionCron();
 });
