@@ -470,7 +470,9 @@ struct DashboardView: View {
             currentDistance: currentState.distance,
             fastestPace: userManager.currentUser.fastestMilePace,
             mostMiles: healthManager.cachedCurrentStreakStats.mostMiles > 0 ? healthManager.cachedCurrentStreakStats.mostMiles : healthManager.mostMilesInOneDay,
-            totalMiles: healthManager.totalLifetimeMiles
+            totalMiles: healthManager.totalLifetimeMiles,
+            healthManager: healthManager,
+            userManager: userManager
         )
     }
 
@@ -580,79 +582,146 @@ struct InstructionsBanner: View {
 
 struct InstructionsView: View {
     @Environment(\.dismiss) private var dismiss
-    
+    @Environment(\.colorScheme) var colorScheme
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    // Header
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("How to Use Mile A Day")
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
-                        
-                        Text("Simple steps to track your daily mile progress")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                VStack(spacing: 28) {
+                    // Hero header
+                    VStack(spacing: 12) {
+                        Image(systemName: "figure.run.circle.fill")
+                            .font(.system(size: 56))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [MADTheme.Colors.madRed, .orange],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+
+                        Text("Getting Started")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundColor(MADTheme.Colors.primaryText)
+
+                        Text("Track your daily mile in a few easy steps")
+                            .font(MADTheme.Typography.body)
+                            .foregroundColor(MADTheme.Colors.secondaryText)
+                            .multilineTextAlignment(.center)
                     }
-                    
-                    // Step-by-step instructions
-                    VStack(alignment: .leading, spacing: 20) {
+                    .padding(.top, 8)
+                    .frame(maxWidth: .infinity)
+
+                    // Steps
+                    VStack(spacing: 0) {
                         InstructionStep(
                             number: "1",
-                            title: "Start Your Workout",
-                            description: "Open Apple Fitness or any workout app and start your run or walk. Make sure HealthKit integration is enabled.",
+                            title: "Go for a Run or Walk",
+                            description: "Use Apple Fitness, your Apple Watch, or any HealthKit-compatible app to record a workout.",
                             icon: "figure.run",
-                            color: .blue
+                            color: MADTheme.Colors.madRed,
+                            isLast: false
                         )
-                        
+
                         InstructionStep(
                             number: "2",
-                            title: "Complete Your Mile",
-                            description: "Finish your workout to reach your daily mile goal. The app works with any distance - walking, running, or hiking.",
-                            icon: "checkmark.circle.fill",
-                            color: .green
+                            title: "Hit Your Daily Goal",
+                            description: "Walk or run at least one mile (or your custom goal). Any combo of workouts in a day counts!",
+                            icon: "target",
+                            color: .green,
+                            isLast: false
                         )
-                        
+
                         InstructionStep(
                             number: "3",
-                            title: "Return to Mile A Day",
-                            description: "Come back to this app to see your updated progress, maintain your streak, and earn badges.",
-                            icon: "arrow.clockwise",
-                            color: .orange
+                            title: "Open Mile A Day",
+                            description: "Your progress syncs automatically from HealthKit. Pull down to refresh anytime.",
+                            icon: "arrow.triangle.2.circlepath",
+                            color: .blue,
+                            isLast: false
                         )
-                        
+
                         InstructionStep(
                             number: "4",
-                            title: "Check Your Widgets",
-                            description: "Add our widgets to your home screen for quick progress updates throughout the day.",
-                            icon: "rectangle.3.group",
-                            color: .purple
+                            title: "Build Your Streak",
+                            description: "Complete your goal every day to keep your streak alive. Tap your streak to share cards with friends!",
+                            icon: "flame.fill",
+                            color: .orange,
+                            isLast: false
+                        )
+
+                        InstructionStep(
+                            number: "5",
+                            title: "Earn Medals & Compete",
+                            description: "Unlock medals for milestones, challenge friends in competitions, and climb the leaderboard.",
+                            icon: "medal.fill",
+                            color: .purple,
+                            isLast: true
                         )
                     }
-                    
-                    // Additional tips
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Tips for Success")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            TipItem(text: "Enable HealthKit permissions for accurate tracking")
-                            TipItem(text: "Pull down to refresh your progress manually")
-                            TipItem(text: "Adjust your daily goal in settings (gear icon)")
-                            TipItem(text: "Maintain your streak by hitting your goal daily")
-                            TipItem(text: "Tap the ℹ️ icon anytime to see these instructions")
-        }
-    }
-                    .padding()
+                    .padding(MADTheme.Spacing.md)
                     .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(.systemGray6))
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                    .stroke(
+                                        LinearGradient(
+                                            colors: [
+                                                Color.white.opacity(colorScheme == .dark ? 0.15 : 0.3),
+                                                Color.clear
+                                            ],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        lineWidth: 1
+                                    )
+                            )
                     )
+                    .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
+
+                    // Pro tips section
+                    VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "sparkles")
+                                .foregroundColor(.yellow)
+                            Text("Pro Tips")
+                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                                .foregroundColor(MADTheme.Colors.primaryText)
+                        }
+
+                        VStack(spacing: 10) {
+                            TipItem(icon: "applewatch", text: "Apple Watch workouts sync automatically", color: .blue)
+                            TipItem(icon: "widget.small", text: "Add widgets to your Home Screen for quick stats", color: .purple)
+                            TipItem(icon: "gearshape.fill", text: "Customize your daily goal from the stats section", color: .gray)
+                            TipItem(icon: "person.2.fill", text: "Add friends to compete and stay motivated", color: .green)
+                        }
+                    }
+                    .padding(MADTheme.Spacing.lg)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                    .stroke(
+                                        LinearGradient(
+                                            colors: [
+                                                Color.yellow.opacity(0.2),
+                                                Color.clear
+                                            ],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        lineWidth: 1
+                                    )
+                            )
+                    )
+                    .shadow(color: .black.opacity(0.06), radius: 6, x: 0, y: 3)
                 }
-                .padding()
+                .padding(.horizontal, MADTheme.Spacing.lg)
+                .padding(.bottom, MADTheme.Spacing.xl)
             }
+            .background(MADTheme.Colors.secondaryBackground)
             .navigationTitle("Instructions")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -660,6 +729,8 @@ struct InstructionsView: View {
                     Button("Done") {
                         dismiss()
                     }
+                    .fontWeight(.semibold)
+                    .foregroundColor(MADTheme.Colors.madRed)
                 }
             }
         }
@@ -672,57 +743,77 @@ struct InstructionStep: View {
     let description: String
     let icon: String
     let color: Color
-    
+    var isLast: Bool = false
+
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            // Step number
+        HStack(alignment: .top, spacing: 14) {
+            // Timeline column
+            VStack(spacing: 0) {
                 ZStack {
                     Circle()
-                    .fill(color)
-                    .frame(width: 32, height: 32)
-                    
-                Text(number)
-                    .font(.headline)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
-            }
-            
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
+                        .fill(
+                            LinearGradient(
+                                colors: [color, color.opacity(0.7)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 36, height: 36)
+                        .shadow(color: color.opacity(0.3), radius: 4, x: 0, y: 2)
+
                     Image(systemName: icon)
-                        .foregroundColor(color)
-                    .font(.title2)
-                
-                    Text(title)
-                            .font(.headline)
-                            .fontWeight(.semibold)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.white)
                 }
-                
-                Text(description)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+
+                if !isLast {
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [color.opacity(0.4), color.opacity(0.1)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(width: 2)
+                        .frame(maxHeight: .infinity)
+                }
             }
-            
-            Spacer()
+
+            // Content
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    .foregroundColor(MADTheme.Colors.primaryText)
+
+                Text(description)
+                    .font(.system(size: 14))
+                    .foregroundColor(MADTheme.Colors.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(2)
+            }
+            .padding(.bottom, isLast ? 0 : 20)
         }
     }
 }
 
 struct TipItem: View {
+    var icon: String = "lightbulb.fill"
     let text: String
-    
+    var color: Color = .yellow
+
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "lightbulb.fill")
-                .foregroundColor(.yellow)
-                        .font(.caption)
-                .padding(.top, 2)
-            
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 14))
+                .foregroundColor(color)
+                .frame(width: 24, height: 24)
+
             Text(text)
-                .font(.subheadline)
+                .font(.system(size: 14))
+                .foregroundColor(MADTheme.Colors.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
-                }
+        }
     }
 }
 
@@ -740,6 +831,8 @@ struct StreakCard: View {
     let fastestPace: TimeInterval
     let mostMiles: Double
     let totalMiles: Double
+    @ObservedObject var healthManager: HealthKitManager
+    @ObservedObject var userManager: UserManager
     @Environment(\.colorScheme) var colorScheme
     @State private var animateStreak = false
     @State private var animateFire = false
@@ -750,6 +843,16 @@ struct StreakCard: View {
 
     // Streak milestone milestones
     private let milestones = [3, 5, 7, 10, 14, 21, 30, 50, 60, 75, 90, 100, 150, 200, 250, 365, 500, 1000]
+
+    /// Best fastest pace from user stored value and HealthKit live value
+    private var bestFastestPace: TimeInterval {
+        let userPace = fastestPace
+        let hkPace = healthManager.fastestMilePace
+        if userPace > 0 && hkPace > 0 {
+            return min(userPace, hkPace)
+        }
+        return userPace > 0 ? userPace : hkPace
+    }
 
     private var nextMilestone: (value: Int, progress: Double, daysToGo: Int)? {
         for milestone in milestones {
@@ -922,6 +1025,20 @@ struct StreakCard: View {
                     .frame(height: 8)
                 }
             }
+
+            // Compact week-at-a-glance row
+            compactWeekRow
+
+            // Share hint
+            HStack(spacing: 6) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 10))
+                Text("Tap to share your streak")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundColor(.white.opacity(0.45))
+            .frame(maxWidth: .infinity)
+            .padding(.top, 4)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 24)
@@ -1033,13 +1150,82 @@ struct StreakCard: View {
                 currentDistance: currentDistance,
                 progress: progress,
                 isGoalCompleted: isGoalCompleted,
-                fastestPace: fastestPace,
+                fastestPace: bestFastestPace,
                 mostMiles: mostMiles,
                 totalMiles: totalMiles
             )
         }
     }
     
+    // MARK: - Compact Week Row
+
+    private var weekDays: [Date] {
+        let calendar = Calendar.current
+        let today = Date()
+        let weekday = calendar.component(.weekday, from: today)
+        let daysFromSunday = weekday - 1
+        guard let startOfWeek = calendar.date(byAdding: .day, value: -daysFromSunday, to: calendar.startOfDay(for: today)) else {
+            return []
+        }
+        return (0..<7).compactMap { offset in
+            calendar.date(byAdding: .day, value: offset, to: startOfWeek)
+        }
+    }
+
+    private var compactWeekRow: some View {
+        VStack(spacing: 8) {
+            // Thin separator
+            Rectangle()
+                .fill(Color.white.opacity(0.1))
+                .frame(height: 1)
+
+            // Week dots row
+            HStack(spacing: 0) {
+                ForEach(weekDays, id: \.self) { date in
+                    let calendar = Calendar.current
+                    let dateKey = calendar.startOfDay(for: date)
+                    let completed = healthManager.dailyMileGoals[dateKey] ?? false
+                    let isToday = calendar.isDateInToday(date)
+                    let isFuture = date > Date()
+                    let dayLetter = {
+                        let formatter = DateFormatter()
+                        formatter.dateFormat = "EEEEE"
+                        return formatter.string(from: date)
+                    }()
+
+                    VStack(spacing: 4) {
+                        Text(dayLetter)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.white.opacity(0.5))
+
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    completed ? Color.green.opacity(0.8) :
+                                    isFuture ? Color.white.opacity(0.08) :
+                                    Color.white.opacity(0.15)
+                                )
+                                .frame(width: 26, height: 26)
+
+                            if completed {
+                                Image(systemName: "figure.run")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(.white)
+                            }
+
+                            if isToday {
+                                Circle()
+                                    .stroke(statusColor, lineWidth: 2)
+                                    .frame(width: 30, height: 30)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
     private func updateTimeRemaining() {
         if !isGoalCompleted {
             timeRemainingText = user.formattedTimeUntilReset
@@ -1250,16 +1436,26 @@ struct UnifiedStatsGrid: View {
         case currentStreak = "Current Streak"
     }
     
+    /// Best fastest pace from all sources (user stored + HealthKit live)
+    var bestAllTimeFastestPace: TimeInterval {
+        let userPace = user.fastestMilePace
+        let hkPace = healthManager.fastestMilePace
+        if userPace > 0 && hkPace > 0 {
+            return min(userPace, hkPace) // lower is faster
+        }
+        return userPace > 0 ? userPace : hkPace
+    }
+
     var formattedFastestPace: String {
         if isCalculating || isRefreshingFastestPace {
             return "Calculating..."
         }
-        
+
         if statsType == .allTime {
-            if user.fastestMilePace > 0 {
-                let totalMinutes = user.fastestMilePace
-                let minutes = Int(totalMinutes)
-                let seconds = Int((totalMinutes - Double(minutes)) * 60)
+            let pace = bestAllTimeFastestPace
+            if pace > 0 {
+                let minutes = Int(pace)
+                let seconds = Int((pace - Double(minutes)) * 60)
                 return String(format: "%d:%02d /mi", minutes, seconds)
             }
         } else {
@@ -1546,12 +1742,12 @@ struct UnifiedStatsGrid: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
-                        
+
                         Text("\(streakDays)")
                             .font(.title2)
                             .fontWeight(.bold)
                             .foregroundColor(.primary)
-                        
+
                         if streakDays > 0 {
                             Text("Current streak")
                                 .font(.caption2)
@@ -1566,6 +1762,66 @@ struct UnifiedStatsGrid: View {
                             .overlay(
                                 RoundedRectangle(cornerRadius: 12)
                                     .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                            )
+                    )
+
+                    // Total Miles (lifetime) card in current streak view
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "map.fill")
+                                .foregroundColor(.red)
+                            Text("Total Miles")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Text(String(format: "%.1f mi", user.totalMiles))
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+
+                        Text("Lifetime")
+                            .font(.caption2)
+                            .foregroundColor(.red)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.red.opacity(0.1))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                            )
+                    )
+
+                    // Average per day card
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                                .foregroundColor(.cyan)
+                            Text("Avg Per Day")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Text(String(format: "%.2f mi", avgMilesPerDay))
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+
+                        Text("Current streak")
+                            .font(.caption2)
+                            .foregroundColor(.cyan)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color.cyan.opacity(0.1))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.cyan.opacity(0.3), lineWidth: 1)
                             )
                     )
                 }

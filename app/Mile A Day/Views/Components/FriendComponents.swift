@@ -495,7 +495,7 @@ struct FriendBadgesView: View {
     var body: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
             HStack {
-                Text("Badges")
+                Text("Medals")
                     .font(MADTheme.Typography.headline)
                     .foregroundColor(MADTheme.Colors.primaryText)
                 Spacer()
@@ -505,7 +505,7 @@ struct FriendBadgesView: View {
             }
             
             if badges.isEmpty {
-                Text("No badges yet")
+                Text("No medals yet")
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(MADTheme.Colors.secondaryText)
                     .frame(maxWidth: .infinity)

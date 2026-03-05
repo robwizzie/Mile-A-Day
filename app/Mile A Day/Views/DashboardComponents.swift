@@ -325,7 +325,7 @@ struct BadgesPreviewCard: View {
                                 .font(.system(size: 32))
                                 .foregroundColor(.secondary.opacity(0.4))
 
-                            Text("Start running to earn badges!")
+                            Text("Start running to earn medals!")
                                 .font(.system(size: 12, weight: .medium, design: .rounded))
                                 .foregroundColor(.secondary)
                         }
@@ -567,11 +567,11 @@ struct CalendarPreviewCard: View {
 
     var body: some View {
         NavigationLink(destination: StepsView(healthManager: healthManager, userManager: userManager)) {
-            VStack(alignment: .leading, spacing: 16) {
-                // Header
+            VStack(alignment: .leading, spacing: 12) {
+                // Header row
                 HStack {
                     Image(systemName: "shoeprints.fill")
-                        .font(.title2)
+                        .font(.subheadline)
                         .foregroundStyle(
                             LinearGradient(
                                 colors: [.blue, .cyan],
@@ -580,59 +580,63 @@ struct CalendarPreviewCard: View {
                             )
                         )
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Steps")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.primary)
-                    }
+                    Text("Steps")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.primary)
 
                     Spacer()
 
                     Image(systemName: "chevron.right")
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundColor(.secondary)
                 }
 
-                // Steps display
-                HStack(alignment: .bottom, spacing: 6) {
-                    Text("\(todaysSteps)")
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                }
+                Spacer()
 
-                // Progress bar
+                // Steps count - prominent
+                Text("\(todaysSteps)")
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+
+                // Progress section
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text("Goal: 10,000 steps")
+                        Text("\(Int(stepProgress * 100))%")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .fontWeight(.semibold)
+                            .foregroundColor(stepColor)
 
                         Spacer()
 
-                        Text("\(Int(stepProgress * 100))%")
+                        Text("of 10k")
                             .font(.caption2)
-                            .fontWeight(.medium)
-                            .foregroundColor(.primary)
+                            .foregroundColor(.secondary)
                     }
 
                     GeometryReader { geometry in
                         ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 2)
+                            RoundedRectangle(cornerRadius: 3)
                                 .fill(Color.gray.opacity(0.2))
-                                .frame(height: 4)
+                                .frame(height: 6)
 
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(stepColor)
-                                .frame(width: stepProgress * geometry.size.width, height: 4)
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [stepColor, stepColor.opacity(0.7)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: stepProgress * geometry.size.width, height: 6)
                         }
                     }
-                    .frame(height: 4)
+                    .frame(height: 6)
                 }
             }
-            .padding()
+            .padding(14)
             .frame(height: 180)
             .background(
                 ZStack {

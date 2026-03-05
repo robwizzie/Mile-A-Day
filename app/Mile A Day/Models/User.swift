@@ -585,7 +585,7 @@ struct User: Identifiable, Codable {
             "pace_6min": "Speed Demon",
             "pace_5min": "Elite Speed"
         ]
-        return badgeNames[id] ?? "Unknown Badge"
+        return badgeNames[id] ?? "Unknown Medal"
     }
     
     private func getBadgeDescription(for id: String) -> String {
