@@ -30,6 +30,7 @@ struct DashboardView: View {
     /// but the full‑screen tracker is not currently visible.
     @State private var showInProgressBanner = false
     @State private var showForceResetAlert = false
+    @State private var chartScrollOffset: CGFloat = 0
     
     /// Navigation state for badges view from celebration
     @State private var navigateToBadgesFromCelebration = false
@@ -92,8 +93,29 @@ struct DashboardView: View {
         ScrollView(.vertical, showsIndicators: true) {
             dashboardContent
                 .frame(maxWidth: .infinity)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: DashboardScrollOffsetKey.self,
+                            value: geo.frame(in: .named("dashboardScroll")).minY
+                        )
+                    }
+                )
         }
         .coordinateSpace(name: "dashboardScroll")
+        .onPreferenceChange(DashboardScrollOffsetKey.self) { value in
+            chartScrollOffset = value
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            WeeklyMileChartView(
+                healthManager: healthManager,
+                userManager: userManager,
+                scrollOffset: chartScrollOffset
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
+        }
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .background(MADTheme.Colors.appBackgroundGradient)
         .scrollContentBackground(.hidden)
@@ -409,7 +431,6 @@ struct DashboardView: View {
         VStack(spacing: 16) {
             inProgressBannerSection
             instructionsSection
-            weeklyChartSection
             streakSection
             todayProgressSection
             stepsAndBadgesSection
@@ -511,19 +532,21 @@ struct DashboardView: View {
         }
     }
 
-    private var weeklyChartSection: some View {
-        WeeklyMileChartView(
-            healthManager: healthManager,
-            userManager: userManager
-        )
-    }
-
     private var statsAndHistorySection: some View {
         VStack(spacing: 12) {
             StatsGridView(user: userManager.currentUser, healthManager: healthManager)
 
             RecentWorkoutsView(workouts: healthManager.recentWorkouts)
         }
+    }
+}
+
+// MARK: - Scroll Offset Preference Key
+
+private struct DashboardScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

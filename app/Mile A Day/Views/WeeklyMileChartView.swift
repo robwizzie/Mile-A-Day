@@ -36,8 +36,8 @@ struct WeeklyMileChartView: View {
     @State private var showShareSheet: Bool = false
     @State private var hasAppeared: Bool = false
 
-    // Scroll-collapse: 0 = fully expanded, 1 = fully collapsed
-    @State private var collapseProgress: CGFloat = 0
+    // Scroll-collapse: driven externally by the parent's scroll offset
+    var scrollOffset: CGFloat = 0
 
     // Heights
     private let expandedHeight: CGFloat = 280
@@ -104,6 +104,10 @@ struct WeeklyMileChartView: View {
     // MARK: Body
 
     var body: some View {
+        // scrollOffset starts positive (content at rest), goes negative as user scrolls up.
+        // Collapse starts after 30pt of scroll, fully collapsed after 150pt total.
+        let scrolled = max(-scrollOffset, 0)
+        let collapseProgress = min(scrolled / 150, 1)
         let isCollapsed = collapseProgress > 0.5
         let currentHeight = expandedHeight - (expandedHeight - collapsedHeight) * collapseProgress
 
@@ -137,25 +141,6 @@ struct WeeklyMileChartView: View {
         }
         .onChange(of: healthManager.workoutIndex?.lastUpdated) {
             resetAndAnimate()
-        }
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(
-                    key: ScrollOffsetKey.self,
-                    value: geo.frame(in: .named("dashboardScroll")).minY
-                )
-            }
-        )
-        .onPreferenceChange(ScrollOffsetKey.self) { offset in
-            // offset starts near 0 at top, goes negative as we scroll down
-            // We want to start collapsing when the card scrolls up
-            let threshold: CGFloat = 60  // start collapsing after 60pt of scroll
-            let range: CGFloat = 120     // fully collapsed after another 120pt
-            let adjustedOffset = -(offset - threshold)
-            let newProgress = min(max(adjustedOffset / range, 0), 1)
-            withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 0.9)) {
-                collapseProgress = newProgress
-            }
         }
         .sheet(isPresented: $showShareSheet) {
             EnhancedShareView(
@@ -726,14 +711,6 @@ struct WeeklyMileChartView: View {
     }
 }
 
-// MARK: - Scroll Offset Preference Key
-
-private struct ScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
 
 // MARK: - Preview
 
@@ -753,7 +730,8 @@ private struct ScrollOffsetKey: PreferenceKey {
             VStack(spacing: 16) {
                 WeeklyMileChartView(
                     healthManager: HealthKitManager(),
-                    userManager: UserManager()
+                    userManager: UserManager(),
+                    scrollOffset: 0
                 )
 
                 ForEach(0..<5) { _ in
