@@ -73,10 +73,44 @@ struct GoalCompletionStats: Equatable {
     }
 }
 
+/// Milestone tier: mini milestones are frequent encouragement, major milestones get extra celebration
+enum MilestoneTier {
+    case mini
+    case major
+}
+
 /// Streak milestones for celebration highlights
+/// Mini milestones every ~50 days keep users motivated; major milestones get special treatment
 enum StreakMilestone: CaseIterable {
-    case week, twoWeeks, threeWeeks, month, fiftyDays, hundredDays, year
-    
+    // Mini milestones (frequent encouragement)
+    case week           // 7
+    case twoWeeks       // 14
+    case threeWeeks     // 21
+    case month          // 30
+    case fiftyDays      // 50
+    case seventyFive    // 75
+    // Major milestones (extra special)
+    case hundredDays    // 100
+    // Mini
+    case oneFifty       // 150
+    case twoHundred     // 200
+    // Major
+    case twoFifty       // 250
+    case threeHundred   // 300
+    // Major
+    case year           // 365
+    // Mini
+    case fourHundred    // 400
+    case fourFifty      // 450
+    // Major
+    case fiveHundred    // 500
+    // Mini
+    case sixHundred     // 600
+    // Major
+    case twoYears       // 730
+    // Major
+    case thousandDays   // 1000
+
     var days: Int {
         switch self {
         case .week: return 7
@@ -84,11 +118,33 @@ enum StreakMilestone: CaseIterable {
         case .threeWeeks: return 21
         case .month: return 30
         case .fiftyDays: return 50
+        case .seventyFive: return 75
         case .hundredDays: return 100
+        case .oneFifty: return 150
+        case .twoHundred: return 200
+        case .twoFifty: return 250
+        case .threeHundred: return 300
         case .year: return 365
+        case .fourHundred: return 400
+        case .fourFifty: return 450
+        case .fiveHundred: return 500
+        case .sixHundred: return 600
+        case .twoYears: return 730
+        case .thousandDays: return 1000
         }
     }
-    
+
+    var tier: MilestoneTier {
+        switch self {
+        case .hundredDays, .twoFifty, .threeHundred, .year, .fiveHundred, .twoYears, .thousandDays:
+            return .major
+        default:
+            return .mini
+        }
+    }
+
+    var isMajor: Bool { tier == .major }
+
     var title: String {
         switch self {
         case .week: return "1 Week Streak!"
@@ -96,20 +152,56 @@ enum StreakMilestone: CaseIterable {
         case .threeWeeks: return "3 Week Streak!"
         case .month: return "1 Month Streak!"
         case .fiftyDays: return "50 Day Streak!"
+        case .seventyFive: return "75 Day Streak!"
         case .hundredDays: return "100 Day Streak!"
+        case .oneFifty: return "150 Day Streak!"
+        case .twoHundred: return "200 Day Streak!"
+        case .twoFifty: return "250 Day Streak!"
+        case .threeHundred: return "300 Day Streak!"
         case .year: return "1 Year Streak!"
+        case .fourHundred: return "400 Day Streak!"
+        case .fourFifty: return "450 Day Streak!"
+        case .fiveHundred: return "500 Day Streak!"
+        case .sixHundred: return "600 Day Streak!"
+        case .twoYears: return "2 Year Streak!"
+        case .thousandDays: return "1,000 Day Streak!"
         }
     }
-    
+
     var emoji: String {
         switch self {
         case .week: return "🔥"
         case .twoWeeks: return "💪"
         case .threeWeeks: return "⚡️"
         case .month: return "🏆"
-        case .fiftyDays: return "👑"
+        case .fiftyDays: return "🎯"
+        case .seventyFive: return "✨"
         case .hundredDays: return "💎"
+        case .oneFifty: return "🚀"
+        case .twoHundred: return "⭐️"
+        case .twoFifty: return "👑"
+        case .threeHundred: return "🏅"
         case .year: return "🌟"
+        case .fourHundred: return "🔥"
+        case .fourFifty: return "💪"
+        case .fiveHundred: return "🏆"
+        case .sixHundred: return "⚡️"
+        case .twoYears: return "💎"
+        case .thousandDays: return "👑"
+        }
+    }
+
+    /// Subtitle shown on major milestones
+    var majorSubtitle: String {
+        switch self {
+        case .hundredDays: return "Triple digits! You're in the elite!"
+        case .twoFifty: return "A quarter thousand days of dedication!"
+        case .threeHundred: return "300 days of pure commitment!"
+        case .year: return "365 days. One full year. Legendary!"
+        case .fiveHundred: return "Half a thousand! Absolutely incredible!"
+        case .twoYears: return "Two full years! You're unstoppable!"
+        case .thousandDays: return "ONE THOUSAND DAYS. You are a legend!"
+        default: return "Incredible dedication!"
         }
     }
 }

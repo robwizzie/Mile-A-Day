@@ -26,8 +26,14 @@ struct GoalCompletedCelebrationView: View {
     @State private var showMotivation = false
     @State private var showButtons = false
     @State private var confettiTrigger = false
+    @State private var confettiTrigger2 = false
+    @State private var showFireworks = false
     @State private var pulseAnimation = false
     @State private var flameGlow = false
+
+    private var isMajorMilestone: Bool {
+        stats.streakMilestone?.isMajor == true
+    }
 
     // Haptic generators
     private let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
@@ -40,8 +46,20 @@ struct GoalCompletedCelebrationView: View {
             // Warm gradient background
             celebrationBackground
 
+            // Fireworks (major milestones only)
+            if showFireworks {
+                FireworksView()
+                    .allowsHitTesting(false)
+            }
+
             // Confetti
             if confettiTrigger {
+                CelebrationConfetti()
+                    .allowsHitTesting(false)
+            }
+
+            // Second wave of confetti for major milestones
+            if confettiTrigger2 {
                 CelebrationConfetti()
                     .allowsHitTesting(false)
             }
@@ -406,62 +424,126 @@ struct GoalCompletedCelebrationView: View {
 
     // MARK: - Streak Milestone Banner
 
+    @ViewBuilder
     private func streakMilestoneBanner(_ milestone: StreakMilestone) -> some View {
+        if milestone.isMajor {
+            majorMilestoneBanner(milestone)
+        } else {
+            miniMilestoneBanner(milestone)
+        }
+    }
+
+    /// Mini milestone: clean, encouraging, compact
+    private func miniMilestoneBanner(_ milestone: StreakMilestone) -> some View {
         HStack(spacing: 12) {
             Text(milestone.emoji)
-                .font(.system(size: 36))
+                .font(.system(size: 32))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(milestone.title)
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
 
-                Text("Incredible dedication!")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                Text("Keep the momentum going!")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.7))
             }
 
             Spacer()
         }
-        .padding(18)
+        .padding(16)
         .background(
-            RoundedRectangle(cornerRadius: 18)
+            RoundedRectangle(cornerRadius: 16)
                 .fill(
                     LinearGradient(
-                        colors: [.orange.opacity(0.35), .red.opacity(0.35)],
+                        colors: [.orange.opacity(0.25), .red.opacity(0.2)],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 18)
-                        .stroke(
-                            LinearGradient(
-                                colors: [.orange.opacity(0.5), .red.opacity(0.5)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            ),
-                            lineWidth: 1
-                        )
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(.white.opacity(0.15), lineWidth: 1)
                 )
         )
+    }
+
+    /// Major milestone: big, bold, extra sparkle
+    private func majorMilestoneBanner(_ milestone: StreakMilestone) -> some View {
+        VStack(spacing: 12) {
+            // Big emoji with glow
+            ZStack {
+                Text(milestone.emoji)
+                    .font(.system(size: 48))
+                    .blur(radius: 15)
+                    .opacity(0.5)
+                Text(milestone.emoji)
+                    .font(.system(size: 56))
+            }
+
+            Text(milestone.title.uppercased())
+                .font(.system(size: 22, weight: .black, design: .rounded))
+                .tracking(2)
+                .foregroundColor(.yellow)
+
+            Text(milestone.majorSubtitle)
+                .font(.system(size: 15, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.85))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+        .padding(.horizontal, 20)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.yellow.opacity(0.15),
+                                Color.orange.opacity(0.2),
+                                Color.red.opacity(0.15)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.yellow.opacity(0.5), .orange.opacity(0.4), .red.opacity(0.3)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 2
+                    )
+            }
+        )
+        .shadow(color: .orange.opacity(0.3), radius: 20, x: 0, y: 8)
     }
 
     // MARK: - Motivation Section
 
     private var motivationSection: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
+            // Show next milestone with progress bar
             if let next = nextStreakMilestone {
                 let daysLeft = next.days - stats.currentStreak
-                Text("\(daysLeft) day\(daysLeft == 1 ? "" : "s") until \(next.title.lowercased())")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundColor(.orange)
+
+                HStack(spacing: 6) {
+                    Text(next.emoji)
+                        .font(.system(size: 14))
+                    Text("\(daysLeft) day\(daysLeft == 1 ? "" : "s") until \(next.title.lowercased())")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .foregroundColor(.orange)
+                }
 
                 // Progress bar to next milestone
                 GeometryReader { geo in
                     let previousMilestone = previousStreakMilestone?.days ?? 0
                     let range = next.days - previousMilestone
-                    let progress = min(Double(stats.currentStreak - previousMilestone) / Double(range), 1.0)
+                    let progress = min(Double(stats.currentStreak - previousMilestone) / Double(max(range, 1)), 1.0)
 
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 4)
@@ -471,7 +553,7 @@ struct GoalCompletedCelebrationView: View {
                         RoundedRectangle(cornerRadius: 4)
                             .fill(
                                 LinearGradient(
-                                    colors: [.orange, .yellow],
+                                    colors: next.isMajor ? [.yellow, .orange] : [.orange, .red.opacity(0.8)],
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
@@ -480,6 +562,15 @@ struct GoalCompletedCelebrationView: View {
                     }
                 }
                 .frame(height: 8)
+
+                // If the next milestone is mini, also tease the next major
+                if !next.isMajor, let nextMajor = nextMajorMilestone, nextMajor.days != next.days {
+                    let majorDaysLeft = nextMajor.days - stats.currentStreak
+                    Text("\(nextMajor.emoji) \(majorDaysLeft) days to \(nextMajor.title.lowercased())")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundColor(.yellow.opacity(0.7))
+                        .padding(.top, 2)
+                }
             }
 
             Text("Come back tomorrow to keep your streak alive!")
@@ -497,6 +588,10 @@ struct GoalCompletedCelebrationView: View {
 
     private var previousStreakMilestone: StreakMilestone? {
         StreakMilestone.allCases.last { $0.days <= stats.currentStreak }
+    }
+
+    private var nextMajorMilestone: StreakMilestone? {
+        StreakMilestone.allCases.first { $0.days > stats.currentStreak && $0.isMajor }
     }
 
     // MARK: - Buttons
@@ -601,9 +696,12 @@ struct GoalCompletedCelebrationView: View {
             notification.notificationOccurred(.success)
         }
 
-        // Phase 4: Confetti burst
+        // Phase 4: Confetti burst (+ fireworks for major milestones)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
             confettiTrigger = true
+            if isMajorMilestone {
+                showFireworks = true
+            }
         }
 
         // Phase 5: Title
@@ -633,12 +731,16 @@ struct GoalCompletedCelebrationView: View {
             }
         }
 
-        // Phase 7: Stats
+        // Phase 7: Stats (+ second confetti wave for major milestones)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 showStats = true
             }
             impactMedium.impactOccurred()
+            if isMajorMilestone {
+                confettiTrigger2 = true
+                notification.notificationOccurred(.success)
+            }
         }
 
         // Phase 8: Motivation
