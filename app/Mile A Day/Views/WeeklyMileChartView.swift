@@ -2,8 +2,8 @@
 //  WeeklyMileChartView.swift
 //  Mile A Day
 //
-//  Animated weekly distance chart with goal line, color-coded segments,
-//  tap-to-inspect tooltips, and a share button.
+//  Scroll-collapsible hero chart: expands as a full animated line chart,
+//  collapses into a compact week-dot row with streak as the user scrolls.
 //
 
 import SwiftUI
@@ -13,24 +13,35 @@ import SwiftUI
 struct DayData: Identifiable {
     let id = UUID()
     let date: Date
-    let label: String          // "Mon", "Tue", …
+    let label: String          // "Sun", "Mon", …
+    let shortLabel: String     // "S", "M", …
     let distance: Double       // miles
     let metGoal: Bool
     let isToday: Bool
+    let isFuture: Bool
 }
 
-// MARK: - Main View
+// MARK: - Collapsible Hero Chart
 
 struct WeeklyMileChartView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     @Environment(\.colorScheme) var colorScheme
 
+    // Animation state
     @State private var selectedIndex: Int? = nil
     @State private var lineDrawn: Bool = false
     @State private var pointsVisible: [Bool] = Array(repeating: false, count: 7)
     @State private var goalLineVisible: Bool = false
     @State private var showShareSheet: Bool = false
+    @State private var hasAppeared: Bool = false
+
+    // Scroll-collapse: 0 = fully expanded, 1 = fully collapsed
+    @State private var collapseProgress: CGFloat = 0
+
+    // Heights
+    private let expandedHeight: CGFloat = 280
+    private let collapsedHeight: CGFloat = 72
 
     // MARK: Derived data
 
@@ -53,23 +64,35 @@ struct WeeklyMileChartView: View {
         return (0..<7).compactMap { offset -> DayData? in
             guard let date = calendar.date(byAdding: .day, value: offset, to: startOfWeek) else { return nil }
             let startOfDay = calendar.startOfDay(for: date)
+            let isToday = calendar.isDateInToday(date)
+            let isFuture = startOfDay > calendar.startOfDay(for: today)
             let miles: Double
-            if let index = healthManager.workoutIndex {
+            if isFuture {
+                miles = 0
+            } else if let index = healthManager.workoutIndex {
                 miles = index.totalMiles(for: startOfDay)
             } else {
-                // Fallback: use dailyMileGoals presence to infer at least 0.95
                 let goalMet = healthManager.dailyMileGoals[startOfDay] ?? false
                 miles = goalMet ? max(goalDistance, 1.0) : 0.0
             }
             let label = dayFormatter.string(from: date)
-            let isToday = calendar.isDateInToday(date)
-            let met = miles >= goalDistance * 0.95  // same qualifying threshold
-            return DayData(date: date, label: label, distance: miles, metGoal: met, isToday: isToday)
+            let shortLabel = String(label.prefix(1))
+            let met = miles >= goalDistance * 0.95
+            return DayData(date: date, label: label, shortLabel: shortLabel, distance: miles, metGoal: met, isToday: isToday, isFuture: isFuture)
         }
     }
 
     private var currentStreak: Int {
         userManager.currentUser.streak
+    }
+
+    private var daysCompletedThisWeek: Int {
+        weekDays.filter { $0.metGoal }.count
+    }
+
+    /// Number of days so far this week (including today)
+    private var daysSoFarThisWeek: Int {
+        weekDays.filter { !$0.isFuture }.count
     }
 
     // MARK: Colors
@@ -81,16 +104,57 @@ struct WeeklyMileChartView: View {
     // MARK: Body
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            headerRow
-            chartArea
-                .padding(.top, 8)
+        let currentHeight = expandedHeight - (expandedHeight - collapsedHeight) * collapseProgress
+        let chartOpacity = max(1 - collapseProgress * 2.5, 0) // chart fades out in first 40%
+        let compactOpacity = max((collapseProgress - 0.4) / 0.4, 0) // compact fades in 40%-80%
+
+        ZStack(alignment: .top) {
+            // Card background
+            cardBackground
+
+            // EXPANDED: Full chart
+            VStack(alignment: .leading, spacing: 0) {
+                expandedHeader
+                    .opacity(chartOpacity)
+                chartArea
+                    .padding(.top, 6)
+            }
+            .padding(16)
+            .opacity(chartOpacity)
+
+            // COLLAPSED: Compact week row
+            collapsedRow
+                .opacity(compactOpacity)
         }
-        .padding(16)
-        .background(cardBackground)
-        .onAppear { runEntryAnimation() }
+        .frame(height: currentHeight)
+        .clipped()
+        .onAppear {
+            if !hasAppeared {
+                hasAppeared = true
+                runEntryAnimation()
+            }
+        }
         .onChange(of: healthManager.workoutIndex?.lastUpdated) {
             resetAndAnimate()
+        }
+        .background(
+            GeometryReader { geo in
+                Color.clear.preference(
+                    key: ScrollOffsetKey.self,
+                    value: geo.frame(in: .named("dashboardScroll")).minY
+                )
+            }
+        )
+        .onPreferenceChange(ScrollOffsetKey.self) { offset in
+            // offset starts near 0 at top, goes negative as we scroll down
+            // We want to start collapsing when the card scrolls up
+            let threshold: CGFloat = 60  // start collapsing after 60pt of scroll
+            let range: CGFloat = 120     // fully collapsed after another 120pt
+            let adjustedOffset = -(offset - threshold)
+            let newProgress = min(max(adjustedOffset / range, 0), 1)
+            withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 0.9)) {
+                collapseProgress = newProgress
+            }
         }
         .sheet(isPresented: $showShareSheet) {
             EnhancedShareView(
@@ -113,23 +177,17 @@ struct WeeklyMileChartView: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - Expanded Header
 
-    private var headerRow: some View {
+    private var expandedHeader: some View {
         HStack(alignment: .center) {
-            HStack(spacing: 8) {
-                Image(systemName: "chart.line.uptrend.xyaxis")
-                    .font(.title3)
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [accentRed, .orange],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+            VStack(alignment: .leading, spacing: 2) {
                 Text("This Week")
-                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundColor(.primary)
+                Text("\(daysCompletedThisWeek) of \(daysSoFarThisWeek) day\(daysSoFarThisWeek == 1 ? "" : "s") hit")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.secondary)
             }
 
             Spacer()
@@ -148,22 +206,112 @@ struct WeeklyMileChartView: View {
                     )
             }
 
-            // Streak badge
-            HStack(spacing: 4) {
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 13))
-                    .foregroundColor(.orange)
-                Text("\(currentStreak)")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundColor(.primary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                Capsule()
-                    .fill(Color.orange.opacity(0.15))
-            )
+            streakBadge
         }
+    }
+
+    // MARK: - Collapsed Compact Row
+
+    private var collapsedRow: some View {
+        HStack(spacing: 0) {
+            // Streak info (left)
+            HStack(spacing: 6) {
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.orange, accentRed], startPoint: .top, endPoint: .bottom)
+                    )
+                Text("\(currentStreak)")
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+                Text("day streak")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            // Compact week dots
+            HStack(spacing: 6) {
+                ForEach(weekDays) { day in
+                    compactDayDot(day: day)
+                }
+            }
+
+            Spacer().frame(width: 10)
+
+            // Share button
+            Button {
+                showShareSheet = true
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    // MARK: - Compact Day Dot
+
+    private func compactDayDot(day: DayData) -> some View {
+        VStack(spacing: 3) {
+            ZStack {
+                if day.isFuture {
+                    // Future: dashed ring, clearly inactive
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
+                        .frame(width: 22, height: 22)
+                } else {
+                    Circle()
+                        .fill(
+                            day.metGoal ? accentRed :
+                            day.distance > 0 ? missedOrange.opacity(0.5) :
+                            Color.gray.opacity(0.2)
+                        )
+                        .frame(width: 22, height: 22)
+
+                    if day.metGoal {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.white)
+                    } else if day.distance > 0 {
+                        Circle()
+                            .fill(missedOrange)
+                            .frame(width: 6, height: 6)
+                    }
+                }
+
+                if day.isToday {
+                    Circle()
+                        .stroke(accentRed, lineWidth: 2)
+                        .frame(width: 26, height: 26)
+                }
+            }
+            Text(day.isToday ? "NOW" : day.shortLabel)
+                .font(.system(size: 9, weight: day.isToday ? .heavy : .regular, design: .rounded))
+                .foregroundColor(day.isToday ? accentRed : (day.isFuture ? .white.opacity(0.25) : .secondary))
+        }
+    }
+
+    // MARK: - Streak Badge
+
+    private var streakBadge: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "flame.fill")
+                .font(.system(size: 13))
+                .foregroundColor(.orange)
+            Text("\(currentStreak)")
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundColor(.primary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule()
+                .fill(Color.orange.opacity(0.15))
+        )
     }
 
     // MARK: - Chart Drawing Area
@@ -173,39 +321,48 @@ struct WeeklyMileChartView: View {
             let size = geo.size
             let data = weekDays
             let maxY = max(chartMaxY(data: data), goalDistance * 1.4, 1.5)
-            let points = chartPoints(data: data, size: size, maxY: maxY)
+            let allPoints = chartPoints(data: data, size: size, maxY: maxY)
             let goalY = yPosition(for: goalDistance, height: size.height, maxY: maxY)
 
+            // Only draw the line through past + today (not future)
+            let activeCount = data.filter { !$0.isFuture }.count
+            let activeData = Array(data.prefix(activeCount))
+            let activePoints = Array(allPoints.prefix(activeCount))
+
             ZStack(alignment: .topLeading) {
-                // Gradient fill under the line
-                if points.count >= 2 {
-                    areaFill(points: points, size: size)
+                // Gradient fill under the line (active days only)
+                if activePoints.count >= 2 {
+                    areaFill(points: activePoints, size: size)
                         .opacity(lineDrawn ? 0.25 : 0)
                         .animation(.easeInOut(duration: 0.5).delay(0.6), value: lineDrawn)
                 }
 
                 // Goal line
-                goalLine(y: goalY, width: size.width, maxY: maxY)
+                goalLine(y: goalY, width: size.width)
                     .opacity(goalLineVisible ? 1 : 0)
                     .animation(.easeInOut(duration: 0.5), value: goalLineVisible)
 
-                // Animated line path
-                if points.count >= 2 {
-                    animatedLine(points: points, data: data, size: size)
+                // Animated line path (active days only)
+                if activePoints.count >= 2 {
+                    animatedLine(points: activePoints, data: activeData)
                 }
 
-                // Data points
-                ForEach(0..<min(data.count, points.count), id: \.self) { i in
-                    dataPoint(at: points[i], data: data[i], index: i)
+                // Data points — active days get full dots, future days get dim placeholders
+                ForEach(0..<min(data.count, allPoints.count), id: \.self) { i in
+                    if data[i].isFuture {
+                        futureDayPlaceholder(at: allPoints[i])
+                    } else {
+                        dataPoint(at: allPoints[i], data: data[i], index: i)
+                    }
                 }
 
                 // Tooltip
-                if let idx = selectedIndex, idx < points.count, idx < data.count {
-                    tooltip(for: data[idx], at: points[idx], chartWidth: size.width)
+                if let idx = selectedIndex, idx < allPoints.count, idx < data.count, !data[idx].isFuture {
+                    tooltip(for: data[idx], at: allPoints[idx], chartWidth: size.width)
                 }
 
                 // X-axis labels
-                xAxisLabels(data: data, points: points, height: size.height)
+                xAxisLabels(data: data, points: allPoints, height: size.height)
             }
         }
         .frame(height: 180)
@@ -231,7 +388,7 @@ struct WeeklyMileChartView: View {
 
     // MARK: - Goal Line
 
-    private func goalLine(y: CGFloat, width: CGFloat, maxY: Double) -> some View {
+    private func goalLine(y: CGFloat, width: CGFloat) -> some View {
         ZStack(alignment: .trailing) {
             Path { p in
                 p.move(to: CGPoint(x: 0, y: y))
@@ -240,7 +397,6 @@ struct WeeklyMileChartView: View {
             .stroke(style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
             .foregroundColor(goalLineColor)
 
-            // Goal label
             Text(String(format: "%.1f mi", goalDistance))
                 .font(.system(size: 10, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.5))
@@ -251,7 +407,7 @@ struct WeeklyMileChartView: View {
 
     // MARK: - Animated Line
 
-    private func animatedLine(points: [CGPoint], data: [DayData], size: CGSize) -> some View {
+    private func animatedLine(points: [CGPoint], data: [DayData]) -> some View {
         let path = smoothPath(points: points)
 
         return ZStack {
@@ -262,12 +418,11 @@ struct WeeklyMileChartView: View {
             )
             .blur(radius: 4)
 
-            // Main colored line – red for met, orange for missed
-            // We draw two masked copies of the path
+            // Main colored line
             path.trim(from: 0, to: lineDrawn ? 1 : 0)
                 .stroke(
                     LinearGradient(
-                        stops: gradientStops(data: data, points: points, pathLength: pathLength(points: points)),
+                        stops: gradientStops(data: data, points: points),
                         startPoint: .leading,
                         endPoint: .trailing
                     ),
@@ -286,17 +441,14 @@ struct WeeklyMileChartView: View {
         let visible = pointsVisible.indices.contains(index) ? pointsVisible[index] : false
 
         return ZStack {
-            // Outer glow
             if data.isToday || isSelected {
                 Circle()
                     .fill(color.opacity(0.3))
                     .frame(width: radius * 3, height: radius * 3)
             }
-            // Filled circle
             Circle()
                 .fill(color)
                 .frame(width: radius * 2, height: radius * 2)
-            // Inner white dot
             Circle()
                 .fill(Color.white)
                 .frame(width: radius * 0.8, height: radius * 0.8)
@@ -321,10 +473,9 @@ struct WeeklyMileChartView: View {
             f.dateFormat = "MMM d"
             return f
         }()
-        let distText = String(format: "%.2f mi", data.distance)
+        let distText = data.isFuture ? "—" : String(format: "%.2f mi", data.distance)
         let dateText = dateFormatter.string(from: data.date)
 
-        // Clamp tooltip so it doesn't go off-screen
         let tooltipWidth: CGFloat = 90
         let clampedX = min(max(point.x, tooltipWidth / 2 + 4), chartWidth - tooltipWidth / 2 - 4)
 
@@ -348,14 +499,32 @@ struct WeeklyMileChartView: View {
         .zIndex(10)
     }
 
+    // MARK: - Future Day Placeholder
+
+    private func futureDayPlaceholder(at point: CGPoint) -> some View {
+        Circle()
+            .strokeBorder(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
+            .frame(width: 10, height: 10)
+            .position(point)
+            .allowsHitTesting(false)
+    }
+
     // MARK: - X-Axis Labels
 
     private func xAxisLabels(data: [DayData], points: [CGPoint], height: CGFloat) -> some View {
         ForEach(0..<min(data.count, points.count), id: \.self) { i in
-            Text(data[i].label)
-                .font(.system(size: 10, weight: data[i].isToday ? .bold : .regular, design: .rounded))
-                .foregroundColor(data[i].isToday ? .primary : .secondary)
-                .position(x: points[i].x, y: height - 4)
+            VStack(spacing: 1) {
+                if data[i].isToday {
+                    Text("TODAY")
+                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .foregroundColor(accentRed)
+                } else {
+                    Text(data[i].label)
+                        .font(.system(size: 10, weight: .regular, design: .rounded))
+                        .foregroundColor(data[i].isFuture ? .white.opacity(0.2) : .secondary)
+                }
+            }
+            .position(x: points[i].x, y: height - 4)
         }
     }
 
@@ -399,7 +568,7 @@ struct WeeklyMileChartView: View {
     }
 
     private func chartPoints(data: [DayData], size: CGSize, maxY: Double) -> [CGPoint] {
-        let chartHeight = size.height - 24   // room for x labels
+        let chartHeight = size.height - 24
         let count = data.count
         guard count > 0 else { return [] }
         let spacing = size.width / CGFloat(count)
@@ -429,7 +598,6 @@ struct WeeklyMileChartView: View {
             return path
         }
 
-        // Catmull-Rom spline converted to cubic bezier segments
         for i in 0..<(points.count - 1) {
             let p0 = i > 0 ? points[i - 1] : points[i]
             let p1 = points[i]
@@ -474,8 +642,8 @@ struct WeeklyMileChartView: View {
 
     // MARK: - Gradient Stops (red vs orange per segment)
 
-    private func gradientStops(data: [DayData], points: [CGPoint], pathLength: CGFloat) -> [Gradient.Stop] {
-        guard data.count >= 2, pathLength > 0 else {
+    private func gradientStops(data: [DayData], points: [CGPoint]) -> [Gradient.Stop] {
+        guard data.count >= 2, points.count >= 2 else {
             return [Gradient.Stop(color: accentRed, location: 0)]
         }
 
@@ -485,10 +653,10 @@ struct WeeklyMileChartView: View {
             let color = data[i].metGoal ? accentRed : missedOrange
             let location = points[i].x / (points.last?.x ?? 1)
 
-            // Add a small transition zone
             if i > 0 {
-                let prevColor = data[i - 1].metGoal ? accentRed : missedOrange
-                if prevColor != color {
+                let prevMet = data[i - 1].metGoal
+                if data[i].metGoal != prevMet {
+                    let prevColor = prevMet ? accentRed : missedOrange
                     let midLocation = ((stops.last?.location ?? 0) + location) / 2
                     stops.append(Gradient.Stop(color: prevColor, location: max(midLocation - 0.02, 0)))
                     stops.append(Gradient.Stop(color: color, location: min(midLocation + 0.02, 1)))
@@ -497,18 +665,8 @@ struct WeeklyMileChartView: View {
             stops.append(Gradient.Stop(color: color, location: location))
         }
 
-        // Deduplicate / ensure sorted
         stops.sort { $0.location < $1.location }
         return stops
-    }
-
-    private func pathLength(points: [CGPoint]) -> CGFloat {
-        guard points.count >= 2 else { return 0 }
-        var length: CGFloat = 0
-        for i in 1..<points.count {
-            length += distance(points[i - 1], points[i])
-        }
-        return length
     }
 
     // MARK: - Entry Animation
@@ -525,7 +683,6 @@ struct WeeklyMileChartView: View {
             lineDrawn = true
         }
 
-        // Stagger data point reveals
         for i in 0..<7 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.7 + Double(i) * 0.07) {
                 withAnimation {
@@ -548,6 +705,15 @@ struct WeeklyMileChartView: View {
     }
 }
 
+// MARK: - Scroll Offset Preference Key
+
+private struct ScrollOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 // MARK: - Preview
 
 #Preview {
@@ -562,10 +728,21 @@ struct WeeklyMileChartView: View {
         )
         .ignoresSafeArea()
 
-        WeeklyMileChartView(
-            healthManager: HealthKitManager(),
-            userManager: UserManager()
-        )
-        .padding()
+        ScrollView {
+            VStack(spacing: 16) {
+                WeeklyMileChartView(
+                    healthManager: HealthKitManager(),
+                    userManager: UserManager()
+                )
+
+                ForEach(0..<5) { _ in
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(.ultraThinMaterial)
+                        .frame(height: 120)
+                }
+            }
+            .padding()
+        }
+        .coordinateSpace(name: "dashboardScroll")
     }
 }
