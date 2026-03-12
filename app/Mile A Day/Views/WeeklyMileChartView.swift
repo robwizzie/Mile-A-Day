@@ -90,6 +90,11 @@ struct WeeklyMileChartView: View {
         weekDays.filter { $0.metGoal }.count
     }
 
+    /// Number of days so far this week (including today)
+    private var daysSoFarThisWeek: Int {
+        weekDays.filter { !$0.isFuture }.count
+    }
+
     // MARK: Colors
 
     private let accentRed = Color(red: 0.85, green: 0.25, blue: 0.35)
@@ -180,7 +185,7 @@ struct WeeklyMileChartView: View {
                 Text("This Week")
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundColor(.primary)
-                Text("\(daysCompletedThisWeek)/7 days completed")
+                Text("\(daysCompletedThisWeek) of \(daysSoFarThisWeek) day\(daysSoFarThisWeek == 1 ? "" : "s") hit")
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundColor(.secondary)
             }
@@ -253,25 +258,29 @@ struct WeeklyMileChartView: View {
     private func compactDayDot(day: DayData) -> some View {
         VStack(spacing: 3) {
             ZStack {
-                Circle()
-                    .fill(
-                        day.isFuture ? Color.gray.opacity(0.15) :
-                        day.metGoal ? accentRed :
-                        day.distance > 0 ? missedOrange.opacity(0.5) :
-                        Color.gray.opacity(0.2)
-                    )
-                    .frame(width: 22, height: 22)
-
-                if day.metGoal {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.white)
-                } else if day.isFuture {
-                    // empty
-                } else if day.distance > 0 {
+                if day.isFuture {
+                    // Future: dashed ring, clearly inactive
                     Circle()
-                        .fill(missedOrange)
-                        .frame(width: 6, height: 6)
+                        .strokeBorder(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
+                        .frame(width: 22, height: 22)
+                } else {
+                    Circle()
+                        .fill(
+                            day.metGoal ? accentRed :
+                            day.distance > 0 ? missedOrange.opacity(0.5) :
+                            Color.gray.opacity(0.2)
+                        )
+                        .frame(width: 22, height: 22)
+
+                    if day.metGoal {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.white)
+                    } else if day.distance > 0 {
+                        Circle()
+                            .fill(missedOrange)
+                            .frame(width: 6, height: 6)
+                    }
                 }
 
                 if day.isToday {
@@ -280,9 +289,9 @@ struct WeeklyMileChartView: View {
                         .frame(width: 26, height: 26)
                 }
             }
-            Text(day.shortLabel)
-                .font(.system(size: 9, weight: day.isToday ? .bold : .regular, design: .rounded))
-                .foregroundColor(day.isToday ? .primary : .secondary)
+            Text(day.isToday ? "NOW" : day.shortLabel)
+                .font(.system(size: 9, weight: day.isToday ? .heavy : .regular, design: .rounded))
+                .foregroundColor(day.isToday ? accentRed : (day.isFuture ? .white.opacity(0.25) : .secondary))
         }
     }
 
@@ -312,13 +321,18 @@ struct WeeklyMileChartView: View {
             let size = geo.size
             let data = weekDays
             let maxY = max(chartMaxY(data: data), goalDistance * 1.4, 1.5)
-            let points = chartPoints(data: data, size: size, maxY: maxY)
+            let allPoints = chartPoints(data: data, size: size, maxY: maxY)
             let goalY = yPosition(for: goalDistance, height: size.height, maxY: maxY)
 
+            // Only draw the line through past + today (not future)
+            let activeCount = data.filter { !$0.isFuture }.count
+            let activeData = Array(data.prefix(activeCount))
+            let activePoints = Array(allPoints.prefix(activeCount))
+
             ZStack(alignment: .topLeading) {
-                // Gradient fill under the line
-                if points.count >= 2 {
-                    areaFill(points: points, size: size)
+                // Gradient fill under the line (active days only)
+                if activePoints.count >= 2 {
+                    areaFill(points: activePoints, size: size)
                         .opacity(lineDrawn ? 0.25 : 0)
                         .animation(.easeInOut(duration: 0.5).delay(0.6), value: lineDrawn)
                 }
@@ -328,23 +342,27 @@ struct WeeklyMileChartView: View {
                     .opacity(goalLineVisible ? 1 : 0)
                     .animation(.easeInOut(duration: 0.5), value: goalLineVisible)
 
-                // Animated line path
-                if points.count >= 2 {
-                    animatedLine(points: points, data: data)
+                // Animated line path (active days only)
+                if activePoints.count >= 2 {
+                    animatedLine(points: activePoints, data: activeData)
                 }
 
-                // Data points
-                ForEach(0..<min(data.count, points.count), id: \.self) { i in
-                    dataPoint(at: points[i], data: data[i], index: i)
+                // Data points — active days get full dots, future days get dim placeholders
+                ForEach(0..<min(data.count, allPoints.count), id: \.self) { i in
+                    if data[i].isFuture {
+                        futureDayPlaceholder(at: allPoints[i])
+                    } else {
+                        dataPoint(at: allPoints[i], data: data[i], index: i)
+                    }
                 }
 
                 // Tooltip
-                if let idx = selectedIndex, idx < points.count, idx < data.count {
-                    tooltip(for: data[idx], at: points[idx], chartWidth: size.width)
+                if let idx = selectedIndex, idx < allPoints.count, idx < data.count, !data[idx].isFuture {
+                    tooltip(for: data[idx], at: allPoints[idx], chartWidth: size.width)
                 }
 
                 // X-axis labels
-                xAxisLabels(data: data, points: points, height: size.height)
+                xAxisLabels(data: data, points: allPoints, height: size.height)
             }
         }
         .frame(height: 180)
@@ -418,7 +436,7 @@ struct WeeklyMileChartView: View {
 
     private func dataPoint(at point: CGPoint, data: DayData, index: Int) -> some View {
         let isSelected = selectedIndex == index
-        let color = data.metGoal ? accentRed : (data.isFuture ? Color.gray.opacity(0.3) : missedOrange)
+        let color = data.metGoal ? accentRed : missedOrange
         let radius: CGFloat = data.isToday ? 7 : 5
         let visible = pointsVisible.indices.contains(index) ? pointsVisible[index] : false
 
@@ -481,14 +499,32 @@ struct WeeklyMileChartView: View {
         .zIndex(10)
     }
 
+    // MARK: - Future Day Placeholder
+
+    private func futureDayPlaceholder(at point: CGPoint) -> some View {
+        Circle()
+            .strokeBorder(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
+            .frame(width: 10, height: 10)
+            .position(point)
+            .allowsHitTesting(false)
+    }
+
     // MARK: - X-Axis Labels
 
     private func xAxisLabels(data: [DayData], points: [CGPoint], height: CGFloat) -> some View {
         ForEach(0..<min(data.count, points.count), id: \.self) { i in
-            Text(data[i].label)
-                .font(.system(size: 10, weight: data[i].isToday ? .bold : .regular, design: .rounded))
-                .foregroundColor(data[i].isToday ? .primary : .secondary)
-                .position(x: points[i].x, y: height - 4)
+            VStack(spacing: 1) {
+                if data[i].isToday {
+                    Text("TODAY")
+                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .foregroundColor(accentRed)
+                } else {
+                    Text(data[i].label)
+                        .font(.system(size: 10, weight: .regular, design: .rounded))
+                        .foregroundColor(data[i].isFuture ? .white.opacity(0.2) : .secondary)
+                }
+            }
+            .position(x: points[i].x, y: height - 4)
         }
     }
 
@@ -614,12 +650,13 @@ struct WeeklyMileChartView: View {
         var stops: [Gradient.Stop] = []
 
         for i in 0..<data.count {
-            let color = data[i].metGoal ? accentRed : (data[i].isFuture ? Color.gray.opacity(0.3) : missedOrange)
+            let color = data[i].metGoal ? accentRed : missedOrange
             let location = points[i].x / (points.last?.x ?? 1)
 
             if i > 0 {
-                let prevColor = data[i - 1].metGoal ? accentRed : (data[i - 1].isFuture ? Color.gray.opacity(0.3) : missedOrange)
-                if data[i].metGoal != data[i - 1].metGoal || data[i].isFuture != data[i - 1].isFuture {
+                let prevMet = data[i - 1].metGoal
+                if data[i].metGoal != prevMet {
+                    let prevColor = prevMet ? accentRed : missedOrange
                     let midLocation = ((stops.last?.location ?? 0) + location) / 2
                     stops.append(Gradient.Stop(color: prevColor, location: max(midLocation - 0.02, 0)))
                     stops.append(Gradient.Stop(color: color, location: min(midLocation + 0.02, 1)))
