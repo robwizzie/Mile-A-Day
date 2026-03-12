@@ -93,6 +93,7 @@ struct DashboardView: View {
             dashboardContent
                 .frame(maxWidth: .infinity)
         }
+        .coordinateSpace(name: "dashboardScroll")
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .background(MADTheme.Colors.appBackgroundGradient)
         .scrollContentBackground(.hidden)
@@ -408,10 +409,10 @@ struct DashboardView: View {
         VStack(spacing: 16) {
             inProgressBannerSection
             instructionsSection
+            weeklyChartSection
             streakSection
             todayProgressSection
             stepsAndBadgesSection
-            weekAtAGlanceSection
             statsAndHistorySection
         }
         .padding(.horizontal, 16)
@@ -510,7 +511,7 @@ struct DashboardView: View {
         }
     }
 
-    private var weekAtAGlanceSection: some View {
+    private var weeklyChartSection: some View {
         WeeklyMileChartView(
             healthManager: healthManager,
             userManager: userManager
