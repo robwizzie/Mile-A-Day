@@ -104,30 +104,31 @@ struct WeeklyMileChartView: View {
     // MARK: Body
 
     var body: some View {
+        let isCollapsed = collapseProgress > 0.5
         let currentHeight = expandedHeight - (expandedHeight - collapsedHeight) * collapseProgress
-        let chartOpacity = max(1 - collapseProgress * 2.5, 0) // chart fades out in first 40%
-        let compactOpacity = max((collapseProgress - 0.4) / 0.4, 0) // compact fades in 40%-80%
 
         ZStack(alignment: .top) {
             // Card background
             cardBackground
 
-            // EXPANDED: Full chart
-            VStack(alignment: .leading, spacing: 0) {
-                expandedHeader
-                    .opacity(chartOpacity)
-                chartArea
-                    .padding(.top, 6)
+            if isCollapsed {
+                // COLLAPSED: Compact week row
+                collapsedRow
+                    .transition(.opacity)
+            } else {
+                // EXPANDED: Full chart
+                VStack(alignment: .leading, spacing: 0) {
+                    expandedHeader
+                    chartArea
+                        .padding(.top, 6)
+                }
+                .padding(16)
+                .transition(.opacity)
             }
-            .padding(16)
-            .opacity(chartOpacity)
-
-            // COLLAPSED: Compact week row
-            collapsedRow
-                .opacity(compactOpacity)
         }
         .frame(height: currentHeight)
         .clipped()
+        .animation(.easeInOut(duration: 0.2), value: isCollapsed)
         .onAppear {
             if !hasAppeared {
                 hasAppeared = true
