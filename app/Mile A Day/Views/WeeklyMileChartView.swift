@@ -255,11 +255,11 @@ struct WeeklyMileChartView: View {
                     .frame(width: 26, height: 26)
             } else if day.metGoal {
                 Circle()
-                    .stroke(Color.green, lineWidth: 2)
+                    .fill(Color.green)
                     .frame(width: 26, height: 26)
-                Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.green)
+                Image(systemName: "figure.run")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white)
             } else if day.distance > 0 {
                 Circle()
                     .fill(missedOrange.opacity(0.3))

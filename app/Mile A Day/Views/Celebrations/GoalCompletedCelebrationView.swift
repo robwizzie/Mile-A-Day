@@ -11,56 +11,52 @@ import SwiftUI
 struct GoalCompletedCelebrationView: View {
     @ObservedObject var manager = CelebrationManager.shared
     var stats: GoalCompletionStats = .placeholder
-    
+
     // Animation states
     @State private var overlayOpacity: Double = 0
     @State private var showBackground = false
-    @State private var showFireworks = false
-    @State private var showMainIcon = false
-    @State private var mainIconScale: CGFloat = 0
-    @State private var mainIconRotation: Double = -180
+    @State private var showFlame = false
+    @State private var flameScale: CGFloat = 0
+    @State private var showStreakCount = false
+    @State private var streakCountValue: Int = 0
+    @State private var showWeekCalendar = false
+    @State private var weekDayRevealIndex: Int = -1
     @State private var showTitle = false
     @State private var showStats = false
-    @State private var showStreakBanner = false
     @State private var showMotivation = false
     @State private var showButtons = false
     @State private var confettiTrigger = false
     @State private var pulseAnimation = false
-    @State private var shimmerPhase: CGFloat = -1
-    
+    @State private var flameGlow = false
+
     // Haptic generators
     private let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
     private let impactMedium = UIImpactFeedbackGenerator(style: .medium)
+    private let impactLight = UIImpactFeedbackGenerator(style: .light)
     private let notification = UINotificationFeedbackGenerator()
-    
+
     var body: some View {
         ZStack {
-            // Animated gradient background
+            // Warm gradient background
             celebrationBackground
-            
-            // Fireworks particle effect
-            if showFireworks {
-                FireworksView()
-                    .allowsHitTesting(false)
-            }
-            
-            // Main confetti
+
+            // Confetti
             if confettiTrigger {
                 CelebrationConfetti()
                     .allowsHitTesting(false)
             }
-            
+
             // Content
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    Spacer(minLength: 80)
-                    
-                    // Main trophy/checkmark icon
-                    mainIconView
-                    
-                    Spacer(minLength: 30)
-                    
-                    // Title section
+                    Spacer(minLength: 60)
+
+                    // HERO: Flame + streak counter
+                    streakHeroSection
+
+                    Spacer(minLength: 24)
+
+                    // Title
                     if showTitle {
                         titleSection
                             .transition(.asymmetric(
@@ -68,20 +64,31 @@ struct GoalCompletedCelebrationView: View {
                                 removal: .opacity
                             ))
                     }
-                    
-                    Spacer(minLength: 24)
-                    
-                    // Stats cards
-                    if showStats {
-                        statsSection
+
+                    Spacer(minLength: 20)
+
+                    // Week calendar
+                    if showWeekCalendar {
+                        weekCalendarSection
                             .transition(.asymmetric(
-                                insertion: .scale(scale: 0.9).combined(with: .opacity).combined(with: .offset(y: 30)),
+                                insertion: .scale(scale: 0.95).combined(with: .opacity),
                                 removal: .opacity
                             ))
                     }
-                    
-                    // Streak milestone banner (if applicable)
-                    if showStreakBanner, let milestone = stats.streakMilestone {
+
+                    Spacer(minLength: 20)
+
+                    // Today's stats (compact)
+                    if showStats {
+                        todayStatsSection
+                            .transition(.asymmetric(
+                                insertion: .opacity.combined(with: .offset(y: 20)),
+                                removal: .opacity
+                            ))
+                    }
+
+                    // Streak milestone banner
+                    if showMotivation, let milestone = stats.streakMilestone {
                         streakMilestoneBanner(milestone)
                             .transition(.asymmetric(
                                 insertion: .scale(scale: 0.8).combined(with: .opacity),
@@ -89,26 +96,22 @@ struct GoalCompletedCelebrationView: View {
                             ))
                             .padding(.top, 16)
                     }
-                    
-                    // Motivational message
+
+                    // Motivation
                     if showMotivation {
                         motivationSection
-                            .transition(.asymmetric(
-                                insertion: .opacity.combined(with: .offset(y: 20)),
-                                removal: .opacity
-                            ))
-                            .padding(.top, 20)
+                            .padding(.top, 16)
+                            .transition(.opacity.combined(with: .offset(y: 20)))
                     }
-                    
+
                     Spacer(minLength: 24)
-                    
-                    // Action buttons
+
+                    // Buttons
                     if showButtons {
                         buttonSection
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
 
-                    // Safe area spacing for bottom (tab bar + home indicator)
                     Spacer(minLength: 100)
                 }
                 .padding(.horizontal, 24)
@@ -120,494 +123,318 @@ struct GoalCompletedCelebrationView: View {
             startCelebrationSequence()
         }
     }
-    
+
     // MARK: - Background
-    
+
     private var celebrationBackground: some View {
         ZStack {
-            // Base gradient
+            // Deep warm gradient
             LinearGradient(
                 colors: [
-                    Color(red: 0.85, green: 0.25, blue: 0.35),
-                    Color(red: 0.7, green: 0.2, blue: 0.3),
-                    Color(red: 0.15, green: 0.08, blue: 0.1)
+                    Color(red: 0.95, green: 0.55, blue: 0.1),
+                    Color(red: 0.85, green: 0.25, blue: 0.15),
+                    Color(red: 0.15, green: 0.08, blue: 0.05)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
-            
-            // Animated radial pulse
+
+            // Pulsing radial glow behind flame
             if showBackground {
                 RadialGradient(
                     colors: [
-                        Color.yellow.opacity(pulseAnimation ? 0.15 : 0.05),
+                        Color.yellow.opacity(pulseAnimation ? 0.2 : 0.08),
+                        Color.orange.opacity(pulseAnimation ? 0.1 : 0.03),
                         Color.clear
                     ],
-                    center: .center,
-                    startRadius: 50,
-                    endRadius: pulseAnimation ? 400 : 200
+                    center: UnitPoint(x: 0.5, y: 0.25),
+                    startRadius: 30,
+                    endRadius: pulseAnimation ? 350 : 200
                 )
                 .animation(.easeInOut(duration: 2).repeatForever(autoreverses: true), value: pulseAnimation)
-            }
-            
-            // Subtle overlay pattern
-            GeometryReader { geo in
-                ForEach(0..<20, id: \.self) { i in
-                    Circle()
-                        .fill(Color.white.opacity(0.03))
-                        .frame(width: CGFloat.random(in: 50...150))
-                        .position(
-                            x: CGFloat.random(in: 0...geo.size.width),
-                            y: CGFloat.random(in: 0...geo.size.height)
-                        )
-                        .blur(radius: 20)
-                }
             }
         }
         .ignoresSafeArea()
     }
-    
-    // MARK: - Main Icon
-    
-    private var mainIconView: some View {
-        ZStack {
-            // Outer glow rings
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .stroke(
-                        Color.yellow.opacity(0.3 - Double(index) * 0.1),
-                        lineWidth: 3
-                    )
-                    .frame(width: 180 + CGFloat(index * 30), height: 180 + CGFloat(index * 30))
-                    .scaleEffect(pulseAnimation ? 1.1 : 1.0)
-                    .animation(
-                        .easeInOut(duration: 1.5)
-                            .repeatForever(autoreverses: true)
-                            .delay(Double(index) * 0.2),
-                        value: pulseAnimation
-                    )
-            }
-            
-            // Inner glow
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [Color.yellow.opacity(0.4), Color.clear],
-                        center: .center,
-                        startRadius: 50,
-                        endRadius: 100
-                    )
-                )
-                .frame(width: 200, height: 200)
-            
-            // Main circle background
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color(red: 1.0, green: 0.85, blue: 0.3),
-                            Color(red: 1.0, green: 0.6, blue: 0.2)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 140, height: 140)
-                .shadow(color: Color.orange.opacity(0.5), radius: 30, x: 0, y: 10)
-                .overlay(
-                    Circle()
-                        .stroke(
-                            LinearGradient(
-                                colors: [.white.opacity(0.6), .clear],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 3
-                        )
-                )
-            
-            // Trophy icon
-            Image(systemName: stats.isNewPersonalBest ? "star.fill" : "trophy.fill")
-                .font(.system(size: 70, weight: .medium))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [.white, .white.opacity(0.9)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .shadow(color: .black.opacity(0.2), radius: 5, x: 0, y: 3)
-                .overlay(shimmerOverlay)
-        }
-        .scaleEffect(mainIconScale)
-        .rotationEffect(.degrees(mainIconRotation))
-        .opacity(showMainIcon ? 1 : 0)
-    }
-    
-    @ViewBuilder
-    private var shimmerOverlay: some View {
-        Image(systemName: stats.isNewPersonalBest ? "star.fill" : "trophy.fill")
-            .font(.system(size: 70, weight: .medium))
-            .foregroundStyle(
-                LinearGradient(
-                    colors: [.clear, .white.opacity(0.5), .clear],
-                    startPoint: UnitPoint(x: shimmerPhase - 0.3, y: 0),
-                    endPoint: UnitPoint(x: shimmerPhase + 0.3, y: 1)
-                )
-            )
-            .onAppear {
-                withAnimation(.linear(duration: 2).repeatForever(autoreverses: false)) {
-                    shimmerPhase = 1.5
-                }
-            }
-    }
-    
-    // MARK: - Title Section
-    
-    private var titleSection: some View {
+
+    // MARK: - Streak Hero (Flame + Counter)
+
+    private var streakHeroSection: some View {
         VStack(spacing: 8) {
+            // Flame icon with glow
+            ZStack {
+                // Outer glow
+                if flameGlow {
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [Color.orange.opacity(0.4), Color.clear],
+                                center: .center,
+                                startRadius: 30,
+                                endRadius: 100
+                            )
+                        )
+                        .frame(width: 200, height: 200)
+                        .scaleEffect(pulseAnimation ? 1.15 : 1.0)
+                        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: pulseAnimation)
+                }
+
+                // Flame
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 100, weight: .medium))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [
+                                Color.yellow,
+                                Color.orange,
+                                Color(red: 1.0, green: 0.3, blue: 0.1)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .shadow(color: .orange.opacity(0.6), radius: 20, x: 0, y: 5)
+            }
+            .scaleEffect(flameScale)
+            .opacity(showFlame ? 1 : 0)
+
+            // Streak counter
+            if showStreakCount {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(streakCountValue)")
+                        .font(.system(size: 72, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                        .contentTransition(.numericText())
+
+                    Text("day streak!")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.9))
+                }
+                .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
+                .transition(.scale(scale: 0.5).combined(with: .opacity))
+            }
+        }
+    }
+
+    // MARK: - Title
+
+    private var titleSection: some View {
+        VStack(spacing: 6) {
             if stats.isNewPersonalBest {
-                Text("🎉 NEW PERSONAL BEST! 🎉")
+                Text("NEW PERSONAL BEST!")
                     .font(.system(size: 14, weight: .black, design: .rounded))
                     .tracking(2)
                     .foregroundColor(.yellow)
             }
-            
-            Text("Goal Crushed!")
-                .font(.system(size: 42, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-                .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
-            
+
             Text(completionSubtitle)
                 .font(.system(size: 18, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.9))
                 .multilineTextAlignment(.center)
         }
     }
-    
+
     private var completionSubtitle: String {
         if stats.percentOver > 50 {
-            return "You absolutely smashed it today! 💥"
+            return "You absolutely crushed it today!"
         } else if stats.percentOver > 20 {
-            return "You went above and beyond! 🚀"
+            return "You went above and beyond!"
         } else if stats.percentOver > 0 {
-            return "You crushed your daily goal! 🎯"
+            return "Goal smashed! Keep it up!"
         } else {
-            return "You hit your daily goal! ✅"
+            return "You hit your daily goal!"
         }
     }
-    
-    // MARK: - Stats Section
-    
-    private var statsSection: some View {
-        VStack(spacing: 12) {
-            // Distance card (main stat)
-            distanceCard
-            
-            // Secondary stats row - Streak and Duration
+
+    // MARK: - Week Calendar (Duolingo-style)
+
+    private var weekCalendarSection: some View {
+        let calendar = Calendar.current
+        let today = Date()
+        let weekday = calendar.component(.weekday, from: today)
+        let daysFromSunday = weekday - 1
+
+        let dayLabels = ["S", "M", "T", "W", "T", "F", "S"]
+
+        return VStack(spacing: 12) {
+            Text("THIS WEEK")
+                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .tracking(2)
+                .foregroundColor(.white.opacity(0.5))
+
             HStack(spacing: 12) {
-                streakCard
-                durationCard
-            }
-            
-            // Third row - Pace and Calories (if available)
-            HStack(spacing: 12) {
-                if stats.todaysAveragePace != nil {
-                    paceCard
-                } else {
-                    lifetimeMilesCard
-                }
-                
-                if stats.todaysCalories > 0 {
-                    caloriesCard
-                } else {
-                    workoutCountCard
-                }
-            }
-        }
-    }
-    
-    private var distanceCard: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Image(systemName: "figure.run")
-                    .font(.system(size: 16, weight: .semibold))
-                Text("Today's Distance")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                Spacer()
-                if stats.percentOver > 0 {
-                    Text("+\(Int(stats.percentOver))%")
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                        .foregroundColor(.green)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.green.opacity(0.2))
-                        .cornerRadius(8)
-                }
-            }
-            .foregroundColor(.white.opacity(0.8))
-            
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(String(format: "%.2f", stats.todaysDistance))
-                    .font(.system(size: 48, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                
-                Text("mi")
-                    .font(.system(size: 20, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
-                
-                Spacer()
-                
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("Goal")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.6))
-                    Text("\(String(format: "%.1f", stats.goalDistance)) mi")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.8))
+                ForEach(0..<7, id: \.self) { index in
+                    let isPast = index < daysFromSunday
+                    let isToday = index == daysFromSunday
+                    let isFuture = index > daysFromSunday
+                    let isRevealed = index <= weekDayRevealIndex
+
+                    VStack(spacing: 6) {
+                        Text(dayLabels[index])
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(isToday ? .orange : .white.opacity(0.5))
+
+                        ZStack {
+                            if isFuture {
+                                // Future: dim empty circle
+                                Circle()
+                                    .stroke(Color.white.opacity(0.15), lineWidth: 1.5)
+                                    .frame(width: 36, height: 36)
+                            } else if isToday {
+                                // Today: green filled with running figure (just completed!)
+                                Circle()
+                                    .fill(Color.green)
+                                    .frame(width: 36, height: 36)
+                                    .shadow(color: .green.opacity(0.5), radius: isRevealed ? 8 : 0)
+
+                                Image(systemName: "figure.run")
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundColor(.white)
+                            } else if isPast {
+                                // Past: check if goal was met (simplified — assume met for streak days)
+                                let daysMet = stats.currentStreak >= daysFromSunday
+                                    ? true
+                                    : index >= (daysFromSunday - stats.currentStreak)
+
+                                if daysMet {
+                                    Circle()
+                                        .fill(Color.green)
+                                        .frame(width: 36, height: 36)
+
+                                    Image(systemName: "figure.run")
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundColor(.white)
+                                } else {
+                                    Circle()
+                                        .fill(Color.white.opacity(0.08))
+                                        .frame(width: 36, height: 36)
+
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundColor(.white.opacity(0.3))
+                                }
+                            }
+                        }
+                        .scaleEffect(isRevealed ? 1.0 : 0.5)
+                        .opacity(isRevealed || isFuture ? 1.0 : 0.3)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.6), value: isRevealed)
+                    }
                 }
             }
         }
-        .padding(20)
+        .padding(.vertical, 20)
+        .padding(.horizontal, 16)
         .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(.white.opacity(0.15))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20)
-                        .stroke(.white.opacity(0.25), lineWidth: 1)
-                )
-        )
-    }
-    
-    private var streakCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.orange)
-                Text("Streak")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
-            }
-            
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text("\(stats.currentStreak)")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                
-                Text("days")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .fill(.white.opacity(0.1))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(.white.opacity(0.2), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(.white.opacity(0.15), lineWidth: 1)
                 )
         )
     }
-    
-    private var paceCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "speedometer")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(stats.isPacePB ? .green : .cyan)
-                Text(stats.isPacePB ? "New PB!" : "Avg Pace")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
+
+    // MARK: - Today's Stats (Compact)
+
+    private var todayStatsSection: some View {
+        HStack(spacing: 12) {
+            // Distance
+            statPill(
+                icon: "figure.run",
+                iconColor: .green,
+                value: String(format: "%.2f", stats.todaysDistance),
+                unit: "mi",
+                extra: stats.percentOver > 0 ? "+\(Int(stats.percentOver))%" : nil
+            )
+
+            // Duration
+            if stats.todaysTotalDuration > 0 {
+                statPill(
+                    icon: "timer",
+                    iconColor: .mint,
+                    value: stats.formattedDuration,
+                    unit: "min",
+                    extra: nil
+                )
             }
-            
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(formatPace(stats.todaysAveragePace ?? 0))
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                
-                Text("/mi")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
+
+            // Pace
+            if let pace = stats.todaysAveragePace {
+                statPill(
+                    icon: "speedometer",
+                    iconColor: stats.isPacePB ? .green : .cyan,
+                    value: formatPace(pace),
+                    unit: "/mi",
+                    extra: stats.isPacePB ? "PB!" : nil
+                )
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(.white.opacity(0.1))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(stats.isPacePB ? Color.green.opacity(0.4) : .white.opacity(0.2), lineWidth: 1)
-                )
-        )
     }
-    
-    private var durationCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "timer")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.mint)
-                Text("Duration")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
-            }
-            
+
+    private func statPill(icon: String, iconColor: Color, value: String, unit: String, extra: String?) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(iconColor)
+
             HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(stats.formattedDuration)
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                Text(value)
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
-                
-                Text("min")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                Text(unit)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.6))
             }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(.white.opacity(0.1))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(.white.opacity(0.2), lineWidth: 1)
-                )
-        )
-    }
-    
-    private var caloriesCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "flame.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.red)
-                Text("Calories")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
-            }
-            
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(stats.formattedCalories)
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                
-                Text("cal")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(.white.opacity(0.1))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(.white.opacity(0.2), lineWidth: 1)
-                )
-        )
-    }
-    
-    private var workoutCountCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "figure.run.circle.fill")
-                    .font(.system(size: 14, weight: .semibold))
+
+            if let extra = extra {
+                Text(extra)
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
                     .foregroundColor(.green)
-                Text("Workouts")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
-            }
-            
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text("\(stats.todaysWorkoutCount)")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                
-                Text(stats.todaysWorkoutCount == 1 ? "run" : "runs")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 14)
                 .fill(.white.opacity(0.1))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(.white.opacity(0.2), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(.white.opacity(0.15), lineWidth: 1)
                 )
         )
     }
-    
-    private var lifetimeMilesCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "road.lanes")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.purple)
-                Text("Total Miles")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
-            }
-            
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(String(format: "%.0f", stats.totalLifetimeMiles))
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                
-                Text("mi")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(.white.opacity(0.1))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(.white.opacity(0.2), lineWidth: 1)
-                )
-        )
-    }
-    
+
     // MARK: - Streak Milestone Banner
-    
+
     private func streakMilestoneBanner(_ milestone: StreakMilestone) -> some View {
         HStack(spacing: 12) {
             Text(milestone.emoji)
-                .font(.system(size: 32))
-            
+                .font(.system(size: 36))
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(milestone.title)
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
-                
-                Text("Keep the momentum going!")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
+
+                Text("Incredible dedication!")
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.7))
             }
-            
+
             Spacer()
         }
-        .padding(16)
+        .padding(18)
         .background(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 18)
                 .fill(
                     LinearGradient(
-                        colors: [.orange.opacity(0.3), .red.opacity(0.3)],
+                        colors: [.orange.opacity(0.35), .red.opacity(0.35)],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: 18)
                         .stroke(
                             LinearGradient(
                                 colors: [.orange.opacity(0.5), .red.opacity(0.5)],
@@ -619,58 +446,66 @@ struct GoalCompletedCelebrationView: View {
                 )
         )
     }
-    
+
     // MARK: - Motivation Section
-    
+
     private var motivationSection: some View {
         VStack(spacing: 8) {
-            Text(motivationalMessage)
-                .font(.system(size: 16, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.85))
-                .multilineTextAlignment(.center)
-            
-            Text(nextGoalMessage)
+            if let next = nextStreakMilestone {
+                let daysLeft = next.days - stats.currentStreak
+                Text("\(daysLeft) day\(daysLeft == 1 ? "" : "s") until \(next.title.lowercased())")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundColor(.orange)
+
+                // Progress bar to next milestone
+                GeometryReader { geo in
+                    let previousMilestone = previousStreakMilestone?.days ?? 0
+                    let range = next.days - previousMilestone
+                    let progress = min(Double(stats.currentStreak - previousMilestone) / Double(range), 1.0)
+
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.white.opacity(0.15))
+                            .frame(height: 8)
+
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(
+                                LinearGradient(
+                                    colors: [.orange, .yellow],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: geo.size.width * progress, height: 8)
+                    }
+                }
+                .frame(height: 8)
+            }
+
+            Text("Come back tomorrow to keep your streak alive!")
                 .font(.system(size: 14, weight: .regular, design: .rounded))
                 .foregroundColor(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
+                .padding(.top, 4)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 8)
     }
-    
-    private var motivationalMessage: String {
-        if stats.isNewPersonalBest {
-            return "You just set a new personal record! 🏅"
-        } else if stats.currentStreak >= 30 {
-            return "A whole month of consistency! You're unstoppable! 💪"
-        } else if stats.currentStreak >= 7 {
-            return "A full week of crushing it! Amazing discipline! 🔥"
-        } else if stats.percentOver > 30 {
-            return "Way to go the extra mile (literally)! 🌟"
-        } else {
-            return "Every mile counts. You're building something great! ✨"
-        }
-    }
-    
-    private var nextGoalMessage: String {
-        if let milestone = nextStreakMilestone {
-            return "Only \(milestone.days - stats.currentStreak) days until your next streak milestone!"
-        } else {
-            return "Come back tomorrow to keep your streak alive!"
-        }
-    }
-    
+
     private var nextStreakMilestone: StreakMilestone? {
         StreakMilestone.allCases.first { $0.days > stats.currentStreak }
     }
-    
-    // MARK: - Buttons Section
-    
+
+    private var previousStreakMilestone: StreakMilestone? {
+        StreakMilestone.allCases.last { $0.days <= stats.currentStreak }
+    }
+
+    // MARK: - Buttons
+
     private var buttonSection: some View {
         VStack(spacing: 12) {
-            // Share achievement button
+            // Share button
             Button {
-                triggerHaptic()
-                // Share action would go here
+                impactMedium.impactOccurred()
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "square.and.arrow.up")
@@ -685,18 +520,18 @@ struct GoalCompletedCelebrationView: View {
                     RoundedRectangle(cornerRadius: 16)
                         .fill(
                             LinearGradient(
-                                colors: [Color(red: 0.85, green: 0.25, blue: 0.35), Color(red: 0.7, green: 0.2, blue: 0.3)],
+                                colors: [.orange, Color(red: 0.85, green: 0.3, blue: 0.1)],
                                 startPoint: .leading,
                                 endPoint: .trailing
                             )
                         )
-                        .shadow(color: Color(red: 0.85, green: 0.25, blue: 0.35).opacity(0.4), radius: 15, x: 0, y: 8)
+                        .shadow(color: .orange.opacity(0.4), radius: 15, x: 0, y: 8)
                 )
             }
-            
-            // Continue button
+
+            // Continue
             Button {
-                triggerHaptic()
+                impactMedium.impactOccurred()
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     manager.dismissCurrentCelebration()
                 }
@@ -721,89 +556,119 @@ struct GoalCompletedCelebrationView: View {
             }
         }
     }
-    
-    // MARK: - Helper Functions
-    
+
+    // MARK: - Helpers
+
     private func formatPace(_ pace: TimeInterval) -> String {
         let minutes = Int(pace)
         let seconds = Int((pace - Double(minutes)) * 60)
         return String(format: "%d:%02d", minutes, seconds)
     }
-    
-    private func triggerHaptic() {
-        impactMedium.impactOccurred()
-    }
-    
+
     // MARK: - Animation Sequence
-    
+
     private func startCelebrationSequence() {
         impactHeavy.prepare()
         notification.prepare()
-        
-        // Phase 1: Fade in
+
+        // Phase 1: Fade in background
         withAnimation(.easeOut(duration: 0.3)) {
             overlayOpacity = 1
             showBackground = true
         }
-        
-        // Phase 2: Main icon appears
+
+        // Phase 2: Flame appears with spring
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            withAnimation(.spring(response: 0.7, dampingFraction: 0.6)) {
-                showMainIcon = true
-                mainIconScale = 1.0
-                mainIconRotation = 0
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.5)) {
+                showFlame = true
+                flameScale = 1.0
             }
             impactHeavy.impactOccurred(intensity: 1.0)
-            
-            // Start pulse animation
+
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                flameGlow = true
                 pulseAnimation = true
             }
         }
-        
-        // Phase 3: Fireworks and confetti
+
+        // Phase 3: Streak counter animates up
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            showFireworks = true
-            confettiTrigger = true
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                showStreakCount = true
+            }
+            // Count up to streak number
+            animateStreakCounter()
             notification.notificationOccurred(.success)
         }
-        
-        // Phase 4: Title
+
+        // Phase 4: Confetti burst
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            confettiTrigger = true
+        }
+
+        // Phase 5: Title
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 showTitle = true
             }
         }
-        
-        // Phase 5: Stats
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+
+        // Phase 6: Week calendar with staggered day reveals
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                showWeekCalendar = true
+            }
+            // Stagger each day dot
+            let calendar = Calendar.current
+            let weekday = calendar.component(.weekday, from: Date())
+            let daysFromSunday = weekday - 1
+
+            for i in 0...daysFromSunday {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.1) {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) {
+                        weekDayRevealIndex = i
+                    }
+                    impactLight.impactOccurred(intensity: 0.5)
+                }
+            }
+        }
+
+        // Phase 7: Stats
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 showStats = true
             }
             impactMedium.impactOccurred()
         }
-        
-        // Phase 6: Streak banner (if applicable)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
-            if stats.streakMilestone != nil {
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
-                    showStreakBanner = true
-                }
-                impactMedium.impactOccurred()
-            }
-        }
-        
-        // Phase 7: Motivation
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+
+        // Phase 8: Motivation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.1) {
             withAnimation(.easeOut(duration: 0.4)) {
                 showMotivation = true
             }
         }
-        
-        // Phase 8: Buttons
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+
+        // Phase 9: Buttons
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 showButtons = true
+            }
+        }
+    }
+
+    private func animateStreakCounter() {
+        let target = stats.currentStreak
+        let startFrom = max(target - 5, 0)
+        streakCountValue = startFrom
+
+        for i in 0...(target - startFrom) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.06) {
+                withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
+                    streakCountValue = startFrom + i
+                }
+                if startFrom + i == target {
+                    impactHeavy.impactOccurred(intensity: 1.0)
+                }
             }
         }
     }
@@ -813,7 +678,7 @@ struct GoalCompletedCelebrationView: View {
 
 struct FireworksView: View {
     @State private var fireworks: [Firework] = []
-    
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
@@ -826,9 +691,8 @@ struct FireworksView: View {
             }
         }
     }
-    
+
     private func generateFireworks(in size: CGSize) {
-        // Generate multiple fireworks with delays
         for i in 0..<8 {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.3) {
                 let firework = Firework(
@@ -853,7 +717,7 @@ struct Firework: Identifiable {
 struct FireworkBurst: View {
     let firework: Firework
     @State private var isAnimating = false
-    
+
     var body: some View {
         ZStack {
             ForEach(0..<12, id: \.self) { index in
@@ -880,7 +744,7 @@ struct FireworkBurst: View {
 
 struct CelebrationConfetti: View {
     @State private var particles: [ConfettiPiece2] = []
-    
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
@@ -915,11 +779,11 @@ struct ConfettiPiece2: Identifiable {
 struct ConfettiPieceView: View {
     let particle: ConfettiPiece2
     let screenHeight: CGFloat
-    
+
     @State private var offset: CGFloat = -50
     @State private var rotation: Double = 0
     @State private var sway: CGFloat = 0
-    
+
     var body: some View {
         Rectangle()
             .fill(particle.color)
@@ -940,6 +804,119 @@ struct ConfettiPieceView: View {
     }
 }
 
+// MARK: - Post-Goal Workout Encouragement
+
+struct PostGoalEncouragementView: View {
+    @ObservedObject var manager = CelebrationManager.shared
+    var stats: GoalCompletionStats
+
+    @State private var showContent = false
+
+    var body: some View {
+        ZStack {
+            // Dark overlay
+            LinearGradient(
+                colors: [
+                    Color(red: 0.1, green: 0.5, blue: 0.3),
+                    Color(red: 0.05, green: 0.25, blue: 0.15),
+                    Color(red: 0.05, green: 0.08, blue: 0.05)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            if showContent {
+                VStack(spacing: 20) {
+                    Spacer()
+
+                    // Star icon
+                    Image(systemName: "star.circle.fill")
+                        .font(.system(size: 80))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.yellow, .orange],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .shadow(color: .yellow.opacity(0.4), radius: 20)
+
+                    VStack(spacing: 8) {
+                        Text("Extra Mile!")
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+
+                        Text("You're going above and beyond today!")
+                            .font(.system(size: 18, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                    }
+
+                    // Updated distance
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(String(format: "%.2f", stats.todaysDistance))
+                            .font(.system(size: 48, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                        Text("mi total today")
+                            .font(.system(size: 16, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .padding(.top, 8)
+
+                    // Percentage over goal
+                    if stats.percentOver > 0 {
+                        Text("+\(Int(stats.percentOver))% over goal")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(.green)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule()
+                                    .fill(Color.green.opacity(0.2))
+                            )
+                    }
+
+                    Spacer()
+
+                    // Continue button
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            manager.dismissCurrentCelebration()
+                        }
+                    } label: {
+                        Text("Keep Going!")
+                            .font(.system(size: 17, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 54)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [.green, Color(red: 0.1, green: 0.6, blue: 0.3)],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                            )
+                    }
+                    .padding(.horizontal, 24)
+
+                    Spacer(minLength: 80)
+                }
+                .transition(.scale(scale: 0.9).combined(with: .opacity))
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.1)) {
+                showContent = true
+            }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
+    }
+}
+
 // MARK: - Preview
 
 #Preview("Goal Completed") {
@@ -953,17 +930,35 @@ struct ConfettiPieceView: View {
             todaysAveragePace: 8.45,
             todaysFastestPace: 8.12,
             personalBestPace: 7.8,
-            todaysTotalDuration: 890, // 14:50
+            todaysTotalDuration: 890,
             todaysCalories: 215,
             todaysWorkoutCount: 1
         )
     )
 }
 
-#Preview("Personal Best") {
+#Preview("Long Streak") {
     GoalCompletedCelebrationView(
         stats: GoalCompletionStats(
-            todaysDistance: 5.5,
+            todaysDistance: 4.21,
+            goalDistance: 1.0,
+            currentStreak: 303,
+            totalLifetimeMiles: 500.0,
+            bestDayMiles: 5.0,
+            todaysAveragePace: 8.5,
+            todaysFastestPace: 7.8,
+            personalBestPace: 7.5,
+            todaysTotalDuration: 2376,
+            todaysCalories: 580,
+            todaysWorkoutCount: 2
+        )
+    )
+}
+
+#Preview("Post-Goal Encouragement") {
+    PostGoalEncouragementView(
+        stats: GoalCompletionStats(
+            todaysDistance: 3.5,
             goalDistance: 1.0,
             currentStreak: 30,
             totalLifetimeMiles: 250.0,
@@ -971,7 +966,7 @@ struct ConfettiPieceView: View {
             todaysAveragePace: 7.2,
             todaysFastestPace: 6.8,
             personalBestPace: 7.5,
-            todaysTotalDuration: 2376, // 39:36
+            todaysTotalDuration: 2376,
             todaysCalories: 580,
             todaysWorkoutCount: 2
         )

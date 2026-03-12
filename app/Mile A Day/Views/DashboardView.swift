@@ -64,12 +64,27 @@ struct DashboardView: View {
             return
         }
 
-        print("[Dashboard] 🎉 Goal completion detected! Distance: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles)")
-
-        // Show celebration with the stats
-        // CelebrationManager will check hasShownGoalCelebrationToday and mark it as shown internally
         let stats = buildGoalCompletionStats()
+
+        // If goal celebration was already shown today, show post-goal encouragement instead
+        if celebrationManager.hasShownGoalCelebrationToday {
+            return
+        }
+
+        print("[Dashboard] 🎉 Goal completion detected! Distance: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles)")
         celebrationManager.addCelebration(.goalCompleted(stats: stats))
+    }
+
+    /// Show encouragement when the user completes additional workouts after reaching their goal
+    private func checkAndShowPostGoalEncouragement() {
+        guard currentState.isCompleted,
+              celebrationManager.hasShownGoalCelebrationToday,
+              healthManager.todaysDistance > 0 else {
+            return
+        }
+
+        let stats = buildGoalCompletionStats()
+        celebrationManager.addCelebration(.postGoalWorkout(stats: stats))
     }
     
     // Simplified state calculation
@@ -160,6 +175,12 @@ struct DashboardView: View {
                 // show a compact banner so they can easily resume.
                 let hasActive = InProgressWorkoutStore.load()?.isActive == true
                 showInProgressBanner = hasActive
+
+                // If goal was already met, show encouragement for the extra effort
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    checkAndShowPostGoalEncouragement()
+                }
             }) {
                 if let state = InProgressWorkoutStore.load(), state.isActive {
                     WorkoutTrackingView(

@@ -119,6 +119,7 @@ enum StreakMilestone: CaseIterable {
 /// Types of celebrations that can be shown
 enum CelebrationType: Identifiable, Equatable {
     case goalCompleted(stats: GoalCompletionStats)
+    case postGoalWorkout(stats: GoalCompletionStats)
     case badgeUnlocked(badge: Badge)
     case milestone(title: String, description: String, icon: String)
 
@@ -126,6 +127,8 @@ enum CelebrationType: Identifiable, Equatable {
         switch self {
         case .goalCompleted:
             return "goal-completed-\(Date().timeIntervalSince1970)"
+        case .postGoalWorkout:
+            return "post-goal-\(Date().timeIntervalSince1970)"
         case .badgeUnlocked(let badge):
             return "badge-\(badge.id)"
         case .milestone(let title, _, _):
@@ -137,6 +140,8 @@ enum CelebrationType: Identifiable, Equatable {
         switch (lhs, rhs) {
         case (.goalCompleted, .goalCompleted):
             return true // Only one goal completion per day
+        case (.postGoalWorkout, .postGoalWorkout):
+            return true
         case (.badgeUnlocked(let b1), .badgeUnlocked(let b2)):
             return b1.id == b2.id
         case (.milestone(let t1, _, _), .milestone(let t2, _, _)):
