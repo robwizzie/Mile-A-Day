@@ -36,8 +36,8 @@ struct WeeklyMileChartView: View {
     @State private var showShareSheet: Bool = false
     @State private var hasAppeared: Bool = false
 
-    // Scroll-collapse: 0 = fully expanded, 1 = fully collapsed
-    @State private var collapseProgress: CGFloat = 0
+    // Scroll-collapse: driven externally by scroll offset from parent
+    var scrollOffset: CGFloat = 0
 
     // Heights
     private let expandedHeight: CGFloat = 280
@@ -104,31 +104,48 @@ struct WeeklyMileChartView: View {
     // MARK: Body
 
     var body: some View {
-        let isCollapsed = collapseProgress > 0.5
+        // Compute collapse progress from scroll offset (0 = expanded, 1 = collapsed)
+        let scrolled = max(-scrollOffset, 0)
+        let collapseProgress = min(scrolled / 200, 1)
         let currentHeight = expandedHeight - (expandedHeight - collapsedHeight) * collapseProgress
+
+        // Phase opacities — tuned so content crossfades without gaps or overlaps
+        let expandedHeaderOpacity = min(max(1 - collapseProgress / 0.3, 0), 1)
+        let collapsedHeaderOpacity = min(max((collapseProgress - 0.15) / 0.25, 0), 1)
+        let chartOpacity = min(max(1 - max(collapseProgress - 0.3, 0) / 0.35, 0), 1)
+        let dotsOpacity = min(max((collapseProgress - 0.55) / 0.35, 0), 1)
 
         ZStack(alignment: .top) {
             // Card background
             cardBackground
 
-            if isCollapsed {
-                // COLLAPSED: Compact week row
-                collapsedRow
-                    .transition(.opacity)
-            } else {
-                // EXPANDED: Full chart
-                VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                // Morphing header: expanded ↔ collapsed
+                ZStack(alignment: .leading) {
                     expandedHeader
+                        .opacity(expandedHeaderOpacity)
+                    collapsedHeaderRow
+                        .opacity(collapsedHeaderOpacity)
+                }
+
+                // Content area: chart compresses via clipping, dots fade in
+                ZStack(alignment: .top) {
+                    // Chart (always rendered at full 180pt, bottom cropped as card shrinks)
                     chartArea
                         .padding(.top, 6)
+                        .opacity(chartOpacity)
+
+                    // Dots row (fades in during late collapse)
+                    collapsedDotsRow
+                        .padding(.top, 6)
+                        .opacity(dotsOpacity)
                 }
-                .padding(16)
-                .transition(.opacity)
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
         }
         .frame(height: currentHeight)
         .clipped()
-        .animation(.easeInOut(duration: 0.2), value: isCollapsed)
         .onAppear {
             if !hasAppeared {
                 hasAppeared = true
@@ -137,24 +154,6 @@ struct WeeklyMileChartView: View {
         }
         .onChange(of: healthManager.workoutIndex?.lastUpdated) {
             resetAndAnimate()
-        }
-        .background(
-            GeometryReader { geo in
-                Color.clear.preference(
-                    key: ScrollOffsetKey.self,
-                    value: geo.frame(in: .named("dashboardScroll")).minY
-                )
-            }
-        )
-        .onPreferenceChange(ScrollOffsetKey.self) { offset in
-            // offset starts positive (below nav), goes toward 0 and negative as user scrolls up
-            let threshold: CGFloat = 60  // start collapsing after 60pt of scroll
-            let range: CGFloat = 120     // fully collapsed after another 120pt
-            let adjustedOffset = -(offset - threshold)
-            let newProgress = min(max(adjustedOffset / range, 0), 1)
-            withAnimation(.interactiveSpring(response: 0.15, dampingFraction: 0.9)) {
-                collapseProgress = newProgress
-            }
         }
         .sheet(isPresented: $showShareSheet) {
             EnhancedShareView(
@@ -210,88 +209,75 @@ struct WeeklyMileChartView: View {
         }
     }
 
-    // MARK: - Collapsed Compact Row
+    // MARK: - Collapsed Header Row (flame + "Streak" ... "X days")
 
-    private var collapsedRow: some View {
-        HStack(spacing: 0) {
-            // Streak info (left)
+    private var collapsedHeaderRow: some View {
+        HStack {
             HStack(spacing: 6) {
                 Image(systemName: "flame.fill")
                     .font(.system(size: 16))
                     .foregroundStyle(
                         LinearGradient(colors: [.orange, accentRed], startPoint: .top, endPoint: .bottom)
                     )
+                Text("Streak")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+            }
+            Spacer()
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text("\(currentStreak)")
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundColor(.primary)
-                Text("day streak")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-
-            // Compact week dots
-            HStack(spacing: 6) {
-                ForEach(weekDays) { day in
-                    compactDayDot(day: day)
-                }
-            }
-
-            Spacer().frame(width: 10)
-
-            // Share button
-            Button {
-                showShareSheet = true
-            } label: {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 13, weight: .medium))
+                Text("days")
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundColor(.secondary)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
     }
 
-    // MARK: - Compact Day Dot
+    // MARK: - Collapsed Dots Row (7 circle indicators)
 
-    private func compactDayDot(day: DayData) -> some View {
-        VStack(spacing: 3) {
-            ZStack {
-                if day.isFuture {
-                    // Future: dashed ring, clearly inactive
-                    Circle()
-                        .strokeBorder(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
-                        .frame(width: 22, height: 22)
-                } else {
-                    Circle()
-                        .fill(
-                            day.metGoal ? accentRed :
-                            day.distance > 0 ? missedOrange.opacity(0.5) :
-                            Color.gray.opacity(0.2)
-                        )
-                        .frame(width: 22, height: 22)
-
-                    if day.metGoal {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.white)
-                    } else if day.distance > 0 {
-                        Circle()
-                            .fill(missedOrange)
-                            .frame(width: 6, height: 6)
-                    }
-                }
-
-                if day.isToday {
-                    Circle()
-                        .stroke(accentRed, lineWidth: 2)
-                        .frame(width: 26, height: 26)
-                }
+    private var collapsedDotsRow: some View {
+        HStack(spacing: 0) {
+            ForEach(weekDays) { day in
+                Spacer()
+                collapsedDot(day: day)
+                Spacer()
             }
-            Text(day.isToday ? "NOW" : day.shortLabel)
-                .font(.system(size: 9, weight: day.isToday ? .heavy : .regular, design: .rounded))
-                .foregroundColor(day.isToday ? accentRed : (day.isFuture ? .white.opacity(0.25) : .secondary))
+        }
+    }
+
+    private func collapsedDot(day: DayData) -> some View {
+        ZStack {
+            if day.isFuture {
+                Circle()
+                    .stroke(Color.white.opacity(0.15), lineWidth: 1.5)
+                    .frame(width: 26, height: 26)
+            } else if day.metGoal {
+                Circle()
+                    .stroke(Color.green, lineWidth: 2)
+                    .frame(width: 26, height: 26)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.green)
+            } else if day.distance > 0 {
+                Circle()
+                    .fill(missedOrange.opacity(0.3))
+                    .frame(width: 26, height: 26)
+                Circle()
+                    .fill(missedOrange)
+                    .frame(width: 10, height: 10)
+            } else {
+                Circle()
+                    .stroke(Color.white.opacity(0.15), lineWidth: 1.5)
+                    .frame(width: 26, height: 26)
+            }
+
+            if day.isToday {
+                Circle()
+                    .stroke(accentRed, lineWidth: 2)
+                    .frame(width: 30, height: 30)
+            }
         }
     }
 
@@ -726,15 +712,6 @@ struct WeeklyMileChartView: View {
 }
 
 
-// MARK: - Scroll Offset Preference Key
-
-private struct ScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 // MARK: - Preview
 
 #Preview {
@@ -753,7 +730,8 @@ private struct ScrollOffsetKey: PreferenceKey {
             VStack(spacing: 16) {
                 WeeklyMileChartView(
                     healthManager: HealthKitManager(),
-                    userManager: UserManager()
+                    userManager: UserManager(),
+                    scrollOffset: 0
                 )
 
                 ForEach(0..<5) { _ in
