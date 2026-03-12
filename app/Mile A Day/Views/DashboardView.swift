@@ -511,7 +511,7 @@ struct DashboardView: View {
     }
 
     private var weekAtAGlanceSection: some View {
-        WeekAtAGlanceCard(
+        WeeklyMileChartView(
             healthManager: healthManager,
             userManager: userManager
         )
