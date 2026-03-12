@@ -68,7 +68,7 @@ struct WeeklyMileChartView: View {
             let isFuture = startOfDay > calendar.startOfDay(for: today)
             let miles: Double
             if isFuture {
-                miles = 0
+                miles = goalDistance   // plot at goal line as a target
             } else if let index = healthManager.workoutIndex {
                 miles = index.totalMiles(for: startOfDay)
             } else {
@@ -77,7 +77,7 @@ struct WeeklyMileChartView: View {
             }
             let label = dayFormatter.string(from: date)
             let shortLabel = String(label.prefix(1))
-            let met = miles >= goalDistance * 0.95
+            let met = !isFuture && miles >= goalDistance * 0.95
             return DayData(date: date, label: label, shortLabel: shortLabel, distance: miles, metGoal: met, isToday: isToday, isFuture: isFuture)
         }
     }
@@ -104,30 +104,31 @@ struct WeeklyMileChartView: View {
     // MARK: Body
 
     var body: some View {
+        let isCollapsed = collapseProgress > 0.5
         let currentHeight = expandedHeight - (expandedHeight - collapsedHeight) * collapseProgress
-        let chartOpacity = max(1 - collapseProgress * 2.5, 0) // chart fades out in first 40%
-        let compactOpacity = max((collapseProgress - 0.4) / 0.4, 0) // compact fades in 40%-80%
 
         ZStack(alignment: .top) {
             // Card background
             cardBackground
 
-            // EXPANDED: Full chart
-            VStack(alignment: .leading, spacing: 0) {
-                expandedHeader
-                    .opacity(chartOpacity)
-                chartArea
-                    .padding(.top, 6)
+            if isCollapsed {
+                // COLLAPSED: Compact week row
+                collapsedRow
+                    .transition(.opacity)
+            } else {
+                // EXPANDED: Full chart
+                VStack(alignment: .leading, spacing: 0) {
+                    expandedHeader
+                    chartArea
+                        .padding(.top, 6)
+                }
+                .padding(16)
+                .transition(.opacity)
             }
-            .padding(16)
-            .opacity(chartOpacity)
-
-            // COLLAPSED: Compact week row
-            collapsedRow
-                .opacity(compactOpacity)
         }
         .frame(height: currentHeight)
         .clipped()
+        .animation(.easeInOut(duration: 0.2), value: isCollapsed)
         .onAppear {
             if !hasAppeared {
                 hasAppeared = true
@@ -321,13 +322,13 @@ struct WeeklyMileChartView: View {
             let size = geo.size
             let data = weekDays
             let maxY = max(chartMaxY(data: data), goalDistance * 1.4, 1.5)
-            let allPoints = chartPoints(data: data, size: size, maxY: maxY)
+            let points = chartPoints(data: data, size: size, maxY: maxY)
             let goalY = yPosition(for: goalDistance, height: size.height, maxY: maxY)
 
-            // Only draw the line through past + today (not future)
+            // Split into active (past+today) and future
             let activeCount = data.filter { !$0.isFuture }.count
+            let activePoints = Array(points.prefix(activeCount))
             let activeData = Array(data.prefix(activeCount))
-            let activePoints = Array(allPoints.prefix(activeCount))
 
             ZStack(alignment: .topLeading) {
                 // Gradient fill under the line (active days only)
@@ -342,27 +343,47 @@ struct WeeklyMileChartView: View {
                     .opacity(goalLineVisible ? 1 : 0)
                     .animation(.easeInOut(duration: 0.5), value: goalLineVisible)
 
-                // Animated line path (active days only)
+                // "Today" vertical marker line
+                if activeCount > 0, activeCount < data.count {
+                    let todayX = points[activeCount - 1].x
+                    Path { p in
+                        p.move(to: CGPoint(x: todayX, y: 0))
+                        p.addLine(to: CGPoint(x: todayX, y: size.height - 24))
+                    }
+                    .stroke(accentRed.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                }
+
+                // Solid line for active days
                 if activePoints.count >= 2 {
                     animatedLine(points: activePoints, data: activeData)
                 }
 
-                // Data points — active days get full dots, future days get dim placeholders
-                ForEach(0..<min(data.count, allPoints.count), id: \.self) { i in
+                // Dashed faint line from today into future days
+                if activeCount > 0, activeCount < data.count {
+                    let futureSegmentPoints = Array(points[(activeCount - 1)...])
+                    let futurePath = smoothPath(points: futureSegmentPoints)
+                    futurePath.stroke(
+                        Color.white.opacity(0.10),
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round, dash: [6, 6])
+                    )
+                }
+
+                // Data points
+                ForEach(0..<min(data.count, points.count), id: \.self) { i in
                     if data[i].isFuture {
-                        futureDayPlaceholder(at: allPoints[i])
+                        futureDayPlaceholder(at: points[i])
                     } else {
-                        dataPoint(at: allPoints[i], data: data[i], index: i)
+                        dataPoint(at: points[i], data: data[i], index: i)
                     }
                 }
 
-                // Tooltip
-                if let idx = selectedIndex, idx < allPoints.count, idx < data.count, !data[idx].isFuture {
-                    tooltip(for: data[idx], at: allPoints[idx], chartWidth: size.width)
+                // Tooltip (only for non-future days)
+                if let idx = selectedIndex, idx < points.count, idx < data.count, !data[idx].isFuture {
+                    tooltip(for: data[idx], at: points[idx], chartWidth: size.width)
                 }
 
                 // X-axis labels
-                xAxisLabels(data: data, points: allPoints, height: size.height)
+                xAxisLabels(data: data, points: points, height: size.height)
             }
         }
         .frame(height: 180)
@@ -503,7 +524,7 @@ struct WeeklyMileChartView: View {
 
     private func futureDayPlaceholder(at point: CGPoint) -> some View {
         Circle()
-            .strokeBorder(Color.white.opacity(0.12), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
+            .strokeBorder(Color.white.opacity(0.15), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
             .frame(width: 10, height: 10)
             .position(point)
             .allowsHitTesting(false)
