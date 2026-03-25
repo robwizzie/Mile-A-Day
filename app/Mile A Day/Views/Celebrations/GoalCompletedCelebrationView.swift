@@ -31,6 +31,16 @@ struct GoalCompletedCelebrationView: View {
     @State private var pulseAnimation = false
     @State private var flameGlow = false
 
+    // Flame ignition animation states
+    @State private var showEmber = false
+    @State private var emberScale: CGFloat = 0
+    @State private var ignitionFlash = false
+    @State private var ignitionFlashOpacity: Double = 0
+    @State private var showSparks = false
+    @State private var flameOpacity: Double = 0
+    @State private var backdropOpacity: Double = 0
+    @State private var flameYOffset: CGFloat = 20
+
     private var isMajorMilestone: Bool {
         stats.streakMilestone?.isMajor == true
     }
@@ -67,12 +77,12 @@ struct GoalCompletedCelebrationView: View {
             // Content
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    Spacer(minLength: 60)
+                    Spacer(minLength: 80)
 
                     // HERO: Flame + streak counter
                     streakHeroSection
 
-                    Spacer(minLength: 24)
+                    Spacer(minLength: 20)
 
                     // Title
                     if showTitle {
@@ -146,30 +156,45 @@ struct GoalCompletedCelebrationView: View {
 
     private var celebrationBackground: some View {
         ZStack {
-            // Deep warm gradient
+            // Dark base that makes the flame pop (Duolingo-style dark background)
             LinearGradient(
                 colors: [
-                    Color(red: 0.95, green: 0.55, blue: 0.1),
-                    Color(red: 0.85, green: 0.25, blue: 0.15),
-                    Color(red: 0.15, green: 0.08, blue: 0.05)
+                    Color(red: 0.12, green: 0.06, blue: 0.02),
+                    Color(red: 0.08, green: 0.04, blue: 0.02),
+                    Color(red: 0.05, green: 0.02, blue: 0.01)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
 
-            // Pulsing radial glow behind flame
+            // Warm ambient glow that builds with the flame ignition
             if showBackground {
                 RadialGradient(
                     colors: [
-                        Color.yellow.opacity(pulseAnimation ? 0.2 : 0.08),
-                        Color.orange.opacity(pulseAnimation ? 0.1 : 0.03),
+                        Color.orange.opacity(flameGlow ? 0.35 : 0.0),
+                        Color(red: 0.85, green: 0.25, blue: 0.1).opacity(flameGlow ? 0.15 : 0.0),
                         Color.clear
                     ],
-                    center: UnitPoint(x: 0.5, y: 0.25),
-                    startRadius: 30,
-                    endRadius: pulseAnimation ? 350 : 200
+                    center: UnitPoint(x: 0.5, y: 0.28),
+                    startRadius: 20,
+                    endRadius: 400
                 )
-                .animation(.easeInOut(duration: 2).repeatForever(autoreverses: true), value: pulseAnimation)
+                .animation(.easeInOut(duration: 1.2), value: flameGlow)
+            }
+
+            // Pulsing radial glow behind flame (after ignition)
+            if flameGlow {
+                RadialGradient(
+                    colors: [
+                        Color.yellow.opacity(pulseAnimation ? 0.15 : 0.06),
+                        Color.orange.opacity(pulseAnimation ? 0.08 : 0.02),
+                        Color.clear
+                    ],
+                    center: UnitPoint(x: 0.5, y: 0.28),
+                    startRadius: 30,
+                    endRadius: pulseAnimation ? 300 : 200
+                )
+                .animation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true), value: pulseAnimation)
             }
         }
         .ignoresSafeArea()
@@ -178,32 +203,98 @@ struct GoalCompletedCelebrationView: View {
     // MARK: - Streak Hero (Flame + Counter)
 
     private var streakHeroSection: some View {
-        VStack(spacing: 8) {
-            // Flame icon with glow
+        VStack(spacing: 16) {
+            // Flame icon with ignition animation
             ZStack {
-                // Outer glow
+                // Dark backdrop disc for contrast
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                Color(red: 0.15, green: 0.08, blue: 0.03).opacity(0.9),
+                                Color(red: 0.1, green: 0.05, blue: 0.02).opacity(0.6),
+                                Color.clear
+                            ],
+                            center: .center,
+                            startRadius: 40,
+                            endRadius: 120
+                        )
+                    )
+                    .frame(width: 240, height: 240)
+                    .opacity(backdropOpacity)
+
+                // Outer warm glow ring (appears after ignition)
                 if flameGlow {
                     Circle()
                         .fill(
                             RadialGradient(
-                                colors: [Color.orange.opacity(0.4), Color.clear],
+                                colors: [
+                                    Color.orange.opacity(0.35),
+                                    Color(red: 1.0, green: 0.4, blue: 0.1).opacity(0.15),
+                                    Color.clear
+                                ],
                                 center: .center,
-                                startRadius: 30,
-                                endRadius: 100
+                                startRadius: 40,
+                                endRadius: 130
                             )
                         )
-                        .frame(width: 200, height: 200)
-                        .scaleEffect(pulseAnimation ? 1.15 : 1.0)
-                        .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: pulseAnimation)
+                        .frame(width: 260, height: 260)
+                        .scaleEffect(pulseAnimation ? 1.12 : 1.0)
+                        .animation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true), value: pulseAnimation)
                 }
 
-                // Flame
+                // Ignition flash burst
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                Color.white,
+                                Color.yellow.opacity(0.8),
+                                Color.orange.opacity(0.4),
+                                Color.clear
+                            ],
+                            center: .center,
+                            startRadius: 0,
+                            endRadius: 120
+                        )
+                    )
+                    .frame(width: 240, height: 240)
+                    .scaleEffect(ignitionFlash ? 1.5 : 0.3)
+                    .opacity(ignitionFlashOpacity)
+
+                // Ember sparks that shoot outward on ignition
+                if showSparks {
+                    IgnitionSparksView()
+                }
+
+                // Initial ember (small warm dot before flame appears)
+                if showEmber && !showFlame {
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [
+                                    Color.yellow,
+                                    Color.orange,
+                                    Color(red: 1.0, green: 0.3, blue: 0.0).opacity(0.6),
+                                    Color.clear
+                                ],
+                                center: .center,
+                                startRadius: 2,
+                                endRadius: 15
+                            )
+                        )
+                        .frame(width: 30, height: 30)
+                        .scaleEffect(emberScale)
+                }
+
+                // The flame itself
                 Image(systemName: "flame.fill")
-                    .font(.system(size: 100, weight: .medium))
+                    .font(.system(size: 120, weight: .medium))
                     .foregroundStyle(
                         LinearGradient(
                             colors: [
-                                Color.yellow,
+                                Color(red: 1.0, green: 0.95, blue: 0.5),
+                                Color(red: 1.0, green: 0.7, blue: 0.1),
                                 Color.orange,
                                 Color(red: 1.0, green: 0.3, blue: 0.1)
                             ],
@@ -211,10 +302,13 @@ struct GoalCompletedCelebrationView: View {
                             endPoint: .bottom
                         )
                     )
-                    .shadow(color: .orange.opacity(0.6), radius: 20, x: 0, y: 5)
+                    .shadow(color: Color.orange.opacity(0.8), radius: 30, x: 0, y: 5)
+                    .shadow(color: Color.yellow.opacity(0.4), radius: 15, x: 0, y: -5)
+                    .scaleEffect(flameScale)
+                    .opacity(flameOpacity)
+                    .offset(y: flameYOffset)
             }
-            .scaleEffect(flameScale)
-            .opacity(showFlame ? 1 : 0)
+            .frame(height: 260)
 
             // Streak counter
             if showStreakCount {
@@ -228,7 +322,7 @@ struct GoalCompletedCelebrationView: View {
                         .font(.system(size: 24, weight: .bold, design: .rounded))
                         .foregroundColor(.white.opacity(0.9))
                 }
-                .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
+                .shadow(color: .orange.opacity(0.3), radius: 15, x: 0, y: 5)
                 .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
         }
@@ -666,57 +760,91 @@ struct GoalCompletedCelebrationView: View {
         impactHeavy.prepare()
         notification.prepare()
 
-        // Phase 1: Fade in background
-        withAnimation(.easeOut(duration: 0.3)) {
+        // Phase 1: Fade in dark background
+        withAnimation(.easeOut(duration: 0.4)) {
             overlayOpacity = 1
             showBackground = true
         }
 
-        // Phase 2: Flame appears with spring
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.5)) {
-                showFlame = true
-                flameScale = 1.0
+        // Phase 2: Small ember appears (the "seed" of the flame)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            withAnimation(.easeOut(duration: 0.3)) {
+                backdropOpacity = 1.0
+            }
+            showEmber = true
+            withAnimation(.easeOut(duration: 0.4)) {
+                emberScale = 1.0
+            }
+            impactLight.impactOccurred(intensity: 0.4)
+        }
+
+        // Phase 3: Ignition flash — the ember bursts into flame
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            // Flash burst
+            withAnimation(.easeOut(duration: 0.15)) {
+                ignitionFlash = true
+                ignitionFlashOpacity = 0.9
             }
             impactHeavy.impactOccurred(intensity: 1.0)
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                flameGlow = true
-                pulseAnimation = true
+            // Sparks fly out
+            showSparks = true
+
+            // Flash fades
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                withAnimation(.easeOut(duration: 0.4)) {
+                    ignitionFlashOpacity = 0
+                }
+            }
+
+            // Flame emerges from the flash
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                showFlame = true
+                withAnimation(.spring(response: 0.7, dampingFraction: 0.55)) {
+                    flameScale = 1.0
+                    flameOpacity = 1.0
+                    flameYOffset = 0
+                }
+
+                // Background warms up as flame ignites
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    withAnimation(.easeInOut(duration: 0.8)) {
+                        flameGlow = true
+                    }
+                    pulseAnimation = true
+                }
             }
         }
 
-        // Phase 3: Streak counter animates up
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        // Phase 4: Streak counter animates up
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 showStreakCount = true
             }
-            // Count up to streak number
             animateStreakCounter()
             notification.notificationOccurred(.success)
         }
 
-        // Phase 4: Confetti burst (+ fireworks for major milestones)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+        // Phase 5: Confetti burst (+ fireworks for major milestones)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             confettiTrigger = true
             if isMajorMilestone {
                 showFireworks = true
             }
         }
 
-        // Phase 5: Title
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+        // Phase 6: Title
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 showTitle = true
             }
         }
 
-        // Phase 6: Week calendar with staggered day reveals
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+        // Phase 7: Week calendar with staggered day reveals
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 showWeekCalendar = true
             }
-            // Stagger each day dot
             let calendar = Calendar.current
             let weekday = calendar.component(.weekday, from: Date())
             let daysFromSunday = weekday - 1
@@ -731,8 +859,8 @@ struct GoalCompletedCelebrationView: View {
             }
         }
 
-        // Phase 7: Stats (+ second confetti wave for major milestones)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+        // Phase 8: Stats (+ second confetti wave for major milestones)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 showStats = true
             }
@@ -743,15 +871,15 @@ struct GoalCompletedCelebrationView: View {
             }
         }
 
-        // Phase 8: Motivation
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.1) {
+        // Phase 9: Motivation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.9) {
             withAnimation(.easeOut(duration: 0.4)) {
                 showMotivation = true
             }
         }
 
-        // Phase 9: Buttons
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+        // Phase 10: Buttons
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 showButtons = true
             }
@@ -773,6 +901,82 @@ struct GoalCompletedCelebrationView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Ignition Sparks View
+
+struct IgnitionSpark: Identifiable {
+    let id = UUID()
+    let angle: Double
+    let distance: CGFloat
+    let size: CGFloat
+    let duration: Double
+    let delay: Double
+    let color: Color
+}
+
+struct IgnitionSparksView: View {
+    @State private var sparks: [IgnitionSpark] = []
+    @State private var isAnimating = false
+
+    private let sparkColors: [Color] = [
+        Color(red: 1.0, green: 0.95, blue: 0.5),
+        Color(red: 1.0, green: 0.7, blue: 0.1),
+        .orange,
+        Color(red: 1.0, green: 0.4, blue: 0.1),
+        .white
+    ]
+
+    var body: some View {
+        ZStack {
+            ForEach(sparks) { spark in
+                IgnitionSparkView(spark: spark)
+            }
+        }
+        .onAppear {
+            generateSparks()
+        }
+    }
+
+    private func generateSparks() {
+        sparks = (0..<24).map { i in
+            let angle = Double(i) * (2 * .pi / 24) + Double.random(in: -0.15...0.15)
+            return IgnitionSpark(
+                angle: angle,
+                distance: CGFloat.random(in: 60...140),
+                size: CGFloat.random(in: 3...8),
+                duration: Double.random(in: 0.4...0.8),
+                delay: Double.random(in: 0...0.1),
+                color: sparkColors.randomElement()!
+            )
+        }
+    }
+}
+
+struct IgnitionSparkView: View {
+    let spark: IgnitionSpark
+    @State private var isAnimating = false
+    @State private var sparkOpacity: Double = 1
+
+    var body: some View {
+        Circle()
+            .fill(spark.color)
+            .frame(width: spark.size, height: spark.size)
+            .shadow(color: spark.color.opacity(0.8), radius: 4)
+            .offset(
+                x: isAnimating ? cos(spark.angle) * spark.distance : 0,
+                y: isAnimating ? sin(spark.angle) * spark.distance : 0
+            )
+            .opacity(sparkOpacity)
+            .onAppear {
+                withAnimation(.easeOut(duration: spark.duration).delay(spark.delay)) {
+                    isAnimating = true
+                }
+                withAnimation(.easeIn(duration: spark.duration * 0.6).delay(spark.delay + spark.duration * 0.4)) {
+                    sparkOpacity = 0
+                }
+            }
     }
 }
 
