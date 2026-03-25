@@ -30,7 +30,9 @@ struct DashboardView: View {
     /// but the full‑screen tracker is not currently visible.
     @State private var showInProgressBanner = false
     @State private var showForceResetAlert = false
-    @State private var chartScrollOffset: CGFloat = 0
+
+    /// User preference: "chart" (line chart) or "streak" (streak card)
+    @AppStorage("weekViewStyle") private var weekViewStyle: String = "chart"
     
     /// Navigation state for badges view from celebration
     @State private var navigateToBadgesFromCelebration = false
@@ -101,35 +103,20 @@ struct DashboardView: View {
     private var inProgressState: InProgressWorkoutState? {
         InProgressWorkoutStore.load()
     }
-    
+
     var body: some View {
         // iOS 26: Simple ScrollView with background - no ZStack needed
         // NavigationStack is provided by MainTabView
         ScrollView(.vertical, showsIndicators: true) {
-            dashboardContent
-                .frame(maxWidth: .infinity)
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(
-                            key: DashboardScrollOffsetKey.self,
-                            value: geo.frame(in: .named("dashboardScroll")).minY
-                        )
-                    }
-                )
-        }
-        .coordinateSpace(name: "dashboardScroll")
-        .onPreferenceChange(DashboardScrollOffsetKey.self) { value in
-            chartScrollOffset = value
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            WeeklyMileChartView(
-                healthManager: healthManager,
-                userManager: userManager,
-                scrollOffset: chartScrollOffset
-            )
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 8)
+            VStack(spacing: 0) {
+                // Week view: user can toggle between chart and dots
+                weekViewSection
+                    .padding(.top, 8)
+                    .padding(.bottom, 8)
+
+                dashboardContent
+                    .frame(maxWidth: .infinity)
+            }
         }
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .background(MADTheme.Colors.appBackgroundGradient)
@@ -445,6 +432,67 @@ struct DashboardView: View {
         }
     }
 
+    // MARK: - Week View (Chart or Dots toggle)
+
+    @ViewBuilder
+    private var weekViewSection: some View {
+        VStack(spacing: 10) {
+            // Segmented tab picker
+            weekViewPicker
+
+            // Content for selected tab
+            if weekViewStyle == "chart" {
+                WeeklyMileChartView(
+                    healthManager: healthManager,
+                    userManager: userManager
+                )
+                .padding(.horizontal, 16)
+            } else {
+                streakSection
+                    .padding(.horizontal, 16)
+            }
+        }
+    }
+
+    private var weekViewPicker: some View {
+        let tabs: [(id: String, label: String, icon: String)] = [
+            ("chart", "This Week", "chart.xyaxis.line"),
+            ("streak", "Streak", "flame.fill"),
+        ]
+
+        return HStack(spacing: 4) {
+            ForEach(tabs, id: \.id) { tab in
+                let isSelected = weekViewStyle == tab.id
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        weekViewStyle = tab.id
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(tab.label)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundColor(isSelected ? .white : .secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule()
+                            .fill(isSelected ? Color.white.opacity(0.15) : Color.clear)
+                    )
+                }
+            }
+        }
+        .padding(3)
+        .background(
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
+        )
+        .padding(.horizontal, 16)
+    }
+
     // MARK: - Extracted dashboard sections to help Swift type‑check
 
     @ViewBuilder
@@ -452,7 +500,6 @@ struct DashboardView: View {
         VStack(spacing: 16) {
             inProgressBannerSection
             instructionsSection
-            streakSection
             todayProgressSection
             stepsAndBadgesSection
             statsAndHistorySection
@@ -559,15 +606,6 @@ struct DashboardView: View {
 
             RecentWorkoutsView(workouts: healthManager.recentWorkouts)
         }
-    }
-}
-
-// MARK: - Scroll Offset Preference Key
-
-private struct DashboardScrollOffsetKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 
@@ -882,7 +920,6 @@ struct StreakCard: View {
     @State private var animateStreak = false
     @State private var animateFire = false
     @State private var showingShareSheet = false
-    @State private var isPressed = false
     @State private var timeRemainingText: String = ""
     @State private var timer: Timer?
 
@@ -1142,8 +1179,6 @@ struct StreakCard: View {
             }
         }
         .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
-        .scaleEffect(isPressed ? 0.98 : 1.0)
-        .animation(.easeInOut(duration: 0.1), value: isPressed)
         .onAppear {
             updateTimeRemaining()
             startTimer()
@@ -1171,24 +1206,12 @@ struct StreakCard: View {
             timer?.invalidate()
             timer = nil
         }
+        .contentShape(Rectangle())
         .onTapGesture {
             let impact = UIImpactFeedbackGenerator(style: .medium)
             impact.impactOccurred()
             showingShareSheet = true
         }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    withAnimation(.easeInOut(duration: 0.1)) {
-                        isPressed = true
-                    }
-                }
-                .onEnded { _ in
-                    withAnimation(.easeInOut(duration: 0.1)) {
-                        isPressed = false
-                    }
-                }
-        )
         .sheet(isPresented: $showingShareSheet) {
             EnhancedShareView(
                 user: user,

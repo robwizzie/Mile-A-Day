@@ -11,8 +11,6 @@ struct BadgeUnlockCelebrationView: View {
     
     // Animation states
     @State private var overlayOpacity: Double = 0
-    @State private var showRaysBackground = false
-    @State private var showRibbon = false
     @State private var showMedal = false
     @State private var medalScale: CGFloat = 0
     @State private var showIcon = false
@@ -20,12 +18,8 @@ struct BadgeUnlockCelebrationView: View {
     @State private var iconRotation: Double = -30
     @State private var showRarityBanner = false
     @State private var showConfetti = false
-    @State private var showRingPulse = false
     @State private var showContent = false
     @State private var showButtons = false
-    @State private var showGlowRings = false
-    @State private var shimmerPhase: CGFloat = -0.5
-    @State private var glowPulse = false
     
     // Haptic generators
     private let impactGenerator = UIImpactFeedbackGenerator(style: .heavy)
@@ -74,17 +68,17 @@ struct BadgeUnlockCelebrationView: View {
     
     var confettiCount: Int {
         switch badge.rarity {
-        case .common: return 50
-        case .rare: return 80
-        case .legendary: return 130
+        case .common: return 20
+        case .rare: return 30
+        case .legendary: return 40
         }
     }
-    
+
     var ringCount: Int {
         switch badge.rarity {
-        case .common: return 2
-        case .rare: return 3
-        case .legendary: return 5
+        case .common: return 1
+        case .rare: return 2
+        case .legendary: return 3
         }
     }
     
@@ -94,14 +88,8 @@ struct BadgeUnlockCelebrationView: View {
         ZStack {
             // Dynamic gradient background
             badgeBackgroundView
-            
-            // Animated ray burst background
-            if showRaysBackground {
-                RayBurstView(color: rarityColor)
-                    .opacity(badge.rarity == .legendary ? 0.4 : 0.25)
-            }
-            
-            // Confetti explosion
+
+            // Confetti
             if showConfetti {
                 ConfettiCannon(
                     colors: confettiColors,
@@ -109,11 +97,11 @@ struct BadgeUnlockCelebrationView: View {
                 )
                 .allowsHitTesting(false)
             }
-            
+
             // Main content
             VStack(spacing: 0) {
                 Spacer()
-                
+
                 // Rarity banner at top
                 if showRarityBanner {
                     RarityBannerView(
@@ -122,83 +110,27 @@ struct BadgeUnlockCelebrationView: View {
                         rarityColor: rarityColor,
                         rarityGradient: rarityGradient
                     )
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .top).combined(with: .opacity).combined(with: .scale(scale: 0.8)),
-                        removal: .opacity
-                    ))
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
-                
+
                 Spacer()
-                
-                // Badge display with effects
+
+                // Badge display
                 ZStack {
-                    // Animated glow rings
-                    if showGlowRings {
-                        ForEach(0..<ringCount, id: \.self) { index in
-                            GlowRingView(
-                                color: rarityColor,
-                                delay: Double(index) * 0.15,
-                                size: 180 + CGFloat(index * 40)
-                            )
-                        }
-                    }
-                    
-                    // Ring pulse effect
-                    if showRingPulse {
-                        RingPulseView(color: rarityColor)
-                    }
-                    
-                    // Ambient glow
+                    // Subtle ambient glow
                     Circle()
                         .fill(
                             RadialGradient(
-                                colors: [
-                                    rarityColor.opacity(glowPulse ? 0.5 : 0.3),
-                                    rarityColor.opacity(0)
-                                ],
+                                colors: [rarityColor.opacity(0.35), rarityColor.opacity(0)],
                                 center: .center,
                                 startRadius: 50,
-                                endRadius: glowPulse ? 150 : 120
+                                endRadius: 130
                             )
                         )
-                        .frame(width: 300, height: 300)
-                    
-                    // Ribbon
-                    if showRibbon {
-                        VStack(spacing: 0) {
-                            Rectangle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [rarityColor, rarityColor.opacity(0.8)],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                                .frame(width: 50, height: 70)
-                            
-                            HStack(spacing: 0) {
-                                CelebrationRibbonTail(isLeft: true, color: rarityColor)
-                                CelebrationRibbonTail(isLeft: false, color: rarityColor)
-                            }
-                            .frame(width: 50)
-                        }
-                        .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
-                        .offset(y: -115)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .top).combined(with: .opacity),
-                            removal: .opacity
-                        ))
-                    }
-                    
-                    // Medal container
+                        .frame(width: 280, height: 280)
+
+                    // Medal
                     ZStack {
-                        // Outer decorative rings
-                        ForEach(0..<3, id: \.self) { i in
-                            Circle()
-                                .stroke(rarityColor.opacity(0.2 - Double(i) * 0.05), lineWidth: 2)
-                                .frame(width: 200 + CGFloat(i * 30), height: 200 + CGFloat(i * 30))
-                        }
-                        
                         // Main medal
                         Circle()
                             .fill(
@@ -208,28 +140,28 @@ struct BadgeUnlockCelebrationView: View {
                                     endPoint: .bottomTrailing
                                 )
                             )
-                            .frame(width: 170, height: 170)
+                            .frame(width: 160, height: 160)
                             .overlay(
                                 Circle()
                                     .stroke(
                                         LinearGradient(
-                                            colors: [Color.white.opacity(0.7), rarityColor.opacity(0.4)],
+                                            colors: [Color.white.opacity(0.6), rarityColor.opacity(0.3)],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
                                         ),
-                                        lineWidth: 4
+                                        lineWidth: 3
                                     )
                             )
-                            .shadow(color: rarityColor.opacity(0.6), radius: 30, x: 0, y: 15)
-                        
-                        // Inner decorative ring
+                            .shadow(color: rarityColor.opacity(0.5), radius: 20, x: 0, y: 10)
+
+                        // Inner ring
                         Circle()
-                            .stroke(Color.white.opacity(0.35), lineWidth: 2)
-                            .frame(width: 140, height: 140)
-                        
+                            .stroke(Color.white.opacity(0.3), lineWidth: 1.5)
+                            .frame(width: 130, height: 130)
+
                         // Badge icon
                         Image(systemName: badgeIcon)
-                            .font(.system(size: 80, weight: .semibold))
+                            .font(.system(size: 64, weight: .semibold))
                             .foregroundStyle(
                                 LinearGradient(
                                     colors: [.white, .white.opacity(0.85)],
@@ -237,36 +169,13 @@ struct BadgeUnlockCelebrationView: View {
                                     endPoint: .bottom
                                 )
                             )
-                            .shadow(color: .black.opacity(0.35), radius: 5, x: 0, y: 4)
+                            .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 3)
                             .scaleEffect(iconScale)
                             .rotationEffect(.degrees(iconRotation))
                             .opacity(showIcon ? 1 : 0)
-                        
-                        // Shimmer effect
-                        if badge.rarity == .legendary {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [.clear, .white.opacity(0.4), .clear],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .frame(width: 170, height: 170)
-                                .offset(x: shimmerPhase * 200)
-                                .clipShape(Circle())
-                        }
                     }
                     .scaleEffect(medalScale)
                     .opacity(showMedal ? 1 : 0)
-                    
-                    // Sparkle particles around badge
-                    if showContent {
-                        BadgeSparkleRing(
-                            color: badge.rarity == .legendary ? .yellow : .white,
-                            count: badge.rarity == .legendary ? 10 : 6
-                        )
-                    }
                 }
                 
                 Spacer()
@@ -427,31 +336,15 @@ struct BadgeUnlockCelebrationView: View {
     // MARK: - Background View
     
     private var badgeBackgroundView: some View {
-        ZStack {
-            // Base gradient
-            LinearGradient(
-                colors: [
-                    rarityColor.opacity(0.85),
-                    rarityColor.opacity(0.6),
-                    Color.black.opacity(0.95)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            
-            // Animated mesh for legendary
-            if badge.rarity == .legendary {
-                AnimatedMeshBackground(colors: rarityGradient)
-            }
-            
-            // Vignette overlay
-            RadialGradient(
-                colors: [.clear, .black.opacity(0.6)],
-                center: .center,
-                startRadius: 100,
-                endRadius: 450
-            )
-        }
+        LinearGradient(
+            colors: [
+                rarityColor.opacity(0.8),
+                rarityColor.opacity(0.5),
+                Color.black.opacity(0.95)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
         .ignoresSafeArea()
     }
     
@@ -489,109 +382,51 @@ struct BadgeUnlockCelebrationView: View {
     // MARK: - Animation Sequence
 
     private func startCelebrationSequence() {
-        // Prepare haptics
-        impactGenerator.prepare()
         notificationGenerator.prepare()
 
-        // Phase 1: Fade in overlay and background
-        withAnimation(.easeOut(duration: 0.35)) {
+        // Phase 1: Fade in + rarity banner
+        withAnimation(.easeOut(duration: 0.25)) {
             overlayOpacity = 1
         }
-
-        // Phase 2: Ray burst background
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            withAnimation(.easeOut(duration: 0.4)) {
-                showRaysBackground = true
-            }
-        }
-
-        // Phase 3: Rarity banner drops in with satisfying tap
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.65)) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                 showRarityBanner = true
             }
-            impactGenerator.impactOccurred(intensity: 0.4)
         }
 
-        // Phase 4: Ribbon drops
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
-                showRibbon = true
-            }
-        }
-
-        // Phase 5: Medal scales in with bounce — this is the big moment
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
-            // Overshoot for dramatic effect
-            withAnimation(.spring(response: 0.55, dampingFraction: 0.55)) {
+        // Phase 2: Medal + icon appear together
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.55)) {
                 showMedal = true
                 medalScale = 1.0
             }
-            impactGenerator.impactOccurred(intensity: 0.7)
+            notificationGenerator.notificationOccurred(.success)
         }
-
-        // Phase 6: Icon bursts in with rotation + heavy haptic
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
-            withAnimation(.spring(response: 0.45, dampingFraction: 0.5)) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.5)) {
                 showIcon = true
                 iconScale = 1.0
                 iconRotation = 0
             }
-            impactGenerator.impactOccurred(intensity: 1.0)
+            impactGenerator.impactOccurred(intensity: 0.8)
         }
 
-        // Phase 7: Ring pulse and glow rings — the "stamp" moment
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-            showRingPulse = true
-            withAnimation(.easeOut(duration: 0.3)) {
-                showGlowRings = true
-            }
-            // Double-tap haptic for satisfying stamp feel
-            let lightTap = UIImpactFeedbackGenerator(style: .light)
-            lightTap.impactOccurred()
-        }
-
-        // Phase 8: Confetti explosion — the reward moment
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        // Phase 3: Confetti
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
             showConfetti = true
-            notificationGenerator.notificationOccurred(.success)
-
-            // Extra haptic burst for legendary badges
-            if badge.rarity == .legendary {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    let heavy = UIImpactFeedbackGenerator(style: .heavy)
-                    heavy.impactOccurred(intensity: 0.6)
-                }
-            }
         }
 
-        // Phase 9: Content reveals with smooth slide
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.15) {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.78)) {
+        // Phase 4: Content
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                 showContent = true
             }
         }
 
-        // Phase 10: Buttons appear
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+        // Phase 5: Buttons
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 showButtons = true
-            }
-        }
-
-        // Start continuous shimmer for legendary
-        if badge.rarity == .legendary {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                withAnimation(.linear(duration: 2).repeatForever(autoreverses: false)) {
-                    shimmerPhase = 1.5
-                }
-            }
-        }
-
-        // Start glow pulse
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
-                glowPulse = true
             }
         }
     }
@@ -599,35 +434,6 @@ struct BadgeUnlockCelebrationView: View {
     private func triggerHaptic() {
         let impact = UIImpactFeedbackGenerator(style: .medium)
         impact.impactOccurred()
-    }
-}
-
-// MARK: - Celebration Ribbon Tail
-
-struct CelebrationRibbonTail: View {
-    let isLeft: Bool
-    let color: Color
-    
-    var body: some View {
-        Path { path in
-            let width: CGFloat = 25
-            let height: CGFloat = 30
-            
-            path.move(to: CGPoint(x: 0, y: 0))
-            path.addLine(to: CGPoint(x: width, y: 0))
-            path.addLine(to: CGPoint(x: width, y: height))
-            path.addLine(to: CGPoint(x: width * 0.5, y: height * 0.6))
-            path.addLine(to: CGPoint(x: 0, y: height))
-            path.closeSubpath()
-        }
-        .fill(
-            LinearGradient(
-                colors: [color, color.opacity(0.7)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
-        .frame(width: 25, height: 30)
     }
 }
 
@@ -703,164 +509,6 @@ struct RarityBannerView: View {
     }
 }
 
-// MARK: - Ray Burst View
-
-struct RayBurstView: View {
-    let color: Color
-    @State private var rotation: Double = 0
-    
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                ForEach(0..<16, id: \.self) { index in
-                    Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [color, color.opacity(0)],
-                                startPoint: .center,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: geo.size.width, height: 3)
-                        .rotationEffect(.degrees(Double(index) * 22.5 + rotation))
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-            .position(x: geo.size.width / 2, y: geo.size.height / 2)
-        }
-        .onAppear {
-            withAnimation(.linear(duration: 20).repeatForever(autoreverses: false)) {
-                rotation = 360
-            }
-        }
-    }
-}
-
-// MARK: - Glow Ring View
-
-struct GlowRingView: View {
-    let color: Color
-    let delay: Double
-    let size: CGFloat
-    
-    @State private var scale: CGFloat = 0.8
-    @State private var opacity: Double = 0
-    
-    var body: some View {
-        Circle()
-            .stroke(
-                color.opacity(0.4),
-                lineWidth: 2
-            )
-            .frame(width: size, height: size)
-            .scaleEffect(scale)
-            .opacity(opacity)
-            .onAppear {
-                withAnimation(.easeOut(duration: 1.5).delay(delay).repeatForever(autoreverses: false)) {
-                    scale = 1.3
-                    opacity = 0
-                }
-                // Initial state
-                withAnimation(.easeIn(duration: 0.3).delay(delay)) {
-                    opacity = 0.6
-                }
-            }
-    }
-}
-
-// MARK: - Ring Pulse View
-
-struct RingPulseView: View {
-    let color: Color
-    @State private var scale: CGFloat = 1
-    @State private var opacity: Double = 1
-    
-    var body: some View {
-        ZStack {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .stroke(color, lineWidth: 4)
-                    .frame(width: 170, height: 170)
-                    .scaleEffect(scale)
-                    .opacity(opacity)
-                    .animation(
-                        .easeOut(duration: 1.2)
-                            .delay(Double(index) * 0.3),
-                        value: scale
-                    )
-            }
-        }
-        .onAppear {
-            scale = 2.5
-            opacity = 0
-        }
-    }
-}
-
-// MARK: - Badge Sparkle Ring
-
-struct BadgeSparkleRing: View {
-    let color: Color
-    let count: Int
-    
-    @State private var isAnimating = false
-    
-    var body: some View {
-        ZStack {
-            ForEach(0..<count, id: \.self) { index in
-                SparkleParticle(color: color)
-                    .offset(
-                        x: cos(Double(index) * 2 * .pi / Double(count)) * 120,
-                        y: sin(Double(index) * 2 * .pi / Double(count)) * 120
-                    )
-                    .opacity(isAnimating ? 1 : 0)
-                    .scaleEffect(isAnimating ? 1 : 0)
-                    .animation(
-                        .spring(response: 0.5, dampingFraction: 0.6)
-                            .delay(Double(index) * 0.08),
-                        value: isAnimating
-                    )
-            }
-        }
-        .onAppear {
-            isAnimating = true
-        }
-    }
-}
-
-// MARK: - Sparkle Particle
-
-struct SparkleParticle: View {
-    let color: Color
-    @State private var twinkle = false
-    
-    var body: some View {
-        ZStack {
-            // Horizontal line
-            Capsule()
-                .fill(color)
-                .frame(width: 18, height: 3)
-            
-            // Vertical line
-            Capsule()
-                .fill(color)
-                .frame(width: 3, height: 18)
-            
-            // Glow
-            Circle()
-                .fill(color.opacity(0.5))
-                .frame(width: 10, height: 10)
-                .blur(radius: 3)
-        }
-        .scaleEffect(twinkle ? 1.2 : 0.8)
-        .opacity(twinkle ? 1 : 0.6)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
-                twinkle = true
-            }
-        }
-    }
-}
 
 // MARK: - Confetti Cannon
 
@@ -964,53 +612,6 @@ struct Triangle: Shape {
         path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
         path.closeSubpath()
         return path
-    }
-}
-
-// MARK: - Animated Mesh Background (Legendary)
-
-struct AnimatedMeshBackground: View {
-    let colors: [Color]
-    @State private var animate = false
-    
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                ForEach(0..<5, id: \.self) { index in
-                    Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [colors[index % colors.count].opacity(0.6), .clear],
-                                center: .center,
-                                startRadius: 0,
-                                endRadius: 200
-                            )
-                        )
-                        .frame(width: 300, height: 300)
-                        .offset(
-                            x: animate ? meshOffset(for: index, in: geo.size).x : -meshOffset(for: index, in: geo.size).x,
-                            y: animate ? meshOffset(for: index, in: geo.size).y : -meshOffset(for: index, in: geo.size).y
-                        )
-                        .blur(radius: 50)
-                }
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-        }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 5).repeatForever(autoreverses: true)) {
-                animate = true
-            }
-        }
-    }
-    
-    private func meshOffset(for index: Int, in size: CGSize) -> CGPoint {
-        let angles: [Double] = [0, 72, 144, 216, 288]
-        let angle = angles[index] * .pi / 180
-        let radius = Double(min(size.width, size.height) * 0.3)
-        return CGPoint(
-            x: cos(angle) * radius,
-            y: sin(angle) * radius
-        )
     }
 }
 
