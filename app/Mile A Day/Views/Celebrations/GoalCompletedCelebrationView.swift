@@ -15,7 +15,6 @@ struct GoalCompletedCelebrationView: View {
     // Animation states
     @State private var overlayOpacity: Double = 0
     @State private var showFlame = false
-    @State private var flameScale: CGFloat = 0
     @State private var showStreakCount = false
     @State private var streakCountValue: Int = 0
     @State private var showWeekCalendar = false
@@ -48,12 +47,12 @@ struct GoalCompletedCelebrationView: View {
             // Content
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    Spacer(minLength: 60)
+                    Spacer(minLength: 40)
 
                     // HERO: Flame + streak counter
                     streakHeroSection
 
-                    Spacer(minLength: 24)
+                    Spacer(minLength: 16)
 
                     // Title
                     if showTitle {
@@ -111,9 +110,10 @@ struct GoalCompletedCelebrationView: View {
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
 
-                    Spacer(minLength: 100)
+                    Spacer(minLength: 50)
                 }
                 .padding(.horizontal, 24)
+                .padding(.bottom, 34) // Safe area for bottom
             }
         }
         .ignoresSafeArea()
@@ -126,35 +126,39 @@ struct GoalCompletedCelebrationView: View {
     // MARK: - Background
 
     private var celebrationBackground: some View {
-        LinearGradient(
-            colors: [
-                Color(red: 0.95, green: 0.55, blue: 0.1),
-                Color(red: 0.85, green: 0.25, blue: 0.15),
-                Color(red: 0.15, green: 0.08, blue: 0.05)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+        ZStack {
+            // Base gradient
+            LinearGradient(
+                colors: [
+                    Color(red: 0.92, green: 0.50, blue: 0.08),
+                    Color(red: 0.80, green: 0.22, blue: 0.12),
+                    Color(red: 0.12, green: 0.06, blue: 0.03)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            // Warm radial glow behind flame area
+            RadialGradient(
+                colors: [
+                    Color(red: 1.0, green: 0.65, blue: 0.15).opacity(0.35),
+                    Color.clear
+                ],
+                center: UnitPoint(x: 0.5, y: 0.18),
+                startRadius: 10,
+                endRadius: 200
+            )
+        }
         .ignoresSafeArea()
     }
 
     // MARK: - Streak Hero (Flame + Counter)
 
     private var streakHeroSection: some View {
-        VStack(spacing: 12) {
-            // Flame icon
-            Image(systemName: "flame.fill")
-                .font(.system(size: 64, weight: .medium))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [.yellow, .orange, Color(red: 1.0, green: 0.3, blue: 0.1)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .shadow(color: .orange.opacity(0.5), radius: 12, x: 0, y: 4)
-                .scaleEffect(flameScale)
-                .opacity(showFlame ? 1 : 0)
+        VStack(spacing: 4) {
+            // Animated flame with glow and embers
+            FlameAnimationView(isIgnited: $showFlame)
+                .frame(height: 140)
 
             // Streak counter
             if showStreakCount {
@@ -163,10 +167,12 @@ struct GoalCompletedCelebrationView: View {
                         .font(.system(size: 56, weight: .black, design: .rounded))
                         .foregroundColor(.white)
                         .contentTransition(.numericText())
+                        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
 
                     Text("day streak!")
                         .font(.system(size: 20, weight: .bold, design: .rounded))
                         .foregroundColor(.white.opacity(0.9))
+                        .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
                 }
                 .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
@@ -182,11 +188,13 @@ struct GoalCompletedCelebrationView: View {
                     .font(.system(size: 14, weight: .black, design: .rounded))
                     .tracking(2)
                     .foregroundColor(.yellow)
+                    .shadow(color: .orange.opacity(0.5), radius: 4, x: 0, y: 1)
             }
 
             Text(completionSubtitle)
                 .font(.system(size: 18, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(.white.opacity(0.95))
+                .shadow(color: .black.opacity(0.3), radius: 3, x: 0, y: 1)
                 .multilineTextAlignment(.center)
         }
     }
@@ -605,20 +613,19 @@ struct GoalCompletedCelebrationView: View {
         impactMedium.prepare()
         notification.prepare()
 
-        // Phase 1: Fade in + flame
-        withAnimation(.easeOut(duration: 0.25)) {
+        // Phase 1: Fade in background (0.0s)
+        withAnimation(.easeOut(duration: 0.3)) {
             overlayOpacity = 1
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
-                showFlame = true
-                flameScale = 1.0
-            }
+
+        // Phase 2: Ignite the flame (0.25s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            showFlame = true
             notification.notificationOccurred(.success)
         }
 
-        // Phase 2: Streak counter + confetti
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+        // Phase 3: Streak counter + confetti burst (0.7s - after flame has ignited)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 showStreakCount = true
             }
@@ -626,8 +633,8 @@ struct GoalCompletedCelebrationView: View {
             confettiTrigger = true
         }
 
-        // Phase 3: Title + week calendar
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+        // Phase 4: Title + week calendar (1.1s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 showTitle = true
                 showWeekCalendar = true
@@ -645,16 +652,16 @@ struct GoalCompletedCelebrationView: View {
             }
         }
 
-        // Phase 4: Stats + motivation
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+        // Phase 5: Stats + motivation (1.5s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 showStats = true
                 showMotivation = true
             }
         }
 
-        // Phase 5: Buttons
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+        // Phase 6: Buttons (1.8s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 showButtons = true
             }
@@ -684,62 +691,157 @@ struct GoalCompletedCelebrationView: View {
 struct CelebrationConfetti: View {
     @State private var particles: [ConfettiPiece2] = []
 
+    // App-themed confetti colors: warm oranges, yellows, whites, with pops of color
+    private let confettiColors: [Color] = [
+        .yellow,
+        Color(red: 1.0, green: 0.85, blue: 0.2),  // Gold
+        .orange,
+        Color(red: 1.0, green: 0.45, blue: 0.15),  // Deep orange
+        .white,
+        .white.opacity(0.9),
+        Color(red: 1.0, green: 0.6, blue: 0.7),    // Soft pink
+        .cyan.opacity(0.8),
+    ]
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 ForEach(particles) { particle in
-                    ConfettiPieceView(particle: particle, screenHeight: geo.size.height)
+                    ConfettiPieceView(particle: particle, screenSize: geo.size)
                 }
             }
             .onAppear {
-                particles = (0..<30).map { _ in
+                let centerX = geo.size.width / 2
+
+                // Wave 1: Burst from top-center (0.0s) - 25 pieces
+                let wave1 = (0..<25).map { _ in
                     ConfettiPiece2(
-                        color: [.yellow, .orange, .red, .pink, .white, .cyan].randomElement()!,
-                        x: CGFloat.random(in: 0...geo.size.width),
+                        color: confettiColors.randomElement()!,
+                        startX: centerX + CGFloat.random(in: -40...40),
+                        startY: -20,
+                        shape: ConfettiShape.allCases.randomElement()!,
                         size: CGFloat.random(in: 6...12),
-                        delay: Double.random(in: 0...0.5),
-                        duration: Double.random(in: 2.5...4.0)
+                        delay: Double.random(in: 0...0.3),
+                        duration: Double.random(in: 2.5...4.0),
+                        swayAmount: CGFloat.random(in: 30...80),
+                        driftX: CGFloat.random(in: -60...60)
                     )
                 }
+
+                // Wave 2: From sides (0.3s) - 15 pieces
+                let wave2 = (0..<15).map { _ -> ConfettiPiece2 in
+                    let fromLeft = Bool.random()
+                    return ConfettiPiece2(
+                        color: confettiColors.randomElement()!,
+                        startX: fromLeft ? -10 : geo.size.width + 10,
+                        startY: CGFloat.random(in: 50...200),
+                        shape: ConfettiShape.allCases.randomElement()!,
+                        size: CGFloat.random(in: 5...10),
+                        delay: Double.random(in: 0.3...0.7),
+                        duration: Double.random(in: 2.0...3.5),
+                        swayAmount: CGFloat.random(in: 20...50),
+                        driftX: fromLeft ? CGFloat.random(in: 30...120) : CGFloat.random(in: -120 ... -30)
+                    )
+                }
+
+                // Wave 3: Gentle trailing confetti (1.0s) - 10 pieces
+                let wave3 = (0..<10).map { _ in
+                    ConfettiPiece2(
+                        color: confettiColors.randomElement()!,
+                        startX: CGFloat.random(in: 0...geo.size.width),
+                        startY: -30,
+                        shape: ConfettiShape.allCases.randomElement()!,
+                        size: CGFloat.random(in: 4...8),
+                        delay: Double.random(in: 1.0...1.8),
+                        duration: Double.random(in: 3.0...5.0),
+                        swayAmount: CGFloat.random(in: 20...40),
+                        driftX: CGFloat.random(in: -30...30)
+                    )
+                }
+
+                particles = wave1 + wave2 + wave3
             }
         }
     }
 }
 
+enum ConfettiShape: CaseIterable {
+    case rectangle
+    case circle
+    case roundedSquare
+}
+
 struct ConfettiPiece2: Identifiable {
     let id = UUID()
     let color: Color
-    let x: CGFloat
+    let startX: CGFloat
+    let startY: CGFloat
+    let shape: ConfettiShape
     let size: CGFloat
     let delay: Double
     let duration: Double
+    let swayAmount: CGFloat
+    let driftX: CGFloat
 }
 
 struct ConfettiPieceView: View {
     let particle: ConfettiPiece2
-    let screenHeight: CGFloat
+    let screenSize: CGSize
 
-    @State private var offset: CGFloat = -50
+    @State private var yOffset: CGFloat = 0
+    @State private var xOffset: CGFloat = 0
     @State private var rotation: Double = 0
+    @State private var rotation3D: Double = 0
     @State private var sway: CGFloat = 0
+    @State private var opacity: Double = 1.0
 
     var body: some View {
-        Rectangle()
-            .fill(particle.color)
-            .frame(width: particle.size, height: particle.size * 1.5)
-            .rotationEffect(.degrees(rotation))
-            .offset(x: particle.x + sway, y: offset)
-            .onAppear {
-                withAnimation(.easeIn(duration: particle.duration).delay(particle.delay)) {
-                    offset = screenHeight + 50
-                }
-                withAnimation(.linear(duration: particle.duration).delay(particle.delay)) {
-                    rotation = Double.random(in: 360...720)
-                }
-                withAnimation(.easeInOut(duration: 0.8).delay(particle.delay).repeatForever(autoreverses: true)) {
-                    sway = CGFloat.random(in: -40...40)
-                }
+        Group {
+            switch particle.shape {
+            case .rectangle:
+                Rectangle()
+                    .fill(particle.color)
+                    .frame(width: particle.size, height: particle.size * 1.6)
+            case .circle:
+                Circle()
+                    .fill(particle.color)
+                    .frame(width: particle.size, height: particle.size)
+            case .roundedSquare:
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(particle.color)
+                    .frame(width: particle.size, height: particle.size)
             }
+        }
+        .rotation3DEffect(.degrees(rotation3D), axis: (x: 1, y: 0, z: 0))
+        .rotationEffect(.degrees(rotation))
+        .opacity(opacity)
+        .offset(x: particle.startX + xOffset + sway, y: particle.startY + yOffset)
+        .onAppear {
+            // Fall down
+            withAnimation(.easeIn(duration: particle.duration).delay(particle.delay)) {
+                yOffset = screenSize.height + 80
+            }
+            // Drift sideways
+            withAnimation(.easeOut(duration: particle.duration * 0.8).delay(particle.delay)) {
+                xOffset = particle.driftX
+            }
+            // Spin
+            withAnimation(.linear(duration: particle.duration).delay(particle.delay)) {
+                rotation = Double.random(in: 360...1080)
+            }
+            // 3D flip for paper-like effect
+            withAnimation(.linear(duration: particle.duration * 0.4).delay(particle.delay).repeatForever(autoreverses: false)) {
+                rotation3D = 360
+            }
+            // Sway side to side
+            withAnimation(.easeInOut(duration: 0.6).delay(particle.delay).repeatForever(autoreverses: true)) {
+                sway = CGFloat.random(in: -particle.swayAmount...particle.swayAmount)
+            }
+            // Fade out near end
+            withAnimation(.easeIn(duration: particle.duration * 0.3).delay(particle.delay + particle.duration * 0.7)) {
+                opacity = 0
+            }
+        }
     }
 }
 

@@ -314,6 +314,7 @@ class HealthKitManager: ObservableObject {
     
     @Published var isAuthorized = false
     @Published var todaysDistance: Double = 0.0
+    @Published var todaysWorkouts: [HKWorkout] = []  // Only today's workouts (for stats)
     @Published var recentWorkouts: [HKWorkout] = []
     @Published var totalLifetimeMiles: Double = 0.0
     @Published var fastestMilePace: TimeInterval = 0.0
@@ -634,12 +635,13 @@ class HealthKitManager: ObservableObject {
             guard let self = self, let workouts = samples as? [HKWorkout], !workouts.isEmpty else {
                 DispatchQueue.main.async {
                     self?.todaysDistance = 0.0
+                    self?.todaysWorkouts = []
                     #if !os(watchOS)
                     // Get current goal from widget store or default to 1.0
                     let widgetData = WidgetDataStore.load()
                     let currentGoal = widgetData.goal
                     let safeGoal = currentGoal > 0 ? currentGoal : 1.0
-                    
+
                     // Use unified progress calculation
                     WidgetDataStore.save(todayMiles: 0, goal: safeGoal)
                     #endif
@@ -698,40 +700,57 @@ class HealthKitManager: ObservableObject {
     
     // MARK: - Today's Stats (Computed Properties)
     
-    /// Today's total workout duration in seconds
+    /// Today's total workout duration in seconds (uses todaysWorkouts for accuracy)
     var todaysTotalDuration: TimeInterval {
-        return recentWorkouts.reduce(0) { $0 + $1.duration }
+        return todaysWorkouts.reduce(0) { $0 + $1.duration }
     }
-    
-    /// Today's average pace in minutes per mile (calculated from all today's workouts)
+
+    /// Today's average pace in minutes per mile (calculated from today's workouts only)
     var todaysAveragePace: TimeInterval? {
-        guard todaysDistance > 0 else { return nil }
-        let totalDurationMinutes = todaysTotalDuration / 60.0
-        return totalDurationMinutes / todaysDistance
+        // Calculate from today's workouts directly for accuracy
+        var totalDuration: TimeInterval = 0
+        var totalMiles: Double = 0
+
+        for workout in todaysWorkouts {
+            if let distance = workout.totalDistance {
+                let miles = distance.doubleValue(for: HKUnit.mile())
+                if miles > 0 {
+                    totalDuration += workout.duration
+                    totalMiles += miles
+                }
+            }
+        }
+
+        guard totalMiles > 0 else { return nil }
+        let pace = (totalDuration / 60.0) / totalMiles
+        // Sanity check: pace should be between 2:00/mi and 30:00/mi
+        guard pace >= 2.0 && pace <= 30.0 else { return nil }
+        return pace
     }
-    
+
     /// Today's fastest pace from individual workouts (best single workout pace today)
     var todaysFastestPace: TimeInterval? {
         var fastestPace: TimeInterval = .infinity
-        
-        for workout in recentWorkouts {
+
+        for workout in todaysWorkouts {
             if let distance = workout.totalDistance {
                 let miles = distance.doubleValue(for: HKUnit.mile())
-                if miles >= 0.5 { // Only consider workouts with at least half a mile
+                if miles >= 0.3 { // Only consider workouts with meaningful distance
                     let pace = (workout.duration / 60.0) / miles
-                    if pace < fastestPace {
+                    // Sanity check: pace should be between 2:00/mi and 30:00/mi
+                    if pace >= 2.0 && pace < fastestPace {
                         fastestPace = pace
                     }
                 }
             }
         }
-        
+
         return fastestPace == .infinity ? nil : fastestPace
     }
-    
+
     /// Today's total calories burned (estimated from workouts)
     var todaysTotalCalories: Double {
-        return recentWorkouts.reduce(0) { total, workout in
+        return todaysWorkouts.reduce(0) { total, workout in
             if #available(iOS 18.0, *) {
                 if let statistics = workout.statistics(for: HKQuantityType(.activeEnergyBurned)),
                    let energy = statistics.sumQuantity() {
@@ -747,7 +766,7 @@ class HealthKitManager: ObservableObject {
     
     /// Number of workouts completed today
     var todaysWorkoutCount: Int {
-        return recentWorkouts.count
+        return todaysWorkouts.count
     }
     
     // Get distance in miles from a workout
@@ -1106,7 +1125,7 @@ class HealthKitManager: ObservableObject {
         
         DispatchQueue.main.async {
             self.todaysDistance = totalMiles
-            self.recentWorkouts = todaysWorkouts
+            self.todaysWorkouts = todaysWorkouts
             #if !os(watchOS)
             // Get current goal from widget store or default to 1.0
             let widgetData = WidgetDataStore.load()
