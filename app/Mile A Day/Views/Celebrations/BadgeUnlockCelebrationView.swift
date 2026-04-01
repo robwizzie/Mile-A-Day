@@ -537,7 +537,7 @@ struct ConfettiCannon: View {
                         delay: Double.random(in: 0...0.8),
                         duration: Double.random(in: 2.5...4.0),
                         swayAmount: CGFloat.random(in: -60...60),
-                        shape: ConfettiShape.allCases.randomElement() ?? .rectangle
+                        shape: CelebrationConfettiShape.allCases.randomElement() ?? .rectangle
                     )
                 }
             }
@@ -555,11 +555,7 @@ struct ConfettiParticle: Identifiable {
     let delay: Double
     let duration: Double
     let swayAmount: CGFloat
-    let shape: ConfettiShape
-}
-
-enum ConfettiShape: CaseIterable {
-    case rectangle, circle, triangle
+    let shape: CelebrationConfettiShape
 }
 
 struct ConfettiPiece: View {
@@ -599,19 +595,10 @@ struct ConfettiPiece: View {
         case .circle:
             Circle().fill(particle.color)
         case .triangle:
-            Triangle().fill(particle.color)
+            CelebrationTriangle().fill(particle.color)
+        case .roundedSquare:
+            RoundedRectangle(cornerRadius: 2).fill(particle.color)
         }
-    }
-}
-
-struct Triangle: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.closeSubpath()
-        return path
     }
 }
 

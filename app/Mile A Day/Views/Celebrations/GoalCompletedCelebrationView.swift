@@ -719,7 +719,7 @@ struct CelebrationConfetti: View {
                         color: confettiColors.randomElement()!,
                         startX: centerX + CGFloat.random(in: -40...40),
                         startY: -20,
-                        shape: ConfettiShape.allCases.randomElement()!,
+                        shape: CelebrationConfettiShape.allCases.randomElement()!,
                         size: CGFloat.random(in: 6...12),
                         delay: Double.random(in: 0...0.3),
                         duration: Double.random(in: 2.5...4.0),
@@ -735,7 +735,7 @@ struct CelebrationConfetti: View {
                         color: confettiColors.randomElement()!,
                         startX: fromLeft ? -10 : geo.size.width + 10,
                         startY: CGFloat.random(in: 50...200),
-                        shape: ConfettiShape.allCases.randomElement()!,
+                        shape: CelebrationConfettiShape.allCases.randomElement()!,
                         size: CGFloat.random(in: 5...10),
                         delay: Double.random(in: 0.3...0.7),
                         duration: Double.random(in: 2.0...3.5),
@@ -750,7 +750,7 @@ struct CelebrationConfetti: View {
                         color: confettiColors.randomElement()!,
                         startX: CGFloat.random(in: 0...geo.size.width),
                         startY: -30,
-                        shape: ConfettiShape.allCases.randomElement()!,
+                        shape: CelebrationConfettiShape.allCases.randomElement()!,
                         size: CGFloat.random(in: 4...8),
                         delay: Double.random(in: 1.0...1.8),
                         duration: Double.random(in: 3.0...5.0),
@@ -765,18 +765,14 @@ struct CelebrationConfetti: View {
     }
 }
 
-enum ConfettiShape: CaseIterable {
-    case rectangle
-    case circle
-    case roundedSquare
-}
+// CelebrationConfettiShape is defined in CelebrationConfettiTypes.swift
 
 struct ConfettiPiece2: Identifiable {
     let id = UUID()
     let color: Color
     let startX: CGFloat
     let startY: CGFloat
-    let shape: ConfettiShape
+    let shape: CelebrationConfettiShape
     let size: CGFloat
     let delay: Double
     let duration: Double
@@ -808,6 +804,10 @@ struct ConfettiPieceView: View {
                     .frame(width: particle.size, height: particle.size)
             case .roundedSquare:
                 RoundedRectangle(cornerRadius: 2)
+                    .fill(particle.color)
+                    .frame(width: particle.size, height: particle.size)
+            case .triangle:
+                CelebrationTriangle()
                     .fill(particle.color)
                     .frame(width: particle.size, height: particle.size)
             }
