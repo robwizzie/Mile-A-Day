@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import HealthKit
 
 /// App State Manager
 /// Manages the overall app flow: Splash -> Onboarding -> Auth -> Main App
@@ -12,6 +13,7 @@ class AppStateManager: ObservableObject {
         case onboarding
         case authentication
         case usernameSetup
+        case welcome
         case healthAccess
         case workoutSync
         case main
@@ -28,6 +30,7 @@ class AppStateManager: ObservableObject {
     private let hasLaunchedKey = "MAD_HasLaunchedBefore"
     private let hasCompletedOnboardingKey = "MAD_HasCompletedOnboarding"
     private let isAuthenticatedKey = "MAD_IsAuthenticated"
+    private let hasCompletedFullSetupKey = "MAD_HasCompletedFullSetup"
     
     // MARK: - Initialization
     init() {
@@ -45,8 +48,10 @@ class AppStateManager: ObservableObject {
                     self.currentState = .onboarding
                 } else if !self.isAuthenticated {
                     self.currentState = .authentication
-                } else {
+                } else if self.userDefaults.bool(forKey: self.hasCompletedFullSetupKey) {
                     self.currentState = .main
+                } else {
+                    self.routeToIncompleteSetupStep()
                 }
             }
         }
@@ -65,21 +70,7 @@ class AppStateManager: ObservableObject {
         }
     }
     
-    /// Complete authentication and check if username setup is needed
-    func completeAuthentication() {
-        userDefaults.set(true, forKey: isAuthenticatedKey)
-        isAuthenticated = true
-        
-        DispatchQueue.main.async {
-            withAnimation(MADTheme.Animation.standard) {
-                // Check if user needs to set up username
-                // This will be determined by the UserManager
-                self.currentState = .usernameSetup
-            }
-        }
-    }
-    
-    /// Complete authentication with username check
+    /// Complete authentication and route to appropriate setup step
     func completeAuthentication(userManager: UserManager) {
         userDefaults.set(true, forKey: isAuthenticatedKey)
         isAuthenticated = true
@@ -89,10 +80,18 @@ class AppStateManager: ObservableObject {
 
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
-                // Check if user already has a username
                 if userManager.currentUser.hasUsername {
-                    // Go to health access step before sync
-                    self.currentState = .healthAccess
+                    if self.isHealthKitAuthorized() {
+                        // Returning user with everything set up
+                        self.userDefaults.set(true, forKey: self.hasCompletedFullSetupKey)
+                        if WorkoutSyncService.shared.isFirstTimeSync() {
+                            self.currentState = .workoutSync
+                        } else {
+                            self.currentState = .main
+                        }
+                    } else {
+                        self.currentState = .healthAccess
+                    }
                 } else {
                     self.currentState = .usernameSetup
                 }
@@ -100,8 +99,17 @@ class AppStateManager: ObservableObject {
         }
     }
     
-    /// Complete username setup and move to health access
+    /// Complete username setup and move to welcome screen
     func completeUsernameSetup() {
+        DispatchQueue.main.async {
+            withAnimation(MADTheme.Animation.standard) {
+                self.currentState = .welcome
+            }
+        }
+    }
+
+    /// Complete welcome screen and move to health access
+    func completeWelcome() {
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 self.currentState = .healthAccess
@@ -111,6 +119,8 @@ class AppStateManager: ObservableObject {
 
     /// Complete health access and check if workout sync is needed
     func completeHealthAccess() {
+        userDefaults.set(true, forKey: hasCompletedFullSetupKey)
+
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 if WorkoutSyncService.shared.isFirstTimeSync() {
@@ -134,8 +144,9 @@ class AppStateManager: ObservableObject {
     /// Sign out user (for testing purposes)
     func signOut() {
         userDefaults.set(false, forKey: isAuthenticatedKey)
+        userDefaults.set(false, forKey: hasCompletedFullSetupKey)
         isAuthenticated = false
-        
+
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 self.currentState = .authentication
@@ -148,6 +159,7 @@ class AppStateManager: ObservableObject {
         userDefaults.removeObject(forKey: hasLaunchedKey)
         userDefaults.removeObject(forKey: hasCompletedOnboardingKey)
         userDefaults.removeObject(forKey: isAuthenticatedKey)
+        userDefaults.removeObject(forKey: hasCompletedFullSetupKey)
         
         isFirstLaunch = true
         isAuthenticated = false
@@ -161,7 +173,29 @@ class AppStateManager: ObservableObject {
     }
     
     // MARK: - Private Methods
-    
+
+    /// Check if HealthKit write authorization has been granted
+    private func isHealthKitAuthorized() -> Bool {
+        guard HKHealthStore.isHealthDataAvailable() else { return false }
+        let status = HKHealthStore().authorizationStatus(for: HKObjectType.workoutType())
+        return status == .sharingAuthorized
+    }
+
+    /// Route to the first incomplete setup step for an authenticated user
+    private func routeToIncompleteSetupStep() {
+        let user = UserManager.shared.currentUser
+
+        if !user.hasUsername {
+            self.currentState = .usernameSetup
+        } else if !isHealthKitAuthorized() {
+            self.currentState = .healthAccess
+        } else {
+            // Everything is actually complete — set the flag and go to main
+            self.userDefaults.set(true, forKey: hasCompletedFullSetupKey)
+            self.currentState = .main
+        }
+    }
+
     /// Load the current app state from UserDefaults
     private func loadAppState() {
         let hasLaunched = userDefaults.bool(forKey: hasLaunchedKey)

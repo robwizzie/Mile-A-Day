@@ -13,8 +13,8 @@ struct UsernameSetupView: View {
             // Background gradient
             LinearGradient(
                 colors: [
-                    MADTheme.Colors.madWhite,
-                    MADTheme.Colors.secondaryBackground
+                    Color(red: 0.12, green: 0.06, blue: 0.08),
+                    Color(red: 0.06, green: 0.03, blue: 0.04)
                 ],
                 startPoint: .top,
                 endPoint: .bottom

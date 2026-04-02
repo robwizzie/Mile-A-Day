@@ -37,6 +37,15 @@ struct RootView: View {
                         removal: .move(edge: .leading).combined(with: .opacity)
                     ))
 
+            case .welcome:
+                WelcomeView()
+                    .environmentObject(userManager)
+                    .preferredColorScheme(.dark)
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.9).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+
             case .healthAccess:
                 HealthAccessView()
                     .preferredColorScheme(.dark)

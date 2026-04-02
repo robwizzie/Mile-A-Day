@@ -1600,11 +1600,12 @@ class HealthKitManager: ObservableObject {
                 return
             }
             
-            // Update cached workout data
-            self.updateCachedWorkoutData(with: newWorkouts)
-            
-            // Recalculate stats with all workouts (cached + new)
-            self.recalculateStatsWithAllWorkouts()
+            // Update cached workout data and recalculate stats on main thread
+            // (cachedWorkouts is @Published so all mutations must happen on main)
+            DispatchQueue.main.async {
+                self.updateCachedWorkoutData(with: newWorkouts)
+                self.recalculateStatsWithAllWorkouts()
+            }
         }
         
         healthStore.execute(query)
@@ -1612,11 +1613,12 @@ class HealthKitManager: ObservableObject {
     
     /// Updates cached workout data with new workouts
     /// Automatically deduplicates based on workout UUID
+    /// Updates cached workout data with new workouts
+    /// Must be called on the main thread (cachedWorkouts is @Published)
     private func updateCachedWorkoutData(with newWorkouts: [HKWorkout]) {
         var addedCount = 0
         var duplicateCount = 0
-        
-        // Add only unique new workouts
+
         for workout in newWorkouts {
             if !cachedWorkoutUUIDs.contains(workout.uuid) {
                 cachedWorkouts.append(workout)
@@ -1626,8 +1628,7 @@ class HealthKitManager: ObservableObject {
                 duplicateCount += 1
             }
         }
-        
-        // Update latest workout date
+
         if let latestWorkout = newWorkouts.max(by: { $0.endDate < $1.endDate }) {
             if let currentLatest = cachedLatestWorkoutDate {
                 cachedLatestWorkoutDate = max(currentLatest, latestWorkout.endDate)
@@ -1635,10 +1636,9 @@ class HealthKitManager: ObservableObject {
                 cachedLatestWorkoutDate = latestWorkout.endDate
             }
         }
-        
-        // Update workout count
+
         cachedWorkoutCount = cachedWorkouts.count
-        
+
         log("[HealthKit] Updated cached workout data - Added: \(addedCount), Duplicates skipped: \(duplicateCount), Total: \(cachedWorkoutCount)")
     }
     
