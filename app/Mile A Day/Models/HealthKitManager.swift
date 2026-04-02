@@ -2381,10 +2381,15 @@ class HealthKitManager: ObservableObject {
                 }
             }
             
-            // Store in property for UI access
+            // Merge with existing dailyMileGoals (preserve days outside this month's query range,
+            // e.g. Sunday of the current week when it falls in the previous month)
             DispatchQueue.main.async {
-                self.dailyMileGoals = dailyMileGoals
-                self.log("[HealthKit] 📅 Calendar updated with \(dailyMileGoals.filter { $0.value }.count) qualifying days")
+                var merged = self.dailyMileGoals
+                for (date, goalReached) in dailyMileGoals {
+                    merged[date] = goalReached
+                }
+                self.dailyMileGoals = merged
+                self.log("[HealthKit] 📅 Calendar updated with \(merged.filter { $0.value }.count) qualifying days")
             }
         }
         
@@ -2779,6 +2784,19 @@ class HealthKitManager: ObservableObject {
         
         guard !newWorkouts.isEmpty else {
             print("[WorkoutIndex] ✅ No new workouts found")
+            // Still populate dailyMileGoals from the cached index so the
+            // streak week-dots render correctly (the index was loaded from
+            // disk at init, but dailyMileGoals is not persisted).
+            await MainActor.run {
+                var goals: [Date: Bool] = [:]
+                for (dateKey, records) in currentIndex.workoutsByDate {
+                    if let date = dateFromKey(dateKey) {
+                        let totalMiles = records.reduce(0) { $0 + $1.distance }
+                        goals[date] = totalMiles >= 0.95
+                    }
+                }
+                self.dailyMileGoals = goals
+            }
             return
         }
         

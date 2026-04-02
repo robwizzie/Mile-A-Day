@@ -32,7 +32,7 @@ struct DashboardView: View {
     @State private var showForceResetAlert = false
 
     /// User preference: "chart" (line chart) or "streak" (streak card)
-    @AppStorage("weekViewStyle") private var weekViewStyle: String = "chart"
+    @AppStorage("weekViewStyle") private var weekViewStyle: String = "streak"
     
     /// Navigation state for badges view from celebration
     @State private var navigateToBadgesFromCelebration = false
@@ -456,8 +456,8 @@ struct DashboardView: View {
 
     private var weekViewPicker: some View {
         let tabs: [(id: String, label: String, icon: String)] = [
-            ("chart", "This Week", "chart.xyaxis.line"),
             ("streak", "Streak", "flame.fill"),
+            ("chart", "This Week", "chart.xyaxis.line"),
         ]
 
         return HStack(spacing: 4) {
@@ -614,48 +614,59 @@ struct DashboardView: View {
 struct InstructionsBanner: View {
     @Binding var showInstructions: Bool
     @AppStorage("hasSeenInstructions") private var hasSeenInstructions = false
-    
+
     var body: some View {
         if !hasSeenInstructions {
-            VStack(spacing: 12) {
-                HStack {
-                    Image(systemName: "info.circle.fill")
-                        .foregroundColor(.blue)
-                        .font(.title2)
-                    
+            VStack(spacing: 14) {
+                HStack(spacing: 12) {
+                    Image(systemName: "figure.run.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [MADTheme.Colors.madRed, .orange],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Welcome to Mile A Day!")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                        
-                        Text("Complete your workout in Apple Fitness, then return here to see your progress. Tap the ℹ️ icon anytime for help.")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+
+                        Text("Start a run in-app or log workouts from Apple Fitness. Tap the ")
+                            + Text(Image(systemName: "info.circle"))
+                                .foregroundColor(.white.opacity(0.7))
+                            + Text(" icon anytime for help.")
                     }
-                    
-                    Spacer()
-                    
-                    Button("Got it!") {
-                        withAnimation {
-                            hasSeenInstructions = true
-            }
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+                }
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        hasSeenInstructions = true
                     }
-                    .font(.caption)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
+                } label: {
+                    Text("Got it!")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            Capsule()
+                                .fill(MADTheme.Colors.madRed.opacity(0.8))
+                        )
                 }
             }
-            .padding()
+            .padding(16)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.blue.opacity(0.1))
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(Color.white.opacity(0.08))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
             )
         }
     }
