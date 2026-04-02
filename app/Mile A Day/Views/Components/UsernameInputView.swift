@@ -276,9 +276,13 @@ class UsernameService {
         guard let url = URL(string: "\(backendURL)/users/check-username?username=\(username)") else {
             throw UsernameError.invalidURL
         }
-        
+
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            var request = URLRequest(url: url)
+            if let token = UserDefaults.standard.string(forKey: "authToken") {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
+            let (data, response) = try await URLSession.shared.data(for: request)
             
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw UsernameError.networkError
