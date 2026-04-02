@@ -18,7 +18,7 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
         total_duration
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-      ON CONFLICT (user_id, workout_id)
+      ON CONFLICT (workout_id)
       DO UPDATE SET
         distance = EXCLUDED.distance,
         local_date = EXCLUDED.local_date,
