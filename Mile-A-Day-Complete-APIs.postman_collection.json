@@ -1,0 +1,1083 @@
+{
+	"info": {
+		"name": "Mile-A-Day Complete API",
+		"description": "Complete collection for all Mile-A-Day endpoints",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{authToken}}",
+				"type": "string"
+			}
+		]
+	},
+	"item": [
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Sign In",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"user_id\": \"apple_user_123\",\n  \"identity_token\": \"eyJraWQiOiJXNldjT0tCIiwiYWxnIjoiUlMyNTYifQ...\",\n  \"authorization_code\": \"code123\",\n  \"email\": \"user@example.com\",\n  \"device_info\": {\n    \"model\": \"iPhone\",\n    \"os_version\": \"iOS 18.0\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/auth/signin",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"auth",
+								"signin"
+							]
+						},
+						"description": "Sign in with Apple. Returns user object, accessToken (30 day expiry), refreshToken (long-lived), expiresIn ('30d'), and expiresAt (Unix timestamp in milliseconds). Device info is stored for session tracking."
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Token",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refreshToken\": \"your_refresh_token_here\"\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/auth/refresh",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"auth",
+								"refresh"
+							]
+						},
+						"description": "Exchange a refresh token for a new access token and refresh token pair. The old refresh token is revoked (token rotation). Returns new accessToken (30 day expiry), refreshToken, expiresIn ('30d'), and expiresAt (Unix timestamp in milliseconds)."
+					},
+					"response": []
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refreshToken\": \"your_refresh_token_here\"\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/auth/logout",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"auth",
+								"logout"
+							]
+						},
+						"description": "Revoke a single refresh token (logout from this session only). Other sessions remain active. Requires authentication."
+					},
+					"response": []
+				},
+				{
+					"name": "Logout All",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/auth/logout-all",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"auth",
+								"logout-all"
+							]
+						},
+						"description": "Revoke all refresh tokens for the authenticated user (logout from all sessions). Requires authentication."
+					},
+					"response": []
+				}
+			],
+			"description": "Authentication endpoints"
+		},
+		{
+			"name": "Dev",
+			"item": [
+				{
+					"name": "Generate Test Token",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"userId\": \"{{userId}}\"\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/dev/test-token",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"dev",
+								"test-token"
+							]
+						},
+						"description": "Generate a test JWT token for development. Required: userId"
+					},
+					"response": []
+				}
+			],
+			"description": "Development/testing endpoints"
+		},
+		{
+			"name": "Users",
+			"item": [
+				{
+					"name": "Search Users",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/users/search?query=john",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"users",
+								"search"
+							],
+							"query": [
+								{
+									"key": "query",
+									"value": "john",
+									"description": "Search query for username or email"
+								}
+							]
+						},
+						"description": "Search users by username or email (max 50 results)"
+					},
+					"response": []
+				},
+				{
+					"name": "Check Username",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/users/check-username?username=johndoe",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"users",
+								"check-username"
+							],
+							"query": [
+								{
+									"key": "username",
+									"value": "johndoe",
+									"description": "Username to check availability"
+								}
+							]
+						},
+						"description": "Check if a username is available"
+					},
+					"response": []
+				},
+				{
+					"name": "Get User",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/users/:userId",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"users",
+								":userId"
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Get user details by user ID"
+					},
+					"response": []
+				},
+				{
+					"name": "Update User",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"johndoe\",\n  \"first_name\": \"John\",\n  \"last_name\": \"Doe\"\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/users/:userId",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"users",
+								":userId"
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Update user profile (username, first_name, last_name). Requires self-access."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Username",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"newusername\"\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/users/:userId/username",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"users",
+								":userId",
+								"username"
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Update user's username. Requires self-access."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Bio",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"bio\": \"Running enthusiast and marathon runner\"\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/users/:userId/bio",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"users",
+								":userId",
+								"bio"
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Update user's bio. Requires self-access."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Profile Image",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"profileImageUrl\": \"https://example.com/profile.jpg\"\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/users/:userId/profile-image",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"users",
+								":userId",
+								"profile-image"
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Update user's profile image URL. Requires self-access."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete User",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/users/:userId",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"users",
+								":userId"
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Delete user account. Requires self-access."
+					},
+					"response": []
+				}
+			],
+			"description": "User management endpoints"
+		},
+		{
+			"name": "Friends",
+			"item": [
+				{
+					"name": "Get Friends",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/friends/:userId",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"friends",
+								":userId"
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Get list of friends for a user. Requires self-access."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Friend Requests",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/friends/requests/:userId",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"friends",
+								"requests",
+								":userId"
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Get pending friend requests received by user. Requires self-access."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Sent Requests",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/friends/sent-requests/:userId",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"friends",
+								"sent-requests",
+								":userId"
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Get friend requests sent by user. Requires self-access."
+					},
+					"response": []
+				},
+				{
+					"name": "Send Friend Request",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"fromUser\": \"{{userId}}\",\n  \"toUser\": \"user456\"\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/friends/request",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"friends",
+								"request"
+							]
+						},
+						"description": "Send a friend request. Requires self-access for fromUser."
+					},
+					"response": []
+				},
+				{
+					"name": "Accept Friend Request",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"fromUser\": \"user456\",\n  \"toUser\": \"{{userId}}\"\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/friends/accept",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"friends",
+								"accept"
+							]
+						},
+						"description": "Accept a friend request. Requires self-access for toUser."
+					},
+					"response": []
+				},
+				{
+					"name": "Ignore Friend Request",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"fromUser\": \"user456\",\n  \"toUser\": \"{{userId}}\"\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/friends/ignore",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"friends",
+								"ignore"
+							]
+						},
+						"description": "Ignore a friend request. Requires self-access for toUser."
+					},
+					"response": []
+				},
+				{
+					"name": "Decline Friend Request",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"fromUser\": \"user456\",\n  \"toUser\": \"{{userId}}\"\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/friends/decline",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"friends",
+								"decline"
+							]
+						},
+						"description": "Decline a friend request. Requires self-access for toUser."
+					},
+					"response": []
+				},
+				{
+					"name": "Remove Friend",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"fromUser\": \"{{userId}}\",\n  \"toUser\": \"user456\"\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/friends/remove",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"friends",
+								"remove"
+							]
+						},
+						"description": "Remove a friend. Requires self-access for fromUser."
+					},
+					"response": []
+				}
+			],
+			"description": "Friendship management endpoints"
+		},
+		{
+			"name": "Workouts",
+			"item": [
+				{
+					"name": "Upload Workouts",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "[\n  {\n    \"workout_id\": \"workout123\",\n    \"date\": \"2025-01-15\",\n    \"distance\": 3.2,\n    \"duration\": 1800,\n    \"type\": \"run\"\n  },\n  {\n    \"workout_id\": \"workout124\",\n    \"date\": \"2025-01-16\",\n    \"distance\": 5.0,\n    \"duration\": 2400,\n    \"type\": \"run\"\n  }\n]"
+						},
+						"url": {
+							"raw": "{{domain}}/workouts/:userId/upload",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"workouts",
+								":userId",
+								"upload"
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Upload workouts array. Requires self-access."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Streak",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/workouts/:userId/streak",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"workouts",
+								":userId",
+								"streak"
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Get user's current workout streak"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Workout Range",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/workouts/:userId/range",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"workouts",
+								":userId",
+								"range"
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Get workouts in a date range (not yet implemented)"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Recent Workouts",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/workouts/:userId/recent?limit=10",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"workouts",
+								":userId",
+								"recent"
+							],
+							"query": [
+								{
+									"key": "limit",
+									"value": "10",
+									"description": "Number of recent workouts to return"
+								}
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Get recent workouts for a user"
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/workouts/:userId/stats?current_streak=true",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"workouts",
+								":userId",
+								"stats"
+							],
+							"query": [
+								{
+									"key": "current_streak",
+									"value": "true",
+									"description": "If true, calculates stats only for current streak period"
+								}
+							],
+							"variable": [
+								{
+									"key": "userId",
+									"value": "{{userId}}"
+								}
+							]
+						},
+						"description": "Get user workout statistics (streak, total miles, best day, best split, recent workouts)"
+					},
+					"response": []
+				}
+			],
+			"description": "Workout tracking and statistics endpoints"
+		},
+		{
+			"name": "Competitions",
+			"item": [
+				{
+					"name": "Create Competition",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"competition_name\": \"Summer Challenge\",\n  \"type\": \"distance\",\n  \"start_date\": \"2025-06-01\",\n  \"end_date\": \"2025-08-31\",\n  \"workouts\": [],\n  \"options\": {}\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/competitions",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"competitions"
+							]
+						},
+						"description": "Create a new competition. Required: competition_name, type"
+					},
+					"response": []
+				},
+				{
+					"name": "Get All Competitions",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/competitions?page=1&pageSize=25&status=active",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"competitions"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1",
+									"description": "Page number (default: 1)"
+								},
+								{
+									"key": "pageSize",
+									"value": "25",
+									"description": "Items per page (default: 25)"
+								},
+								{
+									"key": "status",
+									"value": "active",
+									"description": "Filter by status"
+								}
+							]
+						},
+						"description": "Get all competitions for authenticated user with pagination"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Competition Invites",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/competitions/invites?page=1",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"competitions",
+								"invites"
+							],
+							"query": [
+								{
+									"key": "page",
+									"value": "1",
+									"description": "Page number (default: 1)"
+								}
+							]
+						},
+						"description": "Get pending competition invites"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Competition by ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/competitions/:competitionId",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"competitions",
+								":competitionId"
+							],
+							"variable": [
+								{
+									"key": "competitionId",
+									"value": "comp123"
+								}
+							]
+						},
+						"description": "Get details of a specific competition"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Competition",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"competition_name\": \"Updated Competition Name\",\n  \"end_date\": \"2025-09-30\",\n  \"options\": {\n    \"goal\": 2\n  }\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/competitions/:competitionId",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"competitions",
+								":competitionId"
+							],
+							"variable": [
+								{
+									"key": "competitionId",
+									"value": "comp123"
+								}
+							]
+						},
+						"description": "Update competition fields. Only included fields will be updated. Options are merged with existing options. Only the owner can update."
+					},
+					"response": []
+				},
+				{
+					"name": "Start Competition",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/competitions/:competitionId/start",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"competitions",
+								":competitionId",
+								"start"
+							],
+							"variable": [
+								{
+									"key": "competitionId",
+									"value": "comp123"
+								}
+							]
+						},
+						"description": "Start a competition (not yet implemented)"
+					},
+					"response": []
+				},
+				{
+					"name": "Invite User to Competition",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"inviteUser\": \"user456\"\n}"
+						},
+						"url": {
+							"raw": "{{domain}}/competitions/:competitionId/invite",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"competitions",
+								":competitionId",
+								"invite"
+							],
+							"variable": [
+								{
+									"key": "competitionId",
+									"value": "comp123"
+								}
+							]
+						},
+						"description": "Invite a user to a competition. Required: inviteUser"
+					},
+					"response": []
+				},
+				{
+					"name": "Accept Competition Invite",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/competitions/:competitionId/accept",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"competitions",
+								":competitionId",
+								"accept"
+							],
+							"variable": [
+								{
+									"key": "competitionId",
+									"value": "comp123"
+								}
+							]
+						},
+						"description": "Accept a pending competition invite"
+					},
+					"response": []
+				},
+				{
+					"name": "Decline Competition Invite",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{domain}}/competitions/:competitionId/decline",
+							"host": [
+								"{{domain}}"
+							],
+							"path": [
+								"competitions",
+								":competitionId",
+								"decline"
+							],
+							"variable": [
+								{
+									"key": "competitionId",
+									"value": "comp123"
+								}
+							]
+						},
+						"description": "Decline a pending competition invite"
+					},
+					"response": []
+				}
+			],
+			"description": "Competition management endpoints"
+		}
+	],
+	"variable": [
+		{
+			"key": "domain",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "authToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "userId",
+			"value": "",
+			"type": "string"
+		}
+	]
+}
