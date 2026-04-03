@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
+import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 import userRoutes from './routes/usersRoutes.js';
@@ -20,6 +21,11 @@ const app = express();
 const PORT = parseInt(process.env.PORT ?? '3000');
 
 app.use(express.json());
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(process.cwd(), 'uploads', 'profile-images');
+fs.mkdirSync(uploadsDir, { recursive: true });
+
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 app.get('/status', (req, res) => {

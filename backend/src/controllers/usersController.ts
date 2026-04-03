@@ -54,6 +54,17 @@ export async function updateUser(req: Request, res: Response) {
 		});
 	}
 
+	// Check username uniqueness if being updated
+	if (req.body.username !== undefined) {
+		const existingUser = await db.query(
+			'SELECT user_id FROM users WHERE username = $1 AND user_id != $2',
+			[req.body.username, userId]
+		);
+		if (existingUser.length > 0) {
+			return res.status(400).json({ error: 'Username already taken' });
+		}
+	}
+
 	const updates: string[] = [];
 	const values: any[] = [];
 

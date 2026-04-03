@@ -9,11 +9,7 @@ struct ProfileView: View {
     @State private var showingFastestPaceDetail = false
     @State private var showingLogoutConfirmation = false
     @State private var showingUsernameSetup = false
-    @State private var showingBioEditor = false
-    @State private var showingUsernameEditor = false
-    @State private var showingImagePicker = false
     @State private var showingEditProfile = false
-    @State private var selectedImage: UIImage?
     @State private var currentProfileImage: UIImage?
     @State private var showingPrivacySettings = false
     
@@ -64,7 +60,7 @@ struct ProfileView: View {
         VStack(spacing: MADTheme.Spacing.lg) {
             // Profile Image
             Button(action: {
-                showingImagePicker = true
+                showingEditProfile = true
             }) {
                 ZStack {
                     Circle()
@@ -168,22 +164,8 @@ struct ProfileView: View {
             UsernameSetupView()
                 .environmentObject(userManager)
         }
-        .sheet(isPresented: $showingImagePicker) {
-            ImagePicker(selectedImage: $selectedImage)
-                .onDisappear {
-                    selectedImage = nil
-                }
-        }
         .sheet(isPresented: $showingPrivacySettings) {
             PrivacySettingsView()
-        }
-        .onChange(of: selectedImage) { oldImage, newImage in
-            if let image = newImage {
-                // Update UI immediately without animation
-                currentProfileImage = image
-                // Save to storage
-                saveCustomProfileImage(image)
-            }
         }
         .onAppear {
             // Load profile image: try server URL first, then local cache
@@ -443,13 +425,6 @@ struct ProfileView: View {
         return userManager.getAppleProfileImage()
     }
     
-    // Helper function to save custom profile image
-    private func saveCustomProfileImage(_ image: UIImage) {
-        if let data = image.jpegData(compressionQuality: 0.8) {
-            UserDefaults.standard.set(data, forKey: "customProfileImage")
-        }
-    }
-
 }
 
 /// MAD-themed stat card component
