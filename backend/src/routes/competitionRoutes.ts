@@ -10,6 +10,7 @@ import {
 	updateComp,
 	deleteComp
 } from '../controllers/competitionController.js';
+import { nudgeUser } from '../controllers/nudgeController.js';
 
 const router = Router();
 
@@ -23,5 +24,6 @@ router.post('/:competitionId/start', startComp);
 router.post('/:competitionId/invite', inviteUsersToComp);
 router.post('/:competitionId/accept', getCompInviteHandler('accepted'));
 router.post('/:competitionId/decline', getCompInviteHandler('declined'));
+router.post('/:competitionId/nudge', nudgeUser);
 
 export default router;

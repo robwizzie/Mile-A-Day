@@ -34,6 +34,14 @@ struct NotificationSettingsView: View {
                 Toggle("When I receive a friend request", isOn: $prefs.friendRequestReceivedEnabled)
                 Toggle("When a friend request is accepted", isOn: $prefs.friendRequestAcceptedEnabled)
             }
+
+            Section(header: Text("Competitions")) {
+                Toggle("Competition invites", isOn: $prefs.competitionInviteEnabled)
+                Toggle("Invite accepted", isOn: $prefs.competitionAcceptedEnabled)
+                Toggle("Competition started", isOn: $prefs.competitionStartEnabled)
+                Toggle("Competition finished", isOn: $prefs.competitionFinishEnabled)
+                Toggle("Nudges", isOn: $prefs.competitionNudgeEnabled)
+            }
         }
         .navigationTitle("Notifications")
         .toolbar {

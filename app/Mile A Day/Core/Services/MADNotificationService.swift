@@ -2,6 +2,10 @@ import Foundation
 import UserNotifications
 import UIKit
 
+extension Notification.Name {
+    static let didReceivePushNotification = Notification.Name("didReceivePushNotification")
+}
+
 /// A singleton that centralises all notification related logic for MAD.
 ///
 /// - Handles permission requests
@@ -203,9 +207,78 @@ final class MADNotificationService: NSObject, ObservableObject {
     }
 
     // MARK: - Remote Notifications
-    /// Registers with APNs for remote pushes (friend completion etc.). Should be called from the AppDelegate.
+
+    /// The current APNs device token (hex string), kept in memory for unregister on sign-out.
+    private(set) var currentDeviceToken: String?
+
+    /// Registers with APNs for remote pushes. Call after auth + notification permission granted.
     func registerForRemoteNotifications() {
         UIApplication.shared.registerForRemoteNotifications()
+    }
+
+    /// Sends the device token to the backend. Called from AppDelegate when APNs returns a token.
+    @MainActor
+    func sendDeviceTokenToBackend(_ token: String) async {
+        currentDeviceToken = token
+        UserDefaults.standard.set(token, forKey: "apnsDeviceToken")
+
+        guard UserDefaults.standard.string(forKey: "authToken") != nil else {
+            print("[Notifications] No auth token, skipping device token registration")
+            return
+        }
+
+        do {
+            struct RegisterRequest: Codable { let device_token: String }
+            let body = try JSONEncoder().encode(RegisterRequest(device_token: token))
+            let _: [String: String] = try await APIClient.fancyFetch(
+                endpoint: "/devices/register",
+                method: .POST,
+                body: body,
+                responseType: [String: String].self
+            )
+            print("[Notifications] Device token registered with backend")
+        } catch {
+            print("[Notifications] Failed to register device token: \(error.localizedDescription)")
+        }
+    }
+
+    /// Unregisters the device token from the backend. Call on sign-out.
+    @MainActor
+    func unregisterDeviceToken() async {
+        let token = currentDeviceToken ?? UserDefaults.standard.string(forKey: "apnsDeviceToken")
+        guard let token else { return }
+
+        do {
+            struct UnregisterRequest: Codable { let device_token: String }
+            let body = try JSONEncoder().encode(UnregisterRequest(device_token: token))
+            let _: [String: String] = try await APIClient.fancyFetch(
+                endpoint: "/devices/unregister",
+                method: .DELETE,
+                body: body,
+                responseType: [String: String].self
+            )
+            print("[Notifications] Device token unregistered from backend")
+        } catch {
+            print("[Notifications] Failed to unregister device token: \(error.localizedDescription)")
+        }
+
+        currentDeviceToken = nil
+        UserDefaults.standard.removeObject(forKey: "apnsDeviceToken")
+    }
+
+    /// Checks if a remote notification type is enabled in user preferences.
+    private func isRemoteNotificationEnabled(type: String) -> Bool {
+        let prefs = NotificationPreferences.load()
+        switch type {
+        case "friend_request": return prefs.friendRequestReceivedEnabled
+        case "friend_request_accepted": return prefs.friendRequestAcceptedEnabled
+        case "competition_invite": return prefs.competitionInviteEnabled
+        case "competition_accepted": return prefs.competitionAcceptedEnabled
+        case "competition_started", "competition_updates": return prefs.competitionStartEnabled
+        case "competition_finished": return prefs.competitionFinishEnabled
+        case "competition_nudge": return prefs.competitionNudgeEnabled
+        default: return true
+        }
     }
 
     // MARK: - Private helpers
@@ -251,20 +324,34 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         // For daily reminders, only show if user hasn't completed their goal
         if notification.request.identifier == Identifier.dailyReminder {
-            // Check current completion status
             let widgetData = WidgetDataStore.load()
             let isCompleted = widgetData.miles >= widgetData.goal
-            
             if isCompleted {
-                return [] // Don't show notification
+                return []
             }
         }
-        
-        // Show banner even when app is foreground to reinforce motivation
+
+        // For remote notifications, check user preferences
+        let userInfo = notification.request.content.userInfo
+        if let type = userInfo["type"] as? String {
+            if !isRemoteNotificationEnabled(type: type) {
+                return []
+            }
+        }
+
         return [.banner, .sound]
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        // Handle deep links or custom actions in future
+        let userInfo = response.notification.request.content.userInfo
+        guard let type = userInfo["type"] as? String else { return }
+        let data = userInfo["data"] as? [String: String] ?? [:]
+
+        // Post a notification so the app can navigate to the right screen
+        NotificationCenter.default.post(
+            name: .didReceivePushNotification,
+            object: nil,
+            userInfo: ["type": type, "data": data]
+        )
     }
 } 

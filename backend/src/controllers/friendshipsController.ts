@@ -8,6 +8,7 @@ import {
 } from '../services/friendshipService.js';
 import hasRequiredKeys from '../utils/hasRequiredKeys.js';
 import { getUser, getUsers } from '../services/userService.js';
+import { sendPush } from '../services/pushNotificationService.js';
 
 const BAD_REQUEST_ERRORS = [
 	'No friendship found',
@@ -78,6 +79,16 @@ export async function sendRequest(req: Request, res: Response) {
 		throw new Error(friendResult.error);
 	}
 
+	// Send push notification to the recipient
+	const sender = users.find(u => u.user_id === fromUser);
+	const senderName = sender?.username || 'Someone';
+	sendPush(toUser, {
+		title: 'New friend request',
+		body: `${senderName} wants to be friends`,
+		type: 'friend_request',
+		data: { user_id: fromUser }
+	}).catch(err => console.error('[Push] Error sending friend request notification:', err.message));
+
 	res.send(friendResult);
 }
 
@@ -101,6 +112,18 @@ export function getFriendshipHandler(status: 'accepted' | 'rejected' | 'ignored'
 			} else {
 				throw new Error(friendResult.error);
 			}
+		}
+
+		// Notify the original sender that their request was accepted
+		if (status === 'accepted') {
+			const accepter = users.find(u => u.user_id === toUser);
+			const accepterName = accepter?.username || 'Someone';
+			sendPush(fromUser, {
+				title: 'Friend request accepted',
+				body: `${accepterName} accepted your friend request`,
+				type: 'friend_request_accepted',
+				data: { user_id: toUser }
+			}).catch(err => console.error('[Push] Error sending friend accepted notification:', err.message));
 		}
 
 		res.send(friendResult);

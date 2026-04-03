@@ -2,6 +2,7 @@ import { BadRequestError } from '../errors/Errors.js';
 import { Competition, CompetitionActivity, CompetitionOptions, CompetitionType, CompetitionUser } from '../types/competitions.js';
 import { PostgresService } from './DbService.js';
 import { getQuantityDateRange } from './workoutService.js';
+import { sendOrQueueCompetitionNotification } from './pushNotificationService.js';
 
 const WORKOUT_TYPE_MAP: Record<string, string> = { run: 'running', walk: 'walking', running: 'running', walking: 'walking' };
 
@@ -614,6 +615,17 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 	);
 
 	await resolveCompetitionPlacements(competition.id, finalScores);
+
+	// Notify all accepted participants that the competition finished
+	const acceptedUsers = competition.users.filter((u: CompetitionUser) => u.invite_status === 'accepted');
+	for (const user of acceptedUsers) {
+		sendOrQueueCompetitionNotification(
+			user.user_id,
+			'competition_finished',
+			competition.id,
+			competition.competition_name
+		).catch(err => console.error('[Push] Error sending competition finish notification:', err.message));
+	}
 }
 
 async function resolveCompetitionPlacements(competitionId: string, precomputedScores?: UserData): Promise<void> {

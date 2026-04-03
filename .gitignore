@@ -7,6 +7,9 @@ dist
 # Uploads (profile images stored on server)
 backend/uploads/
 
+# APNs private key
+backend/certs/
+
 # Xcode
 *.xcuserstate
 *.xcuserdatad

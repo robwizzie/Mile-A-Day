@@ -13,6 +13,7 @@ import {
 } from '../services/competitionService.js';
 import { getUser } from '../services/userService.js';
 import { CompetitionUser } from '../types/competitions.js';
+import { sendPush, sendOrQueueCompetitionNotification } from '../services/pushNotificationService.js';
 
 export async function createComp(req: AuthenticatedRequest, res: Response) {
 	if (!hasRequiredKeys(['competition_name', 'type'], req, res)) return;
@@ -89,6 +90,19 @@ export async function startComp(req: AuthenticatedRequest, res: Response) {
 			start_date: startDate,
 			...(endDate ? { end_date: endDate } : {})
 		});
+
+		// Notify all accepted participants (except the owner who started it)
+		const participants = competition.users.filter(
+			(u: CompetitionUser) => u.invite_status === 'accepted' && u.user_id !== req.userId!
+		);
+		for (const participant of participants) {
+			sendOrQueueCompetitionNotification(
+				participant.user_id,
+				'competition_started',
+				competitionId,
+				competition.competition_name
+			).catch(err => console.error('[Push] Error sending competition start notification:', err.message));
+		}
 
 		res.status(200).json({ competition: updatedCompetition });
 	} catch (error: any) {
@@ -177,6 +191,16 @@ export async function inviteUsersToComp(req: AuthenticatedRequest, res: Response
 
 		await sendCompetitionInvite(competitionId, inviteUserId);
 
+		// Notify the invited user
+		const inviter = await getUser({ userId: req.userId! });
+		const inviterName = inviter?.username || 'Someone';
+		sendPush(inviteUserId, {
+			title: 'Competition invite',
+			body: `${inviterName} invited you to ${competition.competition_name}`,
+			type: 'competition_invite',
+			data: { competition_id: competitionId }
+		}).catch(err => console.error('[Push] Error sending competition invite notification:', err.message));
+
 		res.status(200).json({ message: `Successfully invited user ${inviteUserId} to competition ${competitionId}` });
 	} catch (error: any) {
 		console.error('Error inviting user:', error.message);
@@ -262,6 +286,18 @@ export function getCompInviteHandler(status: 'accepted' | 'declined') {
 			const updatedUserInfo = await updateCompetitionInvite(competitionId, req.userId!, status);
 
 			competition.users = competition.users.map(u => (u.user_id === req.userId! ? { ...u, ...updatedUserInfo } : u));
+
+			// Notify the competition owner when someone accepts
+			if (status === 'accepted') {
+				const accepter = await getUser({ userId: req.userId! });
+				const accepterName = accepter?.username || 'Someone';
+				sendPush(competition.owner, {
+					title: 'Invite accepted',
+					body: `${accepterName} joined ${competition.competition_name}`,
+					type: 'competition_accepted',
+					data: { competition_id: competitionId }
+				}).catch(err => console.error('[Push] Error sending competition accepted notification:', err.message));
+			}
 
 			res.status(200).json({ competition });
 		} catch (error: any) {

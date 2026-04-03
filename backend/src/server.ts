@@ -9,8 +9,10 @@ import authRoutes from './routes/authRoutes.js';
 import devRoutes from './routes/devRoutes.js';
 import workoutRoutes from './routes/workoutRoutes.js';
 import competitionRoutes from './routes/competitionRoutes.js';
+import deviceRoutes from './routes/deviceRoutes.js';
 import { authenticateToken } from './middleware/auth.js';
 import { startCompetitionCron } from './cron/competitionCron.js';
+import { startNotificationCron } from './cron/notificationCron.js';
 import { webcrypto } from 'node:crypto';
 
 (globalThis as any).crypto ??= webcrypto;
@@ -44,6 +46,7 @@ app.use('/users', userRoutes);
 app.use('/friends', friendRoutes);
 app.use('/workouts', workoutRoutes);
 app.use('/competitions', competitionRoutes);
+app.use('/devices', deviceRoutes);
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 	console.error('Error:', err.message);
@@ -58,4 +61,5 @@ const server = http.createServer(app);
 server.listen(PORT, '0.0.0.0', () => {
 	console.log(`Server running on port ${PORT}`);
 	startCompetitionCron();
+	startNotificationCron();
 });

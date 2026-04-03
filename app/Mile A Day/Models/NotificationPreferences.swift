@@ -14,6 +14,13 @@ struct NotificationPreferences: Codable {
     /// (Used on devices that detect a new friend relationship.)
     var friendRequestAcceptedEnabled: Bool = true
 
+    // Competition notifications
+    var competitionInviteEnabled: Bool = true
+    var competitionAcceptedEnabled: Bool = true
+    var competitionStartEnabled: Bool = true
+    var competitionFinishEnabled: Bool = true
+    var competitionNudgeEnabled: Bool = true
+
     static let `default` = NotificationPreferences()
 }
 

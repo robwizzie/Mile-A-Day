@@ -78,6 +78,12 @@ class AppStateManager: ObservableObject {
         // Now that user is authenticated, enable HealthKit background delivery
         MADBackgroundService.shared.enableBackgroundDeliveryAfterAuth()
 
+        // Register for push notifications
+        Task {
+            await MADNotificationService.shared.requestAuthorization()
+            MADNotificationService.shared.registerForRemoteNotifications()
+        }
+
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 if userManager.currentUser.hasUsername {
@@ -143,6 +149,11 @@ class AppStateManager: ObservableObject {
     
     /// Sign out user (for testing purposes)
     func signOut() {
+        // Unregister device token before signing out
+        Task {
+            await MADNotificationService.shared.unregisterDeviceToken()
+        }
+
         userDefaults.set(false, forKey: isAuthenticatedKey)
         userDefaults.set(false, forKey: hasCompletedFullSetupKey)
         isAuthenticated = false
