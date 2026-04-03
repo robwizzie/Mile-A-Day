@@ -1,9 +1,10 @@
 export function HabitSection() {
   return (
-    <section id="habit" className="relative px-6 py-24">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute bottom-0 left-1/2 h-[500px] w-[500px] -translate-x-1/2 rounded-full bg-[#c72554] opacity-[0.04] blur-[150px]" />
-      </div>
+    <section
+      id="habit"
+      className="section-lazy relative px-6 py-24"
+      style={{ background: "radial-gradient(ellipse 500px 500px at 50% 100%, rgba(199,37,84,0.04) 0%, transparent 70%)" }}
+    >
       <div className="relative mx-auto max-w-4xl text-center">
         <span className="reveal mb-4 inline-block text-sm font-semibold uppercase tracking-widest text-[#c72554]">
           The Science

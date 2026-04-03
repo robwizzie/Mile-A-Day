@@ -1,29 +1,14 @@
-"use client"
-
-import dynamic from "next/dynamic"
 import { Navbar } from "@/components/navbar"
 import { HeroSection } from "@/components/hero-section"
 import { MarqueeSection } from "@/components/marquee-section"
 import { FeaturesSection } from "@/components/features-section"
 import { HabitSection } from "@/components/habit-section"
 import { CompetitionsSection } from "@/components/competitions-section"
+import { HowItWorksSection } from "@/components/how-it-works-section"
 import { StorySection } from "@/components/story-section"
+import { CtaSection } from "@/components/cta-section"
 import { Footer } from "@/components/footer"
-
-const ScrollReveal = dynamic(
-  () => import("@/components/scroll-reveal").then((m) => m.ScrollReveal),
-  { ssr: false }
-)
-
-const HowItWorksSection = dynamic(
-  () => import("@/components/how-it-works-section").then((m) => m.HowItWorksSection),
-  { ssr: false }
-)
-
-const CtaSection = dynamic(
-  () => import("@/components/cta-section").then((m) => m.CtaSection),
-  { ssr: false }
-)
+import { ScrollReveal } from "@/components/scroll-reveal"
 
 export default function Home() {
   return (

@@ -2,17 +2,15 @@ import Image from "next/image"
 
 export function HeroSection() {
   return (
-    <section className="relative min-h-screen overflow-hidden px-6 pt-32 pb-20">
-      {/* Background orbs */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="animate-pulse-glow absolute -top-40 left-1/2 h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-[#c72554] opacity-[0.07] blur-[150px]" />
-        <div className="animate-pulse-glow absolute -bottom-20 -left-40 h-[400px] w-[400px] rounded-full bg-[#8b1538] opacity-[0.05] blur-[120px]" style={{ animationDelay: "2s" }} />
-      </div>
+    <section
+      className="relative min-h-screen overflow-hidden px-6 pt-32 pb-20"
+      style={{ background: "radial-gradient(ellipse 600px 600px at 50% -10%, rgba(199,37,84,0.07) 0%, transparent 70%), radial-gradient(ellipse 400px 400px at -10% 90%, rgba(139,21,56,0.05) 0%, transparent 70%)" }}
+    >
 
       <div className="relative mx-auto flex max-w-6xl flex-col items-center gap-16 lg:flex-row lg:items-center lg:gap-20">
         {/* Left: copy */}
         <div className="flex flex-1 flex-col items-center text-center lg:items-start lg:text-left">
-          <div className="reveal glass-card-highlight mb-6 inline-flex items-center gap-2 rounded-full px-4 py-2">
+          <div className="animate-fade-in-up glass-card-highlight mb-6 inline-flex items-center gap-2 rounded-full px-4 py-2">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#c72554] opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-[#c72554]" />
@@ -22,7 +20,7 @@ export function HeroSection() {
             </span>
           </div>
 
-          <h1 className="reveal reveal-delay-1 font-heading text-[clamp(60px,11vw,150px)] leading-[0.9] tracking-[-2px]">
+          <h1 className="animate-fade-in-up animate-delay-100 font-heading text-[clamp(60px,11vw,150px)] leading-[0.9] tracking-[-2px]">
             <span className="text-[#f5f5f5]">ONE MILE.</span>
             <br />
             <span className="bg-gradient-to-r from-[#c72554] to-[#ff4d7d] bg-clip-text text-transparent">
@@ -30,11 +28,11 @@ export function HeroSection() {
             </span>
           </h1>
 
-          <p className="reveal reveal-delay-2 mt-6 max-w-lg text-lg leading-relaxed text-[#a0a0a0]">
+          <p className="animate-fade-in-up animate-delay-200 mt-6 max-w-lg text-lg leading-relaxed text-[#a0a0a0]">
             The simplest fitness challenge that will change your life. No complicated programs. No expensive gear. Just lace up, tap Start Mile, and go. Walk it or run it — just get it done.
           </p>
 
-          <div className="reveal reveal-delay-3 mt-8 flex flex-col items-center gap-4 sm:flex-row">
+          <div className="animate-fade-in-up animate-delay-300 mt-8 flex flex-col items-center gap-4 sm:flex-row">
             <a
               href="https://apps.apple.com/us/app/mile-a-day/id6504697812"
               target="_blank"
@@ -55,7 +53,7 @@ export function HeroSection() {
           </div>
 
           {/* Social proof stats */}
-          <div className="reveal reveal-delay-4 mt-10 flex gap-8 sm:gap-12">
+          <div className="animate-fade-in-up animate-delay-400 mt-10 flex gap-8 sm:gap-12">
             <div className="text-center lg:text-left">
               <div className="font-heading text-[28px] text-[#f5f5f5]">365+</div>
               <div className="text-xs text-[#a0a0a0]">Day Streaks</div>
@@ -72,19 +70,20 @@ export function HeroSection() {
         </div>
 
         {/* Right: phone mockup */}
-        <div className="reveal-scale reveal-delay-2 relative flex flex-1 items-center justify-center">
+        <div className="animate-fade-in-up animate-delay-200 relative flex flex-1 items-center justify-center">
           <div className="animate-float phone-mockup relative overflow-hidden p-3" style={{ width: 290 }}>
             <Image
               src="/images/app-dashboard.png"
               alt="Mile A Day app dashboard showing a 288 day streak"
               width={580}
               height={1200}
+              sizes="(max-width: 768px) 260px, 290px"
               className="w-full rounded-[32px]"
               priority
             />
           </div>
           {/* Glow behind phone */}
-          <div className="animate-pulse-glow absolute -z-10 h-[400px] w-[400px] rounded-full bg-[#c72554] opacity-[0.08] blur-[100px]" />
+          <div className="absolute -z-10 h-[400px] w-[400px] rounded-full" style={{ background: "radial-gradient(circle, rgba(199,37,84,0.08) 0%, transparent 70%)" }} />
         </div>
       </div>
     </section>

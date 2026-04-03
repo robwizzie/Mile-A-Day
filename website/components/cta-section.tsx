@@ -15,10 +15,10 @@ export function CtaSection() {
   }
 
   return (
-    <section className="relative px-6 py-24">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute bottom-0 left-1/2 h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-[#c72554] opacity-[0.08] blur-[150px]" />
-      </div>
+    <section
+      className="section-lazy relative px-6 py-24"
+      style={{ background: "radial-gradient(ellipse 600px 600px at 50% 100%, rgba(199,37,84,0.08) 0%, transparent 70%)" }}
+    >
       <div className="relative mx-auto max-w-3xl text-center">
         <span className="reveal mb-4 inline-block text-sm font-semibold uppercase tracking-widest text-[#c72554]">
           Join the Movement
@@ -64,7 +64,7 @@ export function CtaSection() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="your@email.com"
                 required
-                className="flex-1 rounded-xl border border-[#333333] bg-[#1a1a1a]/60 px-4 py-3 text-sm text-[#f5f5f5] placeholder-[#606060] outline-none transition-colors focus:border-[#c72554]/50 backdrop-blur-sm"
+                className="flex-1 rounded-xl border border-[#333333] bg-[#1a1a1a] px-4 py-3 text-sm text-[#f5f5f5] placeholder-[#606060] outline-none transition-colors focus:border-[#c72554]/50"
               />
               <button
                 type="submit"

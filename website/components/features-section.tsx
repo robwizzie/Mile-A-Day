@@ -47,10 +47,11 @@ const features = [
 
 export function FeaturesSection() {
   return (
-    <section id="features" className="relative px-6 py-24">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute top-0 right-0 h-[400px] w-[400px] rounded-full bg-[#8b1538] opacity-[0.04] blur-[150px]" />
-      </div>
+    <section
+      id="features"
+      className="section-lazy relative px-6 py-24"
+      style={{ background: "radial-gradient(ellipse 400px 400px at 90% 0%, rgba(139,21,56,0.04) 0%, transparent 70%)" }}
+    >
       <div className="relative mx-auto max-w-6xl">
         <div className="mx-auto mb-16 max-w-2xl text-center">
           <span className="reveal mb-4 inline-block text-sm font-semibold uppercase tracking-widest text-[#c72554]">

@@ -20,7 +20,7 @@ function MarqueeItem({ text }: { text: string }) {
 
 export function MarqueeSection() {
   return (
-    <div className="relative overflow-hidden border-y border-[#333333]/40 bg-[#111111] py-5">
+    <div className="section-lazy relative overflow-hidden border-y border-[#333333]/40 bg-[#111111] py-5">
       {/* Gradient edge fades */}
       <div className="pointer-events-none absolute left-0 top-0 bottom-0 z-10 w-24 bg-gradient-to-r from-[#111111] to-transparent" />
       <div className="pointer-events-none absolute right-0 top-0 bottom-0 z-10 w-24 bg-gradient-to-l from-[#111111] to-transparent" />

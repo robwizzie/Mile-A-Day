@@ -12,6 +12,7 @@ export function Footer() {
               width={36}
               height={36}
               className="rounded-full"
+              loading="lazy"
             />
             <span className="font-heading text-[22px] tracking-[1px] text-[#f5f5f5]">MILE A DAY</span>
           </div>

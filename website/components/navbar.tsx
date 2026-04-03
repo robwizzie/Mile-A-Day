@@ -13,12 +13,19 @@ const navLinks = [
 export function Navbar() {
   const [scrolled, setScrolled] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
-    setMounted(true)
-    const handleScroll = () => setScrolled(window.scrollY > 20)
-    window.addEventListener("scroll", handleScroll)
+    let ticking = false
+    const handleScroll = () => {
+      if (!ticking) {
+        requestAnimationFrame(() => {
+          setScrolled(window.scrollY > 20)
+          ticking = false
+        })
+        ticking = true
+      }
+    }
+    window.addEventListener("scroll", handleScroll, { passive: true })
     return () => window.removeEventListener("scroll", handleScroll)
   }, [])
 
@@ -26,7 +33,7 @@ export function Navbar() {
     <nav
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
         scrolled ? "glass-nav py-3" : "py-5 bg-transparent"
-      } ${mounted ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-4"}`}
+      }`}
       style={{ transition: "opacity 0.6s ease, transform 0.6s ease, padding 0.5s ease, background 0.5s ease" }}
     >
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6">
@@ -37,6 +44,7 @@ export function Navbar() {
             width={44}
             height={44}
             className="rounded-full"
+            loading="lazy"
           />
           <span className="font-heading text-[22px] tracking-[2px] text-[#f5f5f5]">MILE A DAY</span>
         </a>

@@ -32,8 +32,8 @@
 }
 
 @theme inline {
-  --font-sans: 'DM Sans', system-ui, sans-serif;
-  --font-heading: 'Bebas Neue', sans-serif;
+  --font-sans: var(--font-dm-sans), system-ui, sans-serif;
+  --font-heading: var(--font-bebas-neue), sans-serif;
   --font-mono: ui-monospace, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -77,6 +77,12 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Skip rendering off-screen sections until near viewport */
+.section-lazy {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
 }
 
 /* Liquid Glass Effects */
@@ -132,6 +138,45 @@
     inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
 }
 
+/* Mobile Safari performance: eliminate GPU-heavy effects */
+@media (max-width: 768px) {
+  .glass-card {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(26, 26, 26, 0.85);
+    box-shadow: 0 4px 20px -4px rgba(0, 0, 0, 0.4);
+  }
+  .glass-card-highlight {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(199, 37, 84, 0.1);
+    box-shadow: none;
+  }
+  .glass-nav {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: rgba(10, 10, 10, 0.92);
+  }
+  .glass-button {
+    box-shadow: none;
+  }
+  .phone-mockup {
+    box-shadow:
+      0 20px 40px -10px rgba(0, 0, 0, 0.6);
+  }
+  /* Disable continuous animations on mobile for battery/performance */
+  .animate-pulse-glow {
+    animation: none;
+  }
+  .animate-float {
+    animation: none;
+  }
+  .animate-marquee {
+    animation: none;
+    transform: none;
+  }
+}
+
 /* Smooth scrolling */
 html {
   scroll-behavior: smooth;
@@ -150,10 +195,12 @@ html {
 
 .animate-float {
   animation: float 6s ease-in-out infinite;
+  will-change: transform;
 }
 
 .animate-pulse-glow {
   animation: pulse-glow 4s ease-in-out infinite;
+  will-change: opacity;
 }
 
 @keyframes fade-in-up {
@@ -184,11 +231,12 @@ html {
 
 .animate-marquee {
   animation: marquee 35s linear infinite;
+  will-change: transform;
 }
 
 /* Heading font utility */
 .font-heading {
-  font-family: 'Bebas Neue', sans-serif;
+  font-family: var(--font-bebas-neue), sans-serif;
 }
 
 /* Scroll reveal animations */

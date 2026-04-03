@@ -46,10 +46,11 @@ export function HowItWorksSection() {
   }, [])
 
   return (
-    <section ref={sectionRef} className="relative px-6 py-24">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute bottom-0 left-1/2 h-[400px] w-[400px] -translate-x-1/2 rounded-full bg-[#c72554] opacity-[0.04] blur-[150px]" />
-      </div>
+    <section
+      ref={sectionRef}
+      className="section-lazy relative px-6 py-24"
+      style={{ background: "radial-gradient(ellipse 400px 400px at 50% 100%, rgba(199,37,84,0.04) 0%, transparent 70%)" }}
+    >
       <div className="relative mx-auto max-w-6xl text-center">
         <span
           className={`mb-4 inline-block text-sm font-semibold uppercase tracking-widest text-[#c72554] transition-all duration-700 ${
