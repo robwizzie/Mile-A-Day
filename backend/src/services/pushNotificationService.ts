@@ -27,6 +27,7 @@ function loadApnsKey(): string | null {
 	// Option 1: Key contents passed directly via env var (for Coolify/cloud)
 	if (APNS_KEY) {
 		apnsKey = APNS_KEY.replace(/\\n/g, '\n');
+		console.log(`[Push] APNS_KEY loaded, length: ${apnsKey.length}, starts with: ${apnsKey.substring(0, 30)}, ends with: ${apnsKey.substring(apnsKey.length - 30)}`);
 		return apnsKey;
 	}
 
