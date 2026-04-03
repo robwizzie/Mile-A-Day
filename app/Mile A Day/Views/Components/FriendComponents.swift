@@ -76,8 +76,8 @@ struct ProfileImageView: View {
     
     var body: some View {
         Group {
-            if user.hasProfileImage, let imageURL = user.profile_image_url {
-                AsyncImage(url: URL(string: imageURL)) { image in
+            if user.hasProfileImage, let imageURL = ProfileImageService.fullImageURL(for: user.profile_image_url) {
+                AsyncImage(url: imageURL) { image in
                     image
                         .resizable()
                         .aspectRatio(contentMode: .fill)

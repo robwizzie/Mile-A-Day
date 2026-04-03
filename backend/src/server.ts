@@ -20,6 +20,7 @@ const app = express();
 const PORT = parseInt(process.env.PORT ?? '3000');
 
 app.use(express.json());
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 app.get('/status', (req, res) => {
 	res.send('healthy');
