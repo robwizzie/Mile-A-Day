@@ -223,7 +223,7 @@ struct StepsCalendarView: View {
             // Calendar grid
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: daysInWeek), spacing: MADTheme.Spacing.sm) {
                 // Day headers
-                ForEach(["S", "M", "T", "W", "T", "F", "S"], id: \.self) { day in
+                ForEach(Array(["S", "M", "T", "W", "T", "F", "S"].enumerated()), id: \.offset) { _, day in
                     Text(day)
                         .font(MADTheme.Typography.caption)
                         .fontWeight(.semibold)

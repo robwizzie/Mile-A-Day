@@ -30,9 +30,12 @@ struct Mile_A_DayApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                     // Handle app returning to foreground
                     MADBackgroundService.shared.appWillEnterForeground()
-                    // Re-register for push notifications (handles token rotation)
+                    // Register for push notifications (handles first-time + token rotation)
                     if AppStateManager.shared.isAuthenticated {
-                        MADNotificationService.shared.registerForRemoteNotifications()
+                        Task {
+                            await MADNotificationService.shared.requestAuthorization()
+                            MADNotificationService.shared.registerForRemoteNotifications()
+                        }
                     }
                 }
                 .onOpenURL { url in
