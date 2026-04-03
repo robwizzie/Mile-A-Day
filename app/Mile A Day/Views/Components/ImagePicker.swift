@@ -134,20 +134,18 @@ struct ProfileImageCropper: View {
 
     private func imageDisplaySize(in geometry: GeometryProxy) -> CGSize {
         let imageAspect = image.size.width / image.size.height
-        let containerSize = geometry.size
 
-        // Fill the crop area at minimum
-        let fillWidth = cropSize
-        let fillHeight = cropSize
-
+        // Size the image so its shorter dimension matches the crop circle.
+        // This means at scale 1.0 the image just barely covers the circle,
+        // and the user can zoom in from there.
         if imageAspect > 1 {
-            // Landscape: height fills crop, width extends
-            let height = max(fillHeight, containerSize.height)
+            // Landscape: height is the short side, match it to cropSize
+            let height = cropSize
             let width = height * imageAspect
             return CGSize(width: width, height: height)
         } else {
-            // Portrait or square: width fills crop, height extends
-            let width = max(fillWidth, containerSize.width)
+            // Portrait or square: width is the short side, match it to cropSize
+            let width = cropSize
             let height = width / imageAspect
             return CGSize(width: width, height: height)
         }
@@ -175,13 +173,13 @@ struct ProfileImageCropper: View {
         let imgHeight = image.size.height
         let imageAspect = imgWidth / imgHeight
 
-        // Determine the display size at scale=1
+        // Determine the display size at scale=1 (short side matches cropSize)
         let baseDisplaySize: CGSize
         if imageAspect > 1 {
-            let height = max(cropSize, UIScreen.main.bounds.height)
+            let height = cropSize
             baseDisplaySize = CGSize(width: height * imageAspect, height: height)
         } else {
-            let width = max(cropSize, UIScreen.main.bounds.width)
+            let width = cropSize
             baseDisplaySize = CGSize(width: width, height: width / imageAspect)
         }
 
