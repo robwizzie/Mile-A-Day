@@ -58,8 +58,6 @@ function getApnsToken(): string | null {
 	// Refresh token every 50 minutes (APNs tokens valid for 60 min)
 	if (apnsToken && now < apnsTokenExpiry) return apnsToken;
 
-	console.log(`[Push] Key for signing (${key.length} chars):\n${key}`);
-
 	apnsToken = jwt.sign({}, key, {
 		algorithm: 'ES256',
 		keyid: APNS_KEY_ID,
