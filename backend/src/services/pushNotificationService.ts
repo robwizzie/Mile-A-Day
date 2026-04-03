@@ -26,16 +26,10 @@ function loadApnsKey(): string | null {
 
 	// Option 1: Key contents passed directly via env var (for Coolify/cloud)
 	if (APNS_KEY) {
-		// Strip any literal \n sequences and rebuild proper PEM format
-		let raw = APNS_KEY.replace(/\\n/g, '\n').replace(/\r/g, '');
-		// Extract just the base64 content between PEM headers
-		const match = raw.match(/-----BEGIN PRIVATE KEY-----\s*([\s\S]*?)\s*-----END PRIVATE KEY-----/);
-		if (match) {
-			const base64 = match[1].replace(/\s/g, '');
-			apnsKey = `-----BEGIN PRIVATE KEY-----\n${base64}\n-----END PRIVATE KEY-----\n`;
-		} else {
-			apnsKey = raw;
-		}
+		let raw = APNS_KEY.replace(/\\n/g, '').replace(/\s/g, '');
+		// Strip PEM headers if present, then re-add them
+		raw = raw.replace(/-----BEGIN PRIVATE KEY-----/g, '').replace(/-----END PRIVATE KEY-----/g, '');
+		apnsKey = `-----BEGIN PRIVATE KEY-----\n${raw}\n-----END PRIVATE KEY-----\n`;
 		return apnsKey;
 	}
 
