@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { SignJWT } from 'jose';
 import { resolveExpiredCompetitions } from '../services/competitionService.js';
+import { sendPush } from '../services/pushNotificationService.js';
 
 export async function generateTestToken(req: Request, res: Response) {
 	const env = process.env.NODE_ENV;
@@ -49,6 +50,29 @@ export async function generateTestToken(req: Request, res: Response) {
 		return res.status(500).json({
 			error: 'Failed to generate test token'
 		});
+	}
+}
+
+export async function sendTestNotification(req: Request, res: Response) {
+	if (process.env.NODE_ENV === 'production') {
+		return res.status(403).json({ error: 'Not available in production' });
+	}
+
+	const { userId, message } = req.body;
+	if (!userId || !message) {
+		return res.status(400).json({ error: 'userId and message are required' });
+	}
+
+	try {
+		await sendPush(userId, {
+			title: 'Test Notification',
+			body: message,
+			type: 'friend_request',
+			data: {}
+		});
+		return res.json({ success: true });
+	} catch (err: any) {
+		return res.status(500).json({ error: err.message });
 	}
 }
 

@@ -25,6 +25,9 @@ struct DeveloperSettingsView: View {
     @State private var workoutIdInput = ""
     @State private var showDistanceSamplesSheet = false
     @State private var distanceSamplesLog = ""
+    @State private var testNotificationMessage = ""
+    @State private var isSendingNotification = false
+    @State private var notificationResult: String?
 
     var body: some View {
         List {
@@ -76,6 +79,33 @@ struct DeveloperSettingsView: View {
                     }
                 }
                 .disabled(workoutService.isLoading)
+            }
+
+            // Test Push Notification Section
+            Section(header: Text("Test Push Notification"), footer: Text("Sends to user f9157a...197b")) {
+                TextField("Notification message", text: $testNotificationMessage)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+
+                Button(action: {
+                    Task { await sendTestNotification() }
+                }) {
+                    HStack {
+                        Image(systemName: "bell.badge.fill")
+                            .foregroundColor(.orange)
+                        Text("Send Notification")
+                        Spacer()
+                        if isSendingNotification {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(testNotificationMessage.isEmpty || isSendingNotification)
+
+                if let result = notificationResult {
+                    Text(result)
+                        .font(.caption)
+                        .foregroundColor(result.contains("Sent") ? .green : .red)
+                }
             }
 
             // Workout Debugging Section
@@ -439,6 +469,35 @@ struct DeveloperSettingsView: View {
                     workoutService.errorMessage = message
                     showWorkoutUploadAlert = true
                 }
+            }
+        }
+    }
+
+    private func sendTestNotification() async {
+        await MainActor.run { isSendingNotification = true; notificationResult = nil }
+
+        do {
+            let url = URL(string: "https://mad.mindgoblin.tech/dev/test-notification")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let body: [String: String] = [
+                "userId": "f9157a851e684135bd4f459165c6197b",
+                "message": testNotificationMessage
+            ]
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+            let (_, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+            await MainActor.run {
+                notificationResult = status == 200 ? "Sent!" : "Failed (status \(status))"
+                isSendingNotification = false
+            }
+        } catch {
+            await MainActor.run {
+                notificationResult = "Error: \(error.localizedDescription)"
+                isSendingNotification = false
             }
         }
     }
