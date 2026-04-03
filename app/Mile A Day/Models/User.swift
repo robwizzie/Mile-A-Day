@@ -4,8 +4,11 @@ import SwiftUI
 struct User: Identifiable, Codable {
     var id = UUID()
     var name: String
+    var firstName: String? = nil
+    var lastName: String? = nil
     var username: String?
     var bio: String?
+    var profileImageUrl: String? = nil
     var streak: Int = 0
     var totalMiles: Double = 0.0
     var fastestMilePace: TimeInterval = 0.0  // Minutes per mile (fastest pace)

@@ -104,6 +104,12 @@ class UserManager: ObservableObject {
             currentUser.username = backendUsername
         }
 
+        // Sync profile fields from backend
+        currentUser.firstName = backendResponse.user.first_name
+        currentUser.lastName = backendResponse.user.last_name
+        currentUser.bio = backendResponse.user.bio
+        currentUser.profileImageUrl = backendResponse.user.profile_image_url
+
         // Update name if we have it from Apple
         if let fullName = profile.fullName?.formatted(), !fullName.isEmpty {
             currentUser.name = fullName

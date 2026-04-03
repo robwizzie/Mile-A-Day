@@ -12,6 +12,7 @@ struct ProfileView: View {
     @State private var showingBioEditor = false
     @State private var showingUsernameEditor = false
     @State private var showingImagePicker = false
+    @State private var showingEditProfile = false
     @State private var selectedImage: UIImage?
     @State private var currentProfileImage: UIImage?
     @State private var showingPrivacySettings = false
@@ -109,131 +110,67 @@ struct ProfileView: View {
                 y: MADTheme.Shadow.medium.y
             )
             
-            // Username Section (main name under profile picture)
+            // Name & Username Section
             VStack(spacing: MADTheme.Spacing.sm) {
-                // Username as main name
-                if let username = userManager.currentUser.username {
-                    Text("@\(username)")
+                // Display name (first + last)
+                if let firstName = userManager.currentUser.firstName, !firstName.isEmpty {
+                    let displayName = [firstName, userManager.currentUser.lastName].compactMap { $0 }.joined(separator: " ")
+                    Text(displayName)
                         .font(MADTheme.Typography.title2)
                         .fontWeight(.bold)
                         .foregroundColor(MADTheme.Colors.primaryText)
-                } else {
-                    Text("Set Username")
-                        .font(MADTheme.Typography.title2)
-                        .fontWeight(.bold)
+                }
+
+                // Username
+                if let username = userManager.currentUser.username {
+                    Text("@\(username)")
+                        .font(MADTheme.Typography.body)
                         .foregroundColor(MADTheme.Colors.secondaryText)
                 }
-                
-                // Edit Username Button
-                if userManager.currentUser.username != nil {
-                    Button("Edit Username") {
-                        showingUsernameEditor = true
-                    }
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(MADTheme.Colors.madRed)
-                    .padding(.horizontal, MADTheme.Spacing.md)
-                    .padding(.vertical, MADTheme.Spacing.sm)
-                    .background(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                            .fill(MADTheme.Colors.madRed.opacity(0.1))
-                    )
-                } else {
-                    Button("Set Username") {
-                        showingUsernameSetup = true
-                    }
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(MADTheme.Colors.madRed)
-                    .padding(.horizontal, MADTheme.Spacing.md)
-                    .padding(.vertical, MADTheme.Spacing.sm)
-                    .background(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                            .fill(MADTheme.Colors.madRed.opacity(0.1))
-                    )
-                }
-                
-                
+
                 Text("MAD Member")
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(MADTheme.Colors.secondaryText)
             }
-            
-            // Bio Section
-            VStack(spacing: MADTheme.Spacing.sm) {
-                if let bio = userManager.currentUser.bio, !bio.isEmpty {
-                    VStack(spacing: MADTheme.Spacing.sm) {
-                        Text(bio)
-                            .font(MADTheme.Typography.body)
-                            .foregroundColor(MADTheme.Colors.secondaryText)
-                            .multilineTextAlignment(.center)
-                        
-                        Button("Edit Bio") {
-                            showingBioEditor = true
-                        }
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(MADTheme.Colors.madRed)
-                        .padding(.horizontal, MADTheme.Spacing.sm)
-                        .padding(.vertical, MADTheme.Spacing.xs)
-                        .background(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                                .fill(MADTheme.Colors.madRed.opacity(0.1))
-                        )
-                    }
-                } else {
-                    Button("Create Bio") {
-                        showingBioEditor = true
-                    }
+
+            // Bio
+            if let bio = userManager.currentUser.bio, !bio.isEmpty {
+                Text(bio)
                     .font(MADTheme.Typography.body)
-                    .foregroundColor(MADTheme.Colors.madRed)
-                    .fontWeight(.medium)
-                    .padding(.horizontal, MADTheme.Spacing.md)
-                    .padding(.vertical, MADTheme.Spacing.sm)
-                    .background(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                            .fill(MADTheme.Colors.madRed.opacity(0.1))
-                    )
-                }
+                    .foregroundColor(MADTheme.Colors.secondaryText)
+                    .multilineTextAlignment(.center)
             }
+
+            // Edit Profile Button
+            Button("Edit Profile") {
+                showingEditProfile = true
+            }
+            .font(MADTheme.Typography.headline)
+            .fontWeight(.medium)
+            .foregroundColor(MADTheme.Colors.madRed)
+            .padding(.horizontal, MADTheme.Spacing.lg)
+            .padding(.vertical, MADTheme.Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                    .fill(MADTheme.Colors.madRed.opacity(0.1))
+            )
         }
         .padding(MADTheme.Spacing.xl)
         .madCard()
+        .sheet(isPresented: $showingEditProfile) {
+            EditProfileView(userManager: userManager) {
+                showingEditProfile = false
+                // Reload profile image after edit
+                currentProfileImage = getCustomProfileImage() ?? getAppleProfileImage()
+            }
+        }
         .sheet(isPresented: $showingUsernameSetup) {
             UsernameSetupView()
                 .environmentObject(userManager)
         }
-        .sheet(isPresented: $showingBioEditor) {
-            BioEditorView(
-                bio: userManager.currentUser.bio ?? "",
-                onSave: { newBio in
-                    // Update local data immediately
-                    userManager.currentUser.bio = newBio.isEmpty ? nil : newBio
-                    userManager.saveUserData()
-                    
-                    // Sync to backend
-                    syncBioToBackend(newBio)
-                    
-                    showingBioEditor = false
-                },
-                onCancel: {
-                    showingBioEditor = false
-                }
-            )
-        }
-        .sheet(isPresented: $showingUsernameEditor) {
-            UsernameEditorView(
-                currentUsername: userManager.currentUser.username ?? "",
-                onSave: { newUsername in
-                    updateUsername(newUsername)
-                    showingUsernameEditor = false
-                },
-                onCancel: {
-                    showingUsernameEditor = false
-                }
-            )
-        }
         .sheet(isPresented: $showingImagePicker) {
             ImagePicker(selectedImage: $selectedImage)
                 .onDisappear {
-                    // Reset selected image when picker is dismissed
                     selectedImage = nil
                 }
         }
@@ -249,9 +186,22 @@ struct ProfileView: View {
             }
         }
         .onAppear {
-            // Load current profile image on appear
-            currentProfileImage = getCustomProfileImage() ?? getAppleProfileImage()
-
+            // Load profile image: try server URL first, then local cache
+            if let urlPath = userManager.currentUser.profileImageUrl,
+               let url = ProfileImageService.fullImageURL(for: urlPath) {
+                Task {
+                    if let (data, _) = try? await URLSession.shared.data(from: url),
+                       let image = UIImage(data: data) {
+                        await MainActor.run { currentProfileImage = image }
+                    } else {
+                        await MainActor.run {
+                            currentProfileImage = getCustomProfileImage() ?? getAppleProfileImage()
+                        }
+                    }
+                }
+            } else {
+                currentProfileImage = getCustomProfileImage() ?? getAppleProfileImage()
+            }
         }
     }
     
@@ -499,45 +449,7 @@ struct ProfileView: View {
             UserDefaults.standard.set(data, forKey: "customProfileImage")
         }
     }
-    
 
-    
-    // Helper function to update username
-    private func updateUsername(_ username: String) {
-        Task {
-            do {
-                // Update username in backend
-                if let authToken = userManager.authToken,
-                   let backendUserId = userManager.currentUser.backendUserId {
-                    try await UsernameService.updateUsername(username, userId: backendUserId, authToken: authToken)
-                }
-                
-                // Update local user
-                await MainActor.run {
-                    userManager.currentUser.username = username
-                    userManager.saveUserData()
-                }
-            } catch {
-                await MainActor.run {
-                    // Handle error - could show an alert
-                }
-            }
-        }
-    }
-    
-    // Helper function to sync bio to backend
-    private func syncBioToBackend(_ bio: String) {
-        Task {
-            do {
-                if let authToken = userManager.authToken,
-                   let backendUserId = userManager.currentUser.backendUserId {
-                    try await BioService.updateBio(bio, userId: backendUserId, authToken: authToken)
-                }
-            } catch {
-                // Failed to sync bio to backend
-            }
-        }
-    }
 }
 
 /// MAD-themed stat card component
