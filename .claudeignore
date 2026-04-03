@@ -1,0 +1,26 @@
+# Xcode noise
+*.xcuserstate
+*.xcuserdata
+xcuserdata/
+*.xcworkspace/xcuserdata/
+project.pbxproj
+
+# Build artifacts
+DerivedData/
+build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Backend
+node_modules/
+dist/
+backend/package-lock.json
+
+# Environment / secrets
+.env
+.env.*
+
+# Misc
+.DS_Store
+*.log
