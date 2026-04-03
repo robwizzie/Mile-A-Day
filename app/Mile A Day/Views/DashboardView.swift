@@ -134,14 +134,10 @@ struct DashboardView: View {
         // iOS 26: Liquid Glass is automatic - no modifiers needed
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    showInstructions = true
-                } label: {
-                    Image("mad-logo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 28)
-                }
+                Image("mad-logo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 28)
             }
 
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -150,6 +146,12 @@ struct DashboardView: View {
                         Image(systemName: "trophy.fill")
                             .foregroundStyle(.yellow)
                     }
+                }
+
+                Button {
+                    showInstructions = true
+                } label: {
+                    Image(systemName: "info.circle")
                 }
 
                 Button {
@@ -875,12 +877,12 @@ struct InstructionStep: View {
             }
             .frame(width: 36)
 
-            // Content
+            // Content — top of title aligns with top of circle via shared .top alignment
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
                     .foregroundColor(MADTheme.Colors.primaryText)
-                    .padding(.top, 8)
+                    .frame(minHeight: 36, alignment: .leading)
 
                 Text(description)
                     .font(.system(size: 14))
@@ -899,11 +901,11 @@ struct TipItem: View {
     var color: Color = .yellow
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 14))
                 .foregroundColor(color)
-                .frame(width: 24, height: 24, alignment: .center)
+                .frame(width: 24, alignment: .center)
 
             Text(text)
                 .font(.system(size: 14))
@@ -2175,127 +2177,240 @@ struct WorkoutDetailView: View {
     @State private var splitTimes: [TimeInterval]?
     @State private var isLoadingSplits = false
     @EnvironmentObject var healthManager: HealthKitManager
-    
+
     // Timezone-corrected times from index
     private var correctedEndTime: Date {
         healthManager.getCorrectedLocalTime(for: workout)
     }
-    
+
     private var correctedStartTime: Date {
         let endTime = correctedEndTime
         return endTime.addingTimeInterval(-workout.duration)
     }
-    
+
+    private var workoutTypeString: String {
+        switch workout.workoutActivityType {
+        case .running: return "Run"
+        case .walking: return "Walk"
+        case .cycling: return "Ride"
+        default: return "Workout"
+        }
+    }
+
+    private var workoutIcon: String {
+        switch workout.workoutActivityType {
+        case .running: return "figure.run"
+        case .walking: return "figure.walk"
+        case .cycling: return "bicycle"
+        default: return "figure.mixed.cardio"
+        }
+    }
+
+    private var workoutColor: Color {
+        switch workout.workoutActivityType {
+        case .running: return MADTheme.Colors.madRed
+        case .walking: return .orange
+        case .cycling: return .blue
+        default: return .purple
+        }
+    }
+
+    private var distanceMiles: Double {
+        workout.totalDistance?.doubleValue(for: .mile()) ?? 0
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 30) {
-                    // Top banner
-                    VStack(spacing: 10) {
-                        Text(workout.workoutActivityType == .running ? "Run" : "Walk")
-                            .font(.headline)
-                            .foregroundColor(.secondary)
-                        
-                        Text(correctedEndTime.formattedDate)
-                            .font(.title)
-                            .fontWeight(.bold)
-                        
-                        Text(workout.formattedDistance)
-                            .font(.system(size: 48, weight: .bold, design: .rounded))
-                            .foregroundColor(.blue)
-                            .padding(.top, 5)
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                    .background(Color.blue.opacity(0.1))
-                    .cornerRadius(15)
-                    
-                    // Stats grid
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
-                        DashboardStatBox(title: "Duration", value: workout.formattedDuration, icon: "clock.fill", color: .orange)
-                        DashboardStatBox(title: "Pace", value: workout.pace, icon: "hare.fill", color: .green)
-                        if let calories = calories {
-                            DashboardStatBox(title: "Calories Burned", value: "\(Int(calories)) calories", icon: "flame.fill", color: .red)
+            ZStack {
+                MADTheme.Colors.appBackgroundGradient
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(spacing: MADTheme.Spacing.lg) {
+                        // Hero card — type, distance, date
+                        VStack(spacing: MADTheme.Spacing.md) {
+                            // Workout type badge
+                            HStack(spacing: MADTheme.Spacing.sm) {
+                                Image(systemName: workoutIcon)
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text(workoutTypeString)
+                                    .font(MADTheme.Typography.smallBold)
+                            }
+                            .foregroundColor(workoutColor)
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                            .padding(.vertical, MADTheme.Spacing.xs + 2)
+                            .background(
+                                Capsule()
+                                    .fill(workoutColor.opacity(0.15))
+                            )
+
+                            // Distance — the hero number
+                            Text(workout.formattedDistance)
+                                .font(.system(size: 52, weight: .bold, design: .rounded))
+                                .foregroundColor(.primary)
+
+                            // Date
+                            Text(correctedEndTime.formattedDate)
+                                .font(MADTheme.Typography.body)
+                                .foregroundColor(.secondary)
                         }
-                        DashboardStatBox(title: "Type", value: workout.workoutActivityType == .running ? "Running" : "Walking", icon: "figure.run", color: .purple)
-                    }
-                    .padding()
-                    
-                    // Additional details
-                    VStack(alignment: .leading, spacing: 15) {
-                        Text("Workout Details")
-                            .font(.headline)
-                        
-                        // Use timezone-corrected times from index
-                        DetailRow(title: "Start Time", value: correctedStartTime.formattedTime)
-                        DetailRow(title: "End Time", value: correctedEndTime.formattedTime)
-                        DetailRow(title: "Total Time", value: workout.formattedDuration)
-                        DetailRow(title: "Distance", value: workout.formattedDistance)
-                        DetailRow(title: "Average Pace", value: workout.pace)
-                        if let calories = calories {
-                            DetailRow(title: "Calories Burned", value: "\(Int(calories)) calories")
+                        .padding(MADTheme.Spacing.lg)
+                        .frame(maxWidth: .infinity)
+                        .madLiquidGlass()
+
+                        // Key stats row
+                        HStack(spacing: MADTheme.Spacing.sm) {
+                            DashboardStatBox(
+                                title: "Duration",
+                                value: workout.formattedDuration,
+                                icon: "clock.fill",
+                                color: .orange
+                            )
+
+                            DashboardStatBox(
+                                title: "Pace",
+                                value: workout.pace,
+                                icon: "speedometer",
+                                color: .green
+                            )
+
+                            if let calories = calories {
+                                DashboardStatBox(
+                                    title: "Calories",
+                                    value: "\(Int(calories))",
+                                    icon: "flame.fill",
+                                    color: MADTheme.Colors.madRed
+                                )
+                            }
                         }
-                    }
-                    .padding()
-                    .background(Color(.systemBackground))
-                    .cornerRadius(12)
-                    .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
-                    
-                    // Split Times Section
-                    if let splitTimes = splitTimes, !splitTimes.isEmpty {
-                        VStack(alignment: .leading, spacing: 15) {
-                            Text("Mile Splits")
-                                .font(.headline)
-                            
-                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+
+                        // Timeline details card
+                        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                            HStack(spacing: MADTheme.Spacing.sm) {
+                                Image(systemName: "clock.arrow.2.circlepath")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(MADTheme.Colors.redGradient)
+                                Text("Timeline")
+                                    .font(MADTheme.Typography.headline)
+                                    .foregroundColor(.primary)
+                            }
+
+                            DetailRow(icon: "play.fill", iconColor: .green, title: "Start", value: correctedStartTime.formattedTime)
+                            DetailRow(icon: "stop.fill", iconColor: MADTheme.Colors.madRed, title: "End", value: correctedEndTime.formattedTime)
+                            DetailRow(icon: "timer", iconColor: .orange, title: "Duration", value: workout.formattedDuration)
+                        }
+                        .padding(MADTheme.Spacing.md)
+                        .madLiquidGlass()
+
+                        // Performance details card
+                        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                            HStack(spacing: MADTheme.Spacing.sm) {
+                                Image(systemName: "chart.line.uptrend.xyaxis")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(MADTheme.Colors.redGradient)
+                                Text("Performance")
+                                    .font(MADTheme.Typography.headline)
+                                    .foregroundColor(.primary)
+                            }
+
+                            DetailRow(icon: "point.topleft.down.to.point.bottomright.curvepath.fill", iconColor: .blue, title: "Distance", value: workout.formattedDistance)
+                            DetailRow(icon: "speedometer", iconColor: .green, title: "Avg Pace", value: workout.pace)
+                            if let calories = calories {
+                                DetailRow(icon: "flame.fill", iconColor: MADTheme.Colors.madRed, title: "Calories", value: "\(Int(calories)) kcal")
+                            }
+                        }
+                        .padding(MADTheme.Spacing.md)
+                        .madLiquidGlass()
+
+                        // Mile Splits Section
+                        if let splitTimes = splitTimes, !splitTimes.isEmpty {
+                            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                                HStack(spacing: MADTheme.Spacing.sm) {
+                                    Image(systemName: "flag.checkered")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(MADTheme.Colors.redGradient)
+                                    Text("Mile Splits")
+                                        .font(MADTheme.Typography.headline)
+                                        .foregroundColor(.primary)
+                                }
+
+                                let fastestIndex = splitTimes.enumerated().min(by: { $0.element < $1.element })?.offset
+
                                 ForEach(Array(splitTimes.enumerated()), id: \.offset) { index, splitTime in
-                                    VStack(spacing: 5) {
-                                        Text("Mile \(index + 1)")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                        
+                                    let isFastest = index == fastestIndex && splitTimes.count > 1
+                                    HStack {
+                                        HStack(spacing: MADTheme.Spacing.sm) {
+                                            Text("Mile \(index + 1)")
+                                                .font(MADTheme.Typography.body)
+                                                .foregroundColor(.primary)
+
+                                            if isFastest {
+                                                Text("Fastest")
+                                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                                    .foregroundColor(MADTheme.Colors.success)
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(
+                                                        Capsule()
+                                                            .fill(MADTheme.Colors.success.opacity(0.15))
+                                                    )
+                                            }
+                                        }
+
+                                        Spacer()
+
                                         Text(formatSplitTime(splitTime))
-                                            .font(.headline)
-                                            .foregroundColor(.primary)
+                                            .font(.system(size: 17, weight: .semibold, design: .rounded))
+                                            .foregroundColor(isFastest ? MADTheme.Colors.success : .primary)
                                     }
-                                    .padding()
-                                    .background(Color(.systemGray6))
-                                    .cornerRadius(8)
+                                    .padding(.vertical, MADTheme.Spacing.xs)
+
+                                    if index < splitTimes.count - 1 {
+                                        Divider()
+                                            .overlay(Color.white.opacity(0.06))
+                                    }
                                 }
                             }
-                        }
-                        .padding()
-                        .background(Color(.systemBackground))
-                        .cornerRadius(12)
-                        .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
-                    } else if isLoadingSplits {
-                        VStack(alignment: .leading, spacing: 15) {
-                            Text("Mile Splits")
-                                .font(.headline)
-                            
-                            HStack {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                                Text("Loading split times...")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                            .padding(MADTheme.Spacing.md)
+                            .madLiquidGlass()
+                        } else if isLoadingSplits {
+                            VStack(spacing: MADTheme.Spacing.md) {
+                                HStack(spacing: MADTheme.Spacing.sm) {
+                                    Image(systemName: "flag.checkered")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(MADTheme.Colors.redGradient)
+                                    Text("Mile Splits")
+                                        .font(MADTheme.Typography.headline)
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                }
+
+                                HStack(spacing: MADTheme.Spacing.sm) {
+                                    ProgressView()
+                                        .tint(.secondary)
+                                        .scaleEffect(0.8)
+                                    Text("Loading splits...")
+                                        .font(MADTheme.Typography.caption)
+                                        .foregroundColor(.secondary)
+                                }
                             }
+                            .padding(MADTheme.Spacing.md)
+                            .madLiquidGlass()
                         }
-                        .padding()
-                        .background(Color(.systemBackground))
-                        .cornerRadius(12)
-                        .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
                     }
+                    .padding(MADTheme.Spacing.md)
                 }
-                .padding()
             }
-            .navigationTitle("Workout Details")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         dismiss()
                     }
+                    .foregroundColor(MADTheme.Colors.madRed)
+                    .fontWeight(.semibold)
                 }
             }
             .task {
@@ -2304,13 +2419,12 @@ struct WorkoutDetailView: View {
             }
         }
     }
-    
+
     private func fetchSplitTimes() async {
         isLoadingSplits = true
-        
-        // Create a HealthKitManager instance to access the split times functionality
+
         let healthManager = HealthKitManager()
-        
+
         await withCheckedContinuation { continuation in
             healthManager.getWorkoutSplitTimes(for: workout) { splits in
                 DispatchQueue.main.async {
@@ -2321,25 +2435,25 @@ struct WorkoutDetailView: View {
             }
         }
     }
-    
+
     private func formatSplitTime(_ splitTime: TimeInterval) -> String {
         let totalMinutes = splitTime
         let minutes = Int(totalMinutes)
         let seconds = Int((totalMinutes - Double(minutes)) * 60)
-        
+
         return String(format: "%d:%02d", minutes, seconds)
     }
-    
+
     private func fetchCalories() async {
         let healthStore = HKHealthStore()
         let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!
-        
+
         let predicate = HKQuery.predicateForSamples(
             withStart: workout.startDate,
             end: workout.endDate,
             options: .strictStartDate
         )
-        
+
         let query = HKStatisticsQuery(
             quantityType: energyType,
             quantitySamplePredicate: predicate,
@@ -2349,58 +2463,79 @@ struct WorkoutDetailView: View {
                   let sum = result.sumQuantity() else {
                 return
             }
-            
+
             let calories = sum.doubleValue(for: HKUnit.kilocalorie())
             DispatchQueue.main.async {
                 self.calories = calories
             }
         }
-        
+
         healthStore.execute(query)
     }
 }
 
-// StatBox component for DashboardView (without MADTheme dependency)
 struct DashboardStatBox: View {
     let title: String
     let value: String
     let icon: String
     let color: Color
-    
+
     var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundColor(color)
-            
+        VStack(spacing: MADTheme.Spacing.sm) {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.15))
+                    .frame(width: 36, height: 36)
+
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(color)
+            }
+
             Text(value)
-                .font(.headline)
-                .fontWeight(.bold)
-            
+                .font(MADTheme.Typography.headline)
+                .foregroundColor(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
             Text(title)
-                .font(.caption)
+                .font(MADTheme.Typography.caption)
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
-        .padding()
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
+        .padding(.vertical, MADTheme.Spacing.md)
+        .padding(.horizontal, MADTheme.Spacing.sm)
+        .madLiquidGlass()
     }
 }
 
 struct DetailRow: View {
+    var icon: String? = nil
+    var iconColor: Color = .secondary
     let title: String
     let value: String
-    
+
     var body: some View {
-        HStack {
+        HStack(spacing: MADTheme.Spacing.sm) {
+            if let icon = icon {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(iconColor)
+                    .frame(width: 20)
+            }
+
             Text(title)
+                .font(MADTheme.Typography.body)
                 .foregroundColor(.secondary)
+
             Spacer()
+
             Text(value)
+                .font(MADTheme.Typography.body)
                 .fontWeight(.medium)
+                .foregroundColor(.primary)
         }
+        .padding(.vertical, MADTheme.Spacing.xs)
     }
 }
 

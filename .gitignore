@@ -12,3 +12,8 @@ backend/uploads/
 *.xcuserdatad
 xcuserdata/
 *.xcworkspace/xcuserdata/
+CLAUDE.md
+.claude/commands/backend-dev.md
+.claude/commands/new-endpoint.md
+.claude/commands/new-service.md
+.claude/commands/new-view.md
