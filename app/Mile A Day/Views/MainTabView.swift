@@ -19,15 +19,15 @@ struct MainTabView: View {
                 }
             }
             
-            Tab("Friends", systemImage: "person.2.fill", value: 1) {
-                NavigationStack {
-                    FriendsListView()
-                }
-            }
-            
-            Tab("Compete", systemImage: "trophy.fill", value: 2) {
+            Tab("Compete", systemImage: "trophy.fill", value: 1) {
                 NavigationStack {
                     CompetitionsView()
+                }
+            }
+
+            Tab("Friends", systemImage: "person.2.fill", value: 2) {
+                NavigationStack {
+                    FriendsListView()
                 }
             }
             

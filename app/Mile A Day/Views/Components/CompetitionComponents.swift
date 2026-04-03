@@ -143,7 +143,7 @@ struct CompetitionCard: View {
 
                         Spacer()
 
-                        if competition.isOwner {
+                        if competition.isWinner {
                             Image(systemName: "crown.fill")
                                 .font(.caption)
                                 .foregroundColor(.yellow)

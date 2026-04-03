@@ -23,8 +23,8 @@ struct FlameAnimationView: View {
     @State private var emberParticles: [EmberParticle] = []
     @State private var showParticles: Bool = false
 
-    private let flameSize: CGFloat = 72
-    private let glowColor = Color(red: 1.0, green: 0.5, blue: 0.1)
+    private let flameSize: CGFloat = 80
+    private let glowColor = MADTheme.Colors.madRed
 
     var body: some View {
         ZStack {
@@ -51,8 +51,8 @@ struct FlameAnimationView: View {
                 .fill(
                     RadialGradient(
                         colors: [
-                            Color.yellow.opacity(glowOpacity * 0.5),
-                            Color.orange.opacity(glowOpacity * 0.25),
+                            Color.white.opacity(glowOpacity * 0.5),
+                            MADTheme.Colors.madRed.opacity(glowOpacity * 0.35),
                             Color.clear
                         ],
                         center: .center,
@@ -75,7 +75,7 @@ struct FlameAnimationView: View {
                 // Flame shadow/glow underneath
                 Image(systemName: "flame.fill")
                     .font(.system(size: flameSize, weight: .medium))
-                    .foregroundStyle(Color.orange.opacity(0.6))
+                    .foregroundStyle(MADTheme.Colors.madRed.opacity(0.6))
                     .blur(radius: 12)
                     .scaleEffect(flameScale * 1.1)
 
@@ -85,18 +85,18 @@ struct FlameAnimationView: View {
                     .foregroundStyle(
                         LinearGradient(
                             stops: [
-                                .init(color: Color(red: 1.0, green: 1.0, blue: 0.7), location: 0.0),
-                                .init(color: .yellow, location: 0.25),
-                                .init(color: .orange, location: 0.55),
-                                .init(color: Color(red: 1.0, green: 0.25, blue: 0.05), location: 0.85),
-                                .init(color: Color(red: 0.8, green: 0.15, blue: 0.05), location: 1.0)
+                                .init(color: Color(red: 1.0, green: 0.95, blue: 0.85), location: 0.0),  // White-hot core
+                                .init(color: Color(red: 1.0, green: 0.65, blue: 0.55), location: 0.25), // Light red
+                                .init(color: MADTheme.Colors.madRed, location: 0.55),                     // Brand red
+                                .init(color: Color(red: 0.7, green: 0.15, blue: 0.25), location: 0.85),  // Deep red
+                                .init(color: Color(red: 0.4, green: 0.08, blue: 0.15), location: 1.0)    // Dark red
                             ],
                             startPoint: .top,
                             endPoint: .bottom
                         )
                     )
-                    .shadow(color: .orange.opacity(0.7), radius: 16, x: 0, y: 4)
-                    .shadow(color: .yellow.opacity(0.3), radius: 8, x: 0, y: -2)
+                    .shadow(color: MADTheme.Colors.madRed.opacity(0.7), radius: 16, x: 0, y: 4)
+                    .shadow(color: Color.white.opacity(0.2), radius: 8, x: 0, y: -2)
                     .scaleEffect(flameScale)
                     .scaleEffect(x: flickerPhase ? 1.02 : 0.98, y: flickerPhase ? 1.04 : 0.97)
             }
@@ -108,7 +108,7 @@ struct FlameAnimationView: View {
                 Circle()
                     .fill(
                         RadialGradient(
-                            colors: [.white, .yellow, .orange, .clear],
+                            colors: [.white, Color(red: 1.0, green: 0.65, blue: 0.55), MADTheme.Colors.madRed, .clear],
                             center: .center,
                             startRadius: 0,
                             endRadius: 12
@@ -221,7 +221,7 @@ struct EmberParticleView: View {
         Circle()
             .fill(
                 RadialGradient(
-                    colors: [.white, .yellow, .orange.opacity(0.5)],
+                    colors: [.white, MADTheme.Colors.madRed.opacity(0.8), MADTheme.Colors.madRed.opacity(0.3)],
                     center: .center,
                     startRadius: 0,
                     endRadius: particle.size
@@ -248,9 +248,9 @@ struct EmberParticleView: View {
     ZStack {
         LinearGradient(
             colors: [
-                Color(red: 0.95, green: 0.55, blue: 0.1),
-                Color(red: 0.85, green: 0.25, blue: 0.15),
-                Color(red: 0.15, green: 0.08, blue: 0.05)
+                Color(red: 0.15, green: 0.08, blue: 0.1),
+                Color(red: 0.12, green: 0.06, blue: 0.08),
+                Color(red: 0.05, green: 0.02, blue: 0.04)
             ],
             startPoint: .top,
             endPoint: .bottom

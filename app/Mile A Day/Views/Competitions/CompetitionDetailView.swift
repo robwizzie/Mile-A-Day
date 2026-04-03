@@ -138,7 +138,7 @@ struct CompetitionDetailView: View {
                         .font(MADTheme.Typography.title3)
                         .foregroundColor(.white.opacity(0.7))
 
-                    if competition.isOwner {
+                    if competition.isWinner {
                         Image(systemName: "crown.fill")
                             .font(.caption)
                             .foregroundColor(.yellow)
@@ -319,7 +319,7 @@ struct CompetitionDetailView: View {
 
     private var lobbyParticipantsSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Challengers")
+            Text("Competitors")
                 .font(MADTheme.Typography.title3)
                 .foregroundColor(.white)
                 .padding(.horizontal, MADTheme.Spacing.sm)

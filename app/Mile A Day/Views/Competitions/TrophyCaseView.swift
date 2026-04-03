@@ -283,11 +283,11 @@ struct TrophyCaseView: View {
 
             // Score
             VStack(alignment: .trailing, spacing: 2) {
-                Text(formatScore(trophy.score, unit: trophy.unit))
+                Text(formatScore(trophy))
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
 
-                Text(trophy.unit.shortDisplayName)
+                Text(scoreUnitLabel(trophy))
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(.white.opacity(0.4))
             }
@@ -309,11 +309,34 @@ struct TrophyCaseView: View {
         return display.string(from: date)
     }
 
-    private func formatScore(_ score: Double, unit: CompetitionUnit) -> String {
-        if unit == .steps {
-            return String(format: "%.0f", score)
+    private func formatScore(_ trophy: CompetitionTrophy) -> String {
+        switch trophy.competitionType {
+        case .clash, .targets:
+            // Score is a win/target count (integer points)
+            return String(format: "%.0f", trophy.score)
+        case .streaks:
+            // Score is streak length in intervals (integer)
+            return String(format: "%.0f", trophy.score)
+        case .apex, .race:
+            // Score is actual distance
+            if trophy.unit == .steps {
+                return String(format: "%.0f", trophy.score)
+            }
+            return String(format: "%.1f", trophy.score)
         }
-        return String(format: "%.1f", score)
+    }
+
+    private func scoreUnitLabel(_ trophy: CompetitionTrophy) -> String {
+        switch trophy.competitionType {
+        case .clash:
+            return trophy.score == 1 ? "win" : "wins"
+        case .targets:
+            return trophy.score == 1 ? "day" : "days"
+        case .streaks:
+            return trophy.score == 1 ? "day" : "days"
+        case .apex, .race:
+            return trophy.unit.shortDisplayName
+        }
     }
 }
 

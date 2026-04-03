@@ -224,7 +224,6 @@ struct DayProgressView: View {
 
 struct BadgesPreviewCard: View {
     @ObservedObject var userManager: UserManager
-    @Environment(\.colorScheme) var colorScheme
     @State private var shimmerPhase: CGFloat = -1
 
     private var recentBadges: [Badge] {
@@ -242,146 +241,82 @@ struct BadgesPreviewCard: View {
     private var totalCount: Int {
         userManager.currentUser.getAllBadges().count
     }
-    
+
     private var progress: Double {
         totalCount > 0 ? Double(earnedCount) / Double(totalCount) : 0
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // Header with progress — tap to open full Badges view
-            NavigationLink(destination: BadgesView(userManager: userManager, initialBadge: nil)) {
+        NavigationLink(destination: BadgesView(userManager: userManager, initialBadge: nil)) {
+            VStack(spacing: 14) {
+                // Header row
                 HStack(spacing: 12) {
-                    // Trophy with glow
-                    ZStack {
-                        Circle()
-                            .fill(
-                                RadialGradient(
-                                    colors: [Color.orange.opacity(0.3), Color.clear],
-                                    center: .center,
-                                    startRadius: 5,
-                                    endRadius: 25
-                                )
+                    // Trophy icon
+                    Image(systemName: "trophy.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.yellow, .orange],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
                             )
-                            .frame(width: 50, height: 50)
-                        
-                        Image(systemName: "trophy.fill")
-                            .font(.title2)
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [.yellow, .orange],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                    }
+                        )
 
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("Medals")
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundColor(.primary)
 
-                        // Progress bar
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.white.opacity(0.1))
-                                    .frame(height: 6)
-                                
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [.orange, .yellow],
-                                            startPoint: .leading,
-                                            endPoint: .trailing
-                                        )
-                                    )
-                                    .frame(width: geo.size.width * progress, height: 6)
-                            }
-                        }
-                        .frame(height: 6)
-                        
                         Text("\(earnedCount) of \(totalCount) unlocked")
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundColor(.secondary)
                     }
 
                     Spacer()
 
+                    // Progress pill
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule()
+                                .fill(Color.orange.opacity(0.15))
+                        )
+
                     Image(systemName: "chevron.right")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.secondary)
                 }
-            }
-            .buttonStyle(PlainButtonStyle())
 
-            if recentBadges.isEmpty {
-                // Empty state — tap to open Badges view
-                NavigationLink(destination: BadgesView(userManager: userManager, initialBadge: nil)) {
+                if recentBadges.isEmpty {
                     HStack {
                         Spacer()
-                        VStack(spacing: 8) {
+                        VStack(spacing: 6) {
                             Image(systemName: "trophy")
-                                .font(.system(size: 32))
+                                .font(.system(size: 24))
                                 .foregroundColor(.secondary.opacity(0.4))
-
                             Text("Start running to earn medals!")
                                 .font(.system(size: 12, weight: .medium, design: .rounded))
                                 .foregroundColor(.secondary)
                         }
-                        .padding(.vertical, 12)
+                        .padding(.vertical, 8)
                         Spacer()
                     }
-                }
-                .buttonStyle(PlainButtonStyle())
-            } else {
-                // 3 most recent unlocked — each medal taps to Badges page then that specific medal
-                HStack(spacing: 8) {
-                    ForEach(recentBadges, id: \.id) { badge in
-                        NavigationLink(destination: BadgesView(userManager: userManager, initialBadge: badge)) {
+                } else {
+                    // Recent badges row
+                    HStack(spacing: 8) {
+                        ForEach(recentBadges, id: \.id) { badge in
                             HomeBadgeItem(badge: badge, shimmerPhase: shimmerPhase)
                         }
-                        .buttonStyle(PlainButtonStyle())
                     }
                 }
             }
+            .padding(16)
+            .liquidGlassCard()
         }
-        .padding()
-        .frame(minHeight: 180)
-        .background(
-            ZStack {
-                // Liquid glass background
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.ultraThinMaterial)
-
-                // Gradient overlay
-                LinearGradient(
-                    colors: [
-                        Color.orange.opacity(0.08),
-                        Color.yellow.opacity(0.03),
-                        Color.clear
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                // Glass border
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
-                                Color.clear
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            }
-        )
-        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+        .buttonStyle(PlainButtonStyle())
         .onAppear {
             withAnimation(.linear(duration: 2.5).repeatForever(autoreverses: false)) {
                 shimmerPhase = 1.5
@@ -543,7 +478,6 @@ struct HomeBadgeItem: View {
 struct CalendarPreviewCard: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
-    @Environment(\.colorScheme) var colorScheme
 
     private var todaysSteps: Int {
         healthManager.todaysSteps
@@ -567,11 +501,29 @@ struct CalendarPreviewCard: View {
 
     var body: some View {
         NavigationLink(destination: StepsView(healthManager: healthManager, userManager: userManager)) {
-            VStack(alignment: .leading, spacing: 12) {
-                // Header row
-                HStack {
+            HStack(spacing: 16) {
+                // Step count circle
+                ZStack {
+                    // Track
+                    Circle()
+                        .stroke(Color.white.opacity(0.1), lineWidth: 5)
+
+                    // Progress arc
+                    Circle()
+                        .trim(from: 0, to: stepProgress)
+                        .stroke(
+                            LinearGradient(
+                                colors: [stepColor, stepColor.opacity(0.7)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            style: StrokeStyle(lineWidth: 5, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+
+                    // Icon
                     Image(systemName: "shoeprints.fill")
-                        .font(.subheadline)
+                        .font(.system(size: 20))
                         .foregroundStyle(
                             LinearGradient(
                                 colors: [.blue, .cyan],
@@ -579,98 +531,34 @@ struct CalendarPreviewCard: View {
                                 endPoint: .bottomTrailing
                             )
                         )
+                }
+                .frame(width: 56, height: 56)
 
+                // Text content
+                VStack(alignment: .leading, spacing: 4) {
                     Text("Steps")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.primary)
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundColor(.secondary)
+
+                    Text("\(todaysSteps)")
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+
+                    Text("\(Int(stepProgress * 100))% of 10k goal")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(stepColor)
                 }
 
                 Spacer()
 
-                // Steps count - prominent
-                Text("\(todaysSteps)")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-
-                // Progress section
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("\(Int(stepProgress * 100))%")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(stepColor)
-
-                        Spacer()
-
-                        Text("of 10k")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                    }
-
-                    GeometryReader { geometry in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.gray.opacity(0.2))
-                                .frame(height: 6)
-
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [stepColor, stepColor.opacity(0.7)],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                                .frame(width: stepProgress * geometry.size.width, height: 6)
-                        }
-                    }
-                    .frame(height: 6)
-                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.secondary)
             }
-            .padding(14)
-            .frame(height: 180)
-            .background(
-                ZStack {
-                    // Liquid glass background
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(.ultraThinMaterial)
-
-                    // Gradient overlay
-                    LinearGradient(
-                        colors: [
-                            Color.blue.opacity(0.05),
-                            Color.clear
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                    // Glass border
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
-                                    Color.clear
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                }
-            )
-            .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+            .padding(16)
+            .liquidGlassCard()
         }
         .buttonStyle(PlainButtonStyle())
     }

@@ -160,7 +160,7 @@ struct CreateCompetitionView: View {
                         .padding(.bottom, MADTheme.Spacing.lg)
                 }
             }
-            .navigationTitle("Challenge")
+            .navigationTitle("Competition")
             .navigationBarTitleDisplayMode(.inline)
             // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
             .sheet(isPresented: $showFriendPicker) {
@@ -174,7 +174,7 @@ struct CreateCompetitionView: View {
             } message: {
                 Text(errorMessage)
             }
-            .alert("Challenge Created!", isPresented: $showSuccess) {
+            .alert("Competition Created!", isPresented: $showSuccess) {
                 Button("View Lobby") {
                     dismiss()
                 }
@@ -224,12 +224,12 @@ struct CreateCompetitionView: View {
         }
     }
 
-    // MARK: - Challengers Section
+    // MARK: - Competitors Section
 
     var challengersSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             HStack {
-                Text("Challengers")
+                Text("Competitors")
                     .font(MADTheme.Typography.subheadline)
                     .foregroundColor(.white.opacity(0.6))
 
@@ -604,7 +604,7 @@ struct CreateCompetitionView: View {
                     .font(MADTheme.Typography.subheadline)
                     .foregroundColor(.white.opacity(0.6))
 
-                Text(hasEndDate ? "Choose when the challenge ends" : "Competition runs until manually ended")
+                Text(hasEndDate ? "Choose when the competition ends" : "Competition runs until manually ended")
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(.white.opacity(0.5))
             }
@@ -846,14 +846,14 @@ struct CreateCompetitionView: View {
                         .foregroundColor(.black)
                 }
 
-                Text("Create Challenge")
+                Text("Create Competition")
                     .font(MADTheme.Typography.headline)
                     .foregroundColor(.black)
 
                 Spacer()
 
                 if selectedFriends.count > 0 {
-                    Text("\(selectedFriends.count) challenger\(selectedFriends.count == 1 ? "" : "s")")
+                    Text("\(selectedFriends.count) competitor\(selectedFriends.count == 1 ? "" : "s")")
                         .font(MADTheme.Typography.callout)
                         .foregroundColor(.black.opacity(0.6))
                 }
@@ -891,7 +891,7 @@ struct CreateCompetitionView: View {
                             .font(MADTheme.Typography.title2)
                             .foregroundColor(.white)
 
-                        Text("Add friends to challenge them")
+                        Text("Add friends to compete with")
                             .font(MADTheme.Typography.callout)
                             .foregroundColor(.white.opacity(0.7))
                     }

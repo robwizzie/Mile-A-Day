@@ -339,7 +339,20 @@ class HealthKitManager: ObservableObject {
     
     // Efficient deduplication tracking
     private var cachedWorkoutUUIDs: Set<UUID> = []
-    
+
+    /// Guards celebration triggers: true only after BOTH fetchTodaysDistance()
+    /// AND workout index (streak data) have completed at least once this session.
+    @Published var hasLoadedInitialData: Bool = false
+    private var hasTodaysDistanceLoaded: Bool = false
+    private var hasIndexOrStreakLoaded: Bool = false
+
+    private func checkInitialDataReady() {
+        if hasTodaysDistanceLoaded && hasIndexOrStreakLoaded && !hasLoadedInitialData {
+            hasLoadedInitialData = true
+            print("[HealthKit] ✅ Initial data fully loaded - celebrations now permitted")
+        }
+    }
+
     // MARK: - NEW: Persistent Workout Index (Phase 1 - Architectural Redesign)
     /// Single source of truth for workout data - eliminates inconsistencies
     #if !os(watchOS)
@@ -377,9 +390,10 @@ class HealthKitManager: ObservableObject {
         if let cachedIndex = WorkoutIndex.load() {
             self.workoutIndex = cachedIndex
             log("[HealthKit] ✅ Loaded workout index: \(cachedIndex.currentStreak) day streak, \(cachedIndex.totalWorkouts) workouts")
-            
+
             // Use index data immediately (no 72→161 jump!)
             self.retroactiveStreak = cachedIndex.currentStreak
+            self.hasIndexOrStreakLoaded = true
         } else {
             log("[HealthKit] 📋 No workout index found - will build on first data fetch")
         }
@@ -645,6 +659,10 @@ class HealthKitManager: ObservableObject {
                     // Use unified progress calculation
                     WidgetDataStore.save(todayMiles: 0, goal: safeGoal)
                     #endif
+                    if self?.hasTodaysDistanceLoaded == false {
+                        self?.hasTodaysDistanceLoaded = true
+                        self?.checkInitialDataReady()
+                    }
                 }
                 return
             }
@@ -1131,10 +1149,14 @@ class HealthKitManager: ObservableObject {
             let widgetData = WidgetDataStore.load()
             let currentGoal = widgetData.goal
             let safeGoal = currentGoal > 0 ? currentGoal : 1.0
-            
+
             // Use unified progress calculation
             WidgetDataStore.save(todayMiles: totalMiles, goal: safeGoal)
             #endif
+            if !self.hasTodaysDistanceLoaded {
+                self.hasTodaysDistanceLoaded = true
+                self.checkInitialDataReady()
+            }
         }
     }
     
@@ -2739,8 +2761,13 @@ class HealthKitManager: ObservableObject {
             
             // CRITICAL: Post notification that index is ready
             NotificationCenter.default.post(name: NSNotification.Name("WorkoutIndexReady"), object: nil)
+
+            if !self.hasIndexOrStreakLoaded {
+                self.hasIndexOrStreakLoaded = true
+                self.checkInitialDataReady()
+            }
         }
-        
+
         isIndexBuilding = false
     }
     #endif
@@ -2863,6 +2890,11 @@ class HealthKitManager: ObservableObject {
             
             // Post notification that index was updated
             NotificationCenter.default.post(name: NSNotification.Name("WorkoutIndexReady"), object: nil)
+
+            if !self.hasIndexOrStreakLoaded {
+                self.hasIndexOrStreakLoaded = true
+                self.checkInitialDataReady()
+            }
         }
     }
     #endif

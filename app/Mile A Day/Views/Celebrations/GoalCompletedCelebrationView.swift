@@ -12,18 +12,35 @@ struct GoalCompletedCelebrationView: View {
     @ObservedObject var manager = CelebrationManager.shared
     var stats: GoalCompletionStats = .placeholder
 
-    // Animation states
+    // Phase 1: Impact Entry
     @State private var overlayOpacity: Double = 0
-    @State private var showFlame = false
-    @State private var showStreakCount = false
+    @State private var showRunner: Bool = false
+    @State private var runnerScale: CGFloat = 0.3
+    @State private var runnerOpacity: Double = 1.0
+    @State private var redGlowRadius: CGFloat = 0
+    @State private var redGlowOpacity: Double = 0
+
+    // Phase 2: Streak Flame Hero
+    @State private var showFlame: Bool = false
+    @State private var showStreakCount: Bool = false
     @State private var streakCountValue: Int = 0
-    @State private var showWeekCalendar = false
+    @State private var confettiTrigger: Bool = false
+
+    // Phase 3: Achievement Card
+    @State private var showWeekCard: Bool = false
+    @State private var weekCardOffset: CGFloat = 300
     @State private var weekDayRevealIndex: Int = -1
-    @State private var showTitle = false
-    @State private var showStats = false
-    @State private var showMotivation = false
-    @State private var showButtons = false
-    @State private var confettiTrigger = false
+
+    // Phase 4: Stats & Motivation
+    @State private var showTitle: Bool = false
+    @State private var showStats: Bool = false
+    @State private var showMotivation: Bool = false
+
+    // Phase 5: Buttons
+    @State private var showButtons: Bool = false
+
+    // Share
+    @State private var showShareSheet: Bool = false
 
     private var isMajorMilestone: Bool {
         stats.streakMilestone?.isMajor == true
@@ -31,14 +48,15 @@ struct GoalCompletedCelebrationView: View {
 
     // Haptic generators
     private let impactMedium = UIImpactFeedbackGenerator(style: .medium)
+    private let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
     private let notification = UINotificationFeedbackGenerator()
 
     var body: some View {
         ZStack {
-            // Warm gradient background
+            // App-themed dark background with expanding red glow
             celebrationBackground
 
-            // Single confetti burst
+            // Confetti burst
             if confettiTrigger {
                 CelebrationConfetti()
                     .allowsHitTesting(false)
@@ -47,12 +65,17 @@ struct GoalCompletedCelebrationView: View {
             // Content
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    Spacer(minLength: 40)
+                    Spacer(minLength: 20)
 
-                    // HERO: Flame + streak counter
-                    streakHeroSection
+                    // HERO: Running figure → Flame + streak counter
+                    heroSection
 
-                    Spacer(minLength: 16)
+                    Spacer(minLength: 8)
+
+                    // Streak counter
+                    streakCountSection
+
+                    Spacer(minLength: 12)
 
                     // Title
                     if showTitle {
@@ -65,13 +88,11 @@ struct GoalCompletedCelebrationView: View {
 
                     Spacer(minLength: 20)
 
-                    // Week calendar
-                    if showWeekCalendar {
+                    // Week calendar card
+                    if showWeekCard {
                         weekCalendarSection
-                            .transition(.asymmetric(
-                                insertion: .scale(scale: 0.95).combined(with: .opacity),
-                                removal: .opacity
-                            ))
+                            .offset(y: weekCardOffset)
+                            .transition(.opacity)
                     }
 
                     Spacer(minLength: 20)
@@ -113,7 +134,7 @@ struct GoalCompletedCelebrationView: View {
                     Spacer(minLength: 50)
                 }
                 .padding(.horizontal, 24)
-                .padding(.bottom, 34) // Safe area for bottom
+                .padding(.bottom, 34)
             }
         }
         .ignoresSafeArea()
@@ -127,47 +148,75 @@ struct GoalCompletedCelebrationView: View {
 
     private var celebrationBackground: some View {
         ZStack {
-            // Base gradient
+            // Base: app-themed dark gradient
             LinearGradient(
                 colors: [
-                    Color(red: 0.92, green: 0.50, blue: 0.08),
-                    Color(red: 0.80, green: 0.22, blue: 0.12),
-                    Color(red: 0.12, green: 0.06, blue: 0.03)
+                    Color(red: 0.15, green: 0.08, blue: 0.1),
+                    Color(red: 0.12, green: 0.06, blue: 0.08),
+                    Color(red: 0.05, green: 0.02, blue: 0.04)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
 
-            // Warm radial glow behind flame area
+            // Red radial glow (expands during Phase 1)
             RadialGradient(
                 colors: [
-                    Color(red: 1.0, green: 0.65, blue: 0.15).opacity(0.35),
+                    MADTheme.Colors.madRed.opacity(redGlowOpacity * 0.5),
+                    MADTheme.Colors.madRed.opacity(redGlowOpacity * 0.15),
                     Color.clear
                 ],
-                center: UnitPoint(x: 0.5, y: 0.18),
+                center: UnitPoint(x: 0.5, y: 0.22),
                 startRadius: 10,
-                endRadius: 200
+                endRadius: 250
             )
+            .scaleEffect(redGlowRadius > 0 ? 1.0 : 0.3)
         }
         .ignoresSafeArea()
     }
 
-    // MARK: - Streak Hero (Flame + Counter)
+    // MARK: - Hero Section (Running Figure → Flame)
 
-    private var streakHeroSection: some View {
-        VStack(spacing: 4) {
-            // Animated flame with glow and embers
+    private var heroSection: some View {
+        ZStack {
+            // Running figure (Phase 1) — fades out as flame fades in
+            if showRunner {
+                Image(systemName: "figure.run")
+                    .font(.system(size: 100, weight: .medium))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.9, green: 0.3, blue: 0.4),
+                                MADTheme.Colors.madRed
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .shadow(color: MADTheme.Colors.madRed.opacity(0.6), radius: 20, x: 0, y: 8)
+                    .scaleEffect(runnerScale)
+                    .opacity(runnerOpacity)
+            }
+
+            // Flame (Phase 2) — fades in as runner fades out
             FlameAnimationView(isIgnited: $showFlame)
-                .frame(height: 140)
+                .frame(height: 180)
+                .opacity(showFlame ? 1.0 : 0.0)
+        }
+        .frame(height: 200)
+    }
 
-            // Streak counter
+    // MARK: - Streak Counter
+
+    private var streakCountSection: some View {
+        Group {
             if showStreakCount {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text("\(streakCountValue)")
                         .font(.system(size: 56, weight: .black, design: .rounded))
                         .foregroundColor(.white)
                         .contentTransition(.numericText())
-                        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
+                        .shadow(color: MADTheme.Colors.madRed.opacity(0.5), radius: 8, x: 0, y: 4)
 
                     Text("day streak!")
                         .font(.system(size: 20, weight: .bold, design: .rounded))
@@ -187,8 +236,8 @@ struct GoalCompletedCelebrationView: View {
                 Text("NEW PERSONAL BEST!")
                     .font(.system(size: 14, weight: .black, design: .rounded))
                     .tracking(2)
-                    .foregroundColor(.yellow)
-                    .shadow(color: .orange.opacity(0.5), radius: 4, x: 0, y: 1)
+                    .foregroundColor(Color(red: 1.0, green: 0.65, blue: 0.55))
+                    .shadow(color: MADTheme.Colors.madRed.opacity(0.5), radius: 4, x: 0, y: 1)
             }
 
             Text(completionSubtitle)
@@ -211,7 +260,7 @@ struct GoalCompletedCelebrationView: View {
         }
     }
 
-    // MARK: - Week Calendar (Duolingo-style)
+    // MARK: - Week Calendar (Duolingo-style with liquid glass)
 
     private var weekCalendarSection: some View {
         let calendar = Calendar.current
@@ -237,33 +286,30 @@ struct GoalCompletedCelebrationView: View {
                     VStack(spacing: 6) {
                         Text(dayLabels[index])
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundColor(isToday ? .orange : .white.opacity(0.5))
+                            .foregroundColor(isToday ? MADTheme.Colors.madRed : .white.opacity(0.5))
 
                         ZStack {
                             if isFuture {
-                                // Future: dim empty circle
                                 Circle()
                                     .stroke(Color.white.opacity(0.15), lineWidth: 1.5)
                                     .frame(width: 36, height: 36)
                             } else if isToday {
-                                // Today: green filled with running figure (just completed!)
                                 Circle()
-                                    .fill(Color.green)
+                                    .fill(MADTheme.Colors.madRed)
                                     .frame(width: 36, height: 36)
-                                    .shadow(color: .green.opacity(0.5), radius: isRevealed ? 8 : 0)
+                                    .shadow(color: MADTheme.Colors.madRed.opacity(0.6), radius: isRevealed ? 8 : 0)
 
                                 Image(systemName: "figure.run")
                                     .font(.system(size: 16, weight: .bold))
                                     .foregroundColor(.white)
                             } else if isPast {
-                                // Past: check if goal was met (simplified — assume met for streak days)
                                 let daysMet = stats.currentStreak >= daysFromSunday
                                     ? true
                                     : index >= (daysFromSunday - stats.currentStreak)
 
                                 if daysMet {
                                     Circle()
-                                        .fill(Color.green)
+                                        .fill(MADTheme.Colors.madRed)
                                         .frame(width: 36, height: 36)
 
                                     Image(systemName: "figure.run")
@@ -289,45 +335,35 @@ struct GoalCompletedCelebrationView: View {
         }
         .padding(.vertical, 20)
         .padding(.horizontal, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(.white.opacity(0.1))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(.white.opacity(0.15), lineWidth: 1)
-                )
-        )
+        .liquidGlassCard()
     }
 
     // MARK: - Today's Stats (Compact)
 
     private var todayStatsSection: some View {
         HStack(spacing: 12) {
-            // Distance
             statPill(
                 icon: "figure.run",
-                iconColor: .green,
+                iconColor: MADTheme.Colors.madRed,
                 value: String(format: "%.2f", stats.todaysDistance),
                 unit: "mi",
                 extra: stats.percentOver > 0 ? "+\(Int(stats.percentOver))%" : nil
             )
 
-            // Duration
             if stats.todaysTotalDuration > 0 {
                 statPill(
                     icon: "timer",
-                    iconColor: .mint,
+                    iconColor: .white.opacity(0.8),
                     value: stats.formattedDuration,
                     unit: "min",
                     extra: nil
                 )
             }
 
-            // Pace
             if let pace = stats.todaysAveragePace {
                 statPill(
                     icon: "speedometer",
-                    iconColor: stats.isPacePB ? .green : .cyan,
+                    iconColor: stats.isPacePB ? MADTheme.Colors.madRed : .white.opacity(0.7),
                     value: formatPace(pace),
                     unit: "/mi",
                     extra: stats.isPacePB ? "PB!" : nil
@@ -351,22 +387,13 @@ struct GoalCompletedCelebrationView: View {
                     .foregroundColor(.white.opacity(0.6))
             }
 
-            if let extra = extra {
-                Text(extra)
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(.green)
-            }
+            Text(extra ?? " ")
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundColor(extra != nil ? MADTheme.Colors.madRed : .clear)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(.white.opacity(0.1))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(.white.opacity(0.15), lineWidth: 1)
-                )
-        )
+        .frame(height: 90)
+        .liquidGlassCard()
     }
 
     // MARK: - Streak Milestone Banner
@@ -380,7 +407,6 @@ struct GoalCompletedCelebrationView: View {
         }
     }
 
-    /// Mini milestone: clean, encouraging, compact
     private func miniMilestoneBanner(_ milestone: StreakMilestone) -> some View {
         HStack(spacing: 12) {
             Text(milestone.emoji)
@@ -403,22 +429,20 @@ struct GoalCompletedCelebrationView: View {
             RoundedRectangle(cornerRadius: 16)
                 .fill(
                     LinearGradient(
-                        colors: [.orange.opacity(0.25), .red.opacity(0.2)],
+                        colors: [MADTheme.Colors.madRed.opacity(0.25), MADTheme.Colors.madRed.opacity(0.15)],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 16)
-                        .stroke(.white.opacity(0.15), lineWidth: 1)
+                        .stroke(MADTheme.Colors.madRed.opacity(0.3), lineWidth: 1)
                 )
         )
     }
 
-    /// Major milestone: big, bold, extra sparkle
     private func majorMilestoneBanner(_ milestone: StreakMilestone) -> some View {
         VStack(spacing: 12) {
-            // Big emoji with glow
             ZStack {
                 Text(milestone.emoji)
                     .font(.system(size: 48))
@@ -431,7 +455,7 @@ struct GoalCompletedCelebrationView: View {
             Text(milestone.title.uppercased())
                 .font(.system(size: 22, weight: .black, design: .rounded))
                 .tracking(2)
-                .foregroundColor(.yellow)
+                .foregroundColor(.white)
 
             Text(milestone.majorSubtitle)
                 .font(.system(size: 15, weight: .medium, design: .rounded))
@@ -447,9 +471,9 @@ struct GoalCompletedCelebrationView: View {
                     .fill(
                         LinearGradient(
                             colors: [
-                                Color.yellow.opacity(0.15),
-                                Color.orange.opacity(0.2),
-                                Color.red.opacity(0.15)
+                                MADTheme.Colors.madRed.opacity(0.2),
+                                Color(red: 0.9, green: 0.3, blue: 0.4).opacity(0.15),
+                                MADTheme.Colors.madRed.opacity(0.1)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
@@ -459,7 +483,11 @@ struct GoalCompletedCelebrationView: View {
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(
                         LinearGradient(
-                            colors: [.yellow.opacity(0.5), .orange.opacity(0.4), .red.opacity(0.3)],
+                            colors: [
+                                MADTheme.Colors.madRed.opacity(0.5),
+                                Color(red: 0.9, green: 0.3, blue: 0.4).opacity(0.4),
+                                MADTheme.Colors.madRed.opacity(0.3)
+                            ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
@@ -467,14 +495,13 @@ struct GoalCompletedCelebrationView: View {
                     )
             }
         )
-        .shadow(color: .orange.opacity(0.3), radius: 20, x: 0, y: 8)
+        .shadow(color: MADTheme.Colors.madRed.opacity(0.3), radius: 20, x: 0, y: 8)
     }
 
     // MARK: - Motivation Section
 
     private var motivationSection: some View {
         VStack(spacing: 10) {
-            // Show next milestone with progress bar
             if let next = nextStreakMilestone {
                 let daysLeft = next.days - stats.currentStreak
 
@@ -483,10 +510,9 @@ struct GoalCompletedCelebrationView: View {
                         .font(.system(size: 14))
                     Text("\(daysLeft) day\(daysLeft == 1 ? "" : "s") until \(next.title.lowercased())")
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .foregroundColor(.orange)
+                        .foregroundColor(MADTheme.Colors.madRed)
                 }
 
-                // Progress bar to next milestone
                 GeometryReader { geo in
                     let previousMilestone = previousStreakMilestone?.days ?? 0
                     let range = next.days - previousMilestone
@@ -500,7 +526,9 @@ struct GoalCompletedCelebrationView: View {
                         RoundedRectangle(cornerRadius: 4)
                             .fill(
                                 LinearGradient(
-                                    colors: next.isMajor ? [.yellow, .orange] : [.orange, .red.opacity(0.8)],
+                                    colors: next.isMajor
+                                        ? [Color(red: 0.9, green: 0.3, blue: 0.4), MADTheme.Colors.madRed]
+                                        : [MADTheme.Colors.madRed.opacity(0.7), MADTheme.Colors.madRed],
                                     startPoint: .leading,
                                     endPoint: .trailing
                                 )
@@ -510,12 +538,11 @@ struct GoalCompletedCelebrationView: View {
                 }
                 .frame(height: 8)
 
-                // If the next milestone is mini, also tease the next major
                 if !next.isMajor, let nextMajor = nextMajorMilestone, nextMajor.days != next.days {
                     let majorDaysLeft = nextMajor.days - stats.currentStreak
                     Text("\(nextMajor.emoji) \(majorDaysLeft) days to \(nextMajor.title.lowercased())")
                         .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundColor(.yellow.opacity(0.7))
+                        .foregroundColor(MADTheme.Colors.madRed.opacity(0.7))
                         .padding(.top, 2)
                 }
             }
@@ -548,6 +575,7 @@ struct GoalCompletedCelebrationView: View {
             // Share button
             Button {
                 impactMedium.impactOccurred()
+                showShareSheet = true
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "square.and.arrow.up")
@@ -560,15 +588,12 @@ struct GoalCompletedCelebrationView: View {
                 .frame(height: 54)
                 .background(
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(
-                            LinearGradient(
-                                colors: [.orange, Color(red: 0.85, green: 0.3, blue: 0.1)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .shadow(color: .orange.opacity(0.4), radius: 15, x: 0, y: 8)
+                        .fill(MADTheme.Colors.redGradient)
+                        .shadow(color: MADTheme.Colors.madRed.opacity(0.4), radius: 15, x: 0, y: 8)
                 )
+            }
+            .sheet(isPresented: $showShareSheet) {
+                ShareSheet(items: shareItems)
             }
 
             // Continue
@@ -587,16 +612,25 @@ struct GoalCompletedCelebrationView: View {
                 .foregroundColor(.white.opacity(0.9))
                 .frame(maxWidth: .infinity)
                 .frame(height: 48)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(.white.opacity(0.15))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(.white.opacity(0.25), lineWidth: 1)
-                        )
-                )
+                .liquidGlassCard()
             }
         }
+    }
+
+    private var shareItems: [Any] {
+        var text = "I just completed my daily mile goal on Mile A Day! "
+        text += "\(stats.currentStreak) day streak "
+        text += "and ran \(String(format: "%.2f", stats.todaysDistance)) miles today."
+
+        if let milestone = stats.streakMilestone {
+            text += " \(milestone.emoji) \(milestone.title)"
+        }
+
+        if stats.isNewPersonalBest {
+            text += " New personal best!"
+        }
+
+        return [text]
     }
 
     // MARK: - Helpers
@@ -607,25 +641,41 @@ struct GoalCompletedCelebrationView: View {
         return String(format: "%d:%02d", minutes, seconds)
     }
 
-    // MARK: - Animation Sequence
+    // MARK: - Animation Sequence (5 Phases, ~3s)
 
     private func startCelebrationSequence() {
         impactMedium.prepare()
+        impactHeavy.prepare()
         notification.prepare()
 
-        // Phase 1: Fade in background (0.0s)
+        // Phase 1: Impact Entry (0-0.5s)
+        // Screen darkens, running figure scales in dramatically, red glow expands
         withAnimation(.easeOut(duration: 0.3)) {
             overlayOpacity = 1
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            impactHeavy.impactOccurred(intensity: 1.0)
 
-        // Phase 2: Ignite the flame (0.25s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
+                showRunner = true
+                runnerScale = 1.0
+            }
+            withAnimation(.easeOut(duration: 0.6)) {
+                redGlowRadius = 1.0
+                redGlowOpacity = 1.0
+            }
+        }
+
+        // Phase 2: Streak Flame Hero (0.5-1.2s)
+        // Runner crossfades to flame, streak counter counts up, confetti bursts
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            withAnimation(.easeInOut(duration: 0.4)) {
+                runnerOpacity = 0.0
+            }
             showFlame = true
             notification.notificationOccurred(.success)
         }
-
-        // Phase 3: Streak counter + confetti burst (0.7s - after flame has ignited)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 showStreakCount = true
             }
@@ -633,35 +683,48 @@ struct GoalCompletedCelebrationView: View {
             confettiTrigger = true
         }
 
-        // Phase 4: Title + week calendar (1.1s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+        // Phase 3: Title + Week Card (1.2-2.0s)
+        // Title appears, liquid glass week card slides up from bottom
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 showTitle = true
-                showWeekCalendar = true
             }
-            // Quick staggered day reveals
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
+                showWeekCard = true
+                weekCardOffset = 0
+            }
+            // Staggered day reveals
             let calendar = Calendar.current
             let weekday = calendar.component(.weekday, from: Date())
             let daysFromSunday = weekday - 1
             for i in 0...daysFromSunday {
-                DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.06) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15 + Double(i) * 0.08) {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
                         weekDayRevealIndex = i
+                    }
+                    if i == daysFromSunday {
+                        impactMedium.impactOccurred()
                     }
                 }
             }
         }
 
-        // Phase 5: Stats + motivation (1.5s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+        // Phase 4: Stats + Motivation (2.0-2.5s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 showStats = true
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 showMotivation = true
             }
         }
 
-        // Phase 6: Buttons (1.8s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+        // Phase 5: Buttons (2.7s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.8) {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                 showButtons = true
             }
@@ -691,16 +754,16 @@ struct GoalCompletedCelebrationView: View {
 struct CelebrationConfetti: View {
     @State private var particles: [ConfettiPiece2] = []
 
-    // App-themed confetti colors: warm oranges, yellows, whites, with pops of color
+    // App-themed confetti colors: madRed, white, with pops of pink
     private let confettiColors: [Color] = [
-        .yellow,
-        Color(red: 1.0, green: 0.85, blue: 0.2),  // Gold
-        .orange,
-        Color(red: 1.0, green: 0.45, blue: 0.15),  // Deep orange
+        MADTheme.Colors.madRed,
+        Color(red: 0.9, green: 0.3, blue: 0.4),
         .white,
-        .white.opacity(0.9),
-        Color(red: 1.0, green: 0.6, blue: 0.7),    // Soft pink
-        .cyan.opacity(0.8),
+        .white.opacity(0.85),
+        Color(red: 1.0, green: 0.55, blue: 0.65),
+        Color(red: 0.7, green: 0.2, blue: 0.3),
+        MADTheme.Colors.madRed.opacity(0.7),
+        Color(red: 0.95, green: 0.85, blue: 0.85),
     ]
 
     var body: some View {

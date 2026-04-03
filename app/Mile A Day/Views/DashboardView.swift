@@ -58,9 +58,14 @@ struct DashboardView: View {
     /// Check if goal is completed and show celebration if appropriate
     private func checkAndShowGoalCelebration() {
         // Only show if:
-        // 1. Goal is actually completed (distance >= goal)
-        // 2. We have meaningful distance data (> 0)
+        // 1. Initial data has fully loaded (prevents premature celebration on cold launch)
+        // 2. Goal is actually completed (distance >= goal)
+        // 3. We have meaningful distance data (> 0)
         // Note: CelebrationManager handles duplicate prevention via date-based tracking
+        guard healthManager.hasLoadedInitialData else {
+            print("[Dashboard] ⏳ Skipping celebration check - initial data not yet loaded")
+            return
+        }
         guard currentState.isCompleted,
               healthManager.todaysDistance > 0 else {
             return
@@ -129,12 +134,16 @@ struct DashboardView: View {
         // iOS 26: Liquid Glass is automatic - no modifiers needed
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Image("mad-logo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(height: 28)
+                Button {
+                    showInstructions = true
+                } label: {
+                    Image("mad-logo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 28)
+                }
             }
-            
+
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if userManager.hasNewBadges {
                     NavigationLink(destination: BadgesView(userManager: userManager, initialBadge: nil)) {
@@ -142,13 +151,7 @@ struct DashboardView: View {
                             .foregroundStyle(.yellow)
                     }
                 }
-                
-                Button {
-                    showInstructions = true
-                } label: {
-                    Image(systemName: "info.circle")
-                }
-                
+
                 Button {
                     showGoalSheet = true
                 } label: {
@@ -220,13 +223,8 @@ struct DashboardView: View {
                 // Fetch fastest mile pace from backend database
                 fetchFastestPaceFromBackend()
 
-                // Check for goal completion after a brief delay to allow data to load
-                // This handles the case where the app is opened fresh
-                Task { @MainActor in
-                    // Wait for health data to load
-                    try? await Task.sleep(nanoseconds: 1_500_000_000) // 1.5 seconds
-                    checkAndShowGoalCelebration()
-                }
+                // Goal celebration is now triggered by .onChange(of: healthManager.hasLoadedInitialData)
+                // which fires when both today's distance and workout index have loaded
                 
                 // If there is a persisted in‑progress workout when the dashboard appears,
                 // automatically surface it so the user can't "lose" their active workout.
@@ -265,6 +263,11 @@ struct DashboardView: View {
                     Text("Error: \(error)")
                 } else {
                     Text("Upload completed")
+                }
+            }
+            .onChange(of: healthManager.hasLoadedInitialData) { _, isLoaded in
+                if isLoaded {
+                    checkAndShowGoalCelebration()
                 }
             }
             .onChange(of: currentState.isCompleted) { oldValue, newValue in
@@ -585,18 +588,15 @@ struct DashboardView: View {
     }
 
     private var stepsAndBadgesSection: some View {
-        // Always side by side, equal width, clear gap between panes
-        HStack(spacing: 20) {
+        VStack(spacing: 12) {
             CalendarPreviewCard(
                 healthManager: healthManager,
                 userManager: userManager
             )
-            .frame(maxWidth: .infinity)
 
             BadgesPreviewCard(
                 userManager: userManager
             )
-            .frame(maxWidth: .infinity)
         }
     }
 
@@ -711,7 +711,7 @@ struct InstructionsView: View {
                         InstructionStep(
                             number: "1",
                             title: "Go for a Run or Walk",
-                            description: "Use Apple Fitness, your Apple Watch, or any HealthKit-compatible app to record a workout.",
+                            description: "Start a workout right in Mile A Day, use Apple Fitness, your Apple Watch, or any HealthKit-compatible app to record a workout.",
                             icon: "figure.run",
                             color: MADTheme.Colors.madRed,
                             isLast: false
@@ -841,7 +841,7 @@ struct InstructionStep: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            // Timeline column
+            // Timeline column - fixed width for consistent alignment
             VStack(spacing: 0) {
                 ZStack {
                     Circle()
@@ -873,12 +873,14 @@ struct InstructionStep: View {
                         .frame(maxHeight: .infinity)
                 }
             }
+            .frame(width: 36)
 
             // Content
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
                     .foregroundColor(MADTheme.Colors.primaryText)
+                    .padding(.top, 8)
 
                 Text(description)
                     .font(.system(size: 14))
@@ -897,11 +899,11 @@ struct TipItem: View {
     var color: Color = .yellow
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)
                 .font(.system(size: 14))
                 .foregroundColor(color)
-                .frame(width: 24, height: 24)
+                .frame(width: 24, height: 24, alignment: .center)
 
             Text(text)
                 .font(.system(size: 14))
@@ -1504,6 +1506,7 @@ struct UnifiedStatsGrid: View {
     @ObservedObject var healthManager: HealthKitManager
     let statsType: StatsViewType
     @State private var statsData: (totalMiles: Double, mostMiles: Double, fastestPace: TimeInterval, streakDays: Int) = (0.0, 0.0, 0.0, 0)
+    @State private var hasLoadedOnce = false
     @State private var isCalculating = false
     @State private var showFastestPaceDetail = false
     @State private var showMostMilesDetail = false
@@ -1525,11 +1528,15 @@ struct UnifiedStatsGrid: View {
         return userPace > 0 ? userPace : hkPace
     }
 
-    var formattedFastestPace: String {
-        if isCalculating || isRefreshingFastestPace {
-            return "Calculating..."
+    var isFastestPaceLoading: Bool {
+        if statsType == .allTime {
+            return isRefreshingFastestPace && bestAllTimeFastestPace <= 0
+        } else {
+            return isCalculating && statsData.fastestPace <= 0
         }
+    }
 
+    var formattedFastestPace: String {
         if statsType == .allTime {
             let pace = bestAllTimeFastestPace
             if pace > 0 {
@@ -1667,26 +1674,26 @@ struct UnifiedStatsGrid: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
-                    
-                    Text(String(format: "%.1f mi", totalMiles))
-                        .font(.title2)
-                        .fontWeight(.bold)
-                        .foregroundColor(.primary)
-                    
-                    // Progress indicator - only show for current streak, not all time
-                    if streakDays > 0 && statsType == .currentStreak {
-                        Text(String(format: "%.1f avg/day", avgMilesPerDay))
-                            .font(.caption2)
-                            .foregroundColor(.blue)
-                    } else if statsType == .allTime {
-                        // Add blank space to maintain consistent card height
-                        Text(" ")
-                            .font(.caption2)
-                            .foregroundColor(.clear)
+
+                    if isCalculating && statsType == .currentStreak && !hasLoadedOnce {
+                        ProgressView()
+                            .frame(height: 28)
+                    } else {
+                        Text(String(format: "%.1f mi", totalMiles))
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
                     }
+
+                    Text(streakDays > 0 && statsType == .currentStreak
+                         ? String(format: "%.1f avg/day", avgMilesPerDay)
+                         : (statsType == .allTime ? "All time" : " "))
+                        .font(.caption2)
+                        .foregroundColor(.blue)
                 }
                 .padding()
-                .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 100)
                 .background(
                     RoundedRectangle(cornerRadius: 12)
                         .fill(Color.blue.opacity(0.1))
@@ -1709,28 +1716,30 @@ struct UnifiedStatsGrid: View {
                                 .foregroundColor(.secondary)
                         }
                         
-                        Text(formattedFastestPace)
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
-                            .multilineTextAlignment(.leading)
-                        
+                        if isFastestPaceLoading {
+                            ProgressView()
+                                .frame(height: 28)
+                        } else {
+                            Text(formattedFastestPace)
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                                .multilineTextAlignment(.leading)
+                        }
+
                         if isCalculating || isRefreshingFastestPace {
-                            HStack {
-                                ProgressView()
-                                    .scaleEffect(0.6)
-                                Text("Calculating...")
-                                    .font(.caption2)
-                                    .foregroundColor(.green)
-                            }
-                        } else if (statsType == .allTime ? user.fastestMilePace : statsData.fastestPace) > 0 {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .frame(height: 14)
+                        } else {
                             Text(statsType == .allTime ? "All time" : "Current streak")
                                 .font(.caption2)
                                 .foregroundColor(.green)
                         }
                     }
                     .padding()
-                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 100)
                     .background(
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color.green.opacity(0.1))
@@ -1755,17 +1764,23 @@ struct UnifiedStatsGrid: View {
                                 .foregroundColor(.secondary)
                         }
                         
-                        Text(String(format: "%.1f mi", mostMiles))
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
-                        
+                        if isCalculating && statsType == .currentStreak && !hasLoadedOnce {
+                            ProgressView()
+                                .frame(height: 28)
+                        } else {
+                            Text(String(format: "%.1f mi", mostMiles))
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                        }
+
                         Text(statsType == .allTime ? "All time" : "Current streak")
                             .font(.caption2)
                             .foregroundColor(.purple)
                     }
                     .padding()
-                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 100)
                     .background(
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color.purple.opacity(0.1))
@@ -1776,7 +1791,7 @@ struct UnifiedStatsGrid: View {
                     )
                 }
                 .buttonStyle(PlainButtonStyle())
-                
+
                 // Daily Goal / Streak Days Card
                 if statsType == .allTime {
                     Button {
@@ -1801,7 +1816,8 @@ struct UnifiedStatsGrid: View {
                                 .foregroundColor(.gray)
                         }
                         .padding()
-                        .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 100)
                         .background(
                             RoundedRectangle(cornerRadius: 12)
                                 .fill(Color.gray.opacity(0.1))
@@ -1822,10 +1838,15 @@ struct UnifiedStatsGrid: View {
                                 .foregroundColor(.secondary)
                         }
 
-                        Text("\(streakDays)")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
+                        if isCalculating && !hasLoadedOnce {
+                            ProgressView()
+                                .frame(height: 28)
+                        } else {
+                            Text("\(streakDays)")
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                        }
 
                         if streakDays > 0 {
                             Text("Current streak")
@@ -1834,7 +1855,8 @@ struct UnifiedStatsGrid: View {
                         }
                     }
                     .padding()
-                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 100)
                     .background(
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color.orange.opacity(0.1))
@@ -1864,7 +1886,8 @@ struct UnifiedStatsGrid: View {
                             .foregroundColor(.red)
                     }
                     .padding()
-                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 100)
                     .background(
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color.red.opacity(0.1))
@@ -1884,17 +1907,23 @@ struct UnifiedStatsGrid: View {
                                 .foregroundColor(.secondary)
                         }
 
-                        Text(String(format: "%.2f mi", avgMilesPerDay))
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(.primary)
+                        if isCalculating && !hasLoadedOnce {
+                            ProgressView()
+                                .frame(height: 28)
+                        } else {
+                            Text(String(format: "%.2f mi", avgMilesPerDay))
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                        }
 
                         Text("Current streak")
                             .font(.caption2)
                             .foregroundColor(.cyan)
                     }
                     .padding()
-                    .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 100)
                     .background(
                         RoundedRectangle(cornerRadius: 12)
                             .fill(Color.cyan.opacity(0.1))
@@ -1948,14 +1977,21 @@ struct UnifiedStatsGrid: View {
     }
     
     private func calculateCurrentStreakStats() {
-        isCalculating = true
-        
+        // Show cached data immediately to avoid content shift
+        let cached = healthManager.cachedCurrentStreakStats
+        if cached.streakDays > 0 && !hasLoadedOnce {
+            statsData = cached
+        }
+
+        isCalculating = !hasLoadedOnce
+
         DispatchQueue.global(qos: .userInitiated).async {
             let stats = healthManager.calculateCurrentStreakStats()
-            
+
             DispatchQueue.main.async {
                 self.statsData = stats
                 self.isCalculating = false
+                self.hasLoadedOnce = true
             }
         }
     }

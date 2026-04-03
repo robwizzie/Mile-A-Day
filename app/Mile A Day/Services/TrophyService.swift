@@ -23,11 +23,23 @@ class TrophyService: ObservableObject {
                 }
                 let myUser = rankedUsers[myIndex]
 
+                // Use authoritative winner field for 1st place accuracy
+                let placement: Int
+                if let winnerId = competition.winner, winnerId == currentUserId {
+                    placement = 1
+                } else if competition.winner != nil && competition.winner != currentUserId && myIndex == 0 {
+                    // Backend says someone else won, but score sort puts us first (tie scenario)
+                    // Trust backend winner — we're at least 2nd
+                    placement = 2
+                } else {
+                    placement = myIndex + 1
+                }
+
                 return CompetitionTrophy(
                     id: competition.competition_id,
                     competitionName: competition.competition_name,
                     competitionType: competition.type,
-                    placement: myIndex + 1,
+                    placement: placement,
                     score: myUser.score ?? 0,
                     totalParticipants: rankedUsers.count,
                     completedDate: competition.end_date ?? "",

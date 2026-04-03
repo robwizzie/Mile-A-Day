@@ -13,6 +13,7 @@ struct Competition: Codable, Identifiable {
     let type: CompetitionType
     let options: CompetitionOptions
     let owner: String
+    let winner: String?
     let users: [CompetitionUser]
 
     var id: String { competition_id }
@@ -26,10 +27,11 @@ struct Competition: Codable, Identifiable {
         case type
         case options
         case owner
+        case winner
         case users
     }
 
-    init(competition_id: String, competition_name: String, start_date: String?, end_date: String?, workouts: [CompetitionActivity], type: CompetitionType, options: CompetitionOptions, owner: String, users: [CompetitionUser]) {
+    init(competition_id: String, competition_name: String, start_date: String?, end_date: String?, workouts: [CompetitionActivity], type: CompetitionType, options: CompetitionOptions, owner: String, winner: String? = nil, users: [CompetitionUser]) {
         self.competition_id = competition_id
         self.competition_name = competition_name
         self.start_date = start_date
@@ -38,6 +40,7 @@ struct Competition: Codable, Identifiable {
         self.type = type
         self.options = options
         self.owner = owner
+        self.winner = winner
         self.users = users
     }
 
@@ -51,6 +54,7 @@ struct Competition: Codable, Identifiable {
         type = try container.decode(CompetitionType.self, forKey: .type)
         options = try container.decodeIfPresent(CompetitionOptions.self, forKey: .options) ?? CompetitionOptions.defaults
         owner = try container.decode(String.self, forKey: .owner)
+        winner = try container.decodeIfPresent(String.self, forKey: .winner)
         users = try container.decodeIfPresent([CompetitionUser].self, forKey: .users) ?? []
     }
 
@@ -60,6 +64,23 @@ struct Competition: Codable, Identifiable {
             return false
         }
         return owner == currentUserId
+    }
+
+    /// Whether the current user won this competition (1st place)
+    var isWinner: Bool {
+        guard status == .finished,
+              let currentUserId = UserDefaults.standard.string(forKey: "backendUserId") else {
+            return false
+        }
+        // Use authoritative winner field from backend if available
+        if let winnerId = winner {
+            return winnerId == currentUserId
+        }
+        // Fallback: compute from scores
+        let ranked = users
+            .filter { $0.invite_status == .accepted }
+            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        return ranked.first?.user_id == currentUserId
     }
 
     var currentUserInviteStatus: InviteStatus? {
