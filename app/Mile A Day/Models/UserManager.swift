@@ -109,6 +109,7 @@ class UserManager: ObservableObject {
         currentUser.lastName = backendResponse.user.last_name
         currentUser.bio = backendResponse.user.bio
         currentUser.profileImageUrl = backendResponse.user.profile_image_url
+        currentUser.role = backendResponse.user.role
 
         // Update name if we have it from Apple
         if let fullName = profile.fullName?.formatted(), !fullName.isEmpty {

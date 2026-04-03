@@ -9,6 +9,7 @@ struct User: Identifiable, Codable {
     var username: String?
     var bio: String?
     var profileImageUrl: String? = nil
+    var role: String? = nil
     var streak: Int = 0
     var totalMiles: Double = 0.0
     var fastestMilePace: TimeInterval = 0.0  // Minutes per mile (fastest pace)

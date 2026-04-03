@@ -9,6 +9,7 @@ import SwiftUI
 
 struct FriendWorkoutsSection: View {
     let workouts: [FriendWorkout]
+    var onWorkoutTap: ((FriendWorkout) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
@@ -18,38 +19,46 @@ struct FriendWorkoutsSection: View {
                     .font(.title3)
                     .foregroundColor(MADTheme.Colors.madRed)
                 Text("Recent Workouts")
-                    .font(.system(size: 20, weight: .bold))
+                    .font(MADTheme.Typography.title3)
                     .foregroundColor(MADTheme.Colors.primaryText)
                 Spacer()
                 Text("\(workouts.count)")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(MADTheme.Typography.smallBold)
                     .foregroundColor(MADTheme.Colors.secondaryText)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(
                         Capsule()
-                            .fill(MADTheme.Colors.secondaryBackground)
+                            .fill(Color.white.opacity(0.08))
                     )
             }
             .padding(.top, MADTheme.Spacing.md)
 
-            // Workouts List - removed prefix(10) to show all workouts
-            VStack(spacing: MADTheme.Spacing.xs) {
+            // Workouts List
+            VStack(spacing: MADTheme.Spacing.sm) {
                 ForEach(workouts) { workout in
-                    FriendWorkoutRow(workout: workout)
+                    if let onTap = onWorkoutTap {
+                        Button {
+                            onTap(workout)
+                        } label: {
+                            FriendWorkoutRow(workout: workout, showChevron: true)
+                        }
+                        .buttonStyle(ScaleButtonStyle())
+                    } else {
+                        FriendWorkoutRow(workout: workout)
+                    }
                 }
             }
             .padding(.bottom, MADTheme.Spacing.md)
         }
         .padding(.horizontal, MADTheme.Spacing.md)
-        .background(MADTheme.Colors.primaryBackground)
-        .cornerRadius(MADTheme.CornerRadius.large)
-        .shadow(color: Color.black.opacity(0.1), radius: 10, x: 0, y: 5)
+        .madLiquidGlass()
     }
 }
 
 struct FriendWorkoutRow: View {
     let workout: FriendWorkout
+    var showChevron: Bool = false
 
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
@@ -57,23 +66,23 @@ struct FriendWorkoutRow: View {
             ZStack {
                 Circle()
                     .fill(workoutColor.opacity(0.15))
-                    .frame(width: 48, height: 48)
-                
+                    .frame(width: 44, height: 44)
+
                 Image(systemName: workoutIcon)
-                    .font(.system(size: 20))
+                    .font(.system(size: 18, weight: .medium))
                     .foregroundColor(workoutColor)
             }
 
             // Workout Details
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(workout.formattedDate)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(MADTheme.Typography.body)
+                        .fontWeight(.medium)
                         .foregroundColor(MADTheme.Colors.primaryText)
-                    
-                    // Type badge
+
                     Text(workout.workoutType.capitalized)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundColor(workoutColor)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 3)
@@ -84,37 +93,38 @@ struct FriendWorkoutRow: View {
                 }
 
                 HStack(spacing: 12) {
-                    // Distance
                     HStack(spacing: 4) {
                         Image(systemName: "location.fill")
-                            .font(.system(size: 11))
+                            .font(.system(size: 10))
                             .foregroundColor(MADTheme.Colors.secondaryText)
                         Text(workout.formattedDistance)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(MADTheme.Typography.caption)
+                            .fontWeight(.medium)
                             .foregroundColor(MADTheme.Colors.primaryText)
                     }
-                    
-                    // Duration
+
                     HStack(spacing: 4) {
                         Image(systemName: "clock.fill")
-                            .font(.system(size: 11))
+                            .font(.system(size: 10))
                             .foregroundColor(MADTheme.Colors.secondaryText)
                         Text(workout.formattedDuration)
-                            .font(.system(size: 13))
+                            .font(MADTheme.Typography.caption)
                             .foregroundColor(MADTheme.Colors.secondaryText)
                     }
                 }
             }
 
             Spacer()
+
+            if showChevron {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(MADTheme.Colors.secondaryText)
+            }
         }
         .padding(MADTheme.Spacing.md)
-        .background(MADTheme.Colors.secondaryBackground)
+        .background(Color.white.opacity(0.05))
         .cornerRadius(MADTheme.CornerRadius.medium)
-        .overlay(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .stroke(workoutColor.opacity(0.1), lineWidth: 1)
-        )
     }
 
     private var workoutIcon: String {
@@ -131,7 +141,7 @@ struct FriendWorkoutRow: View {
             return "figure.run"
         }
     }
-    
+
     private var workoutColor: Color {
         switch workout.workoutType.lowercased() {
         case "running":
@@ -147,4 +157,3 @@ struct FriendWorkoutRow: View {
         }
     }
 }
-

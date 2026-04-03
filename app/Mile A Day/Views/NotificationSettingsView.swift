@@ -19,20 +19,70 @@ struct NotificationSettingsView: View {
     }
 
     var body: some View {
-        Form {
-            Section(header: Text("Daily Reminder")) {
-                Toggle("Enable Daily Reminder", isOn: $prefs.dailyReminderEnabled)
-                if prefs.dailyReminderEnabled {
-                    DatePicker("", selection: reminderTimeBinding, displayedComponents: .hourAndMinute)
-                        .datePickerStyle(.wheel)
-                }
-            }
+        ZStack {
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea()
 
-            Section(header: Text("Instant Notifications")) {
-                Toggle("When I complete a mile", isOn: $prefs.mileCompletedEnabled)
-                Toggle("When a friend completes a mile", isOn: $prefs.friendCompletedEnabled)
-                Toggle("When I receive a friend request", isOn: $prefs.friendRequestReceivedEnabled)
-                Toggle("When a friend request is accepted", isOn: $prefs.friendRequestAcceptedEnabled)
+            ScrollView {
+                VStack(spacing: MADTheme.Spacing.lg) {
+                    // Daily Reminder Section
+                    VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                        Text("DAILY REMINDER")
+                            .font(MADTheme.Typography.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
+                            .tracking(0.5)
+
+                        Toggle("Enable Daily Reminder", isOn: $prefs.dailyReminderEnabled)
+                            .font(MADTheme.Typography.body)
+                            .tint(MADTheme.Colors.madRed)
+
+                        if prefs.dailyReminderEnabled {
+                            Divider().overlay(Color.white.opacity(0.06))
+
+                            DatePicker("Reminder Time", selection: reminderTimeBinding, displayedComponents: .hourAndMinute)
+                                .font(MADTheme.Typography.body)
+                                .datePickerStyle(.compact)
+                                .tint(MADTheme.Colors.madRed)
+                        }
+                    }
+                    .padding(MADTheme.Spacing.md)
+                    .madLiquidGlass()
+
+                    // Instant Notifications Section
+                    VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                        Text("INSTANT NOTIFICATIONS")
+                            .font(MADTheme.Typography.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.secondary)
+                            .tracking(0.5)
+
+                        Toggle("When I complete a mile", isOn: $prefs.mileCompletedEnabled)
+                            .font(MADTheme.Typography.body)
+                            .tint(MADTheme.Colors.madRed)
+
+                        Divider().overlay(Color.white.opacity(0.06))
+
+                        Toggle("When a friend completes a mile", isOn: $prefs.friendCompletedEnabled)
+                            .font(MADTheme.Typography.body)
+                            .tint(MADTheme.Colors.madRed)
+
+                        Divider().overlay(Color.white.opacity(0.06))
+
+                        Toggle("When I receive a friend request", isOn: $prefs.friendRequestReceivedEnabled)
+                            .font(MADTheme.Typography.body)
+                            .tint(MADTheme.Colors.madRed)
+
+                        Divider().overlay(Color.white.opacity(0.06))
+
+                        Toggle("When a friend request is accepted", isOn: $prefs.friendRequestAcceptedEnabled)
+                            .font(MADTheme.Typography.body)
+                            .tint(MADTheme.Colors.madRed)
+                    }
+                    .padding(MADTheme.Spacing.md)
+                    .madLiquidGlass()
+                }
+                .padding(MADTheme.Spacing.md)
             }
 
             Section(header: Text("Competitions")) {
@@ -44,23 +94,24 @@ struct NotificationSettingsView: View {
             }
         }
         .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") {
                     saveAndApply()
                 }
+                .foregroundColor(MADTheme.Colors.madRed)
+                .fontWeight(.semibold)
             }
         }
     }
 
     private func saveAndApply() {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         prefs.save()
-        // Update daily reminder schedule based on new prefs
         if prefs.dailyReminderEnabled {
-            // Get current health data for smart notification
             let widgetData = WidgetDataStore.load()
-            
-            // Use smart daily reminder logic
             notificationService.updateDailyReminder(
                 isCompleted: widgetData.miles >= widgetData.goal,
                 currentMiles: widgetData.miles,
@@ -68,7 +119,6 @@ struct NotificationSettingsView: View {
                 at: prefs.dailyReminderHour
             )
         } else {
-            // Remove existing reminder
             UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [MADNotificationService.Identifier.dailyReminder])
         }
     }
@@ -78,4 +128,4 @@ struct NotificationSettingsView: View {
     NavigationStack {
         NotificationSettingsView()
     }
-} 
+}

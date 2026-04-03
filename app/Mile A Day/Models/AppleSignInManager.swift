@@ -34,6 +34,7 @@ class AppleSignInManager: NSObject, ObservableObject {
         let profile_image_url: String?
         let apple_id: String?
         let auth_provider: String?
+        let role: String?
     }
 
     func signIn() async throws -> (AppleUserProfile, BackendAuthResponse) {

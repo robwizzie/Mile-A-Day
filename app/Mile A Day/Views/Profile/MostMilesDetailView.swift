@@ -216,16 +216,25 @@ struct WorkoutRow: View {
         return formatter.string(from: workout.duration) ?? "Unknown"
     }
     
+    private var workoutColor: Color {
+        switch workout.workoutActivityType {
+        case .running: return MADTheme.Colors.madRed
+        case .walking: return .blue
+        case .cycling: return .green
+        default: return .purple
+        }
+    }
+
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
             ZStack {
                 Circle()
-                    .fill(MADTheme.Colors.madRed.opacity(0.15))
+                    .fill(workoutColor.opacity(0.15))
                     .frame(width: 40, height: 40)
-                
+
                 Image(systemName: workoutIcon)
                     .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(MADTheme.Colors.madRed)
+                    .foregroundColor(workoutColor)
             }
             
             VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {

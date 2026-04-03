@@ -2209,8 +2209,8 @@ struct WorkoutDetailView: View {
     private var workoutColor: Color {
         switch workout.workoutActivityType {
         case .running: return MADTheme.Colors.madRed
-        case .walking: return .orange
-        case .cycling: return .blue
+        case .walking: return .blue
+        case .cycling: return .green
         default: return .purple
         }
     }
