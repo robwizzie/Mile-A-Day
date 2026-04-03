@@ -47,7 +47,8 @@ class ProfileImageService {
         }
 
         guard httpResponse.statusCode == 200 else {
-            throw ProfileImageError.serverError("Upload failed with status \(httpResponse.statusCode)")
+            let responseBody = String(data: data, encoding: .utf8) ?? ""
+            throw ProfileImageError.serverError("Upload failed with status \(httpResponse.statusCode): \(responseBody)")
         }
 
         let uploadResponse = try JSONDecoder().decode(UploadResponse.self, from: data)

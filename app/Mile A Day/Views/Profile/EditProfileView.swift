@@ -8,9 +8,9 @@ struct EditProfileView: View {
     @State private var lastName: String
     @State private var username: String
     @State private var bio: String
-    @State private var selectedImage: UIImage?
+    @State private var selectedImageData: Data?
     @State private var pickedImage: UIImage?
-    @State private var currentProfileImage: UIImage?
+    @State private var displayImage: UIImage?
     @State private var showingImagePicker = false
     @State private var showingCropper = false
     @State private var isSaving = false
@@ -42,7 +42,7 @@ struct EditProfileView: View {
             || lastName != (user.lastName ?? "")
             || username != (user.username ?? "")
             || bio != (user.bio ?? "")
-            || selectedImage != nil
+            || selectedImageData != nil
     }
 
     private var canSave: Bool {
@@ -103,8 +103,8 @@ struct EditProfileView: View {
                     ProfileImageCropper(
                         image: image,
                         onCrop: { cropped in
-                            selectedImage = cropped
-                            currentProfileImage = cropped
+                            selectedImageData = cropped.jpegData(compressionQuality: 0.8)
+                            displayImage = cropped
                             showingCropper = false
                             pickedImage = nil
                         },
@@ -136,7 +136,7 @@ struct EditProfileView: View {
                         .fill(MADTheme.Colors.redGradient)
                         .frame(width: 100, height: 100)
 
-                    if let image = currentProfileImage {
+                    if let image = displayImage {
                         Image(uiImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
@@ -370,14 +370,14 @@ struct EditProfileView: View {
             Task {
                 if let (data, _) = try? await URLSession.shared.data(from: url),
                    let image = UIImage(data: data) {
-                    await MainActor.run { currentProfileImage = image }
+                    await MainActor.run { displayImage = image }
                     return
                 }
                 // Fall back to local
-                await MainActor.run { currentProfileImage = getLocalProfileImage() }
+                await MainActor.run { displayImage = getLocalProfileImage() }
             }
         } else {
-            currentProfileImage = getLocalProfileImage()
+            displayImage = getLocalProfileImage()
         }
     }
 
@@ -405,14 +405,12 @@ struct EditProfileView: View {
                 }
 
                 // Upload image if changed
-                if let image = selectedImage {
+                if let imageData = selectedImageData, let image = UIImage(data: imageData) {
                     let imageUrl = try await ProfileImageService.uploadProfileImage(image, userId: backendUserId)
                     await MainActor.run {
                         userManager.currentUser.profileImageUrl = imageUrl
                         // Also save locally for fast access
-                        if let data = image.jpegData(compressionQuality: 0.8) {
-                            UserDefaults.standard.set(data, forKey: "customProfileImage")
-                        }
+                        UserDefaults.standard.set(imageData, forKey: "customProfileImage")
                     }
                 }
 

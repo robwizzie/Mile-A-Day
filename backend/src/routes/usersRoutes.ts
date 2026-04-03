@@ -35,6 +35,13 @@ router.patch('/:userId', requireSelfAccess('userId'), updateUser);
 router.patch('/:userId/username', requireSelfAccess('userId'), updateUserUsername);
 router.patch('/:userId/bio', requireSelfAccess('userId'), updateUserBio);
 router.patch('/:userId/profile-image', requireSelfAccess('userId'), updateUserProfileImage);
-router.post('/:userId/profile-image/upload', requireSelfAccess('userId'), upload.single('image'), uploadProfileImage);
+router.post('/:userId/profile-image/upload', requireSelfAccess('userId'), (req, res, next) => {
+	upload.single('image')(req, res, (err) => {
+		if (err) {
+			return res.status(400).json({ error: 'File upload failed', message: err.message });
+		}
+		next();
+	});
+}, uploadProfileImage);
 
 export default router;
