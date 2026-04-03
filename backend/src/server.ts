@@ -13,6 +13,7 @@ import deviceRoutes from './routes/deviceRoutes.js';
 import { authenticateToken } from './middleware/auth.js';
 import { startCompetitionCron } from './cron/competitionCron.js';
 import { startNotificationCron } from './cron/notificationCron.js';
+import { PostgresService } from './services/DbService.js';
 import { webcrypto } from 'node:crypto';
 
 (globalThis as any).crypto ??= webcrypto;
@@ -36,6 +37,22 @@ app.get('/status', (req, res) => {
 
 app.get('/test-signin.html', (req, res) => {
 	res.sendFile(path.join(process.cwd(), 'test-signin.html'));
+});
+
+// Public endpoint: get profile image URL by username
+app.get('/public/profile-image/:username', (req, res, next) => {
+	res.setHeader('Access-Control-Allow-Origin', '*');
+	next();
+}, async (req, res) => {
+	const db = PostgresService.getInstance();
+	const results = await db.query(
+		'SELECT profile_image_url FROM users WHERE username = $1',
+		[req.params.username]
+	);
+	if (!results.length || !results[0].profile_image_url) {
+		return res.status(404).json({ error: 'Not found' });
+	}
+	res.json({ profile_image_url: results[0].profile_image_url });
 });
 
 app.use('/auth', authRoutes);
