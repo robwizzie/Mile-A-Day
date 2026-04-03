@@ -9,8 +9,10 @@ struct EditProfileView: View {
     @State private var username: String
     @State private var bio: String
     @State private var selectedImage: UIImage?
+    @State private var pickedImage: UIImage?
     @State private var currentProfileImage: UIImage?
     @State private var showingImagePicker = false
+    @State private var showingCropper = false
     @State private var isSaving = false
     @State private var saveError: String?
 
@@ -94,11 +96,28 @@ struct EditProfileView: View {
                 }
             }
             .sheet(isPresented: $showingImagePicker) {
-                ImagePicker(selectedImage: $selectedImage)
+                ImagePicker(selectedImage: $pickedImage)
             }
-            .onChange(of: selectedImage) { _, newImage in
-                if let image = newImage {
-                    currentProfileImage = image
+            .fullScreenCover(isPresented: $showingCropper) {
+                if let image = pickedImage {
+                    ProfileImageCropper(
+                        image: image,
+                        onCrop: { cropped in
+                            selectedImage = cropped
+                            currentProfileImage = cropped
+                            showingCropper = false
+                            pickedImage = nil
+                        },
+                        onCancel: {
+                            showingCropper = false
+                            pickedImage = nil
+                        }
+                    )
+                }
+            }
+            .onChange(of: pickedImage) { _, newImage in
+                if newImage != nil {
+                    showingCropper = true
                 }
             }
             .onAppear {
@@ -376,9 +395,10 @@ struct EditProfileView: View {
 
         Task {
             do {
-                guard let backendUserId = userManager.currentUser.backendUserId else {
+                guard let backendUserId = userManager.currentUser.backendUserId
+                    ?? UserDefaults.standard.string(forKey: "backendUserId") else {
                     await MainActor.run {
-                        saveError = "No backend user ID"
+                        saveError = "Please sign out and sign back in to edit your profile"
                         isSaving = false
                     }
                     return
