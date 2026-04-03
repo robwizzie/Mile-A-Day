@@ -155,8 +155,6 @@ struct ProfileImageCropper: View {
         let imgSize = imageDisplaySize(in: geometry)
         let scaledWidth = imgSize.width * scale
         let scaledHeight = imgSize.height * scale
-        let halfCrop = cropSize / 2
-
         let maxX = max(0, (scaledWidth - cropSize) / 2)
         let maxY = max(0, (scaledHeight - cropSize) / 2)
 
