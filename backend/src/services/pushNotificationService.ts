@@ -172,7 +172,10 @@ export async function sendPush(userId: string, payload: PushPayload): Promise<vo
 		[userId]
 	);
 
-	if (tokens.length === 0) return;
+	if (tokens.length === 0) {
+		console.log(`[Push] No device tokens found for user ${userId}`);
+		return;
+	}
 
 	const results = await Promise.all(
 		tokens.map(({ device_token }) => sendToDevice(device_token, payload))
