@@ -340,8 +340,54 @@ extension CompetitionDetailView {
     // MARK: - Info Section (shared)
     var infoSection: some View {
         VStack(spacing: MADTheme.Spacing.md) {
-            // Goal (not shown for Clash or Apex - they don't have distance targets)
-            if competition.type != .clash && competition.type != .apex {
+            // Type-specific settings
+            switch competition.type {
+            case .apex:
+                // Unit + Duration
+                InfoRow(icon: "ruler", title: "Unit", value: competition.options.unit.displayName)
+                durationRow
+
+            case .streaks:
+                // Goal + Unit, Interval, Lives
+                InfoRow(
+                    icon: "target",
+                    title: "Goal",
+                    value: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
+                )
+                if let interval = competition.options.interval {
+                    InfoRow(icon: "arrow.trianglehead.2.clockwise", title: "Interval", value: interval.displayName)
+                }
+                if competition.options.first_to > 0 {
+                    InfoRow(icon: "heart", title: "Lives", value: "\(competition.options.first_to)")
+                }
+
+            case .targets:
+                // Goal + Unit, Interval, Lives, Duration
+                InfoRow(
+                    icon: "target",
+                    title: "Goal",
+                    value: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
+                )
+                if let interval = competition.options.interval {
+                    InfoRow(icon: "arrow.trianglehead.2.clockwise", title: "Interval", value: interval.displayName)
+                }
+                if competition.options.first_to > 0 {
+                    InfoRow(icon: "heart", title: "Lives", value: "\(competition.options.first_to)")
+                }
+                durationRow
+
+            case .clash:
+                // Unit, Points to Win, Interval
+                InfoRow(icon: "ruler", title: "Unit", value: competition.options.unit.displayName)
+                if competition.options.first_to > 0 {
+                    InfoRow(icon: "star", title: "Points to Win", value: "\(competition.options.first_to)")
+                }
+                if let interval = competition.options.interval {
+                    InfoRow(icon: "arrow.trianglehead.2.clockwise", title: "Interval", value: interval.displayName)
+                }
+
+            case .race:
+                // Goal + Unit
                 InfoRow(
                     icon: "target",
                     title: "Goal",
@@ -349,52 +395,12 @@ extension CompetitionDetailView {
                 )
             }
 
-            // Duration
-            if let startDate = competition.startDateFormatted,
-               let endDate = competition.endDateFormatted {
-                InfoRow(
-                    icon: "calendar",
-                    title: "Duration",
-                    value: "\(startDate.formatted(date: .abbreviated, time: .omitted)) - \(endDate.formatted(date: .abbreviated, time: .omitted))"
-                )
-            } else if let durationStr = competition.options.durationFormatted {
-                InfoRow(
-                    icon: "clock",
-                    title: "Duration",
-                    value: durationStr
-                )
-            } else {
-                InfoRow(
-                    icon: "infinity",
-                    title: "Duration",
-                    value: "Open-ended"
-                )
-            }
-
-            // Workouts
+            // Activities (all types)
             InfoRow(
                 icon: "figure.run",
                 title: "Activities",
                 value: competition.workouts.map { $0.displayName }.joined(separator: ", ")
             )
-
-            // Interval (if applicable)
-            if let interval = competition.options.interval {
-                InfoRow(
-                    icon: "clock",
-                    title: "Interval",
-                    value: interval.displayName
-                )
-            }
-
-            // First to (if applicable)
-            if competition.type == .streaks || competition.type == .clash {
-                InfoRow(
-                    icon: "number",
-                    title: competition.type == .streaks ? "Breaks to Lose" : "Wins to Win",
-                    value: "\(competition.options.first_to)"
-                )
-            }
 
         }
         .padding(MADTheme.Spacing.lg)
@@ -414,6 +420,20 @@ extension CompetitionDetailView {
                 )
         )
         .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+    }
+
+    @ViewBuilder
+    var durationRow: some View {
+        if let startDate = competition.startDateFormatted,
+           let endDate = competition.endDateFormatted {
+            InfoRow(
+                icon: "calendar",
+                title: "Duration",
+                value: "\(startDate.formatted(date: .abbreviated, time: .omitted)) - \(endDate.formatted(date: .abbreviated, time: .omitted))"
+            )
+        } else if let durationStr = competition.options.durationFormatted {
+            InfoRow(icon: "clock", title: "Duration", value: durationStr)
+        }
     }
 
     // MARK: - Invite Button

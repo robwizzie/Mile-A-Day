@@ -132,10 +132,6 @@ struct EditProfileView: View {
         VStack(spacing: MADTheme.Spacing.md) {
             Button(action: { showingImagePicker = true }) {
                 ZStack {
-                    Circle()
-                        .fill(MADTheme.Colors.redGradient)
-                        .frame(width: 100, height: 100)
-
                     if let image = currentProfileImage {
                         Image(uiImage: image)
                             .resizable()
@@ -143,9 +139,7 @@ struct EditProfileView: View {
                             .frame(width: 100, height: 100)
                             .clipShape(Circle())
                     } else {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 40, weight: .medium))
-                            .foregroundColor(.white)
+                        AvatarView(name: userManager.currentUser.name, imageURL: userManager.currentUser.profileImageUrl, size: 100)
                     }
 
                     VStack {

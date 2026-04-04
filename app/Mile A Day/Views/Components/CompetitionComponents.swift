@@ -152,41 +152,76 @@ struct CompetitionCard: View {
 
                     // Stats chips
                     HStack(spacing: MADTheme.Spacing.sm) {
-                        // Goal chip (not for Clash or Apex)
-                        if competition.type != .clash && competition.type != .apex {
+                        // Type-specific stat chips
+                        switch competition.type {
+                        case .apex:
+                            StatChip(icon: "ruler", text: competition.options.unit.shortDisplayName)
+                            if let durationStr = competition.options.durationFormatted {
+                                StatChip(icon: "clock", text: durationStr)
+                            }
+
+                        case .streaks:
                             StatChip(
                                 icon: "target",
                                 text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
                             )
-                        }
+                            if let interval = competition.options.interval {
+                                StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
+                            }
+                            if competition.options.first_to > 0 {
+                                if let currentUserId = UserDefaults.standard.string(forKey: "backendUserId"),
+                                   let currentUser = competition.users.first(where: { $0.user_id == currentUserId }),
+                                   let lives = currentUser.remaining_lives {
+                                    LivesChip(remaining: lives, total: competition.options.first_to)
+                                } else {
+                                    StatChip(
+                                        icon: "heart",
+                                        text: "\(competition.options.first_to) \(competition.options.first_to == 1 ? "life" : "lives")"
+                                    )
+                                }
+                            }
 
-                        // Points chip (Clash) or Lives chip (Streaks)
-                        if competition.type == .clash && competition.options.first_to > 0 {
+                        case .targets:
                             StatChip(
-                                icon: "star",
-                                text: "First to \(competition.options.first_to)"
+                                icon: "target",
+                                text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
                             )
-                        }
+                            if let interval = competition.options.interval {
+                                StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
+                            }
+                            if competition.options.first_to > 0 {
+                                if let currentUserId = UserDefaults.standard.string(forKey: "backendUserId"),
+                                   let currentUser = competition.users.first(where: { $0.user_id == currentUserId }),
+                                   let lives = currentUser.remaining_lives {
+                                    LivesChip(remaining: lives, total: competition.options.first_to)
+                                } else {
+                                    StatChip(
+                                        icon: "heart",
+                                        text: "\(competition.options.first_to) \(competition.options.first_to == 1 ? "life" : "lives")"
+                                    )
+                                }
+                            }
+                            if let durationStr = competition.options.durationFormatted {
+                                StatChip(icon: "clock", text: durationStr)
+                            }
 
-                        if competition.type == .streaks && competition.options.first_to > 0 {
-                            if let currentUserId = UserDefaults.standard.string(forKey: "backendUserId"),
-                               let currentUser = competition.users.first(where: { $0.user_id == currentUserId }),
-                               let lives = currentUser.remaining_lives {
-                                LivesChip(remaining: lives, total: competition.options.first_to)
-                            } else {
+                        case .clash:
+                            StatChip(icon: "ruler", text: competition.options.unit.shortDisplayName)
+                            if competition.options.first_to > 0 {
                                 StatChip(
-                                    icon: "heart",
-                                    text: "\(competition.options.first_to) \(competition.options.first_to == 1 ? "life" : "lives")"
+                                    icon: "star",
+                                    text: "First to \(competition.options.first_to)"
                                 )
                             }
-                        }
+                            if let interval = competition.options.interval {
+                                StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
+                            }
 
-                        if let durationStr = competition.options.durationFormatted {
-                            StatChip(icon: "clock", text: durationStr)
-                        }
-
-                        if let interval = competition.options.interval {
-                            StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
+                        case .race:
+                            StatChip(
+                                icon: "target",
+                                text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
+                            )
                         }
 
                         Spacer()
@@ -492,15 +527,63 @@ struct InviteCard: View {
 
                 // Stats chips
                 HStack(spacing: MADTheme.Spacing.sm) {
-                    if competition.type != .clash {
+                    switch competition.type {
+                    case .apex:
+                        StatChip(icon: "ruler", text: competition.options.unit.shortDisplayName)
+                        if let durationStr = competition.options.durationFormatted {
+                            StatChip(icon: "clock", text: durationStr)
+                        }
+
+                    case .streaks:
                         StatChip(
                             icon: "target",
                             text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
                         )
-                    }
+                        if let interval = competition.options.interval {
+                            StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
+                        }
+                        if competition.options.first_to > 0 {
+                            StatChip(
+                                icon: "heart",
+                                text: "\(competition.options.first_to) \(competition.options.first_to == 1 ? "life" : "lives")"
+                            )
+                        }
 
-                    if let durationStr = competition.options.durationFormatted {
-                        StatChip(icon: "clock", text: durationStr)
+                    case .targets:
+                        StatChip(
+                            icon: "target",
+                            text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
+                        )
+                        if let interval = competition.options.interval {
+                            StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
+                        }
+                        if competition.options.first_to > 0 {
+                            StatChip(
+                                icon: "heart",
+                                text: "\(competition.options.first_to) \(competition.options.first_to == 1 ? "life" : "lives")"
+                            )
+                        }
+                        if let durationStr = competition.options.durationFormatted {
+                            StatChip(icon: "clock", text: durationStr)
+                        }
+
+                    case .clash:
+                        StatChip(icon: "ruler", text: competition.options.unit.shortDisplayName)
+                        if competition.options.first_to > 0 {
+                            StatChip(
+                                icon: "star",
+                                text: "First to \(competition.options.first_to)"
+                            )
+                        }
+                        if let interval = competition.options.interval {
+                            StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
+                        }
+
+                    case .race:
+                        StatChip(
+                            icon: "target",
+                            text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
+                        )
                     }
 
                     Spacer()
