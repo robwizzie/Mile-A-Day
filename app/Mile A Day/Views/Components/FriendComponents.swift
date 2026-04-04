@@ -6,19 +6,22 @@ struct UserProfileCard: View {
     let user: BackendUser
     let showStats: Bool
     let showBadges: Bool
+    let showDetails: Bool
     let onTap: () -> Void
     let actionButton: AnyView?
-    
+
     init(
         user: BackendUser,
         showStats: Bool = true,
         showBadges: Bool = true,
+        showDetails: Bool = true,
         onTap: @escaping () -> Void,
         actionButton: AnyView? = nil
     ) {
         self.user = user
         self.showStats = showStats
         self.showBadges = showBadges
+        self.showDetails = showDetails
         self.onTap = onTap
         self.actionButton = actionButton
     }
@@ -45,7 +48,7 @@ struct UserProfileCard: View {
                         }
 
                         // Bio
-                        if let bio = user.bio, !bio.isEmpty {
+                        if showDetails, let bio = user.bio, !bio.isEmpty {
                             Text(bio)
                                 .font(MADTheme.Typography.caption)
                                 .foregroundColor(MADTheme.Colors.secondaryText)
@@ -69,37 +72,17 @@ struct UserProfileCard: View {
 }
 
 // MARK: - Profile Image View
-/// Reusable profile image component with fallback
+/// Reusable profile image component with fallback (wraps AvatarView with madRed border)
 struct ProfileImageView: View {
     let user: BackendUser
     let size: CGFloat
-    
+
     var body: some View {
-        Group {
-            if user.hasProfileImage, let imageURL = ProfileImageService.fullImageURL(for: user.profile_image_url) {
-                AsyncImage(url: imageURL) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    ProgressView()
-                        .frame(width: size, height: size)
-                }
-            } else {
-                // Fallback to initials
-                Text(user.initials)
-                    .font(.system(size: size * 0.4, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
-                    .frame(width: size, height: size)
-                    .background(MADTheme.Colors.redGradient)
-            }
-        }
-        .frame(width: size, height: size)
-        .clipShape(Circle())
-        .overlay(
-            Circle()
-                .stroke(MADTheme.Colors.madRed.opacity(0.3), lineWidth: 2)
-        )
+        AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: size)
+            .overlay(
+                Circle()
+                    .stroke(MADTheme.Colors.madRed.opacity(0.3), lineWidth: 2)
+            )
     }
 }
 

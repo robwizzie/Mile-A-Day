@@ -202,23 +202,24 @@ struct FriendsListView: View {
                         ForEach(friendService.friendRequests) { request in
                             UserProfileCard(
                                 user: request,
+                                showDetails: false,
                                 onTap: {
                                     selectedUser = request
                                 },
                                 actionButton: AnyView(
-                                    HStack(spacing: MADTheme.Spacing.md) {
+                                    VStack(spacing: MADTheme.Spacing.sm) {
                                         // Accept button
                                         Button(action: {
                                             handleAcceptRequest(request)
                                         }) {
                                             HStack(spacing: MADTheme.Spacing.xs) {
                                                 Image(systemName: "checkmark")
-                                                    .font(.system(size: 14, weight: .semibold))
+                                                    .font(.system(size: 12, weight: .semibold))
                                                 Text("Accept")
                                                     .font(MADTheme.Typography.smallBold)
                                             }
                                             .foregroundColor(.white)
-                                            .padding(.horizontal, MADTheme.Spacing.md)
+                                            .frame(maxWidth: .infinity)
                                             .padding(.vertical, MADTheme.Spacing.sm)
                                             .background(
                                                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
@@ -231,21 +232,27 @@ struct FriendsListView: View {
                                         Button(action: {
                                             handleDeclineRequest(request)
                                         }) {
-                                            Image(systemName: "xmark")
-                                                .font(.system(size: 14, weight: .semibold))
-                                                .foregroundColor(.white.opacity(0.8))
-                                                .frame(width: 36, height: 36)
-                                                .background(
-                                                    Circle()
-                                                        .fill(Color.red.opacity(0.2))
-                                                        .overlay(
-                                                            Circle()
-                                                                .stroke(Color.red.opacity(0.4), lineWidth: 1)
-                                                        )
-                                                )
+                                            HStack(spacing: MADTheme.Spacing.xs) {
+                                                Image(systemName: "xmark")
+                                                    .font(.system(size: 12, weight: .semibold))
+                                                Text("Decline")
+                                                    .font(MADTheme.Typography.smallBold)
+                                            }
+                                            .foregroundColor(.white.opacity(0.7))
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, MADTheme.Spacing.sm)
+                                            .background(
+                                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                                                    .fill(Color.red.opacity(0.2))
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                                                            .stroke(Color.red.opacity(0.4), lineWidth: 1)
+                                                    )
+                                            )
                                         }
                                         .buttonStyle(.plain)
                                     }
+                                    .frame(width: 90)
                                 )
                             )
                         }
