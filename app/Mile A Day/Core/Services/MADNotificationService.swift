@@ -337,6 +337,14 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             if !isRemoteNotificationEnabled(type: type) {
                 return []
             }
+
+            // Notify the app so badge counts can refresh while in foreground
+            let data = userInfo["data"] as? [String: String] ?? [:]
+            NotificationCenter.default.post(
+                name: .didReceivePushNotification,
+                object: nil,
+                userInfo: ["type": type, "data": data]
+            )
         }
 
         return [.banner, .sound]

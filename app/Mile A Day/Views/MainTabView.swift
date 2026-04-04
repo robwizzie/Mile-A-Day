@@ -9,6 +9,7 @@ struct MainTabView: View {
     @StateObject private var notificationService = MADNotificationService.shared
     @StateObject private var competitionService = CompetitionService()
     @StateObject private var friendService = FriendService()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = 0
 
     var body: some View {
@@ -49,6 +50,27 @@ struct MainTabView: View {
         .task {
             await competitionService.refreshAllData()
             await friendService.refreshAllData()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .didReceivePushNotification)) { notification in
+            guard let type = notification.userInfo?["type"] as? String else { return }
+            Task {
+                switch type {
+                case "friend_request":
+                    await friendService.refreshAllData()
+                case "competition_invite":
+                    await competitionService.refreshAllData()
+                default:
+                    break
+                }
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task {
+                    await competitionService.refreshAllData()
+                    await friendService.refreshAllData()
+                }
+            }
         }
     }
 
