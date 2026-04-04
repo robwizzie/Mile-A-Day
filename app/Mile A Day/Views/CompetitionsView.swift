@@ -1,13 +1,15 @@
 import SwiftUI
 
 struct CompetitionsView: View {
+    @ObservedObject var competitionService: CompetitionService
+
     var body: some View {
-        CompetitionsListView()
+        CompetitionsListView(competitionService: competitionService)
     }
 }
 
 #Preview {
     NavigationStack {
-        CompetitionsView()
+        CompetitionsView(competitionService: CompetitionService())
     }
 }

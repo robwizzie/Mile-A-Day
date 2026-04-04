@@ -7,6 +7,7 @@ struct MainTabView: View {
     @StateObject private var healthManager = HealthKitManager()
     @StateObject private var userManager = UserManager.shared
     @StateObject private var notificationService = MADNotificationService.shared
+    @StateObject private var competitionService = CompetitionService()
     @State private var selectedTab = 0
 
     var body: some View {
@@ -21,9 +22,10 @@ struct MainTabView: View {
             
             Tab("Compete", systemImage: "trophy.fill", value: 1) {
                 NavigationStack {
-                    CompetitionsView()
+                    CompetitionsView(competitionService: competitionService)
                 }
             }
+            .badge(competitionService.invites.count)
 
             Tab("Friends", systemImage: "person.2.fill", value: 2) {
                 NavigationStack {
@@ -41,6 +43,9 @@ struct MainTabView: View {
         .tint(MADTheme.Colors.madRed)
         .onAppear {
             initializeApp()
+        }
+        .task {
+            await competitionService.refreshAllData()
         }
     }
 

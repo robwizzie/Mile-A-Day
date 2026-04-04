@@ -87,6 +87,7 @@ struct FriendsListView: View {
                     title: "Friends",
                     count: friendService.friends.count,
                     isSelected: selectedTab == 0,
+                    showCountAsNotification: false,
                     action: { selectedTab = 0 }
                 )
 
@@ -101,6 +102,7 @@ struct FriendsListView: View {
                     title: "Sent",
                     count: friendService.sentRequests.count,
                     isSelected: selectedTab == 2,
+                    showCountAsNotification: false,
                     action: { selectedTab = 2 }
                 )
             }

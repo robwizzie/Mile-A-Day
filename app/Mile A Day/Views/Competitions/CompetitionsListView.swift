@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Main view for managing competitions
 struct CompetitionsListView: View {
-    @StateObject private var competitionService = CompetitionService()
+    @ObservedObject var competitionService: CompetitionService
     @ObservedObject private var trophyService = TrophyService.shared
     @State private var selectedTab = 0
     @State private var showingCreateCompetition = false
@@ -436,6 +436,6 @@ struct CompetitionEmptyStateView: View {
 
 #Preview {
     NavigationStack {
-        CompetitionsListView()
+        CompetitionsListView(competitionService: CompetitionService())
     }
 }
