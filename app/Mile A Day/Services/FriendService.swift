@@ -165,25 +165,11 @@ class FriendService: ObservableObject {
         guard let currentUserId = getCurrentUserId() else {
             throw FriendServiceError.notAuthenticated
         }
-        
-        // Capture existing request IDs so we can detect newly arrived requests
-        let existingRequestIds = Set(friendRequests.map { $0.user_id })
-        
+
         let endpoint = "/friends/requests/\(currentUserId)"
         let response: FriendRequestsResponse = try await makeRequest(endpoint: endpoint, responseType: FriendRequestsResponse.self)
-        
-        // Update local state
+
         friendRequests = response.requests
-        
-        // Detect any brand new incoming requests and trigger notifications
-        let newRequests = response.requests.filter { !existingRequestIds.contains($0.user_id) }
-        if !newRequests.isEmpty {
-            let notificationService = MADNotificationService.shared
-            newRequests.forEach { user in
-                let displayName = user.displayName
-                notificationService.sendFriendRequestReceivedNotification(fromName: displayName)
-            }
-        }
     }
     
     /// Get sent friend requests
