@@ -361,14 +361,7 @@ struct PodiumView: View {
                         .frame(width: avatarSize + 20, height: avatarSize + 20)
                 }
 
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .frame(width: avatarSize, height: avatarSize)
-                    .overlay(
-                        Text(user.name.prefix(1).uppercased())
-                            .font(.system(size: avatarSize * 0.35, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                    )
+                AvatarView(name: user.name, imageURL: user.profileImageUrl, size: avatarSize)
                     .overlay(
                         Circle()
                             .stroke(
@@ -461,14 +454,7 @@ struct TopThreeRow: View {
             }
 
             // Avatar
-            Circle()
-                .fill(.ultraThinMaterial)
-                .frame(width: 40, height: 40)
-                .overlay(
-                    Text(user.name.prefix(1).uppercased())
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
-                )
+            AvatarView(name: user.name, imageURL: user.profileImageUrl, size: 40)
                 .overlay(
                     Circle()
                         .stroke(
@@ -538,14 +524,7 @@ struct RegularLeaderboardRow: View {
                 .frame(width: 30)
 
             // Avatar
-            Circle()
-                .fill(.ultraThinMaterial)
-                .frame(width: 40, height: 40)
-                .overlay(
-                    Text(user.name.prefix(1).uppercased())
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
-                )
+            AvatarView(name: user.name, imageURL: user.profileImageUrl, size: 40)
                 .overlay(
                     Circle()
                         .stroke(Color.white.opacity(0.15), lineWidth: 1)

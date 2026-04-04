@@ -306,14 +306,7 @@ struct StreakActiveView: View {
                 rankLabel(rank)
 
                 // Avatar
-                Circle()
-                    .fill(Color.white.opacity(0.1))
-                    .frame(width: 34, height: 34)
-                    .overlay(
-                        Text(user.displayName.prefix(1).uppercased())
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                    )
+                AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 34)
                     .overlay(
                         Circle().stroke(rank == 1 ? Color.yellow.opacity(0.5) : Color.white.opacity(0.08), lineWidth: 1.5)
                     )
@@ -458,14 +451,8 @@ struct StreakActiveView: View {
                 VStack(spacing: 2) {
                     ForEach(eliminatedUsers.sorted(by: { ($0.score ?? 0) > ($1.score ?? 0) }), id: \.id) { user in
                         HStack(spacing: 8) {
-                            Circle()
-                                .fill(Color.white.opacity(0.04))
-                                .frame(width: 24, height: 24)
-                                .overlay(
-                                    Text(user.displayName.prefix(1).uppercased())
-                                        .font(.system(size: 9, weight: .semibold, design: .rounded))
-                                        .foregroundColor(.white.opacity(0.25))
-                                )
+                            AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 24)
+                                .opacity(0.4)
 
                             Text(user.displayName)
                                 .font(.system(size: 12, weight: .medium, design: .rounded))

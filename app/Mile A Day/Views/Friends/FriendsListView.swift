@@ -372,8 +372,9 @@ struct TabButton: View {
     let title: String
     let count: Int
     let isSelected: Bool
+    var showCountAsNotification: Bool = true
     let action: () -> Void
-    
+
     var body: some View {
         Button(action: action) {
             VStack(spacing: MADTheme.Spacing.xs) {
@@ -381,20 +382,26 @@ struct TabButton: View {
                     Text(title)
                         .font(MADTheme.Typography.headline)
                         .foregroundColor(isSelected ? MADTheme.Colors.madRed : MADTheme.Colors.secondaryText)
-                    
+
                     if count > 0 {
-                        Text("\(count)")
-                            .font(MADTheme.Typography.caption)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, MADTheme.Spacing.sm)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill(MADTheme.Colors.madRed)
-                            )
+                        if showCountAsNotification {
+                            Text("\(count)")
+                                .font(MADTheme.Typography.caption)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, MADTheme.Spacing.sm)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(MADTheme.Colors.madRed)
+                                )
+                        } else {
+                            Text("(\(count))")
+                                .font(MADTheme.Typography.caption)
+                                .foregroundColor(isSelected ? MADTheme.Colors.madRed.opacity(0.7) : MADTheme.Colors.secondaryText.opacity(0.7))
+                        }
                     }
                 }
-                
+
                 Rectangle()
                     .fill(isSelected ? MADTheme.Colors.madRed : Color.clear)
                     .frame(height: 2)

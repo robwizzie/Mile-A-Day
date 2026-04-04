@@ -69,9 +69,10 @@ struct CompetitionsListView: View {
         HStack {
             HStack(spacing: 0) {
                 TabButton(
-                    title: "My Competitions",
-                    count: competitionService.competitions.count,
+                    title: "My Comps",
+                    count: competitionService.competitions.filter { $0.status != .finished }.count,
                     isSelected: selectedTab == 0,
+                    showCountAsNotification: false,
                     action: { selectedTab = 0 }
                 )
 

@@ -104,7 +104,8 @@ const USERS_AGG_SQL = `
 				'user_id', cu.user_id,
 				'invite_status', cu.invite_status,
 				'progress', cu.progress,
-				'username', u.username
+				'username', u.username,
+				'profile_image_url', u.profile_image_url
 			)
 		) FILTER (WHERE cu.competition_id IS NOT NULL),
 		'[]'::jsonb

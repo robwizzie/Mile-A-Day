@@ -279,20 +279,11 @@ struct CreateCompetitionView: View {
                         VStack(spacing: MADTheme.Spacing.sm) {
                             ZStack(alignment: .topTrailing) {
                                 // Avatar circle
-                                ZStack {
-                                    Circle()
-                                        .fill(.ultraThinMaterial)
-                                        .frame(width: 70, height: 70)
-
-                                    Circle()
-                                        .stroke(MADTheme.Colors.primary, lineWidth: 2)
-                                        .frame(width: 70, height: 70)
-
-                                    // Friend initial
-                                    Text(friend.displayName.prefix(1).uppercased())
-                                        .font(MADTheme.Typography.title2)
-                                        .foregroundColor(.white)
-                                }
+                                AvatarView(name: friend.displayName, imageURL: friend.profile_image_url, size: 70)
+                                    .overlay(
+                                        Circle()
+                                            .stroke(MADTheme.Colors.primary, lineWidth: 2)
+                                    )
 
                                 // Remove button - positioned outside the circle
                                 Button {
@@ -1105,14 +1096,7 @@ struct FriendSelectRow: View {
         Button(action: action) {
             HStack(spacing: MADTheme.Spacing.md) {
                 // Friend avatar
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .frame(width: 50, height: 50)
-                    .overlay(
-                        Text(friend.displayName.prefix(1).uppercased())
-                            .font(MADTheme.Typography.headline)
-                            .foregroundColor(.white)
-                    )
+                AvatarView(name: friend.displayName, imageURL: friend.profile_image_url, size: 50)
                     .overlay(
                         Circle()
                             .stroke(isSelected ? MADTheme.Colors.primary : Color.white.opacity(0.2), lineWidth: 2)

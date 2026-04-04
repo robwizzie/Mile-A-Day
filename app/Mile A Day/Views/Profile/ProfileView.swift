@@ -105,13 +105,7 @@ struct ProfileView: View {
                                     .frame(width: 120, height: 120)
                                     .clipShape(Circle())
                             } else {
-                                Circle()
-                                    .fill(MADTheme.Colors.redGradient)
-                                    .frame(width: 120, height: 120)
-
-                                Image(systemName: "person.fill")
-                                    .font(.system(size: 48, weight: .medium))
-                                    .foregroundColor(.white)
+                                AvatarView(name: userManager.currentUser.name, imageURL: userManager.currentUser.profileImageUrl, size: 120)
                             }
 
                             // Camera edit badge

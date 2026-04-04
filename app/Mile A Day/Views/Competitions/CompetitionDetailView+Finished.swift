@@ -129,14 +129,7 @@ extension CompetitionDetailView {
 
             // Avatar
             ZStack {
-                Circle()
-                    .fill(Color.white.opacity(0.12))
-                    .frame(width: rank == 1 ? 56 : 44, height: rank == 1 ? 56 : 44)
-                    .overlay(
-                        Text(user.displayName.prefix(1).uppercased())
-                            .font(.system(size: rank == 1 ? 22 : 16, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                    )
+                AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: rank == 1 ? 56 : 44)
                     .overlay(
                         Circle()
                             .stroke(

@@ -162,14 +162,7 @@ struct FriendInviteRow: View {
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
             // Avatar
-            Circle()
-                .fill(MADTheme.Colors.primaryGradient)
-                .frame(width: 50, height: 50)
-                .overlay(
-                    Text(friend.displayName.prefix(1).uppercased())
-                        .font(MADTheme.Typography.headline)
-                        .foregroundColor(.white)
-                )
+            AvatarView(name: friend.displayName, imageURL: friend.profile_image_url, size: 50)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(friend.displayName)

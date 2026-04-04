@@ -400,14 +400,7 @@ struct ParticipantAvatar: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            Circle()
-                .fill(Color.white.opacity(0.12))
-                .frame(width: 28, height: 28)
-                .overlay(
-                    Text(user.displayName.prefix(1).uppercased())
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
-                )
+            AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 28)
                 .overlay(
                     Circle()
                         .stroke(statusColor.opacity(0.8), lineWidth: 2)
@@ -583,14 +576,7 @@ struct LobbyParticipantRow: View {
 
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
-            Circle()
-                .fill(.ultraThinMaterial)
-                .frame(width: 44, height: 44)
-                .overlay(
-                    Text(user.displayName.prefix(1).uppercased())
-                        .font(MADTheme.Typography.headline)
-                        .foregroundColor(.white)
-                )
+            AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 44)
                 .overlay(
                     Circle()
                         .stroke(statusBorderColor, lineWidth: 2)
@@ -724,14 +710,8 @@ struct CompetitionLeaderboardRow: View {
             }
 
             // Avatar
-            Circle()
-                .fill(.ultraThinMaterial)
-                .frame(width: 40, height: 40)
-                .overlay(
-                    Text(user.displayName.prefix(1).uppercased())
-                        .font(MADTheme.Typography.callout)
-                        .foregroundColor(.white.opacity(isEliminated ? 0.4 : 1.0))
-                )
+            AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 40)
+                .opacity(isEliminated ? 0.6 : 1.0)
                 .overlay(
                     Circle()
                         .stroke(

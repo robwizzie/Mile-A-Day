@@ -174,14 +174,7 @@ extension CompetitionDetailView {
 
             // Avatar with YOU badge below (fixed height container)
             VStack(spacing: 2) {
-                Circle()
-                    .fill(Color.white.opacity(0.12))
-                    .frame(width: avatarSize, height: avatarSize)
-                    .overlay(
-                        Text(user.displayName.prefix(1).uppercased())
-                            .font(.system(size: avatarSize * 0.38, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                    )
+                AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: avatarSize)
                     .overlay(
                         Circle()
                             .stroke(
@@ -348,14 +341,7 @@ extension CompetitionDetailView {
                                 .frame(width: 24)
                         }
 
-                        Circle()
-                            .fill(Color.white.opacity(0.12))
-                            .frame(width: 36, height: 36)
-                            .overlay(
-                                Text(user.displayName.prefix(1).uppercased())
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.white)
-                            )
+                        AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 36)
 
                         Text(user.displayName)
                             .font(MADTheme.Typography.callout)
@@ -471,14 +457,8 @@ extension CompetitionDetailView {
                         HStack(spacing: MADTheme.Spacing.md) {
                             // Avatar with status ring
                             ZStack {
-                                Circle()
-                                    .fill(Color.white.opacity(isEliminated ? 0.05 : 0.12))
-                                    .frame(width: 42, height: 42)
-                                    .overlay(
-                                        Text(user.displayName.prefix(1).uppercased())
-                                            .font(.system(size: 16, weight: .semibold))
-                                            .foregroundColor(.white.opacity(isEliminated ? 0.3 : 1.0))
-                                    )
+                                AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 42)
+                                    .opacity(isEliminated ? 0.5 : 1.0)
                                     .overlay(
                                         Circle()
                                             .stroke(
@@ -695,14 +675,7 @@ extension CompetitionDetailView {
                     let distance = user.intervals?[key] ?? 0
 
                     HStack(spacing: MADTheme.Spacing.md) {
-                        Circle()
-                            .fill(Color.white.opacity(0.12))
-                            .frame(width: 36, height: 36)
-                            .overlay(
-                                Text(user.displayName.prefix(1).uppercased())
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundColor(.white)
-                            )
+                        AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 36)
 
                         Text(user.displayName)
                             .font(MADTheme.Typography.callout)
@@ -764,14 +737,7 @@ extension CompetitionDetailView {
                                 .foregroundColor(hitTarget ? .green : .white.opacity(0.4))
                                 .frame(width: 28)
 
-                            Circle()
-                                .fill(Color.white.opacity(0.12))
-                                .frame(width: 36, height: 36)
-                                .overlay(
-                                    Text(user.displayName.prefix(1).uppercased())
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(.white)
-                                )
+                            AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 36)
 
                             Text(user.displayName)
                                 .font(MADTheme.Typography.callout)

@@ -120,8 +120,8 @@ class CompetitionService: ObservableObject {
 
         print("[CompetitionService] Competition created: \(response.competition_id)")
 
-        // Refresh competitions list
-        try await loadCompetitions()
+        // Refresh competitions list (non-fatal — don't block invites if this fails)
+        try? await loadCompetitions()
 
         return response.competition_id
     }
