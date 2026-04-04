@@ -5,6 +5,7 @@ import {
 	getComp,
 	getAllComps,
 	inviteUsersToComp,
+	removeUserFromComp,
 	getCompInvites,
 	getCompInviteHandler,
 	updateComp,
@@ -22,6 +23,7 @@ router.patch('/:competitionId', updateComp);
 router.delete('/:competitionId', deleteComp);
 router.post('/:competitionId/start', startComp);
 router.post('/:competitionId/invite', inviteUsersToComp);
+router.delete('/:competitionId/users/:userId', removeUserFromComp);
 router.post('/:competitionId/accept', getCompInviteHandler('accepted'));
 router.post('/:competitionId/decline', getCompInviteHandler('declined'));
 router.post('/:competitionId/nudge', nudgeUser);

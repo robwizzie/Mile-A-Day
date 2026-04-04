@@ -25,6 +25,10 @@ struct CompetitionDetailView: View {
     @State var isSendingAction = false
     @State var actionFeedback: ActionFeedback?
 
+    // Remove user
+    @State var showRemoveConfirmation = false
+    @State var removeTargetUser: CompetitionUser?
+
     // Settings dropdown
     @State var showSettings = false
 
@@ -85,6 +89,16 @@ struct CompetitionDetailView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("This action cannot be undone.")
+        }
+        .confirmationDialog(
+            "Remove \(removeTargetUser?.displayName ?? "user")?",
+            isPresented: $showRemoveConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) { confirmRemoveUser() }
+            Button("Cancel", role: .cancel) { removeTargetUser = nil }
+        } message: {
+            Text("They will be removed from the competition.")
         }
         .task {
             await refreshCompetition()

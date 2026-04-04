@@ -528,6 +528,28 @@ extension CompetitionDetailView {
         }
     }
 
+    func removeUserFromCompetition(_ user: CompetitionUser) {
+        removeTargetUser = user
+        showRemoveConfirmation = true
+    }
+
+    func confirmRemoveUser() {
+        guard let user = removeTargetUser else { return }
+        Task {
+            do {
+                try await competitionService.removeUser(
+                    competitionId: competition.competition_id,
+                    userId: user.user_id
+                )
+                competition = try await competitionService.loadCompetition(id: competition.competition_id)
+            } catch {
+                errorMessage = error.localizedDescription
+                showError = true
+            }
+            removeTargetUser = nil
+        }
+    }
+
     func deleteCompetition() {
         isDeleting = true
         Task {

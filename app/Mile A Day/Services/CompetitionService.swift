@@ -295,6 +295,25 @@ class CompetitionService: ObservableObject {
         }
     }
 
+    /// Remove a user from a competition (owner only)
+    func removeUser(competitionId: String, userId: String) async throws {
+        print("[CompetitionService] Removing user \(userId) from competition \(competitionId)")
+
+        let _: InviteUserResponse = try await makeRequest(
+            endpoint: "/competitions/\(competitionId)/users/\(userId)",
+            method: .DELETE,
+            responseType: InviteUserResponse.self
+        )
+
+        print("[CompetitionService] User removed successfully")
+
+        // Refresh competition to get updated user list
+        let updatedCompetition = try await loadCompetition(id: competitionId)
+        if let index = competitions.firstIndex(where: { $0.competition_id == competitionId }) {
+            competitions[index] = updatedCompetition
+        }
+    }
+
     /// Accept a competition invite
     func acceptInvite(competitionId: String) async throws {
         print("[CompetitionService] Accepting invite for competition \(competitionId)")

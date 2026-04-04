@@ -179,6 +179,14 @@ export async function getCompetitions(
 	return competitions;
 }
 
+export async function removeUserFromCompetition(competitionId: string, userId: string) {
+	await db.query(
+		`DELETE FROM competition_users
+		WHERE competition_id = $1 AND user_id = $2`,
+		[competitionId, userId]
+	);
+}
+
 export async function sendCompetitionInvite(competitionId: string, inviteUserId: string) {
 	await db.query(
 		`INSERT INTO competition_users (

@@ -656,6 +656,8 @@ struct InviteCard: View {
 struct LobbyParticipantRow: View {
     let user: CompetitionUser
     let isOwner: Bool
+    var canRemove: Bool = false
+    var onRemove: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
@@ -685,7 +687,18 @@ struct LobbyParticipantRow: View {
 
             Spacer()
 
-            statusIcon
+            if canRemove, let onRemove {
+                Button {
+                    onRemove()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundColor(.red.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+            } else {
+                statusIcon
+            }
         }
     }
 

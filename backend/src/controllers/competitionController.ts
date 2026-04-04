@@ -9,7 +9,8 @@ import {
 	sendCompetitionInvite,
 	updateCompetitionInvite,
 	updateCompetition,
-	deleteCompetition
+	deleteCompetition,
+	removeUserFromCompetition
 } from '../services/competitionService.js';
 import { getUser } from '../services/userService.js';
 import { CompetitionUser } from '../types/competitions.js';
@@ -205,6 +206,48 @@ export async function inviteUsersToComp(req: AuthenticatedRequest, res: Response
 	} catch (error: any) {
 		console.error('Error inviting user:', error.message);
 		res.status(500).json({ error: 'Error inviting user: ' + error.message });
+	}
+}
+
+export async function removeUserFromComp(req: AuthenticatedRequest, res: Response) {
+	if (!hasRequiredKeys(['competitionId', 'userId'], req, res)) return;
+
+	const competitionId = req.params.competitionId;
+	const targetUserId = req.params.userId;
+
+	try {
+		const competition = await getCompetition(competitionId);
+
+		if (!competition) {
+			return res.status(404).json({ error: `No competition found with id: ${competitionId}` });
+		}
+
+		// Only the owner can remove users
+		if (competition.owner !== req.userId!) {
+			return res.status(403).json({ error: 'Only the competition owner can remove users' });
+		}
+
+		// Can't remove yourself (owner)
+		if (targetUserId === req.userId!) {
+			return res.status(400).json({ error: 'Cannot remove yourself from the competition' });
+		}
+
+		// Can only remove from lobby (not started yet)
+		if (competition.start_date && new Date(competition.start_date + ' EST') <= new Date()) {
+			return res.status(400).json({ error: 'Cannot remove users from a competition that has already started' });
+		}
+
+		// Check user is actually in the competition
+		if (!competition.users.find(u => u.user_id === targetUserId)) {
+			return res.status(400).json({ error: 'User is not in this competition' });
+		}
+
+		await removeUserFromCompetition(competitionId, targetUserId);
+
+		res.status(200).json({ message: `Successfully removed user ${targetUserId} from competition ${competitionId}` });
+	} catch (error: any) {
+		console.error('Error removing user from competition:', error.message);
+		res.status(500).json({ error: 'Error removing user: ' + error.message });
 	}
 }
 

@@ -163,7 +163,11 @@ extension CompetitionDetailView {
                 ForEach(competition.users) { user in
                     LobbyParticipantRow(
                         user: user,
-                        isOwner: user.user_id == competition.owner
+                        isOwner: user.user_id == competition.owner,
+                        canRemove: competition.isOwner && user.user_id != competition.owner,
+                        onRemove: {
+                            removeUserFromCompetition(user)
+                        }
                     )
                 }
             }
