@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(cd backend && npm run build)",
+      "Bash(cd website && pnpm build)",
+      "Bash(cd website && pnpm lint)",
+      "Bash(cd website && pnpm lint *)",
+      "Bash(curl *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git status *)",
+      "Bash(git branch *)",
+      "Bash(psql *)",
+      "Bash(ls *)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file_path=$(echo \"$TOOL_INPUT\" | grep -o '\"file_path\"\\s*:\\s*\"[^\"]*\"' | head -1 | sed 's/.*\"\\([^\"]*\\)\"$/\\1/'); if echo \"$file_path\" | grep -q 'backend/src/.*\\.ts$'; then missing=$(grep -n \"from '\\.\\.\\?/\" \"$file_path\" 2>/dev/null | grep -v \"\\.js'\" | grep -v \"node:\" | head -5); if [ -n \"$missing\" ]; then echo \"⚠️  Missing .js extension on local imports in $file_path:\"; echo \"$missing\"; echo \"All local imports in the backend MUST end with .js (ESM requirement)\"; exit 1; fi; fi"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if echo \"$TOOL_INPUT\" | grep -qE '\"command\"\\s*:\\s*\"(git commit|git push)'; then cd backend && npm run build --silent 2>&1 | tail -5; BUILD_EXIT=$?; if [ $BUILD_EXIT -ne 0 ]; then echo '⚠️  Backend build failed — fix TypeScript errors before committing'; exit 1; fi; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

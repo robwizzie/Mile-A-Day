@@ -15,8 +15,8 @@ backend/certs/
 *.xcuserdatad
 xcuserdata/
 *.xcworkspace/xcuserdata/
-CLAUDE.md
-.claude/commands/backend-dev.md
-.claude/commands/new-endpoint.md
-.claude/commands/new-service.md
-.claude/commands/new-view.md
+# MCP config (contains database credentials)
+.mcp.json
+
+# User-specific Claude settings
+.claude/settings.local.json
