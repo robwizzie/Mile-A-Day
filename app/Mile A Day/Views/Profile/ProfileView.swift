@@ -406,7 +406,7 @@ struct ProfileView: View {
 
                 settingsDivider
 
-                NavigationLink(destination: FriendsListView()) {
+                NavigationLink(destination: FriendsListView(friendService: FriendService())) {
                     MADSettingsRow(
                         icon: "person.2.fill",
                         title: "Friends & Leaderboard",

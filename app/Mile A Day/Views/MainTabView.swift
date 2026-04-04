@@ -8,6 +8,7 @@ struct MainTabView: View {
     @StateObject private var userManager = UserManager.shared
     @StateObject private var notificationService = MADNotificationService.shared
     @StateObject private var competitionService = CompetitionService()
+    @StateObject private var friendService = FriendService()
     @State private var selectedTab = 0
 
     var body: some View {
@@ -29,9 +30,10 @@ struct MainTabView: View {
 
             Tab("Friends", systemImage: "person.2.fill", value: 2) {
                 NavigationStack {
-                    FriendsListView()
+                    FriendsListView(friendService: friendService)
                 }
             }
+            .badge(friendService.friendRequests.count)
             
             Tab("Profile", systemImage: "person.fill", value: 3) {
                 NavigationStack {
@@ -46,6 +48,7 @@ struct MainTabView: View {
         }
         .task {
             await competitionService.refreshAllData()
+            await friendService.refreshAllData()
         }
     }
 

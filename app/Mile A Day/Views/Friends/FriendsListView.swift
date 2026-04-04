@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Main view for managing friends list
 struct FriendsListView: View {
-    @StateObject private var friendService = FriendService()
+    @ObservedObject var friendService: FriendService
     @State private var selectedTab = 0
     @State private var showingSearch = false
     @State private var selectedUser: BackendUser?
@@ -417,6 +417,6 @@ struct TabButton: View {
 // MARK: - Preview
 struct FriendsListView_Previews: PreviewProvider {
     static var previews: some View {
-        FriendsListView()
+        FriendsListView(friendService: FriendService())
     }
 }
