@@ -125,7 +125,25 @@ struct MainTabView: View {
                     await friendService.refreshAllData()
                     await refreshUnreadCount()
                 }
+                // Refresh health data and re-evaluate the daily reminder
+                // so "Mile still waiting" is cancelled if the user completed their mile
+                healthManager.fetchTodaysDistance()
             }
+        }
+        .onChange(of: healthManager.todaysDistance) { _, newDistance in
+            let isCompleted = newDistance >= userManager.currentUser.goalMiles
+            if isCompleted {
+                // Cancel immediately — don't wait for the next scheduling window
+                notificationService.cancelDailyReminder()
+            } else {
+                notificationService.updateDailyReminder(
+                    isCompleted: false,
+                    currentMiles: newDistance,
+                    goalMiles: userManager.currentUser.goalMiles
+                )
+            }
+            // Keep widget data in sync so the willPresent check has fresh data
+            WidgetDataStore.save(todayMiles: newDistance, goal: userManager.currentUser.goalMiles)
         }
     }
 
