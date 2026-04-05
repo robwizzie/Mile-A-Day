@@ -6,12 +6,11 @@ struct NotificationPreferences: Codable {
 
     var mileCompletedEnabled: Bool = true
     var friendCompletedEnabled: Bool = true
-    
+
     /// Notify when someone sends me a friend request.
     var friendRequestReceivedEnabled: Bool = true
-    
+
     /// Notify when a friend request results in a new friendship.
-    /// (Used on devices that detect a new friend relationship.)
     var friendRequestAcceptedEnabled: Bool = true
 
     // Competition notifications
@@ -20,6 +19,16 @@ struct NotificationPreferences: Codable {
     var competitionStartEnabled: Bool = true
     var competitionFinishEnabled: Bool = true
     var competitionNudgeEnabled: Bool = true
+    var competitionFlexEnabled: Bool = true
+    var competitionMilestonesEnabled: Bool = true
+
+    // Friend nudge notifications
+    var friendNudgeEnabled: Bool = true
+
+    // Do Not Disturb schedule
+    var dndEnabled: Bool = false
+    var dndStartHour: Int = 22  // 10 PM
+    var dndEndHour: Int = 8     // 8 AM
 
     static let `default` = NotificationPreferences()
 }
@@ -44,4 +53,4 @@ extension NotificationPreferences {
             UserDefaults.standard.set(data, forKey: Self.storageKey)
         }
     }
-} 
+}

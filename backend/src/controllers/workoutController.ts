@@ -14,6 +14,7 @@ import {
 	updateWorkout as updateWorkoutDb
 } from '../services/workoutService.js';
 import { checkRaceCompletions } from '../services/competitionService.js';
+import { notifyFriendsOfMileCompletion, checkCompetitionMilestones, checkPersonalBest, checkLeadChanges } from '../services/notificationService.js';
 
 export async function uploadWorkouts(req: Request, res: Response) {
 	if (!hasRequiredKeys(['userId'], req, res)) return;
@@ -38,6 +39,27 @@ export async function uploadWorkouts(req: Request, res: Response) {
 			await checkRaceCompletions(userId);
 		} catch (raceError: any) {
 			console.error('Error checking race completions:', raceError.message);
+		}
+
+		// Check if user has now completed their mile and notify friends
+		try {
+			const todayMiles = await getTodayMiles(userId);
+			if (todayMiles >= 1.0) {
+				notifyFriendsOfMileCompletion(userId).catch(err =>
+					console.error('Error notifying friends:', err.message)
+				);
+			}
+			checkCompetitionMilestones(userId).catch(err =>
+				console.error('Error checking milestones:', err.message)
+			);
+			checkPersonalBest(userId).catch(err =>
+				console.error('Error checking personal best:', err.message)
+			);
+			checkLeadChanges(userId).catch(err =>
+				console.error('Error checking lead changes:', err.message)
+			);
+		} catch (notifError: any) {
+			console.error('Error checking notifications:', notifError.message);
 		}
 
 		res.status(200).json({

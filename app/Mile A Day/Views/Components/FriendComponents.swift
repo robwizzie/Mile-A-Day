@@ -4,6 +4,7 @@ import SwiftUI
 /// Reusable component for displaying user profile information
 struct UserProfileCard: View {
     let user: BackendUser
+    let subtitle: String?
     let showStats: Bool
     let showBadges: Bool
     let showDetails: Bool
@@ -12,6 +13,7 @@ struct UserProfileCard: View {
 
     init(
         user: BackendUser,
+        subtitle: String? = nil,
         showStats: Bool = true,
         showBadges: Bool = true,
         showDetails: Bool = true,
@@ -19,6 +21,7 @@ struct UserProfileCard: View {
         actionButton: AnyView? = nil
     ) {
         self.user = user
+        self.subtitle = subtitle
         self.showStats = showStats
         self.showBadges = showBadges
         self.showDetails = showDetails
@@ -45,6 +48,13 @@ struct UserProfileCard: View {
                                     .font(MADTheme.Typography.caption)
                                     .foregroundColor(MADTheme.Colors.secondaryText)
                             }
+                        }
+
+                        // Subtitle (e.g., today's progress)
+                        if let subtitle = subtitle {
+                            Text(subtitle)
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundColor(subtitle.contains("Done") ? .green.opacity(0.8) : .orange.opacity(0.8))
                         }
 
                         // Bio

@@ -1,4 +1,5 @@
 import { PostgresService } from './DbService.js';
+import { getNotificationPreferences } from './notificationSettingsService.js';
 import fs from 'fs';
 import path from 'path';
 import http2 from 'http2';
@@ -71,12 +72,20 @@ function getApnsToken(): string | null {
 export type NotificationType =
 	| 'friend_request'
 	| 'friend_request_accepted'
+	| 'friend_nudge'
+	| 'friend_activity'
 	| 'competition_invite'
 	| 'competition_accepted'
 	| 'competition_started'
 	| 'competition_finished'
 	| 'competition_updates'
-	| 'competition_nudge';
+	| 'competition_nudge'
+	| 'competition_flex'
+	| 'competition_milestone'
+	| 'streak_broken'
+	| 'personal_best'
+	| 'lead_change'
+	| 'clash_tie';
 
 interface PushPayload {
 	title: string;
@@ -164,9 +173,89 @@ async function removeInvalidToken(deviceToken: string): Promise<void> {
 	console.log(`[Push] Removed invalid device token: ${deviceToken.substring(0, 8)}...`);
 }
 
+// ─── Smart Throttling ───────────────────────────────────────────────
+
+const DAILY_NOTIFICATION_CAP = 18;
+
+// High-priority types bypass throttling
+const HIGH_PRIORITY_TYPES: NotificationType[] = [
+	'friend_request',
+	'competition_invite',
+	'competition_started',
+	'competition_finished',
+];
+
+async function getDailyNotificationCount(userId: string): Promise<number> {
+	const result = await db.query(
+		`SELECT COUNT(*) as count FROM notification_log
+		WHERE user_id = $1 AND created_at > CURRENT_DATE`,
+		[userId]
+	);
+	return parseInt(result[0]?.count ?? '0');
+}
+
+async function logNotificationSent(userId: string, type: NotificationType): Promise<void> {
+	await db.query(
+		'INSERT INTO notification_log (user_id, type) VALUES ($1, $2)',
+		[userId, type]
+	);
+}
+
+async function isUserInQuietHours(userId: string): Promise<boolean> {
+	const prefs = await getNotificationPreferences(userId);
+	if (prefs.quiet_hours_start === null || prefs.quiet_hours_end === null) return false;
+
+	const now = new Date();
+	const etHour = parseInt(
+		new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(now)
+	);
+
+	if (prefs.quiet_hours_start > prefs.quiet_hours_end) {
+		// Spans midnight (e.g., 22 to 8)
+		return etHour >= prefs.quiet_hours_start || etHour < prefs.quiet_hours_end;
+	}
+	return etHour >= prefs.quiet_hours_start && etHour < prefs.quiet_hours_end;
+}
+
 // ─── Public API ──────────────────────────────────────────────────────
 
 export async function sendPush(userId: string, payload: PushPayload): Promise<void> {
+	// Check user's custom quiet hours
+	if (!HIGH_PRIORITY_TYPES.includes(payload.type)) {
+		const inQuiet = await isUserInQuietHours(userId);
+		if (inQuiet) {
+			console.log(`[Push] Quiet hours for user ${userId}, queueing "${payload.type}"`);
+			await db.query(
+				`INSERT INTO pending_notifications (user_id, type, competition_id, competition_name)
+				VALUES ($1, $2, $3, $4)`,
+				[userId, payload.type, payload.data?.competition_id ?? null, payload.title]
+			);
+			await logNotificationSent(userId, payload.type);
+			// Still store in inbox so user can see it later
+			storeInAppNotification(userId, payload).catch(err =>
+				console.error('[Push] Error storing in-app notification:', err.message)
+			);
+			return;
+		}
+
+		// Smart throttling: check daily cap
+		const dailyCount = await getDailyNotificationCount(userId);
+		if (dailyCount >= DAILY_NOTIFICATION_CAP) {
+			console.log(`[Push] Throttled "${payload.type}" for user ${userId} (${dailyCount}/${DAILY_NOTIFICATION_CAP} today)`);
+			await db.query(
+				`INSERT INTO pending_notifications (user_id, type, competition_id, competition_name)
+				VALUES ($1, $2, $3, $4)`,
+				[userId, payload.type, payload.data?.competition_id ?? null, payload.title]
+			);
+			await logNotificationSent(userId, payload.type);
+			// Still store in inbox
+			storeInAppNotification(userId, payload).catch(err =>
+				console.error('[Push] Error storing in-app notification:', err.message)
+			);
+			return;
+		}
+	}
+
 	const tokens = await db.query<{ device_token: string }>(
 		'SELECT device_token FROM device_tokens WHERE user_id = $1',
 		[userId]
@@ -174,6 +263,10 @@ export async function sendPush(userId: string, payload: PushPayload): Promise<vo
 
 	if (tokens.length === 0) {
 		console.log(`[Push] No device tokens found for user ${userId}`);
+		// Still store in inbox even without device tokens
+		storeInAppNotification(userId, payload).catch(err =>
+			console.error('[Push] Error storing in-app notification:', err.message)
+		);
 		return;
 	}
 
@@ -183,8 +276,22 @@ export async function sendPush(userId: string, payload: PushPayload): Promise<vo
 
 	const sent = results.filter(Boolean).length;
 	if (sent > 0) {
+		await logNotificationSent(userId, payload.type);
 		console.log(`[Push] Sent "${payload.type}" to user ${userId} (${sent}/${tokens.length} devices)`);
 	}
+
+	// Always store in-app notification regardless of push delivery
+	storeInAppNotification(userId, payload).catch(err =>
+		console.error('[Push] Error storing in-app notification:', err.message)
+	);
+}
+
+async function storeInAppNotification(userId: string, payload: PushPayload): Promise<void> {
+	await db.query(
+		`INSERT INTO in_app_notifications (user_id, title, body, type, data)
+		VALUES ($1, $2, $3, $4, $5)`,
+		[userId, payload.title, payload.body, payload.type, JSON.stringify(payload.data ?? {})]
+	);
 }
 
 export async function registerDeviceToken(userId: string, deviceToken: string): Promise<void> {
@@ -262,36 +369,66 @@ export async function flushBatchedNotifications(): Promise<void> {
 	}
 
 	for (const [userId, notifications] of Object.entries(byUser)) {
-		const starts = notifications.filter(n => n.type === 'competition_started');
-		const finishes = notifications.filter(n => n.type === 'competition_finished');
+		const compNotifs = notifications.filter(n =>
+			n.type === 'competition_started' || n.type === 'competition_finished'
+		);
+		const otherNotifs = notifications.filter(n =>
+			n.type !== 'competition_started' && n.type !== 'competition_finished'
+		);
 
-		let title: string;
-		let body: string;
-		let type: NotificationType;
+		// Handle competition start/finish notifications (batch into digest)
+		if (compNotifs.length > 0) {
+			const starts = compNotifs.filter(n => n.type === 'competition_started');
+			const finishes = compNotifs.filter(n => n.type === 'competition_finished');
 
-		if (starts.length > 0 && finishes.length > 0) {
-			title = 'Competition updates';
-			body = 'You have several updates to your competitions — open to check in';
-			type = 'competition_updates';
-		} else if (starts.length === 1) {
-			title = 'Competition started';
-			body = `${starts[0].competition_name} has begun!`;
-			type = 'competition_started';
-		} else if (starts.length > 1) {
-			title = 'Competitions started';
-			body = 'Multiple competitions have started — open to check in';
-			type = 'competition_started';
-		} else if (finishes.length === 1) {
-			title = 'Competition finished';
-			body = `${finishes[0].competition_name} has finished!`;
-			type = 'competition_finished';
-		} else {
-			title = 'Competitions finished';
-			body = 'Multiple competitions have finished — open to check in';
-			type = 'competition_finished';
+			let title: string;
+			let body: string;
+			let type: NotificationType;
+
+			if (starts.length > 0 && finishes.length > 0) {
+				title = 'Competition updates';
+				body = 'You have several updates to your competitions — open to check in';
+				type = 'competition_updates';
+			} else if (starts.length === 1) {
+				title = 'Competition started';
+				body = `${starts[0].competition_name} has begun!`;
+				type = 'competition_started';
+			} else if (starts.length > 1) {
+				title = 'Competitions started';
+				body = 'Multiple competitions have started — open to check in';
+				type = 'competition_started';
+			} else if (finishes.length === 1) {
+				title = 'Competition finished';
+				body = `${finishes[0].competition_name} has finished!`;
+				type = 'competition_finished';
+			} else {
+				title = 'Competitions finished';
+				body = 'Multiple competitions have finished — open to check in';
+				type = 'competition_finished';
+			}
+
+			await sendPush(userId, { title, body, type });
 		}
 
-		await sendPush(userId, { title, body, type });
+		// Handle other throttled notifications (send digest summary)
+		if (otherNotifs.length > 0) {
+			if (otherNotifs.length === 1) {
+				// Single throttled notification: send it directly
+				const n = otherNotifs[0];
+				await sendPush(userId, {
+					title: n.competition_name || 'Notification', // competition_name stores the original title
+					body: `You have a notification you missed`,
+					type: (n.type as NotificationType) || 'competition_updates',
+				});
+			} else {
+				// Multiple: send digest
+				await sendPush(userId, {
+					title: 'Catch up on activity',
+					body: `You have ${otherNotifs.length} notifications from while you were away`,
+					type: 'competition_updates',
+				});
+			}
+		}
 	}
 
 	// Mark all as sent
@@ -322,4 +459,61 @@ export async function logNudge(competitionId: string, senderId: string, targetId
 		`INSERT INTO nudge_log (competition_id, sender_id, target_id) VALUES ($1, $2, $3)`,
 		[competitionId, senderId, targetId]
 	);
+}
+
+// ─── Friend Nudge Rate Limiting ─────────────────────────────────────
+
+export async function canFriendNudge(senderId: string, targetId: string): Promise<boolean> {
+	const result = await db.query(
+		`SELECT id FROM friend_nudge_log
+		WHERE sender_id = $1 AND target_id = $2
+			AND created_at > NOW() - INTERVAL '24 hours'
+		LIMIT 1`,
+		[senderId, targetId]
+	);
+	return result.length === 0;
+}
+
+export async function logFriendNudge(senderId: string, targetId: string): Promise<void> {
+	await db.query(
+		`INSERT INTO friend_nudge_log (sender_id, target_id) VALUES ($1, $2)`,
+		[senderId, targetId]
+	);
+}
+
+// ─── Flex Rate Limiting (per sender→target per day, across all competitions) ──
+
+export async function canFlex(senderId: string, targetId: string): Promise<boolean> {
+	const result = await db.query(
+		`SELECT id FROM flex_log
+		WHERE sender_id = $1 AND target_id = $2
+			AND created_at > NOW() - INTERVAL '24 hours'
+		LIMIT 1`,
+		[senderId, targetId]
+	);
+	return result.length === 0;
+}
+
+export async function logFlex(senderId: string, targetId: string, competitionId: string, message: string | null): Promise<void> {
+	await db.query(
+		`INSERT INTO flex_log (sender_id, target_id, competition_id, message) VALUES ($1, $2, $3, $4)`,
+		[senderId, targetId, competitionId, message]
+	);
+}
+
+// ─── Cleanup ────────────────────────────────────────────────────────
+
+/**
+ * Clean up old log entries to prevent unbounded table growth.
+ * Should be called daily via cron.
+ */
+export async function cleanupNotificationLogs(): Promise<void> {
+	const results = await Promise.all([
+		db.query(`DELETE FROM notification_log WHERE created_at < NOW() - INTERVAL '30 days'`),
+		db.query(`DELETE FROM pending_notifications WHERE sent_at IS NOT NULL AND sent_at < NOW() - INTERVAL '7 days'`),
+		db.query(`DELETE FROM nudge_log WHERE created_at < NOW() - INTERVAL '7 days'`),
+		db.query(`DELETE FROM friend_nudge_log WHERE created_at < NOW() - INTERVAL '7 days'`),
+		db.query(`DELETE FROM flex_log WHERE created_at < NOW() - INTERVAL '30 days'`),
+	]);
+	console.log('[Cleanup] Cleaned up old notification logs');
 }

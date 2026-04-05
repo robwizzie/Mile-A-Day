@@ -351,17 +351,30 @@ class CompetitionService: ObservableObject {
 
     // MARK: - Social Actions
 
-    /// Send a flex to all participants in a competition
-    func sendFlex(competitionId: String) async throws {
-        print("[CompetitionService] Sending flex for competition: \(competitionId)")
+    /// Send a flex to a specific user in a competition with an optional message
+    func sendFlex(competitionId: String, targetUserId: String, message: String? = nil) async throws {
+        print("[CompetitionService] Sending flex to \(targetUserId) in competition: \(competitionId)")
+
+        let request = FlexRequest(target_user_id: targetUserId, message: message)
+        let jsonData = try JSONEncoder().encode(request)
 
         let _: FlexResponse = try await makeRequest(
             endpoint: "/competitions/\(competitionId)/flex",
             method: .POST,
+            body: jsonData,
             responseType: FlexResponse.self
         )
 
         print("[CompetitionService] Flex sent successfully")
+    }
+
+    /// Get preset flex messages
+    func getFlexPresets() async throws -> [String] {
+        let response: FlexPresetsResponse = try await makeRequest(
+            endpoint: "/competitions/flex/presets",
+            responseType: FlexPresetsResponse.self
+        )
+        return response.presets
     }
 
     /// Send a nudge to a specific user in a competition

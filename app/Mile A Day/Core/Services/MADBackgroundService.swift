@@ -250,9 +250,10 @@ final class MADBackgroundService: NSObject, ObservableObject {
         let currentUser = userManager.currentUser
         let todaysDistance = healthManager.todaysDistance
         let goalMiles = currentUser.goalMiles
-        
-        // Check if user just completed their goal
-        if todaysDistance >= goalMiles {
+
+        let isCompleted = todaysDistance >= goalMiles
+
+        if isCompleted {
             // Send completion notification only if conditions are met
             if notificationService.shouldSendCompletionNotification(
                 currentMiles: todaysDistance,
@@ -261,18 +262,18 @@ final class MADBackgroundService: NSObject, ObservableObject {
             ) {
                 notificationService.sendMileCompletedNotification()
             }
-            
+
             // Update user completion status
             userManager.completeRun(miles: todaysDistance)
-            
-            // Update daily reminder to congratulatory message
+
+            // Switch to congratulatory message
             notificationService.updateDailyReminder(
                 isCompleted: true,
                 currentMiles: todaysDistance,
                 goalMiles: goalMiles
             )
         } else {
-            // Update daily reminder to motivational message
+            // Re-evaluate the daily reminder with fresh data (one-shot, non-repeating)
             notificationService.updateDailyReminder(
                 isCompleted: false,
                 currentMiles: todaysDistance,

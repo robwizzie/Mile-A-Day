@@ -10,7 +10,14 @@ struct FriendsListView: View {
     @State private var showingBlockAlert = false
     @State private var userToUnfriend: BackendUser?
     @State private var userToBlock: BackendUser?
-    
+
+    // Nudge state
+    @State private var nudgeStatuses: [String: NudgeStatusResponse] = [:]
+    @State private var nudgingFriendId: String?
+    @State private var nudgeFeedback: NudgeFeedback?
+    @State private var bellShakeIds: Set<String> = []
+    @State private var bellAnimatedIds: Set<String> = []
+
     var body: some View {
         VStack(spacing: 0) {
             // Tab Selector
@@ -58,9 +65,12 @@ struct FriendsListView: View {
                     selectedTab = 1
                     MADNotificationService.shared.pendingNotificationType = nil
                 }
+                // Load nudge statuses for friends
+                await loadNudgeStatuses()
             }
             .refreshable {
                 await friendService.refreshAllData()
+                await loadNudgeStatuses()
             }
             .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
                 guard let type = notification.userInfo?["type"] as? String else { return }
@@ -88,8 +98,16 @@ struct FriendsListView: View {
             } message: {
                 Text("You will unfriend and block this person. They won't be able to see your profile or send you friend requests.")
             }
+            .overlay(alignment: .top) {
+                if let feedback = nudgeFeedback {
+                    nudgeFeedbackBanner(feedback)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                        .zIndex(10)
+                        .padding(.top, 8)
+                }
+            }
     }
-    
+
     // MARK: - Tab Selector
     private var tabSelector: some View {
         HStack {
@@ -117,9 +135,9 @@ struct FriendsListView: View {
                     action: { selectedTab = 2 }
                 )
             }
-            
+
             Spacer()
-            
+
             Button(action: { showingSearch = true }) {
                 Image(systemName: "person.badge.plus")
                     .font(.title2)
@@ -130,7 +148,7 @@ struct FriendsListView: View {
         .padding(.vertical, MADTheme.Spacing.sm)
         .background(Color.clear)
     }
-    
+
     // MARK: - Friends Tab
     private var friendsTab: some View {
         Group {
@@ -148,48 +166,7 @@ struct FriendsListView: View {
                 ScrollView {
                     LazyVStack(spacing: MADTheme.Spacing.md) {
                         ForEach(friendService.friends) { friend in
-                            UserProfileCard(
-                                user: friend,
-                                onTap: {
-                                    selectedUser = friend
-                                },
-                                actionButton: AnyView(
-                                    Menu {
-                                        Button(role: .destructive) {
-                                            userToUnfriend = friend
-                                            showingUnfriendAlert = true
-                                        } label: {
-                                            Label("Unfriend", systemImage: "person.fill.xmark")
-                                        }
-
-                                        Button(role: .destructive) {
-                                            userToBlock = friend
-                                            showingBlockAlert = true
-                                        } label: {
-                                            Label("Block", systemImage: "hand.raised.fill")
-                                        }
-                                    } label: {
-                                        HStack(spacing: MADTheme.Spacing.xs) {
-                                            Text("Friends")
-                                                .font(MADTheme.Typography.smallBold)
-                                            Image(systemName: "chevron.down")
-                                                .font(.caption2)
-                                        }
-                                        .foregroundColor(.green)
-                                        .padding(.horizontal, MADTheme.Spacing.md)
-                                        .padding(.vertical, MADTheme.Spacing.sm)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                                                .fill(Color.green.opacity(0.1))
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                                                        .stroke(Color.green.opacity(0.3), lineWidth: 1)
-                                                )
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                )
-                            )
+                            friendRow(friend: friend)
                         }
                     }
                     .padding(MADTheme.Spacing.md)
@@ -197,7 +174,171 @@ struct FriendsListView: View {
             }
         }
     }
-    
+
+    // MARK: - Friend Row with Nudge
+    private func friendRow(friend: BackendUser) -> some View {
+        let status = nudgeStatuses[friend.user_id]
+        let canNudge = status?.can_nudge ?? false
+        let hasCompletedMile = status?.has_completed_mile ?? false
+        let alreadyNudged = status?.already_nudged_today ?? false
+        let todayMiles = status?.today_miles ?? 0
+
+        return UserProfileCard(
+            user: friend,
+            subtitle: friendProgressText(miles: todayMiles, completed: hasCompletedMile),
+            onTap: {
+                selectedUser = friend
+            },
+            actionButton: AnyView(
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    // Nudge button
+                    nudgeButton(
+                        friend: friend,
+                        canNudge: canNudge,
+                        hasCompletedMile: hasCompletedMile,
+                        alreadyNudged: alreadyNudged
+                    )
+
+                    // Friend menu
+                    friendMenu(friend: friend)
+                }
+            )
+        )
+    }
+
+    private func friendProgressText(miles: Double, completed: Bool) -> String? {
+        if completed {
+            return "Done today (\(String(format: "%.1f", miles)) mi)"
+        } else if miles > 0 {
+            return "\(String(format: "%.1f", miles)) mi today"
+        }
+        return nil
+    }
+
+    // MARK: - Nudge Button
+    private func nudgeButton(friend: BackendUser, canNudge: Bool, hasCompletedMile: Bool, alreadyNudged: Bool) -> some View {
+        Group {
+            if hasCompletedMile {
+                // Friend completed their mile - show checkmark
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(.green)
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Circle()
+                            .fill(Color.green.opacity(0.1))
+                    )
+            } else if alreadyNudged {
+                // Already nudged today - show disabled bell
+                Image(systemName: "bell.slash.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white.opacity(0.2))
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Circle()
+                            .fill(Color.white.opacity(0.04))
+                    )
+            } else {
+                // Can nudge - show nudge button with shake
+                Button {
+                    handleNudge(friend)
+                } label: {
+                    ZStack {
+                        if nudgingFriendId == friend.user_id {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .tint(.orange)
+                        } else {
+                            Image(systemName: "bell.badge")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.orange)
+                                .modifier(BellShakeModifier(isShaking: bellShakeIds.contains(friend.user_id)))
+                        }
+                    }
+                    .frame(width: 36, height: 36)
+                    .background(
+                        Circle()
+                            .fill(Color.orange.opacity(0.12))
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.orange.opacity(0.2), lineWidth: 1)
+                            )
+                    )
+                }
+                .buttonStyle(ScaleButtonStyle())
+                .disabled(nudgingFriendId != nil)
+                .onAppear {
+                    // Only animate once per friend per session
+                    guard !bellAnimatedIds.contains(friend.user_id) else { return }
+                    bellAnimatedIds.insert(friend.user_id)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        withAnimation(.easeInOut(duration: 0.6)) {
+                            bellShakeIds.insert(friend.user_id)
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                            bellShakeIds.remove(friend.user_id)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Friend Menu
+    private func friendMenu(friend: BackendUser) -> some View {
+        Menu {
+            Button(role: .destructive) {
+                userToUnfriend = friend
+                showingUnfriendAlert = true
+            } label: {
+                Label("Unfriend", systemImage: "person.fill.xmark")
+            }
+
+            Button(role: .destructive) {
+                userToBlock = friend
+                showingBlockAlert = true
+            } label: {
+                Label("Block", systemImage: "hand.raised.fill")
+            }
+        } label: {
+            HStack(spacing: MADTheme.Spacing.xs) {
+                Text("Friends")
+                    .font(MADTheme.Typography.smallBold)
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+            }
+            .foregroundColor(.green)
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.vertical, MADTheme.Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                    .fill(Color.green.opacity(0.1))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                            .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Nudge Feedback Banner
+    private func nudgeFeedbackBanner(_ feedback: NudgeFeedback) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: feedback.icon)
+                .font(.system(size: 12))
+            Text(feedback.message)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+        }
+        .foregroundColor(feedback.isError ? .red : .green)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            Capsule()
+                .fill(feedback.isError ? Color.red.opacity(0.12) : Color.green.opacity(0.12))
+        )
+    }
+
     // MARK: - Requests Tab
     private var requestsTab: some View {
         Group {
@@ -275,7 +416,7 @@ struct FriendsListView: View {
             }
         }
     }
-    
+
     // MARK: - Sent Tab
     private var sentTab: some View {
         Group {
@@ -313,21 +454,77 @@ struct FriendsListView: View {
             }
         }
     }
-    
+
     // MARK: - Loading View
     private var loadingView: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
             ProgressView()
                 .scaleEffect(1.5)
                 .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
-            
+
             Text("Loading...")
                 .font(MADTheme.Typography.body)
                 .foregroundColor(MADTheme.Colors.secondaryText)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-    
+
+    // MARK: - Nudge Methods
+    private func loadNudgeStatuses() async {
+        let friendIds = friendService.friends.map { $0.user_id }
+        guard !friendIds.isEmpty else { return }
+
+        do {
+            let statuses = try await friendService.checkNudgeStatusBatch(friendIds: friendIds)
+            await MainActor.run {
+                self.nudgeStatuses = statuses
+            }
+        } catch {
+            // Silently fail - nudge buttons just won't show
+        }
+    }
+
+    private func handleNudge(_ friend: BackendUser) {
+        nudgingFriendId = friend.user_id
+        Task {
+            do {
+                try await friendService.nudgeFriend(friend.user_id)
+                await MainActor.run {
+                    nudgingFriendId = nil
+                    FlexNudgeTracker.markFriendNudgeSent(friendId: friend.user_id)
+                    // Update local status
+                    nudgeStatuses[friend.user_id] = NudgeStatusResponse(
+                        can_nudge: false,
+                        has_completed_mile: false,
+                        already_nudged_today: true
+                    )
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    showNudgeFeedback(NudgeFeedback(
+                        icon: "bell.badge.fill",
+                        message: "Nudge sent to \(friend.displayName)!",
+                        isError: false
+                    ))
+                }
+            } catch {
+                await MainActor.run {
+                    nudgingFriendId = nil
+                    showNudgeFeedback(NudgeFeedback(
+                        icon: "xmark.circle",
+                        message: error.localizedDescription,
+                        isError: true
+                    ))
+                }
+            }
+        }
+    }
+
+    private func showNudgeFeedback(_ feedback: NudgeFeedback) {
+        withAnimation(.easeInOut(duration: 0.2)) { nudgeFeedback = feedback }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            withAnimation(.easeInOut(duration: 0.2)) { nudgeFeedback = nil }
+        }
+    }
+
     // MARK: - Helper Methods
     private func handleAcceptRequest(_ user: BackendUser) {
         Task {
@@ -338,7 +535,7 @@ struct FriendsListView: View {
             }
         }
     }
-    
+
     private func handleDeclineRequest(_ user: BackendUser) {
         Task {
             do {
@@ -348,7 +545,7 @@ struct FriendsListView: View {
             }
         }
     }
-    
+
     private func handleCancelRequest(_ user: BackendUser) {
         Task {
             do {
@@ -378,6 +575,13 @@ struct FriendsListView: View {
             }
         }
     }
+}
+
+// MARK: - Nudge Feedback Model
+private struct NudgeFeedback: Equatable {
+    let icon: String
+    let message: String
+    let isError: Bool
 }
 
 // MARK: - Tab Button Component
@@ -422,6 +626,22 @@ struct TabButton: View {
         }
         .buttonStyle(PlainButtonStyle())
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Bell Shake Animation Modifier
+struct BellShakeModifier: ViewModifier {
+    var isShaking: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .rotationEffect(.degrees(isShaking ? -15 : 0), anchor: .top)
+            .animation(
+                isShaking
+                    ? .easeInOut(duration: 0.1).repeatCount(5, autoreverses: true)
+                    : .default,
+                value: isShaking
+            )
     }
 }
 

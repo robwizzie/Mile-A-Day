@@ -3,6 +3,7 @@ import { AuthenticatedRequest } from '../middleware/auth.js';
 import { getCompetition } from '../services/competitionService.js';
 import { getUser } from '../services/userService.js';
 import { sendPush, canNudge, logNudge } from '../services/pushNotificationService.js';
+import { shouldSendNotification } from '../services/notificationSettingsService.js';
 import hasRequiredKeys from '../utils/hasRequiredKeys.js';
 
 export async function nudgeUser(req: AuthenticatedRequest, res: Response) {
@@ -49,16 +50,19 @@ export async function nudgeUser(req: AuthenticatedRequest, res: Response) {
 
 		await logNudge(competitionId, senderId, targetUserId);
 
-		// Send push notification
-		const sender = await getUser({ userId: senderId });
-		const senderName = sender?.username || 'Someone';
+		// Check notification preferences before sending
+		const shouldSend = await shouldSendNotification(targetUserId, senderId, 'nudge');
+		if (shouldSend) {
+			const sender = await getUser({ userId: senderId });
+			const senderName = sender?.username || 'Someone';
 
-		await sendPush(targetUserId, {
-			title: 'You got nudged!',
-			body: `${senderName} nudged you in ${competition.competition_name}`,
-			type: 'competition_nudge',
-			data: { competition_id: competitionId, user_id: senderId }
-		});
+			await sendPush(targetUserId, {
+				title: 'You got nudged!',
+				body: `${senderName} nudged you in ${competition.competition_name}`,
+				type: 'competition_nudge',
+				data: { competition_id: competitionId, user_id: senderId }
+			});
+		}
 
 		res.status(200).json({ message: 'Nudge sent' });
 	} catch (error: any) {

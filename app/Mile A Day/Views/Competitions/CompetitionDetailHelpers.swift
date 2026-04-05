@@ -208,21 +208,42 @@ struct FriendInviteRow: View {
 struct FlexNudgeTracker {
     private static let flexPrefix = "flex_sent_"
     private static let nudgePrefix = "nudge_sent_"
+    private static let friendNudgePrefix = "friend_nudge_sent_"
 
+    // Competition flex: per target user per day (across all competitions)
+    static func hasSentFlexToday(targetUserId: String) -> Bool {
+        UserDefaults.standard.bool(forKey: flexPrefix + targetUserId + "_" + todayKey())
+    }
+
+    static func markFlexSent(targetUserId: String) {
+        UserDefaults.standard.set(true, forKey: flexPrefix + targetUserId + "_" + todayKey())
+    }
+
+    // Legacy: competition-based flex check (for backward compat)
     static func hasSentFlexToday(competitionId: String) -> Bool {
-        UserDefaults.standard.bool(forKey: flexPrefix + competitionId + "_" + todayKey())
+        UserDefaults.standard.bool(forKey: flexPrefix + "comp_" + competitionId + "_" + todayKey())
     }
 
     static func markFlexSent(competitionId: String) {
-        UserDefaults.standard.set(true, forKey: flexPrefix + competitionId + "_" + todayKey())
+        UserDefaults.standard.set(true, forKey: flexPrefix + "comp_" + competitionId + "_" + todayKey())
     }
 
+    // Competition nudge
     static func hasSentNudgeToday(competitionId: String, targetUserId: String) -> Bool {
         UserDefaults.standard.bool(forKey: nudgePrefix + competitionId + "_" + targetUserId + "_" + todayKey())
     }
 
     static func markNudgeSent(competitionId: String, targetUserId: String) {
         UserDefaults.standard.set(true, forKey: nudgePrefix + competitionId + "_" + targetUserId + "_" + todayKey())
+    }
+
+    // Friend nudge (from friends list, not competition)
+    static func hasSentFriendNudgeToday(friendId: String) -> Bool {
+        UserDefaults.standard.bool(forKey: friendNudgePrefix + friendId + "_" + todayKey())
+    }
+
+    static func markFriendNudgeSent(friendId: String) {
+        UserDefaults.standard.set(true, forKey: friendNudgePrefix + friendId + "_" + todayKey())
     }
 
     private static func todayKey() -> String {

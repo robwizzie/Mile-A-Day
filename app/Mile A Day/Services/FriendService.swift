@@ -464,6 +464,88 @@ class FriendService: ObservableObject {
         return nil
     }
 
+    // MARK: - Friend Nudge
+
+    /// Nudge a friend who hasn't completed their mile yet
+    func nudgeFriend(_ friendId: String) async throws {
+        let _: FriendNudgeResponse = try await makeRequest(
+            endpoint: "/friends/\(friendId)/nudge",
+            method: .POST,
+            responseType: FriendNudgeResponse.self
+        )
+    }
+
+    /// Check nudge status for a specific friend
+    func checkNudgeStatus(for friendId: String) async throws -> NudgeStatusResponse {
+        return try await makeRequest(
+            endpoint: "/friends/\(friendId)/nudge-status",
+            responseType: NudgeStatusResponse.self
+        )
+    }
+
+    /// Batch check nudge status for all friends
+    func checkNudgeStatusBatch(friendIds: [String]) async throws -> [String: NudgeStatusResponse] {
+        let body = try JSONSerialization.data(withJSONObject: ["friend_ids": friendIds])
+        let response: NudgeStatusBatchResponse = try await makeRequest(
+            endpoint: "/friends/nudge-status/batch",
+            method: .POST,
+            body: body,
+            responseType: NudgeStatusBatchResponse.self
+        )
+        return response.statuses
+    }
+
+    // MARK: - Notification Settings
+
+    /// Get notification preferences
+    func getNotificationSettings() async throws -> NotificationSettingsResponse {
+        return try await makeRequest(
+            endpoint: "/notifications/preferences",
+            responseType: NotificationSettingsResponse.self
+        )
+    }
+
+    /// Update notification preferences
+    func updateNotificationSettings(_ settings: [String: Any]) async throws -> NotificationSettingsResponse {
+        let body = try JSONSerialization.data(withJSONObject: settings)
+        return try await makeRequest(
+            endpoint: "/notifications/preferences",
+            method: .PUT,
+            body: body,
+            responseType: NotificationSettingsResponse.self
+        )
+    }
+
+    /// Get friend-specific notification settings
+    func getFriendNotificationSettings() async throws -> [FriendNotificationSetting] {
+        let response: FriendNotificationSettingsResponse = try await makeRequest(
+            endpoint: "/notifications/friends",
+            responseType: FriendNotificationSettingsResponse.self
+        )
+        return response.settings
+    }
+
+    /// Update friend-specific notification settings
+    func updateFriendNotificationSettings(
+        friendId: String,
+        muted: Bool? = nil,
+        nudgesMuted: Bool? = nil,
+        activityMuted: Bool? = nil
+    ) async throws -> FriendNotificationSetting {
+        var body: [String: Any] = [:]
+        if let muted = muted { body["muted"] = muted }
+        if let nudgesMuted = nudgesMuted { body["nudges_muted"] = nudgesMuted }
+        if let activityMuted = activityMuted { body["activity_muted"] = activityMuted }
+
+        let jsonData = try JSONSerialization.data(withJSONObject: body)
+        return try await makeRequest(
+            endpoint: "/notifications/friends/\(friendId)",
+            method: .PUT,
+            body: jsonData,
+            responseType: FriendNotificationSetting.self
+        )
+    }
+
     // MARK: - Friend Workout Data
 
     /// Fetch recent workouts for a friend
@@ -488,6 +570,41 @@ class FriendService: ObservableObject {
         )
 
         return response
+    }
+
+    // MARK: - In-App Notification Inbox
+
+    func getInboxNotifications(limit: Int = 50, offset: Int = 0) async throws -> InAppNotificationResponse {
+        return try await makeRequest(
+            endpoint: "/notifications/inbox?limit=\(limit)&offset=\(offset)",
+            responseType: InAppNotificationResponse.self
+        )
+    }
+
+    func markNotificationRead(id: String) async throws {
+        struct SuccessResponse: Codable { let success: Bool }
+        _ = try await makeRequest(
+            endpoint: "/notifications/inbox/\(id)/read",
+            method: .PUT,
+            responseType: SuccessResponse.self
+        )
+    }
+
+    func markAllNotificationsRead() async throws {
+        struct SuccessResponse: Codable { let success: Bool }
+        _ = try await makeRequest(
+            endpoint: "/notifications/inbox/read-all",
+            method: .PUT,
+            responseType: SuccessResponse.self
+        )
+    }
+
+    func getUnreadNotificationCount() async throws -> Int {
+        let response = try await makeRequest(
+            endpoint: "/notifications/inbox/unread-count",
+            responseType: UnreadCountResponse.self
+        )
+        return response.unread_count
     }
 }
 

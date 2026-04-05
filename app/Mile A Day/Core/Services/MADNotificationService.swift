@@ -110,31 +110,50 @@ final class MADNotificationService: NSObject, ObservableObject {
     }
 
     /// Updates the daily reminder with intelligent scheduling.
-    /// Only schedules reminder notifications if the user hasn't completed their goal.
-    /// - Parameters:
-    ///   - isCompleted: Whether the user has completed their daily goal
-    ///   - currentMiles: Current miles completed today
-    ///   - goalMiles: User's daily goal in miles
-    ///   - hour: Hour to schedule the reminder (default 18 = 6 PM)
-    func updateDailyReminder(isCompleted: Bool, currentMiles: Double = 0, goalMiles: Double = 1.0, at hour: Int = 18) {
+    /// Schedules a one-shot notification for the next occurrence of the reminder hour.
+    /// Content changes based on whether the user has completed their goal:
+    /// - Completed: "Way to go!" congratulatory message
+    /// - Not completed: "Mile still waiting…" motivational nudge
+    /// Must be called on every foreground resume and health data update so the
+    /// notification always reflects the latest completion state.
+    func updateDailyReminder(isCompleted: Bool, currentMiles: Double = 0, goalMiles: Double = 1.0, at hour: Int? = nil) {
         // Remove any pending daily reminder first
         center.removePendingNotificationRequests(withIdentifiers: [Identifier.dailyReminder])
-        
-        var dateComponents = DateComponents()
-        dateComponents.hour = hour
-        dateComponents.calendar = Calendar.current
 
-        let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
+        // Respect user preferences
+        let prefs = NotificationPreferences.load()
+        guard prefs.dailyReminderEnabled else { return }
+
+        let reminderHour = hour ?? prefs.dailyReminderHour
+
+        // Schedule a one-shot notification for the next occurrence of reminderHour.
+        // One-shot ensures stale content can never fire on a future day — the app must
+        // re-evaluate and reschedule each time it runs.
+        let now = Date()
+        var targetComponents = Calendar.current.dateComponents([.year, .month, .day], from: now)
+        targetComponents.hour = reminderHour
+        targetComponents.minute = 0
+        targetComponents.second = 0
+
+        if let targetDate = Calendar.current.date(from: targetComponents), targetDate <= now {
+            // Already past the reminder hour today — schedule for tomorrow
+            if let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: now) {
+                targetComponents = Calendar.current.dateComponents([.year, .month, .day], from: tomorrow)
+                targetComponents.hour = reminderHour
+                targetComponents.minute = 0
+                targetComponents.second = 0
+            }
+        }
+
+        let trigger = UNCalendarNotificationTrigger(dateMatching: targetComponents, repeats: false)
 
         let content = UNMutableNotificationContent()
         content.sound = .default
-        
+
         if isCompleted {
-            // Congratulatory message - only schedule for tomorrow and beyond
             content.title = "Way to go!"
             content.body = "You crushed your mile today. See you tomorrow at the start line!"
         } else {
-            // Motivational reminder - only fires if not completed
             content.title = "Mile still waiting…"
             content.body = "Don't forget to log your daily mile! Lace up and get moving."
         }
@@ -142,12 +161,6 @@ final class MADNotificationService: NSObject, ObservableObject {
         schedule(content: content, trigger: .calendar(trigger), identifier: Identifier.dailyReminder)
     }
     
-    /// Legacy method - use updateDailyReminder(isCompleted:currentMiles:goalMiles:at:) instead
-    @available(*, deprecated, message: "Use updateDailyReminder(isCompleted:currentMiles:goalMiles:at:) instead")
-    func updateDailyReminder(completed: Bool, at hour: Int = 18) {
-        updateDailyReminder(isCompleted: completed, at: hour)
-    }
-
     // MARK: - Smart Notification Logic
     
     /// Checks if we should send a completion notification based on current progress
@@ -276,11 +289,15 @@ final class MADNotificationService: NSObject, ObservableObject {
         switch type {
         case "friend_request": return prefs.friendRequestReceivedEnabled
         case "friend_request_accepted": return prefs.friendRequestAcceptedEnabled
+        case "friend_nudge": return prefs.friendNudgeEnabled
+        case "friend_activity": return prefs.friendCompletedEnabled
         case "competition_invite": return prefs.competitionInviteEnabled
         case "competition_accepted": return prefs.competitionAcceptedEnabled
         case "competition_started", "competition_updates": return prefs.competitionStartEnabled
         case "competition_finished": return prefs.competitionFinishEnabled
         case "competition_nudge": return prefs.competitionNudgeEnabled
+        case "competition_flex": return prefs.competitionFlexEnabled
+        case "competition_milestone": return prefs.competitionMilestonesEnabled
         default: return true
         }
     }
@@ -326,11 +343,16 @@ extension MADNotificationService {
 // MARK: - UNUserNotificationCenterDelegate
 extension MADNotificationService: UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        // For daily reminders, only show if user hasn't completed their goal
+        // For daily reminders, do a last-second check: if the content says
+        // "Mile still waiting" but the user has actually completed their goal,
+        // suppress it. This catches the edge case where HealthKit data arrived
+        // after the notification was scheduled but before it fired.
         if notification.request.identifier == Identifier.dailyReminder {
             let widgetData = WidgetDataStore.load()
             let isCompleted = widgetData.miles >= widgetData.goal
-            if isCompleted {
+            let isReminderContent = notification.request.content.title.contains("waiting")
+            if isCompleted && isReminderContent {
+                center.removePendingNotificationRequests(withIdentifiers: [Identifier.dailyReminder])
                 return []
             }
         }
@@ -340,6 +362,22 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         if let type = userInfo["type"] as? String {
             if !isRemoteNotificationEnabled(type: type) {
                 return []
+            }
+
+            // Check DND schedule
+            let prefs = NotificationPreferences.load()
+            if prefs.dndEnabled {
+                let hour = Calendar.current.component(.hour, from: Date())
+                let inDND: Bool
+                if prefs.dndStartHour > prefs.dndEndHour {
+                    // Spans midnight (e.g., 22 to 8)
+                    inDND = hour >= prefs.dndStartHour || hour < prefs.dndEndHour
+                } else {
+                    inDND = hour >= prefs.dndStartHour && hour < prefs.dndEndHour
+                }
+                if inDND {
+                    return [] // Suppress banner during DND
+                }
             }
 
             // Notify the app so badge counts can refresh while in foreground
