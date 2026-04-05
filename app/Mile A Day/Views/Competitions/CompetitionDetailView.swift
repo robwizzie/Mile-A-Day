@@ -90,10 +90,9 @@ struct CompetitionDetailView: View {
         } message: {
             Text("This action cannot be undone.")
         }
-        .confirmationDialog(
+        .alert(
             "Remove \(removeTargetUser?.displayName ?? "user")?",
-            isPresented: $showRemoveConfirmation,
-            titleVisibility: .visible
+            isPresented: $showRemoveConfirmation
         ) {
             Button("Remove", role: .destructive) { confirmRemoveUser() }
             Button("Cancel", role: .cancel) { removeTargetUser = nil }

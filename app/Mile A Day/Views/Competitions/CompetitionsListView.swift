@@ -32,7 +32,14 @@ struct CompetitionsListView: View {
         .navigationTitle("Competitions")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showingCreateCompetition) {
-            CreateCompetitionView()
+            CreateCompetitionView { createdId in
+                Task {
+                    await competitionService.refreshAllData()
+                    if let competition = competitionService.competitions.first(where: { $0.id == createdId }) {
+                        selectedCompetition = competition
+                    }
+                }
+            }
         }
         .sheet(item: $selectedCompetition) { competition in
             NavigationStack {

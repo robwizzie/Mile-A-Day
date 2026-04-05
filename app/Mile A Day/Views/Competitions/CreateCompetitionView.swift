@@ -5,6 +5,9 @@ struct CreateCompetitionView: View {
     @StateObject private var competitionService = CompetitionService()
     @StateObject private var friendService = FriendService()
 
+    /// Called with the created competition ID when user taps "View Lobby"
+    var onCreated: ((String) -> Void)?
+
     // Form fields
     @State private var selectedFriends: Set<BackendUser> = []
     @State private var selectedType: CompetitionType = .apex
@@ -25,6 +28,7 @@ struct CreateCompetitionView: View {
     @State private var showError = false
     @State private var errorMessage = ""
     @State private var showSuccess = false
+    @State private var createdCompetitionId: String?
     @State private var failedInviteCount = 0
     @State private var showFriendPicker = false
     @State private var showTypeSelector = false
@@ -76,9 +80,9 @@ struct CreateCompetitionView: View {
         selectedType != .clash && selectedType != .apex
     }
 
-    /// Apex, Targets, Clash use interval-based scoring
+    /// Targets and Clash use interval-based scoring
     var needsInterval: Bool {
-        selectedType == .apex || selectedType == .targets || selectedType == .clash
+        selectedType == .targets || selectedType == .clash
     }
 
     var needsFirstTo: Bool {
@@ -176,6 +180,9 @@ struct CreateCompetitionView: View {
             }
             .alert("Competition Created!", isPresented: $showSuccess) {
                 Button("View Lobby") {
+                    if let id = createdCompetitionId {
+                        onCreated?(id)
+                    }
                     dismiss()
                 }
             } message: {
@@ -1033,6 +1040,7 @@ struct CreateCompetitionView: View {
 
                 await MainActor.run {
                     isCreating = false
+                    createdCompetitionId = competitionId
                     failedInviteCount = inviteFailures
                     showSuccess = true
                 }

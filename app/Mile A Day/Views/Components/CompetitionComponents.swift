@@ -723,12 +723,15 @@ struct LobbyParticipantRow: View {
         switch user.invite_status {
         case .accepted:
             Image(systemName: "checkmark.circle.fill")
+                .font(.title3)
                 .foregroundColor(.green)
         case .pending:
             Image(systemName: "clock.fill")
+                .font(.title3)
                 .foregroundColor(.orange)
         case .declined:
             Image(systemName: "xmark.circle.fill")
+                .font(.title3)
                 .foregroundColor(.red)
         }
     }
