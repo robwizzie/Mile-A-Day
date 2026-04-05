@@ -552,7 +552,10 @@ struct StreakActiveView: View {
         isSendingAction = true
         Task {
             do {
-                try await competitionService.sendFlex(competitionId: competition.competition_id)
+                let targets = acceptedUsers.filter { $0.user_id != currentUserId }
+                for target in targets {
+                    try await competitionService.sendFlex(competitionId: competition.competition_id, targetUserId: target.user_id)
+                }
                 await MainActor.run {
                     isSendingAction = false
                     FlexNudgeTracker.markFlexSent(competitionId: competition.competition_id)

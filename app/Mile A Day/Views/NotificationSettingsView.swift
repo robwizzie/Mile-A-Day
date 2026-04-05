@@ -331,31 +331,44 @@ struct NotificationSettingsView: View {
                 Button {
                     toggleFriendMute(friendId: friend.user_id, currentlyMuted: isMuted)
                 } label: {
-                    Image(systemName: isMuted ? "bell.slash.fill" : "bell.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(isMuted ? .red.opacity(0.6) : .white.opacity(0.4))
-                        .frame(width: 30, height: 30)
-                        .background(
-                            Circle()
-                                .fill(isMuted ? Color.red.opacity(0.1) : Color.white.opacity(0.05))
-                        )
+                    HStack(spacing: 4) {
+                        Image(systemName: isMuted ? "bell.slash.fill" : "bell.fill")
+                            .font(.system(size: 12))
+                        Text(isMuted ? "Muted" : "On")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                    }
+                    .foregroundColor(isMuted ? .red.opacity(0.7) : .green.opacity(0.7))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(isMuted ? Color.red.opacity(0.1) : Color.green.opacity(0.08))
+                            .overlay(
+                                Capsule()
+                                    .stroke(isMuted ? Color.red.opacity(0.2) : Color.green.opacity(0.15), lineWidth: 1)
+                            )
+                    )
                 }
                 .buttonStyle(ScaleButtonStyle())
             }
 
             if !isMuted {
                 HStack(spacing: MADTheme.Spacing.sm) {
-                    muteChip(
+                    Text("Tap to toggle:")
+                        .font(.system(size: 9, design: .rounded))
+                        .foregroundColor(.white.opacity(0.25))
+
+                    notificationToggleChip(
                         label: "Nudges",
                         icon: "bell.badge",
-                        isMuted: nudgesMuted,
+                        isEnabled: !nudgesMuted,
                         action: { toggleFriendNudgesMute(friendId: friend.user_id, currentlyMuted: nudgesMuted) }
                     )
 
-                    muteChip(
+                    notificationToggleChip(
                         label: "Activity",
                         icon: "figure.run",
-                        isMuted: activityMuted,
+                        isEnabled: !activityMuted,
                         action: { toggleFriendActivityMute(friendId: friend.user_id, currentlyMuted: activityMuted) }
                     )
 
@@ -370,23 +383,23 @@ struct NotificationSettingsView: View {
         )
     }
 
-    private func muteChip(label: String, icon: String, isMuted: Bool, action: @escaping () -> Void) -> some View {
+    private func notificationToggleChip(label: String, icon: String, isEnabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 4) {
-                Image(systemName: isMuted ? "slash.circle" : icon)
+                Image(systemName: isEnabled ? icon : "slash.circle")
                     .font(.system(size: 9))
                 Text(label)
                     .font(.system(size: 10, weight: .medium, design: .rounded))
             }
-            .foregroundColor(isMuted ? .red.opacity(0.7) : .white.opacity(0.5))
+            .foregroundColor(isEnabled ? .green.opacity(0.8) : .red.opacity(0.7))
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(
                 Capsule()
-                    .fill(isMuted ? Color.red.opacity(0.08) : Color.white.opacity(0.04))
+                    .fill(isEnabled ? Color.green.opacity(0.06) : Color.red.opacity(0.08))
                     .overlay(
                         Capsule()
-                            .stroke(isMuted ? Color.red.opacity(0.15) : Color.white.opacity(0.06), lineWidth: 1)
+                            .stroke(isEnabled ? Color.green.opacity(0.12) : Color.red.opacity(0.15), lineWidth: 1)
                     )
             )
         }
@@ -421,6 +434,10 @@ struct NotificationSettingsView: View {
         isLoadingFriendSettings = true
         Task {
             do {
+                // Load friends list if not already loaded
+                if friendService.friends.isEmpty {
+                    try await friendService.loadFriends()
+                }
                 let settings = try await friendService.getFriendNotificationSettings()
                 await MainActor.run {
                     friendSettings = settings
@@ -435,49 +452,106 @@ struct NotificationSettingsView: View {
     }
 
     private func toggleFriendMute(friendId: String, currentlyMuted: Bool) {
+        // Optimistic update
+        let existing = friendSettings.first(where: { $0.friend_id == friendId })
+        let optimistic = FriendNotificationSetting(
+            friend_id: friendId,
+            username: existing?.username,
+            muted: !currentlyMuted,
+            nudges_muted: existing?.nudges_muted ?? false,
+            activity_muted: existing?.activity_muted ?? false
+        )
+        updateLocalFriendSetting(optimistic)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
         Task {
             do {
                 let updated = try await friendService.updateFriendNotificationSettings(
                     friendId: friendId,
                     muted: !currentlyMuted
                 )
-                await MainActor.run {
-                    updateLocalFriendSetting(updated)
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                }
+                await MainActor.run { updateLocalFriendSetting(updated) }
             } catch {
-                // Silently fail
+                // Revert on failure
+                await MainActor.run {
+                    let reverted = FriendNotificationSetting(
+                        friend_id: friendId,
+                        username: existing?.username,
+                        muted: currentlyMuted,
+                        nudges_muted: existing?.nudges_muted ?? false,
+                        activity_muted: existing?.activity_muted ?? false
+                    )
+                    updateLocalFriendSetting(reverted)
+                }
             }
         }
     }
 
     private func toggleFriendNudgesMute(friendId: String, currentlyMuted: Bool) {
+        let existing = friendSettings.first(where: { $0.friend_id == friendId })
+        let optimistic = FriendNotificationSetting(
+            friend_id: friendId,
+            username: existing?.username,
+            muted: existing?.muted ?? false,
+            nudges_muted: !currentlyMuted,
+            activity_muted: existing?.activity_muted ?? false
+        )
+        updateLocalFriendSetting(optimistic)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
         Task {
             do {
                 let updated = try await friendService.updateFriendNotificationSettings(
                     friendId: friendId,
                     nudgesMuted: !currentlyMuted
                 )
+                await MainActor.run { updateLocalFriendSetting(updated) }
+            } catch {
                 await MainActor.run {
-                    updateLocalFriendSetting(updated)
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    let reverted = FriendNotificationSetting(
+                        friend_id: friendId,
+                        username: existing?.username,
+                        muted: existing?.muted ?? false,
+                        nudges_muted: currentlyMuted,
+                        activity_muted: existing?.activity_muted ?? false
+                    )
+                    updateLocalFriendSetting(reverted)
                 }
-            } catch { }
+            }
         }
     }
 
     private func toggleFriendActivityMute(friendId: String, currentlyMuted: Bool) {
+        let existing = friendSettings.first(where: { $0.friend_id == friendId })
+        let optimistic = FriendNotificationSetting(
+            friend_id: friendId,
+            username: existing?.username,
+            muted: existing?.muted ?? false,
+            nudges_muted: existing?.nudges_muted ?? false,
+            activity_muted: !currentlyMuted
+        )
+        updateLocalFriendSetting(optimistic)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
         Task {
             do {
                 let updated = try await friendService.updateFriendNotificationSettings(
                     friendId: friendId,
                     activityMuted: !currentlyMuted
                 )
+                await MainActor.run { updateLocalFriendSetting(updated) }
+            } catch {
                 await MainActor.run {
-                    updateLocalFriendSetting(updated)
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    let reverted = FriendNotificationSetting(
+                        friend_id: friendId,
+                        username: existing?.username,
+                        muted: existing?.muted ?? false,
+                        nudges_muted: existing?.nudges_muted ?? false,
+                        activity_muted: currentlyMuted
+                    )
+                    updateLocalFriendSetting(reverted)
                 }
-            } catch { }
+            }
         }
     }
 

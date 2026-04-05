@@ -178,89 +178,153 @@ struct FriendsListView: View {
     // MARK: - Friend Row with Nudge
     private func friendRow(friend: BackendUser) -> some View {
         let status = nudgeStatuses[friend.user_id]
-        let canNudge = status?.can_nudge ?? false
         let hasCompletedMile = status?.has_completed_mile ?? false
         let alreadyNudged = status?.already_nudged_today ?? false
         let todayMiles = status?.today_miles ?? 0
+        let goalMiles: Double = 1.0
+        let progress = min(todayMiles / goalMiles, 1.0)
 
-        return UserProfileCard(
-            user: friend,
-            subtitle: friendProgressText(miles: todayMiles, completed: hasCompletedMile),
-            onTap: {
-                selectedUser = friend
-            },
-            actionButton: AnyView(
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    // Nudge button
-                    nudgeButton(
-                        friend: friend,
-                        canNudge: canNudge,
-                        hasCompletedMile: hasCompletedMile,
-                        alreadyNudged: alreadyNudged
-                    )
+        return Button {
+            selectedUser = friend
+        } label: {
+            VStack(spacing: MADTheme.Spacing.sm) {
+                // Top row: avatar, name, menu
+                HStack(spacing: MADTheme.Spacing.md) {
+                    ProfileImageView(user: friend, size: 44)
 
-                    // Friend menu
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(friend.username ?? "Unknown")
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                        if friend.displayName != friend.username {
+                            Text(friend.displayName)
+                                .font(.system(size: 11, design: .rounded))
+                                .foregroundColor(.white.opacity(0.5))
+                        }
+                    }
+
+                    Spacer()
+
                     friendMenu(friend: friend)
                 }
-            )
-        )
-    }
 
-    private func friendProgressText(miles: Double, completed: Bool) -> String? {
-        if completed {
-            return "Done today (\(String(format: "%.1f", miles)) mi)"
-        } else if miles > 0 {
-            return "\(String(format: "%.1f", miles)) mi today"
+                // Progress section
+                if hasCompletedMile {
+                    // Completed state
+                    HStack(spacing: MADTheme.Spacing.sm) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.green)
+
+                        Text("Goal complete")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(.green.opacity(0.9))
+
+                        Spacer()
+
+                        Text("\(String(format: "%.2f", todayMiles)) mi today")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    .padding(.horizontal, MADTheme.Spacing.sm)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.green.opacity(0.08))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.green.opacity(0.12), lineWidth: 1)
+                            )
+                    )
+                } else {
+                    // In-progress state with progress bar and nudge
+                    VStack(spacing: 6) {
+                        HStack {
+                            Text("\(String(format: "%.2f", todayMiles)) / \(String(format: "%.0f", goalMiles)) mi")
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundColor(.white.opacity(0.5))
+
+                            Spacer()
+
+                            Text("\(Int(progress * 100))%")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .foregroundColor(progress > 0 ? .orange.opacity(0.8) : .white.opacity(0.3))
+                        }
+
+                        // Progress bar with nudge button
+                        HStack(spacing: MADTheme.Spacing.sm) {
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(Color.white.opacity(0.06))
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(
+                                            LinearGradient(
+                                                colors: [.orange.opacity(0.6), .orange],
+                                                startPoint: .leading,
+                                                endPoint: .trailing
+                                            )
+                                        )
+                                        .frame(width: max(geo.size.width * progress, progress > 0 ? 4 : 0))
+                                }
+                            }
+                            .frame(height: 28)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+
+                            // Nudge button
+                            nudgeButton(friend: friend, alreadyNudged: alreadyNudged)
+                        }
+                    }
+                }
+            }
+            .padding(MADTheme.Spacing.md)
+            .madCard()
         }
-        return nil
+        .buttonStyle(PlainButtonStyle())
     }
 
-    // MARK: - Nudge Button
-    private func nudgeButton(friend: BackendUser, canNudge: Bool, hasCompletedMile: Bool, alreadyNudged: Bool) -> some View {
+    // MARK: - Nudge Button (only shown when friend hasn't completed goal)
+    private func nudgeButton(friend: BackendUser, alreadyNudged: Bool) -> some View {
         Group {
-            if hasCompletedMile {
-                // Friend completed their mile - show checkmark
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 16))
-                    .foregroundColor(.green)
-                    .frame(width: 36, height: 36)
-                    .background(
-                        Circle()
-                            .fill(Color.green.opacity(0.1))
-                    )
-            } else if alreadyNudged {
-                // Already nudged today - show disabled bell
-                Image(systemName: "bell.slash.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.2))
-                    .frame(width: 36, height: 36)
-                    .background(
-                        Circle()
-                            .fill(Color.white.opacity(0.04))
-                    )
+            if alreadyNudged {
+                HStack(spacing: 4) {
+                    Image(systemName: "bell.slash.fill")
+                        .font(.system(size: 10))
+                    Text("Nudged")
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                }
+                .foregroundColor(.white.opacity(0.25))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(Color.white.opacity(0.04))
+                )
             } else {
-                // Can nudge - show nudge button with shake
                 Button {
                     handleNudge(friend)
                 } label: {
-                    ZStack {
+                    HStack(spacing: 4) {
                         if nudgingFriendId == friend.user_id {
                             ProgressView()
-                                .scaleEffect(0.7)
+                                .scaleEffect(0.6)
                                 .tint(.orange)
                         } else {
                             Image(systemName: "bell.badge")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundColor(.orange)
+                                .font(.system(size: 10, weight: .semibold))
                                 .modifier(BellShakeModifier(isShaking: bellShakeIds.contains(friend.user_id)))
+                            Text("Nudge")
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
                         }
                     }
-                    .frame(width: 36, height: 36)
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
                     .background(
-                        Circle()
+                        Capsule()
                             .fill(Color.orange.opacity(0.12))
                             .overlay(
-                                Circle()
+                                Capsule()
                                     .stroke(Color.orange.opacity(0.2), lineWidth: 1)
                             )
                     )
@@ -268,11 +332,10 @@ struct FriendsListView: View {
                 .buttonStyle(ScaleButtonStyle())
                 .disabled(nudgingFriendId != nil)
                 .onAppear {
-                    // Only animate once per friend per session
                     guard !bellAnimatedIds.contains(friend.user_id) else { return }
                     bellAnimatedIds.insert(friend.user_id)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        withAnimation(.easeInOut(duration: 0.6)) {
+                        _ = withAnimation(.easeInOut(duration: 0.6)) {
                             bellShakeIds.insert(friend.user_id)
                         }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
@@ -496,7 +559,8 @@ struct FriendsListView: View {
                     nudgeStatuses[friend.user_id] = NudgeStatusResponse(
                         can_nudge: false,
                         has_completed_mile: false,
-                        already_nudged_today: true
+                        already_nudged_today: true,
+                        today_miles: nil
                     )
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     showNudgeFeedback(NudgeFeedback(

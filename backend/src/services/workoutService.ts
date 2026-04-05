@@ -198,13 +198,21 @@ export async function getRecentWorkouts(userId: string, limit: number | null = 1
 }
 
 export async function getTodayMiles(userId: string) {
-	const today = new Date().toISOString().split('T')[0];
+	// Use the user's timezone offset from their most recent workout to determine
+	// what "today" is in their local time (local_date is stored in user's timezone)
 	const todayMilesQuery = `
-	SELECT SUM(distance) as total_distance FROM workouts
-	WHERE user_id = $1 AND local_date = $2
+	WITH user_tz AS (
+		SELECT COALESCE(
+			(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY start_date DESC LIMIT 1),
+			0
+		) AS tz_offset
+	)
+	SELECT SUM(w.distance) as total_distance FROM workouts w, user_tz
+	WHERE w.user_id = $1
+	AND w.local_date = (NOW() + (user_tz.tz_offset || ' minutes')::interval)::date
 	`;
 
-	const result = await db.query(todayMilesQuery, [userId, today]);
+	const result = await db.query(todayMilesQuery, [userId]);
 	return result[0]?.total_distance || 0;
 }
 
