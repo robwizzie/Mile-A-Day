@@ -11,6 +11,8 @@ struct MainTabView: View {
     @StateObject private var friendService = FriendService()
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedTab = 0
+    @State private var unreadNotificationCount = 0
+    @State private var showNotificationInbox = false
 
     var body: some View {
         // iOS 26: Use native TabView for automatic Liquid Glass
@@ -19,6 +21,32 @@ struct MainTabView: View {
                 NavigationStack {
                     DashboardView(healthManager: healthManager, userManager: userManager)
                         .environmentObject(notificationService)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button {
+                                    showNotificationInbox = true
+                                } label: {
+                                    ZStack(alignment: .topTrailing) {
+                                        Image(systemName: "bell.fill")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(.white.opacity(0.7))
+
+                                        if unreadNotificationCount > 0 {
+                                            Text("\(min(unreadNotificationCount, 99))")
+                                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                                                .foregroundColor(.white)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(Capsule().fill(MADTheme.Colors.madRed))
+                                                .offset(x: 8, y: -6)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .navigationDestination(isPresented: $showNotificationInbox) {
+                            NotificationInboxView()
+                        }
                 }
             }
             
@@ -51,6 +79,7 @@ struct MainTabView: View {
         .task {
             await competitionService.refreshAllData()
             await friendService.refreshAllData()
+            await refreshUnreadCount()
         }
         .onReceive(NotificationCenter.default.publisher(for: .didReceivePushNotification)) { notification in
             guard let type = notification.userInfo?["type"] as? String else { return }
@@ -76,9 +105,15 @@ struct MainTabView: View {
                      "competition_finished", "competition_updates", "competition_nudge":
                     await competitionService.refreshAllData()
                     selectedTab = 1
+                case "competition_flex", "competition_milestone", "friend_nudge",
+                     "friend_activity", "streak_broken", "personal_best",
+                     "lead_change", "clash_tie":
+                    selectedTab = 0
+                    showNotificationInbox = true
                 default:
                     break
                 }
+                await refreshUnreadCount()
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
@@ -86,6 +121,7 @@ struct MainTabView: View {
                 Task {
                     await competitionService.refreshAllData()
                     await friendService.refreshAllData()
+                    await refreshUnreadCount()
                 }
             }
         }
@@ -141,6 +177,17 @@ struct MainTabView: View {
             default:
                 notificationService.pendingNotificationType = nil
             }
+        }
+    }
+
+    private func refreshUnreadCount() async {
+        do {
+            let count = try await friendService.getUnreadNotificationCount()
+            await MainActor.run {
+                unreadNotificationCount = count
+            }
+        } catch {
+            // Silently fail
         }
     }
 

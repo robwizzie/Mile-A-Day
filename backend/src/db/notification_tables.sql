@@ -69,3 +69,32 @@ CREATE TABLE IF NOT EXISTS milestone_notifications (
     user_id TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Notification log for smart throttling (tracks daily send count per user)
+CREATE TABLE IF NOT EXISTS notification_log (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notification_log_user_date
+    ON notification_log (user_id, created_at DESC);
+
+-- In-app notification center (stores all notifications for user review)
+CREATE TABLE IF NOT EXISTS in_app_notifications (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    type TEXT NOT NULL,
+    data JSONB DEFAULT '{}',
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_in_app_notifications_user
+    ON in_app_notifications (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_in_app_notifications_unread
+    ON in_app_notifications (user_id, is_read) WHERE is_read = FALSE;

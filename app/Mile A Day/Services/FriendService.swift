@@ -571,6 +571,41 @@ class FriendService: ObservableObject {
 
         return response
     }
+
+    // MARK: - In-App Notification Inbox
+
+    func getInboxNotifications(limit: Int = 50, offset: Int = 0) async throws -> InAppNotificationResponse {
+        return try await makeRequest(
+            endpoint: "/notifications/inbox?limit=\(limit)&offset=\(offset)",
+            responseType: InAppNotificationResponse.self
+        )
+    }
+
+    func markNotificationRead(id: String) async throws {
+        struct SuccessResponse: Codable { let success: Bool }
+        _ = try await makeRequest(
+            endpoint: "/notifications/inbox/\(id)/read",
+            method: .PUT,
+            responseType: SuccessResponse.self
+        )
+    }
+
+    func markAllNotificationsRead() async throws {
+        struct SuccessResponse: Codable { let success: Bool }
+        _ = try await makeRequest(
+            endpoint: "/notifications/inbox/read-all",
+            method: .PUT,
+            responseType: SuccessResponse.self
+        )
+    }
+
+    func getUnreadNotificationCount() async throws -> Int {
+        let response = try await makeRequest(
+            endpoint: "/notifications/inbox/unread-count",
+            responseType: UnreadCountResponse.self
+        )
+        return response.unread_count
+    }
 }
 
 // MARK: - Friend Workout Models

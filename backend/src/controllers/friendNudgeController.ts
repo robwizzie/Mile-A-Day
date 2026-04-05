@@ -91,7 +91,7 @@ export async function checkNudgeStatusBatch(req: AuthenticatedRequest, res: Resp
 	}
 
 	try {
-		const statuses: Record<string, { can_nudge: boolean; has_completed_mile: boolean; already_nudged_today: boolean }> = {};
+		const statuses: Record<string, { can_nudge: boolean; has_completed_mile: boolean; already_nudged_today: boolean; today_miles: number }> = {};
 
 		await Promise.all(
 			friendIds.map(async (friendId: string) => {
@@ -104,7 +104,8 @@ export async function checkNudgeStatusBatch(req: AuthenticatedRequest, res: Resp
 				statuses[friendId] = {
 					can_nudge: canNudge && !hasCompletedMile,
 					has_completed_mile: hasCompletedMile,
-					already_nudged_today: !canNudge
+					already_nudged_today: !canNudge,
+					today_miles: Math.round(friendTodayMiles * 100) / 100
 				};
 			})
 		);

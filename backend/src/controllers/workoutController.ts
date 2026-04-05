@@ -14,7 +14,7 @@ import {
 	updateWorkout as updateWorkoutDb
 } from '../services/workoutService.js';
 import { checkRaceCompletions } from '../services/competitionService.js';
-import { notifyFriendsOfMileCompletion, checkCompetitionMilestones } from '../services/notificationService.js';
+import { notifyFriendsOfMileCompletion, checkCompetitionMilestones, checkPersonalBest, checkLeadChanges } from '../services/notificationService.js';
 
 export async function uploadWorkouts(req: Request, res: Response) {
 	if (!hasRequiredKeys(['userId'], req, res)) return;
@@ -51,6 +51,12 @@ export async function uploadWorkouts(req: Request, res: Response) {
 			}
 			checkCompetitionMilestones(userId).catch(err =>
 				console.error('Error checking milestones:', err.message)
+			);
+			checkPersonalBest(userId).catch(err =>
+				console.error('Error checking personal best:', err.message)
+			);
+			checkLeadChanges(userId).catch(err =>
+				console.error('Error checking lead changes:', err.message)
 			);
 		} catch (notifError: any) {
 			console.error('Error checking notifications:', notifError.message);

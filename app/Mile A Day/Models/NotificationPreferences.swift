@@ -25,6 +25,11 @@ struct NotificationPreferences: Codable {
     // Friend nudge notifications
     var friendNudgeEnabled: Bool = true
 
+    // Do Not Disturb schedule
+    var dndEnabled: Bool = false
+    var dndStartHour: Int = 22  // 10 PM
+    var dndEndHour: Int = 8     // 8 AM
+
     static let `default` = NotificationPreferences()
 }
 

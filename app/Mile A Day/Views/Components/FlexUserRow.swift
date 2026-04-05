@@ -10,6 +10,8 @@ struct FlexUserRow: View {
     @State private var isExpanded = false
     @State private var customMessage = ""
     @State private var isSending = false
+    @State private var sentMessage: String?
+    @State private var showSentIndicator = false
 
     private let presets = [
         "Better luck next time",
@@ -171,6 +173,27 @@ struct FlexUserRow: View {
                 .padding(.bottom, MADTheme.Spacing.md)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
+
+            // Sent indicator with message
+            if showSentIndicator {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(typeColor)
+                    Text("Flex sent")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundColor(typeColor)
+                    if let msg = sentMessage {
+                        Text("— \"\(msg)\"")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, MADTheme.Spacing.md)
+                .padding(.bottom, MADTheme.Spacing.sm)
+                .transition(.opacity)
+            }
         }
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
@@ -199,14 +222,22 @@ struct FlexUserRow: View {
 
     private func sendFlex(message: String?) {
         isSending = true
+        sentMessage = message
         onFlex(message)
-        // Reset after a brief delay (parent handles actual state)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+        // Show sent indicator with message
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             isSending = false
             withAnimation(.easeInOut(duration: 0.2)) {
                 isExpanded = false
+                showSentIndicator = true
             }
             customMessage = ""
+        }
+        // Hide sent indicator after a few seconds
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showSentIndicator = false
+            }
         }
     }
 }

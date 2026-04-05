@@ -497,6 +497,7 @@ struct NudgeStatusResponse: Codable {
     let can_nudge: Bool
     let has_completed_mile: Bool
     let already_nudged_today: Bool
+    let today_miles: Double?
 }
 
 struct NudgeStatusBatchResponse: Codable {
@@ -528,6 +529,27 @@ struct FriendNotificationSetting: Codable, Identifiable {
 
 struct FriendNotificationSettingsResponse: Codable {
     let settings: [FriendNotificationSetting]
+}
+
+// MARK: - In-App Notification Models
+
+struct InAppNotification: Codable, Identifiable {
+    let id: String
+    let title: String
+    let body: String
+    let type: String
+    let data: [String: String]?
+    let is_read: Bool
+    let created_at: String
+}
+
+struct InAppNotificationResponse: Codable {
+    let notifications: [InAppNotification]
+    let unread_count: Int
+}
+
+struct UnreadCountResponse: Codable {
+    let unread_count: Int
 }
 
 // MARK: - Trophy Models

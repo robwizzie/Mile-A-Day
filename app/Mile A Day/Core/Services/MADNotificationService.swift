@@ -346,6 +346,22 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
                 return []
             }
 
+            // Check DND schedule
+            let prefs = NotificationPreferences.load()
+            if prefs.dndEnabled {
+                let hour = Calendar.current.component(.hour, from: Date())
+                let inDND: Bool
+                if prefs.dndStartHour > prefs.dndEndHour {
+                    // Spans midnight (e.g., 22 to 8)
+                    inDND = hour >= prefs.dndStartHour || hour < prefs.dndEndHour
+                } else {
+                    inDND = hour >= prefs.dndStartHour && hour < prefs.dndEndHour
+                }
+                if inDND {
+                    return [] // Suppress banner during DND
+                }
+            }
+
             // Notify the app so badge counts can refresh while in foreground
             let data = userInfo["data"] as? [String: String] ?? [:]
             NotificationCenter.default.post(

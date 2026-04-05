@@ -15,6 +15,7 @@ struct FriendsListView: View {
     @State private var nudgeStatuses: [String: NudgeStatusResponse] = [:]
     @State private var nudgingFriendId: String?
     @State private var nudgeFeedback: NudgeFeedback?
+    @State private var bellShakeIds: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -179,9 +180,11 @@ struct FriendsListView: View {
         let canNudge = status?.can_nudge ?? false
         let hasCompletedMile = status?.has_completed_mile ?? false
         let alreadyNudged = status?.already_nudged_today ?? false
+        let todayMiles = status?.today_miles ?? 0
 
         return UserProfileCard(
             user: friend,
+            subtitle: friendProgressText(miles: todayMiles, completed: hasCompletedMile),
             onTap: {
                 selectedUser = friend
             },
@@ -200,6 +203,15 @@ struct FriendsListView: View {
                 }
             )
         )
+    }
+
+    private func friendProgressText(miles: Double, completed: Bool) -> String? {
+        if completed {
+            return "Done today (\(String(format: "%.1f", miles)) mi)"
+        } else if miles > 0 {
+            return "\(String(format: "%.1f", miles)) mi today"
+        }
+        return nil
     }
 
     // MARK: - Nudge Button
@@ -226,7 +238,7 @@ struct FriendsListView: View {
                             .fill(Color.white.opacity(0.04))
                     )
             } else {
-                // Can nudge - show nudge button
+                // Can nudge - show nudge button with shake
                 Button {
                     handleNudge(friend)
                 } label: {
@@ -239,6 +251,7 @@ struct FriendsListView: View {
                             Image(systemName: "bell.badge")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.orange)
+                                .modifier(BellShakeModifier(isShaking: bellShakeIds.contains(friend.user_id)))
                         }
                     }
                     .frame(width: 36, height: 36)
@@ -253,6 +266,16 @@ struct FriendsListView: View {
                 }
                 .buttonStyle(ScaleButtonStyle())
                 .disabled(nudgingFriendId != nil)
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        withAnimation(.easeInOut(duration: 0.6)) {
+                            bellShakeIds.insert(friend.user_id)
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                            bellShakeIds.remove(friend.user_id)
+                        }
+                    }
+                }
             }
         }
     }
@@ -599,6 +622,27 @@ struct TabButton: View {
         }
         .buttonStyle(PlainButtonStyle())
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Bell Shake Animation Modifier
+struct BellShakeModifier: ViewModifier, Animatable {
+    var isShaking: Bool
+
+    var animatableData: CGFloat {
+        get { isShaking ? 1 : 0 }
+        set { }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .rotationEffect(.degrees(isShaking ? -15 : 0), anchor: .top)
+            .animation(
+                isShaking
+                    ? .easeInOut(duration: 0.1).repeatCount(5, autoreverses: true)
+                    : .default,
+                value: isShaking
+            )
     }
 }
 

@@ -80,7 +80,11 @@ export type NotificationType =
 	| 'competition_updates'
 	| 'competition_nudge'
 	| 'competition_flex'
-	| 'competition_milestone';
+	| 'competition_milestone'
+	| 'streak_broken'
+	| 'personal_best'
+	| 'lead_change'
+	| 'clash_tie';
 
 interface PushPayload {
 	title: string;
@@ -168,9 +172,52 @@ async function removeInvalidToken(deviceToken: string): Promise<void> {
 	console.log(`[Push] Removed invalid device token: ${deviceToken.substring(0, 8)}...`);
 }
 
+// ─── Smart Throttling ───────────────────────────────────────────────
+
+const DAILY_NOTIFICATION_CAP = 18;
+
+// High-priority types bypass throttling
+const HIGH_PRIORITY_TYPES: NotificationType[] = [
+	'friend_request',
+	'competition_invite',
+	'competition_started',
+	'competition_finished',
+];
+
+async function getDailyNotificationCount(userId: string): Promise<number> {
+	const result = await db.query(
+		`SELECT COUNT(*) as count FROM notification_log
+		WHERE user_id = $1 AND created_at > CURRENT_DATE`,
+		[userId]
+	);
+	return parseInt(result[0]?.count ?? '0');
+}
+
+async function logNotificationSent(userId: string, type: NotificationType): Promise<void> {
+	await db.query(
+		'INSERT INTO notification_log (user_id, type) VALUES ($1, $2)',
+		[userId, type]
+	);
+}
+
 // ─── Public API ──────────────────────────────────────────────────────
 
 export async function sendPush(userId: string, payload: PushPayload): Promise<void> {
+	// Smart throttling: check daily cap (high-priority types bypass)
+	if (!HIGH_PRIORITY_TYPES.includes(payload.type)) {
+		const dailyCount = await getDailyNotificationCount(userId);
+		if (dailyCount >= DAILY_NOTIFICATION_CAP) {
+			console.log(`[Push] Throttled "${payload.type}" for user ${userId} (${dailyCount}/${DAILY_NOTIFICATION_CAP} today)`);
+			// Queue for digest instead
+			await db.query(
+				`INSERT INTO pending_notifications (user_id, type, competition_id, competition_name)
+				VALUES ($1, $2, $3, $4)`,
+				[userId, payload.type, payload.data?.competition_id || '', payload.body]
+			);
+			return;
+		}
+	}
+
 	const tokens = await db.query<{ device_token: string }>(
 		'SELECT device_token FROM device_tokens WHERE user_id = $1',
 		[userId]
@@ -187,8 +234,22 @@ export async function sendPush(userId: string, payload: PushPayload): Promise<vo
 
 	const sent = results.filter(Boolean).length;
 	if (sent > 0) {
+		await logNotificationSent(userId, payload.type);
 		console.log(`[Push] Sent "${payload.type}" to user ${userId} (${sent}/${tokens.length} devices)`);
 	}
+
+	// Always store in-app notification regardless of push delivery
+	storeInAppNotification(userId, payload).catch(err =>
+		console.error('[Push] Error storing in-app notification:', err.message)
+	);
+}
+
+async function storeInAppNotification(userId: string, payload: PushPayload): Promise<void> {
+	await db.query(
+		`INSERT INTO in_app_notifications (user_id, title, body, type, data)
+		VALUES ($1, $2, $3, $4, $5)`,
+		[userId, payload.title, payload.body, payload.type, JSON.stringify(payload.data ?? {})]
+	);
 }
 
 export async function registerDeviceToken(userId: string, deviceToken: string): Promise<void> {

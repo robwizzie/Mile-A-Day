@@ -25,6 +25,28 @@ struct NotificationSettingsView: View {
         }
     }
 
+    private var dndStartBinding: Binding<Date> {
+        Binding {
+            var comps = DateComponents()
+            comps.hour = prefs.dndStartHour
+            comps.minute = 0
+            return Calendar.current.date(from: comps) ?? Date()
+        } set: { date in
+            prefs.dndStartHour = Calendar.current.component(.hour, from: date)
+        }
+    }
+
+    private var dndEndBinding: Binding<Date> {
+        Binding {
+            var comps = DateComponents()
+            comps.hour = prefs.dndEndHour
+            comps.minute = 0
+            return Calendar.current.date(from: comps) ?? Date()
+        } set: { date in
+            prefs.dndEndHour = Calendar.current.component(.hour, from: date)
+        }
+    }
+
     var body: some View {
         ZStack {
             MADTheme.Colors.appBackgroundGradient
@@ -132,6 +154,58 @@ struct NotificationSettingsView: View {
                             }
                         }
                     }
+
+                    // Do Not Disturb Schedule
+                    settingsSection(title: "DO NOT DISTURB", icon: "moon.fill", iconColor: .indigo) {
+                        settingsToggle("Enable DND Schedule", isOn: $prefs.dndEnabled,
+                            description: "Silence all notifications during scheduled hours")
+
+                        if prefs.dndEnabled {
+                            settingsDivider
+
+                            DatePicker("Start", selection: dndStartBinding, displayedComponents: .hourAndMinute)
+                                .font(MADTheme.Typography.body)
+                                .datePickerStyle(.compact)
+                                .tint(MADTheme.Colors.madRed)
+
+                            DatePicker("End", selection: dndEndBinding, displayedComponents: .hourAndMinute)
+                                .font(MADTheme.Typography.body)
+                                .datePickerStyle(.compact)
+                                .tint(MADTheme.Colors.madRed)
+
+                            Text("Notifications received during DND will appear in your inbox")
+                                .font(.system(size: 11, design: .rounded))
+                                .foregroundColor(.white.opacity(0.35))
+                                .padding(.top, 2)
+                        }
+                    }
+
+                    // Reset to Defaults
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            prefs = .default
+                        }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    } label: {
+                        HStack(spacing: MADTheme.Spacing.sm) {
+                            Image(systemName: "arrow.counterclockwise")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Reset to Defaults")
+                                .font(.system(size: 13, weight: .medium, design: .rounded))
+                        }
+                        .foregroundColor(.white.opacity(0.4))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, MADTheme.Spacing.md)
+                        .background(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                .fill(Color.white.opacity(0.04))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
 
                     Spacer(minLength: MADTheme.Spacing.xxl)
                 }
