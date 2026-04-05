@@ -412,6 +412,11 @@ struct FriendWorkoutDetailSheet: View {
                     VStack(spacing: MADTheme.Spacing.lg) {
                         // Hero card
                         VStack(spacing: MADTheme.Spacing.md) {
+                            // Manual/edited warning banner
+                            if workout.isManualOrEdited {
+                                ManualWorkoutBanner(source: workout.source)
+                            }
+
                             // Workout type badge
                             HStack(spacing: MADTheme.Spacing.sm) {
                                 Image(systemName: workoutIcon)

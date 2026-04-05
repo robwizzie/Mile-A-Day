@@ -225,6 +225,17 @@ struct WorkoutRow: View {
         }
     }
 
+    private var workoutSource: WorkoutSource {
+        guard let index = healthManager.workoutIndex else { return .healthkit }
+        let uuid = workout.uuid.uuidString
+        for (_, records) in index.workoutsByDate {
+            if let record = records.first(where: { $0.id == uuid }) {
+                return record.source
+            }
+        }
+        return .healthkit
+    }
+
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
             ZStack {
@@ -236,29 +247,33 @@ struct WorkoutRow: View {
                     .font(.system(size: 18, weight: .medium))
                     .foregroundColor(workoutColor)
             }
-            
+
             VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
-                Text(workoutTypeString)
-                    .font(MADTheme.Typography.body)
-                    .fontWeight(.medium)
-                    .foregroundColor(MADTheme.Colors.primaryText)
-                
+                HStack(spacing: 6) {
+                    Text(workoutTypeString)
+                        .font(MADTheme.Typography.body)
+                        .fontWeight(.medium)
+                        .foregroundColor(MADTheme.Colors.primaryText)
+
+                    ManualWorkoutBadge(source: workoutSource)
+                }
+
                 HStack {
                     Text(workoutDistance)
                         .font(MADTheme.Typography.caption)
                         .foregroundColor(MADTheme.Colors.secondaryText)
-                    
+
                     Text("•")
                         .foregroundColor(MADTheme.Colors.secondaryText)
-                    
+
                     Text(workoutDuration)
                         .font(MADTheme.Typography.caption)
                         .foregroundColor(MADTheme.Colors.secondaryText)
                 }
             }
-            
+
             Spacer()
-            
+
             Text(DateFormatter.shortTime.string(from: correctedStartTime))
                 .font(MADTheme.Typography.caption)
                 .foregroundColor(MADTheme.Colors.secondaryText)

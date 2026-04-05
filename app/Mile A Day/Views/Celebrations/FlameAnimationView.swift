@@ -10,20 +10,21 @@ import SwiftUI
 
 struct FlameAnimationView: View {
     @Binding var isIgnited: Bool
+    var size: CGFloat = 80
 
     // Animation phases
     @State private var showEmber: Bool = false
     @State private var emberScale: CGFloat = 0.3
     @State private var flameOpacity: Double = 0
-    @State private var flameScale: CGFloat = 0.2
+    @State private var flameScale: CGFloat = 0.1
+    @State private var flameScaleX: CGFloat = 0.3
     @State private var glowRadius: CGFloat = 0
     @State private var glowOpacity: Double = 0
-    @State private var flameOffset: CGFloat = 8
     @State private var flickerPhase: Bool = false
     @State private var emberParticles: [EmberParticle] = []
     @State private var showParticles: Bool = false
 
-    private let flameSize: CGFloat = 80
+    private var flameSize: CGFloat { size }
     private let glowColor = MADTheme.Colors.madRed
 
     var body: some View {
@@ -42,7 +43,7 @@ struct FlameAnimationView: View {
                         endRadius: 80
                     )
                 )
-                .frame(width: 160, height: 160)
+                .frame(width: flameSize * 2, height: flameSize * 2)
                 .scaleEffect(glowRadius > 0 ? 1.0 : 0.5)
                 .blur(radius: 8)
 
@@ -57,10 +58,10 @@ struct FlameAnimationView: View {
                         ],
                         center: .center,
                         startRadius: 5,
-                        endRadius: 50
+                        endRadius: flameSize * 0.625
                     )
                 )
-                .frame(width: 100, height: 100)
+                .frame(width: flameSize * 1.25, height: flameSize * 1.25)
                 .blur(radius: 4)
 
             // Layer 3: Ember particles floating up
@@ -70,14 +71,14 @@ struct FlameAnimationView: View {
                 }
             }
 
-            // Layer 4: The flame itself
+            // Layer 4: The flame itself — grows upward from base like a fire being lit
             ZStack {
                 // Flame shadow/glow underneath
                 Image(systemName: "flame.fill")
                     .font(.system(size: flameSize, weight: .medium))
                     .foregroundStyle(MADTheme.Colors.madRed.opacity(0.6))
                     .blur(radius: 12)
-                    .scaleEffect(flameScale * 1.1)
+                    .scaleEffect(x: flameScaleX * 1.05, y: flameScale * 1.05, anchor: .bottom)
 
                 // Main flame with gradient
                 Image(systemName: "flame.fill")
@@ -97,11 +98,10 @@ struct FlameAnimationView: View {
                     )
                     .shadow(color: MADTheme.Colors.madRed.opacity(0.7), radius: 16, x: 0, y: 4)
                     .shadow(color: Color.white.opacity(0.2), radius: 8, x: 0, y: -2)
-                    .scaleEffect(flameScale)
-                    .scaleEffect(x: flickerPhase ? 1.02 : 0.98, y: flickerPhase ? 1.04 : 0.97)
+                    .scaleEffect(x: flameScaleX, y: flameScale, anchor: .bottom)
+                    .scaleEffect(x: flickerPhase ? 1.02 : 0.98, y: flickerPhase ? 1.04 : 0.97, anchor: .bottom)
             }
             .opacity(flameOpacity)
-            .offset(y: flameOffset)
 
             // Layer 5: Initial spark/ember before ignition
             if showEmber && flameOpacity < 0.5 {
@@ -129,45 +129,50 @@ struct FlameAnimationView: View {
     // MARK: - Ignition Sequence
 
     private func startIgnitionSequence() {
-        // Phase 1: Spark appears (0.0s)
-        withAnimation(.easeOut(duration: 0.15)) {
+        // Phase 1: Spark appears at the base (0.0s)
+        withAnimation(.easeOut(duration: 0.12)) {
             showEmber = true
-            emberScale = 1.0
+            emberScale = 1.2
         }
 
-        // Phase 2: Flame ignites from spark (0.15s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.55, blendDuration: 0)) {
-                flameOpacity = 1.0
-                flameScale = 1.15 // Overshoot slightly
-                flameOffset = 0
+        // Phase 2: Tiny flame catches from the spark — small and narrow at the base (0.12s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            flameOpacity = 1.0
+            withAnimation(.easeOut(duration: 0.3)) {
+                flameScale = 0.35
+                flameScaleX = 0.35
+                glowOpacity = 0.25
+                glowRadius = 0.3
             }
+        }
 
-            // Glow expands
-            withAnimation(.easeOut(duration: 0.6)) {
+        // Phase 3: Fire catches — grows taller and wider in one smooth motion (0.4s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.55)) {
+                flameScale = 1.15
+                flameScaleX = 1.08
                 glowRadius = 1.0
                 glowOpacity = 1.0
             }
         }
 
-        // Phase 3: Settle to natural size (0.5s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+        // Phase 4: Settle to final size (0.9s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.65)) {
                 flameScale = 1.0
+                flameScaleX = 1.0
             }
 
-            // Start ember particles
             showParticles = true
             spawnEmberBurst()
 
-            // Glow settles to steady state
-            withAnimation(.easeInOut(duration: 0.5)) {
+            withAnimation(.easeInOut(duration: 0.4)) {
                 glowOpacity = 0.6
             }
         }
 
-        // Phase 4: Start continuous flicker (0.8s)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+        // Phase 5: Continuous flicker (1.1s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
             startFlickerLoop()
         }
     }
@@ -184,15 +189,15 @@ struct FlameAnimationView: View {
     }
 
     private func spawnEmberBurst() {
-        emberParticles = (0..<8).map { _ in
+        emberParticles = (0..<14).map { _ in
             EmberParticle(
-                startX: CGFloat.random(in: -15...15),
-                startY: CGFloat.random(in: -10...5),
-                endX: CGFloat.random(in: -35...35),
-                endY: CGFloat.random(in: -70 ... -30),
-                size: CGFloat.random(in: 2...5),
-                duration: Double.random(in: 0.8...1.6),
-                delay: Double.random(in: 0...0.4)
+                startX: CGFloat.random(in: -20...20),
+                startY: CGFloat.random(in: -15...5),
+                endX: CGFloat.random(in: -50...50),
+                endY: CGFloat.random(in: -90 ... -25),
+                size: CGFloat.random(in: 2...6),
+                duration: Double.random(in: 0.8...2.0),
+                delay: Double.random(in: 0...0.5)
             )
         }
     }

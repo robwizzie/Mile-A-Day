@@ -90,6 +90,13 @@ struct WeeklyMileChartView: View {
         userManager.currentUser.streak
     }
 
+    private var bestFastestPace: TimeInterval {
+        let userPace = userManager.currentUser.fastestMilePace
+        let hkPace = healthManager.fastestMilePace
+        if userPace > 0 && hkPace > 0 { return min(userPace, hkPace) }
+        return userPace > 0 ? userPace : hkPace
+    }
+
     private var daysCompletedThisWeek: Int {
         weekDays.filter { $0.metGoal }.count
     }
@@ -144,7 +151,7 @@ struct WeeklyMileChartView: View {
                     current: healthManager.todaysDistance,
                     goal: userManager.currentUser.goalMiles
                 ),
-                fastestPace: userManager.currentUser.fastestMilePace,
+                fastestPace: bestFastestPace,
                 mostMiles: healthManager.cachedMostMilesInOneDay > 0
                     ? healthManager.cachedMostMilesInOneDay
                     : healthManager.mostMilesInOneDay,

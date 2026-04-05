@@ -503,6 +503,11 @@ struct FriendWorkout: Codable, Identifiable {
     let workoutType: String
     let deviceEndDate: String?
     let calories: Double?
+    let source: String?
+
+    var isManualOrEdited: Bool {
+        source == "manual" || source == "edited"
+    }
 
     enum CodingKeys: String, CodingKey {
         case id = "workout_id"
@@ -513,6 +518,7 @@ struct FriendWorkout: Codable, Identifiable {
         case workoutType = "workout_type"
         case deviceEndDate = "device_end_date"
         case calories
+        case source
     }
 
     var formattedDate: String {

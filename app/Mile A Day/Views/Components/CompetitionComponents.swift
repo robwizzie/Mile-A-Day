@@ -846,6 +846,19 @@ struct CompetitionLeaderboardRow: View {
                             .padding(.vertical, 1)
                             .background(Capsule().fill(Color.red.opacity(0.4)))
                     }
+
+                    if user.has_manual_workouts == true {
+                        HStack(spacing: 2) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 7))
+                            Text("MANUAL")
+                                .font(.system(size: 7, weight: .bold, design: .rounded))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.orange))
+                    }
                 }
 
                 // Lives indicator for streaks - clean heart icons instead of dots

@@ -493,6 +493,7 @@ class WorkoutSyncService: ObservableObject {
                 "calories": calories,
                 "totalDuration": workout.duration,
                 "splits": splitsData,
+                "source": "healthkit",
             ]
 
             workoutData.append(workoutDict)

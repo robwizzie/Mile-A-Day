@@ -31,6 +31,9 @@ struct DashboardView: View {
     @State private var showInProgressBanner = false
     @State private var showForceResetAlert = false
 
+    /// Controls presentation of the manual workout entry sheet.
+    @State private var showManualWorkoutEntry = false
+
     /// User preference: "chart" (line chart) or "streak" (streak card)
     @AppStorage("weekViewStyle") private var weekViewStyle: String = "streak"
 
@@ -51,8 +54,96 @@ struct DashboardView: View {
             personalBestPace: userManager.currentUser.fastestMilePace > 0 ? userManager.currentUser.fastestMilePace : nil,
             todaysTotalDuration: healthManager.todaysTotalDuration,
             todaysCalories: healthManager.todaysTotalCalories,
-            todaysWorkoutCount: healthManager.todaysWorkoutCount
+            todaysWorkoutCount: healthManager.todaysWorkoutCount,
+            workoutBreakdowns: buildWorkoutBreakdowns(),
+            latestWorkout: buildLatestWorkout()
         )
+    }
+
+    /// Build test stats for admin testing — uses real data if available, otherwise realistic placeholders
+    private func buildTestGoalCompletionStats() -> GoalCompletionStats {
+        let real = buildGoalCompletionStats()
+        if real.todaysDistance > 0 { return real }
+        return GoalCompletionStats(
+            todaysDistance: 1.75,
+            goalDistance: userManager.currentUser.goalMiles,
+            currentStreak: max(userManager.currentUser.streak, 7),
+            totalLifetimeMiles: max(healthManager.totalLifetimeMiles, 150),
+            bestDayMiles: max(healthManager.cachedMostMilesInOneDay, 3.2),
+            todaysAveragePace: 9.15,
+            todaysFastestPace: 8.32,
+            personalBestPace: 7.8,
+            todaysTotalDuration: 1050,
+            todaysCalories: 215,
+            todaysWorkoutCount: 2,
+            workoutBreakdowns: [
+                WorkoutBreakdown(type: "running", distance: 1.25, duration: 750, displayName: "Run", icon: "figure.run"),
+                WorkoutBreakdown(type: "walking", distance: 0.50, duration: 300, displayName: "Walk", icon: "figure.walk")
+            ],
+            latestWorkout: WorkoutBreakdown(type: "running", distance: 1.25, duration: 750, displayName: "Run", icon: "figure.run")
+        )
+    }
+
+    /// Group today's workouts by activity type into breakdowns
+    private func buildWorkoutBreakdowns() -> [WorkoutBreakdown] {
+        var byType: [HKWorkoutActivityType: (distance: Double, duration: TimeInterval)] = [:]
+        for workout in healthManager.todaysWorkouts {
+            let miles = workout.totalDistance?.doubleValue(for: .mile()) ?? 0
+            let existing = byType[workout.workoutActivityType] ?? (0, 0)
+            byType[workout.workoutActivityType] = (existing.distance + miles, existing.duration + workout.duration)
+        }
+        return byType.map { type, data in
+            WorkoutBreakdown(
+                type: workoutTypeString(type),
+                distance: data.distance,
+                duration: data.duration,
+                displayName: workoutDisplayName(type),
+                icon: workoutIconName(type)
+            )
+        }.sorted { $0.distance > $1.distance }
+    }
+
+    /// Get the most recent workout as a breakdown
+    private func buildLatestWorkout() -> WorkoutBreakdown? {
+        guard let latest = healthManager.todaysWorkouts.sorted(by: { $0.endDate > $1.endDate }).first else { return nil }
+        let miles = latest.totalDistance?.doubleValue(for: .mile()) ?? 0
+        return WorkoutBreakdown(
+            type: workoutTypeString(latest.workoutActivityType),
+            distance: miles,
+            duration: latest.duration,
+            displayName: workoutDisplayName(latest.workoutActivityType),
+            icon: workoutIconName(latest.workoutActivityType)
+        )
+    }
+
+    private func workoutTypeString(_ type: HKWorkoutActivityType) -> String {
+        switch type {
+        case .running: return "running"
+        case .walking: return "walking"
+        case .cycling: return "cycling"
+        case .hiking: return "hiking"
+        default: return "other"
+        }
+    }
+
+    private func workoutDisplayName(_ type: HKWorkoutActivityType) -> String {
+        switch type {
+        case .running: return "Run"
+        case .walking: return "Walk"
+        case .cycling: return "Cycle"
+        case .hiking: return "Hike"
+        default: return "Workout"
+        }
+    }
+
+    private func workoutIconName(_ type: HKWorkoutActivityType) -> String {
+        switch type {
+        case .running: return "figure.run"
+        case .walking: return "figure.walk"
+        case .cycling: return "figure.outdoor.cycle"
+        case .hiking: return "figure.hiking"
+        default: return "figure.mixed.cardio"
+        }
     }
 
     /// Check if goal is completed and show celebration if appropriate
@@ -82,14 +173,17 @@ struct DashboardView: View {
         celebrationManager.addCelebration(.goalCompleted(stats: stats))
     }
 
-    /// Show encouragement when the user completes additional workouts after reaching their goal
+    /// Show encouragement when the user completes additional workouts after reaching their goal.
+    /// Uses workout count to ensure it only fires when a new workout finishes (not mid-workout).
     private func checkAndShowPostGoalEncouragement() {
         guard currentState.isCompleted,
               celebrationManager.hasShownGoalCelebrationToday,
-              healthManager.todaysDistance > 0 else {
+              healthManager.todaysDistance > 0,
+              healthManager.todaysWorkoutCount > celebrationManager.lastPostGoalWorkoutCount else {
             return
         }
 
+        celebrationManager.lastPostGoalWorkoutCount = healthManager.todaysWorkoutCount
         let stats = buildGoalCompletionStats()
         celebrationManager.addCelebration(.postGoalWorkout(stats: stats))
     }
@@ -148,6 +242,61 @@ struct DashboardView: View {
                     }
                 }
 
+                // Admin celebration test menu
+                if userManager.currentUser.role == "admin" {
+                    Menu {
+                        Button {
+                            celebrationManager.resetDailyTracking()
+                            celebrationManager.clearAll()
+                            let stats = buildTestGoalCompletionStats()
+                            celebrationManager.addCelebration(.goalCompleted(stats: stats))
+                        } label: {
+                            Label("Test Goal Completion", systemImage: "flame.fill")
+                        }
+
+                        Button {
+                            celebrationManager.clearAll()
+                            let stats = buildTestGoalCompletionStats()
+                            celebrationManager.addCelebration(.postGoalWorkout(stats: stats))
+                        } label: {
+                            Label("Test Extra Mile", systemImage: "star.fill")
+                        }
+
+                        Button {
+                            celebrationManager.clearAll()
+                            if let badge = userManager.currentUser.badges.first {
+                                celebrationManager.addCelebration(.badgeUnlocked(badge: badge))
+                            }
+                        } label: {
+                            Label("Test Badge Unlock", systemImage: "trophy.fill")
+                        }
+
+                        Divider()
+
+                        Button {
+                            celebrationManager.resetDailyTracking()
+                            celebrationManager.clearAll()
+                            let stats = buildTestGoalCompletionStats()
+                            celebrationManager.addCelebration(.goalCompleted(stats: stats))
+                            celebrationManager.addCelebration(.postGoalWorkout(stats: stats))
+                            if let badge = userManager.currentUser.badges.first {
+                                celebrationManager.addCelebration(.badgeUnlocked(badge: badge))
+                            }
+                        } label: {
+                            Label("Test All Celebrations", systemImage: "wand.and.stars")
+                        }
+                    } label: {
+                        Image(systemName: "flask.fill")
+                            .foregroundStyle(.purple)
+                    }
+                }
+
+                Button {
+                    showManualWorkoutEntry = true
+                } label: {
+                    Image(systemName: "plus.circle")
+                }
+
                 Button {
                     showInstructions = true
                 } label: {
@@ -161,6 +310,9 @@ struct DashboardView: View {
                 }
             }
         }
+            .sheet(isPresented: $showManualWorkoutEntry) {
+                ManualWorkoutEntryView()
+            }
             // Always surface an in‑progress workout as the primary experience.
             .fullScreenCover(isPresented: $showWorkoutView, onDismiss: {
                 // When the user dismisses the workout tracker while a workout is still active,
@@ -283,6 +435,16 @@ struct DashboardView: View {
                 // Check for goal completion when distance updates (e.g., after data loads)
                 if newValue > oldValue && newValue > 0 {
                     checkAndShowGoalCelebration()
+                    // Also check for extra mile when distance increases after goal already celebrated
+                    if celebrationManager.hasShownGoalCelebrationToday {
+                        checkAndShowPostGoalEncouragement()
+                    }
+                }
+            }
+            .onChange(of: healthManager.todaysWorkouts.count) { oldValue, newValue in
+                // When a new workout finishes (from Watch, Apple Workout, etc.), check for extra mile
+                if newValue > oldValue && celebrationManager.hasShownGoalCelebrationToday {
+                    checkAndShowPostGoalEncouragement()
                 }
             }
             .confetti(isShowing: $showConfetti)

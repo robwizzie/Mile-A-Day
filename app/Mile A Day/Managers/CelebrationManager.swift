@@ -6,6 +6,43 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Workout Breakdown
+
+/// Breakdown of a single workout type (e.g. all running, all walking) or a single workout
+struct WorkoutBreakdown: Equatable {
+    let type: String           // "running", "walking", "cycling", "hiking", "other"
+    let distance: Double       // miles
+    let duration: TimeInterval // seconds
+    let displayName: String    // "Run", "Walk", "Cycle", "Hike"
+    let icon: String           // SF Symbol: "figure.run", "figure.walk", etc.
+
+    /// Formatted pace (minutes per mile)
+    var pace: Double? {
+        guard distance > 0 else { return nil }
+        return (duration / 60.0) / distance
+    }
+
+    /// Formatted pace string (e.g., "8:32/mi")
+    var formattedPace: String? {
+        guard let pace = pace else { return nil }
+        let minutes = Int(pace)
+        let seconds = Int((pace - Double(minutes)) * 60)
+        return String(format: "%d:%02d/mi", minutes, seconds)
+    }
+
+    /// Formatted duration string (e.g., "12:45")
+    var formattedDuration: String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    /// Formatted distance string (e.g., "1.25")
+    var formattedDistance: String {
+        String(format: "%.2f", distance)
+    }
+}
+
 // MARK: - Goal Completion Stats
 
 /// Stats displayed in the goal completion celebration
@@ -21,33 +58,35 @@ struct GoalCompletionStats: Equatable {
     let todaysTotalDuration: TimeInterval // Total workout duration in seconds
     let todaysCalories: Double // Total calories burned today
     let todaysWorkoutCount: Int // Number of workouts completed today
-    
+    let workoutBreakdowns: [WorkoutBreakdown] // Today's workouts grouped by type
+    let latestWorkout: WorkoutBreakdown? // Most recent workout details
+
     var percentOver: Double {
         guard goalDistance > 0 else { return 0 }
         return ((todaysDistance - goalDistance) / goalDistance) * 100
     }
-    
+
     var isNewPersonalBest: Bool {
         todaysDistance > bestDayMiles && bestDayMiles > 0
     }
-    
+
     /// Check if today's fastest pace is a new personal best
     var isPacePB: Bool {
         guard let todaysFastest = todaysFastestPace, let bestPace = personalBestPace, bestPace > 0 else { return false }
         return todaysFastest < bestPace
     }
-    
+
     var streakMilestone: StreakMilestone? {
         StreakMilestone.allCases.first { $0.days == currentStreak }
     }
-    
+
     /// Formatted total duration string (e.g., "32:15")
     var formattedDuration: String {
         let minutes = Int(todaysTotalDuration) / 60
         let seconds = Int(todaysTotalDuration) % 60
         return String(format: "%d:%02d", minutes, seconds)
     }
-    
+
     /// Formatted calories string
     var formattedCalories: String {
         if todaysCalories >= 1000 {
@@ -55,7 +94,7 @@ struct GoalCompletionStats: Equatable {
         }
         return String(format: "%.0f", todaysCalories)
     }
-    
+
     static var placeholder: GoalCompletionStats {
         GoalCompletionStats(
             todaysDistance: 1.5,
@@ -68,7 +107,12 @@ struct GoalCompletionStats: Equatable {
             personalBestPace: 7.5,
             todaysTotalDuration: 765, // 12:45
             todaysCalories: 185,
-            todaysWorkoutCount: 1
+            todaysWorkoutCount: 1,
+            workoutBreakdowns: [
+                WorkoutBreakdown(type: "running", distance: 1.2, duration: 600, displayName: "Run", icon: "figure.run"),
+                WorkoutBreakdown(type: "walking", distance: 0.3, duration: 165, displayName: "Walk", icon: "figure.walk")
+            ],
+            latestWorkout: WorkoutBreakdown(type: "running", distance: 1.2, duration: 600, displayName: "Run", icon: "figure.run")
         )
     }
 }
@@ -262,6 +306,9 @@ class CelebrationManager: ObservableObject {
     /// Tracks whether goal completion has been shown today (to prevent duplicates)
     @AppStorage("lastGoalCelebrationDate") private var lastGoalCelebrationDateString: String = ""
 
+    /// Tracks the workout count when the last post-goal encouragement was shown
+    @AppStorage("lastPostGoalWorkoutCount") var lastPostGoalWorkoutCount: Int = 0
+
     private init() {}
     
     /// Check if goal celebration has already been shown today
@@ -307,6 +354,7 @@ class CelebrationManager: ObservableObject {
 
         print("[CelebrationManager] 🎉 Adding celebration to queue: \(celebration.id)")
         celebrationQueue.append(celebration)
+        celebrationQueue.sort { priority(of: $0) < priority(of: $1) }
 
         // If nothing is currently showing, show the next one
         if !isShowingCelebration {
@@ -346,6 +394,16 @@ class CelebrationManager: ObservableObject {
         pendingAction = .none
     }
 
+    /// Priority for ordering celebrations: lower = shown first
+    private func priority(of celebration: CelebrationType) -> Int {
+        switch celebration {
+        case .goalCompleted: return 0
+        case .postGoalWorkout: return 1
+        case .badgeUnlocked: return 2
+        case .milestone: return 3
+        }
+    }
+
     /// Show the next celebration in the queue
     private func showNextCelebration() {
         guard !celebrationQueue.isEmpty else { return }
@@ -365,5 +423,6 @@ class CelebrationManager: ObservableObject {
     /// Reset daily tracking (for testing)
     func resetDailyTracking() {
         lastGoalCelebrationDateString = ""
+        lastPostGoalWorkoutCount = 0
     }
 }

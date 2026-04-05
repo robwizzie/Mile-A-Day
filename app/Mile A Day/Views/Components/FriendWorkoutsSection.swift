@@ -90,6 +90,10 @@ struct FriendWorkoutRow: View {
                             Capsule()
                                 .fill(workoutColor.opacity(0.15))
                         )
+
+                    if workout.isManualOrEdited {
+                        ManualWorkoutBadgeFromString(source: workout.source)
+                    }
                 }
 
                 HStack(spacing: 12) {

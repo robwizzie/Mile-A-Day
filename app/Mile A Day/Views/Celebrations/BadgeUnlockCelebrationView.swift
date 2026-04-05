@@ -85,266 +85,277 @@ struct BadgeUnlockCelebrationView: View {
     // MARK: - Body
     
     var body: some View {
-        ZStack {
-            // Dynamic gradient background
-            badgeBackgroundView
+        GeometryReader { geo in
+            ZStack {
+                // Dynamic gradient background
+                badgeBackgroundView
 
-            // Confetti
-            if showConfetti {
-                ConfettiCannon(
-                    colors: confettiColors,
-                    particleCount: confettiCount
-                )
-                .allowsHitTesting(false)
-            }
-
-            // Main content
-            VStack(spacing: 0) {
-                Spacer()
-
-                // Rarity banner at top
-                if showRarityBanner {
-                    RarityBannerView(
-                        rarity: badge.rarity,
-                        rarityText: rarityText,
-                        rarityColor: rarityColor,
-                        rarityGradient: rarityGradient
+                // Confetti
+                if showConfetti {
+                    ConfettiCannon(
+                        colors: confettiColors,
+                        particleCount: confettiCount
                     )
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+                    .allowsHitTesting(false)
                 }
 
-                Spacer()
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        // HERO SECTION: rarity banner + medal + badge info centered
+                        VStack(spacing: 0) {
+                            Spacer(minLength: geo.safeAreaInsets.top + 60)
 
-                // Badge display
-                ZStack {
-                    // Subtle ambient glow
-                    Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [rarityColor.opacity(0.35), rarityColor.opacity(0)],
-                                center: .center,
-                                startRadius: 50,
-                                endRadius: 130
-                            )
-                        )
-                        .frame(width: 280, height: 280)
-
-                    // Medal
-                    ZStack {
-                        // Main medal
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: medalGradient,
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
+                            // Rarity banner at top
+                            if showRarityBanner {
+                                RarityBannerView(
+                                    rarity: badge.rarity,
+                                    rarityText: rarityText,
+                                    rarityColor: rarityColor,
+                                    rarityGradient: rarityGradient
                                 )
-                            )
-                            .frame(width: 160, height: 160)
-                            .overlay(
-                                Circle()
-                                    .stroke(
-                                        LinearGradient(
-                                            colors: [Color.white.opacity(0.6), rarityColor.opacity(0.3)],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        lineWidth: 3
-                                    )
-                            )
-                            .shadow(color: rarityColor.opacity(0.5), radius: 20, x: 0, y: 10)
-
-                        // Inner ring
-                        Circle()
-                            .stroke(Color.white.opacity(0.3), lineWidth: 1.5)
-                            .frame(width: 130, height: 130)
-
-                        // Badge icon
-                        Image(systemName: badgeIcon)
-                            .font(.system(size: 64, weight: .semibold))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [.white, .white.opacity(0.85)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 3)
-                            .scaleEffect(iconScale)
-                            .rotationEffect(.degrees(iconRotation))
-                            .opacity(showIcon ? 1 : 0)
-                    }
-                    .scaleEffect(medalScale)
-                    .opacity(showMedal ? 1 : 0)
-                }
-                
-                Spacer()
-                    .frame(height: 50)
-                
-                // Badge info content
-                if showContent {
-                    VStack(spacing: 16) {
-                        // Achievement unlocked banner
-                        HStack(spacing: 8) {
-                            Image(systemName: "trophy.fill")
-                                .font(.system(size: 14))
-                            Text("BADGE UNLOCKED")
-                                .font(.system(size: 13, weight: .black, design: .rounded))
-                                .tracking(2.5)
-                            Image(systemName: "trophy.fill")
-                                .font(.system(size: 14))
-                        }
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.yellow, .orange],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 8)
-                        .background(
-                            Capsule()
-                                .fill(Color.yellow.opacity(0.1))
-                                .overlay(
-                                    Capsule()
-                                        .stroke(Color.yellow.opacity(0.2), lineWidth: 1)
-                                )
-                        )
-
-                        // Badge name
-                        Text(badge.name)
-                            .font(.system(size: 36, weight: .bold, design: .rounded))
-                            .foregroundStyle(
-                                LinearGradient(
-                                    colors: [.white, .white.opacity(0.85)],
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            )
-                            .multilineTextAlignment(.center)
-                            .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 4)
-
-                        // Achievement description in a card
-                        VStack(spacing: 8) {
-                            Text(badge.description)
-                                .font(.system(size: 17, weight: .semibold, design: .rounded))
-                                .foregroundColor(.white.opacity(0.9))
-                                .multilineTextAlignment(.center)
-                        }
-                        .padding(.horizontal, 32)
-
-                        // Date earned
-                        HStack(spacing: 6) {
-                            Image(systemName: "calendar")
-                                .font(.system(size: 11))
-                            Text("Earned \(badge.dateAwarded.formattedDate)")
-                        }
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.4))
-                        .padding(.top, 2)
-                    }
-                    .transition(.asymmetric(
-                        insertion: .scale(scale: 0.9).combined(with: .opacity).combined(with: .offset(y: 30)),
-                        removal: .opacity
-                    ))
-                }
-                
-                Spacer()
-                    .frame(minHeight: 20)
-
-                // Action buttons
-                if showButtons {
-                    VStack(spacing: 14) {
-                        // View All Badges button
-                        Button {
-                            triggerHaptic()
-                            manager.dismissWithAction(.viewBadges)
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "trophy.fill")
-                                    .font(.system(size: 18, weight: .semibold))
-                                Text("View All Medals")
-                                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                                .transition(.scale(scale: 0.8).combined(with: .opacity))
+                                .padding(.bottom, 16)
                             }
-                            .foregroundColor(.black)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .background(
-                                RoundedRectangle(cornerRadius: 16)
+
+                            // Badge display
+                            ZStack {
+                                // Subtle ambient glow
+                                Circle()
                                     .fill(
+                                        RadialGradient(
+                                            colors: [rarityColor.opacity(0.35), rarityColor.opacity(0)],
+                                            center: .center,
+                                            startRadius: 40,
+                                            endRadius: 110
+                                        )
+                                    )
+                                    .frame(width: 220, height: 220)
+
+                                // Medal
+                                ZStack {
+                                    // Main medal
+                                    Circle()
+                                        .fill(
+                                            LinearGradient(
+                                                colors: medalGradient,
+                                                startPoint: .topLeading,
+                                                endPoint: .bottomTrailing
+                                            )
+                                        )
+                                        .frame(width: 160, height: 160)
+                                        .overlay(
+                                            Circle()
+                                                .stroke(
+                                                    LinearGradient(
+                                                        colors: [Color.white.opacity(0.6), rarityColor.opacity(0.3)],
+                                                        startPoint: .topLeading,
+                                                        endPoint: .bottomTrailing
+                                                    ),
+                                                    lineWidth: 3
+                                                )
+                                        )
+                                        .shadow(color: rarityColor.opacity(0.5), radius: 20, x: 0, y: 10)
+
+                                    // Inner ring
+                                    Circle()
+                                        .stroke(Color.white.opacity(0.3), lineWidth: 1.5)
+                                        .frame(width: 130, height: 130)
+
+                                    // Badge icon
+                                    Image(systemName: badgeIcon)
+                                        .font(.system(size: 64, weight: .semibold))
+                                        .foregroundStyle(
+                                            LinearGradient(
+                                                colors: [.white, .white.opacity(0.85)],
+                                                startPoint: .top,
+                                                endPoint: .bottom
+                                            )
+                                        )
+                                        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 3)
+                                        .scaleEffect(iconScale)
+                                        .rotationEffect(.degrees(iconRotation))
+                                        .opacity(showIcon ? 1 : 0)
+                                }
+                                .scaleEffect(medalScale)
+                                .opacity(showMedal ? 1 : 0)
+                            }
+
+                            // Badge info content
+                            if showContent {
+                                VStack(spacing: 12) {
+                                    // Achievement unlocked banner
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "trophy.fill")
+                                            .font(.system(size: 14))
+                                        Text("BADGE UNLOCKED")
+                                            .font(.system(size: 13, weight: .black, design: .rounded))
+                                            .tracking(2.5)
+                                        Image(systemName: "trophy.fill")
+                                            .font(.system(size: 14))
+                                    }
+                                    .foregroundStyle(
                                         LinearGradient(
-                                            colors: rarityGradient,
+                                            colors: [.yellow, .orange],
                                             startPoint: .leading,
                                             endPoint: .trailing
                                         )
                                     )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16)
-                                            .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                    .padding(.horizontal, 20)
+                                    .padding(.vertical, 8)
+                                    .background(
+                                        Capsule()
+                                            .fill(Color.yellow.opacity(0.1))
+                                            .overlay(
+                                                Capsule()
+                                                    .stroke(Color.yellow.opacity(0.2), lineWidth: 1)
+                                            )
                                     )
-                            )
-                            .shadow(color: rarityColor.opacity(0.4), radius: 15, x: 0, y: 8)
-                        }
-                        .padding(.horizontal, 32)
-                        
-                        // Continue button
-                        Button {
-                            triggerHaptic()
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                manager.dismissCurrentCelebration()
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Text("Continue")
-                                    .font(.system(size: 17, weight: .semibold, design: .rounded))
-                                Image(systemName: "arrow.right")
-                                    .font(.system(size: 14, weight: .bold))
-                            }
-                            .foregroundColor(.white.opacity(0.9))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 50)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(.white.opacity(0.12))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 14)
-                                            .stroke(.white.opacity(0.2), lineWidth: 1)
-                                    )
-                            )
-                        }
-                        .padding(.horizontal, 32)
-                    }
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .bottom).combined(with: .opacity),
-                        removal: .opacity
-                    ))
-                }
 
-                // Safe area spacing for bottom (tab bar + home indicator)
-                Spacer()
-                    .frame(height: 100)
+                                    // Badge name
+                                    Text(badge.name)
+                                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                                        .foregroundStyle(
+                                            LinearGradient(
+                                                colors: [.white, .white.opacity(0.85)],
+                                                startPoint: .top,
+                                                endPoint: .bottom
+                                            )
+                                        )
+                                        .multilineTextAlignment(.center)
+                                        .shadow(color: .black.opacity(0.4), radius: 8, x: 0, y: 4)
+
+                                    // Achievement description
+                                    Text(badge.description)
+                                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+                                        .foregroundColor(.white.opacity(0.9))
+                                        .multilineTextAlignment(.center)
+                                        .padding(.horizontal, 32)
+
+                                    // Date earned
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "calendar")
+                                            .font(.system(size: 11))
+                                        Text("Earned \(badge.dateAwarded.formattedDate)")
+                                    }
+                                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.4))
+                                }
+                                .padding(.top, 16)
+                                .transition(.asymmetric(
+                                    insertion: .scale(scale: 0.9).combined(with: .opacity).combined(with: .offset(y: 20)),
+                                    removal: .opacity
+                                ))
+                            }
+
+                            Spacer(minLength: 20)
+                        }
+                        .frame(minHeight: geo.size.height * 0.65)
+
+                        // BELOW-FOLD: buttons
+                        VStack(spacing: 14) {
+                            if showButtons {
+                                Button {
+                                    triggerHaptic()
+                                    manager.dismissWithAction(.viewBadges)
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        Image(systemName: "trophy.fill")
+                                            .font(.system(size: 18, weight: .semibold))
+                                        Text("View All Medals")
+                                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                                    }
+                                    .foregroundColor(.black)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 56)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 16)
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: rarityGradient,
+                                                    startPoint: .leading,
+                                                    endPoint: .trailing
+                                                )
+                                            )
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 16)
+                                                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                                            )
+                                    )
+                                    .shadow(color: rarityColor.opacity(0.4), radius: 15, x: 0, y: 8)
+                                }
+
+                                Button {
+                                    triggerHaptic()
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                        manager.dismissCurrentCelebration()
+                                    }
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Text("Continue")
+                                            .font(.system(size: 17, weight: .semibold, design: .rounded))
+                                        Image(systemName: "arrow.right")
+                                            .font(.system(size: 14, weight: .bold))
+                                    }
+                                    .foregroundColor(.white.opacity(0.9))
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 50)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 14)
+                                            .fill(.white.opacity(0.12))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 14)
+                                                    .stroke(.white.opacity(0.2), lineWidth: 1)
+                                            )
+                                    )
+                                }
+                            }
+
+                            Spacer(minLength: 120)
+                        }
+                        .padding(.horizontal, 32)
+                        .padding(.top, 8)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
             }
-        }
-        .ignoresSafeArea()
-        .opacity(overlayOpacity)
-        .onAppear {
-            startCelebrationSequence()
+            .ignoresSafeArea()
+            .opacity(overlayOpacity)
+            .onAppear {
+                startCelebrationSequence()
+            }
         }
     }
     
     // MARK: - Background View
     
     private var badgeBackgroundView: some View {
-        LinearGradient(
-            colors: [
-                rarityColor.opacity(0.8),
-                rarityColor.opacity(0.5),
-                Color.black.opacity(0.95)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+        ZStack {
+            // Solid dark base — fully opaque so dashboard doesn't bleed through
+            Color(red: 0.05, green: 0.03, blue: 0.08)
+
+            // Rarity-colored gradient overlay
+            LinearGradient(
+                colors: [
+                    rarityColor.opacity(0.5),
+                    rarityColor.opacity(0.2),
+                    Color.clear
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            // Radial glow behind medal area
+            RadialGradient(
+                colors: [
+                    rarityColor.opacity(0.3),
+                    rarityColor.opacity(0.1),
+                    Color.clear
+                ],
+                center: UnitPoint(x: 0.5, y: 0.35),
+                startRadius: 10,
+                endRadius: 250
+            )
+        }
         .ignoresSafeArea()
     }
     

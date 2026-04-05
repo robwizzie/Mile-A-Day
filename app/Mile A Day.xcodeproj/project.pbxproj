@@ -103,7 +103,6 @@
 				Managers/CelebrationManager.swift,
 				Models/AppPreferences.swift,
 				Models/BackendUser.swift,
-				Models/CustomShareCard.swift,
 				Models/HealthKitManager.swift,
 				Models/NotificationManager.swift,
 				Models/NotificationPreferences.swift,

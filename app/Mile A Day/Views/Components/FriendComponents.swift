@@ -691,7 +691,14 @@ struct RecentWorkout: Codable {
     let deviceEndDate: String
     let calories: Double
     let totalDuration: TimeInterval
-    
+    let source: String?
+    let originalDistance: Double?
+    let originalDuration: Double?
+
+    var isManualOrEdited: Bool {
+        source == "manual" || source == "edited"
+    }
+
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
         case workoutId = "workout_id"
@@ -703,6 +710,9 @@ struct RecentWorkout: Codable {
         case deviceEndDate = "device_end_date"
         case calories
         case totalDuration = "total_duration"
+        case source
+        case originalDistance = "original_distance"
+        case originalDuration = "original_duration"
     }
     
     /// Extracts just the date part (yyyy-MM-dd) from the local_date string

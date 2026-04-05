@@ -10,7 +10,8 @@ import {
 	getTotalMiles,
 	getBestMilesDay,
 	getBestSplit,
-	getTodayMiles
+	getTodayMiles,
+	updateWorkout as updateWorkoutDb
 } from '../services/workoutService.js';
 import { checkRaceCompletions } from '../services/competitionService.js';
 
@@ -135,5 +136,48 @@ export async function getUserStats(req: Request, res: Response) {
 	} catch (error: any) {
 		console.error('Error getting user stats:', error.message);
 		res.status(500).json({ error: 'Error getting user stats: ' + error.message });
+	}
+}
+
+export async function updateWorkout(req: Request, res: Response) {
+	if (!hasRequiredKeys(['userId', 'workoutId'], req, res)) return;
+
+	try {
+		const { userId, workoutId } = req.params;
+		const { distance, totalDuration, workoutType } = req.body;
+
+		if (distance === undefined && totalDuration === undefined && workoutType === undefined) {
+			return res.status(400).json({ error: 'No fields to update provided' });
+		}
+
+		if (distance !== undefined && (typeof distance !== 'number' || distance <= 0)) {
+			return res.status(400).json({ error: 'Distance must be a positive number' });
+		}
+
+		if (totalDuration !== undefined && (typeof totalDuration !== 'number' || totalDuration <= 0)) {
+			return res.status(400).json({ error: 'Duration must be a positive number' });
+		}
+
+		const user = await getUser({ userId });
+		if (!user) {
+			return res.status(400).json({ error: `No user found with ID ${userId}` });
+		}
+
+		const updated = await updateWorkoutDb(userId, workoutId, { distance, totalDuration, workoutType });
+
+		if (!updated) {
+			return res.status(404).json({ error: 'Workout not found' });
+		}
+
+		try {
+			await checkRaceCompletions(userId);
+		} catch (raceError: any) {
+			console.error('Error checking race completions:', raceError.message);
+		}
+
+		res.status(200).json(updated);
+	} catch (error: any) {
+		console.error('Error updating workout:', error.message);
+		res.status(500).json({ error: 'Error updating workout: ' + error.message });
 	}
 }

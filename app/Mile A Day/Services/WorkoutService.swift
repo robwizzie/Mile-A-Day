@@ -162,6 +162,7 @@ class WorkoutService: ObservableObject {
                 "calories": calories,
                 "totalDuration": workout.duration,
                 "splits": splitsData,
+                "source": "healthkit",
             ]
 
             // Debug: Print the workout data being sent with detailed split information
@@ -310,6 +311,127 @@ class WorkoutService: ObservableObject {
         let endpoint = "/workouts/\(userId)/stats\(param)"
         return try await makeRequest(
             endpoint: endpoint, method: .GET, responseType: UserStatsAPIResponse.self)
+    }
+
+    // MARK: - Manual Workout Upload
+
+    /// Upload a manually entered workout to the backend
+    func uploadManualWorkout(
+        distance: Double,
+        duration: TimeInterval,
+        date: Date,
+        workoutType: String
+    ) async throws {
+        guard let currentUserId = getCurrentUserId() else {
+            throw WorkoutServiceError.notAuthenticated
+        }
+
+        let workoutId = UUID().uuidString
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone.current
+        let localDate = formatter.string(from: date)
+
+        let isoFormatter = ISO8601DateFormatter()
+        let endDate = date.addingTimeInterval(duration)
+        let deviceEndDate = isoFormatter.string(from: endDate)
+
+        let timezoneOffset = TimeZone.current.secondsFromGMT() / 60
+
+        let workoutDict: [String: Any] = [
+            "workoutId": workoutId,
+            "distance": distance,
+            "localDate": localDate,
+            "date": localDate,
+            "timezoneOffset": timezoneOffset,
+            "workoutType": workoutType,
+            "deviceEndDate": deviceEndDate,
+            "calories": 0,
+            "totalDuration": duration,
+            "splits": [] as [[String: Any]],
+            "source": "manual"
+        ]
+
+        let requestBody = try JSONSerialization.data(withJSONObject: [workoutDict])
+
+        let _: WorkoutUploadResponse = try await makeRequest(
+            endpoint: "/workouts/\(currentUserId)/upload",
+            method: .POST,
+            body: requestBody,
+            responseType: WorkoutUploadResponse.self
+        )
+    }
+
+    /// Write a manual workout to HealthKit for Apple Health sync
+    func writeManualWorkoutToHealthKit(
+        distance: Double,
+        duration: TimeInterval,
+        date: Date,
+        workoutType: HKWorkoutActivityType
+    ) async {
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = workoutType
+        configuration.locationType = .outdoor
+
+        do {
+            let builder = HKWorkoutBuilder(healthStore: healthStore, configuration: configuration, device: .local())
+            let startDate = date
+            let endDate = date.addingTimeInterval(duration)
+
+            try await builder.beginCollection(at: startDate)
+
+            // Tag as user-entered so the workout index detects it as manual
+            try await builder.addMetadata([HKMetadataKeyWasUserEntered: true])
+
+            // Add distance sample
+            let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!
+            let distanceQuantity = HKQuantity(unit: .mile(), doubleValue: distance)
+            let distanceSample = HKQuantitySample(
+                type: distanceType,
+                quantity: distanceQuantity,
+                start: startDate,
+                end: endDate
+            )
+            try await builder.addSamples([distanceSample])
+
+            try await builder.endCollection(at: endDate)
+            if let finishedWorkout = try await builder.finishWorkout() {
+                // Register the HealthKit UUID so the WorkoutIndex flags it as manual
+                ManualWorkoutRegistry.markManual(finishedWorkout.uuid.uuidString)
+                print("[WorkoutService] Wrote manual workout to HealthKit (UUID: \(finishedWorkout.uuid.uuidString))")
+            }
+        } catch {
+            print("[WorkoutService] Failed to write to HealthKit: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Workout Editing
+
+    /// Update an existing workout on the backend
+    func updateWorkout(
+        workoutId: String,
+        distance: Double?,
+        totalDuration: Double?,
+        workoutType: String?
+    ) async throws -> RecentWorkout {
+        guard let currentUserId = getCurrentUserId() else {
+            throw WorkoutServiceError.notAuthenticated
+        }
+
+        var body: [String: Any] = [:]
+        if let distance = distance { body["distance"] = distance }
+        if let totalDuration = totalDuration { body["totalDuration"] = totalDuration }
+        if let workoutType = workoutType { body["workoutType"] = workoutType }
+
+        let requestBody = try JSONSerialization.data(withJSONObject: body)
+
+        return try await makeRequest(
+            endpoint: "/workouts/\(currentUserId)/workout/\(workoutId)",
+            method: .PATCH,
+            body: requestBody,
+            responseType: RecentWorkout.self
+        )
     }
 }
 

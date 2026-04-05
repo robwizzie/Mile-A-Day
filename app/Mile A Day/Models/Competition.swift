@@ -346,6 +346,7 @@ struct CompetitionUser: Codable, Identifiable {
     let score: Double?
     let intervals: [String: Double]?
     let remaining_lives: Int?
+    let has_manual_workouts: Bool?
 
     var id: String { "\(competition_id)-\(user_id)" }
 
@@ -360,7 +361,7 @@ struct CompetitionUser: Codable, Identifiable {
         return "Unknown"
     }
 
-    init(competition_id: String, user_id: String, invite_status: InviteStatus, username: String?, profile_image_url: String? = nil, score: Double?, intervals: [String: Double]?, remaining_lives: Int? = nil) {
+    init(competition_id: String, user_id: String, invite_status: InviteStatus, username: String?, profile_image_url: String? = nil, score: Double?, intervals: [String: Double]?, remaining_lives: Int? = nil, has_manual_workouts: Bool? = nil) {
         self.competition_id = competition_id
         self.user_id = user_id
         self.invite_status = invite_status
@@ -369,6 +370,7 @@ struct CompetitionUser: Codable, Identifiable {
         self.score = score
         self.intervals = intervals
         self.remaining_lives = remaining_lives
+        self.has_manual_workouts = has_manual_workouts
     }
 
     init(from decoder: Decoder) throws {
@@ -381,6 +383,7 @@ struct CompetitionUser: Codable, Identifiable {
         score = try container.decodeIfPresent(Double.self, forKey: .score)
         intervals = try container.decodeIfPresent([String: Double].self, forKey: .intervals)
         remaining_lives = try container.decodeIfPresent(Int.self, forKey: .remaining_lives)
+        has_manual_workouts = try container.decodeIfPresent(Bool.self, forKey: .has_manual_workouts)
     }
 }
 

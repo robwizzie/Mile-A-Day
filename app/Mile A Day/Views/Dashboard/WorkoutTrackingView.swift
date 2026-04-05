@@ -6,233 +6,6 @@ import ActivityKit
 
 // MARK: - Workout Tracking View
 
-// Location Manager for tracking distance during workouts.
-//
-// Distance tracking modes:
-//   - Outdoor (GPS): Incremental — each location update adds a delta to currentDistance.
-//   - Indoor (Pedometer): Cumulative — pedometer reports total distance since its start.
-//     We add a `pedometerOffset` so recovered workouts don't lose prior distance.
-//
-// The key invariant: currentDistance must NEVER be overwritten with a smaller value
-// by the tracking system itself. Only stopTracking() and explicit reset can clear it.
-class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
-    private let locationManager = CLLocationManager()
-    private let pedometer = CMPedometer()
-    private var lastLocation: CLLocation?
-    private var isUsingPedometer = false
-    private var isTracking = false
-
-    // For indoor pedometer mode: the pedometer reports cumulative distance from its
-    // start date. When recovering a workout, we set this offset to the previously
-    // accumulated distance so the pedometer's new readings ADD to it instead of
-    // replacing it. For GPS mode this is unused (GPS is incremental).
-    private var pedometerOffset: Double = 0.0
-
-    @Published var currentDistance: Double = 0.0 // Distance in miles
-    @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
-
-    override init() {
-        super.init()
-        locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyBest
-        locationManager.activityType = .fitness
-        locationManager.allowsBackgroundLocationUpdates = true
-        locationManager.pausesLocationUpdatesAutomatically = false
-        authorizationStatus = locationManager.authorizationStatus
-    }
-
-    func requestPermission() {
-        locationManager.requestWhenInUseAuthorization()
-    }
-
-    /// Start tracking distance.
-    ///
-    /// - Parameters:
-    ///   - locationType: `.outdoor` for GPS, `.indoor` for pedometer.
-    ///   - initialDistance: Distance already accumulated in a prior session (0 for new workouts).
-    ///     For GPS mode, this becomes the starting value that incremental updates add to.
-    ///     For pedometer mode, this becomes the offset added to the pedometer's readings.
-    func startTracking(locationType: HKWorkoutSessionLocationType = .outdoor, initialDistance: Double = 0.0) {
-        // Prevent double-start
-        guard !isTracking else { return }
-        isTracking = true
-
-        currentDistance = initialDistance
-        lastLocation = nil
-        isUsingPedometer = (locationType == .indoor)
-        pedometerOffset = initialDistance
-
-        if locationType == .indoor {
-            if CMPedometer.isDistanceAvailable() {
-                pedometer.startUpdates(from: Date()) { [weak self] pedometerData, error in
-                    guard let self = self, let data = pedometerData, error == nil else { return }
-
-                    if let distance = data.distance {
-                        let distanceInMiles = distance.doubleValue * 0.000621371
-                        let newTotal = self.pedometerOffset + distanceInMiles
-                        DispatchQueue.main.async {
-                            self.currentDistance = newTotal
-                        }
-                    }
-                }
-            } else {
-                isUsingPedometer = false
-                startGPSTracking()
-            }
-        } else {
-            startGPSTracking()
-        }
-    }
-
-    private func startGPSTracking() {
-        if authorizationStatus == .notDetermined {
-            requestPermission()
-        }
-        locationManager.startUpdatingLocation()
-    }
-
-    func stopTracking() {
-        guard isTracking else { return }
-        isTracking = false
-
-        if isUsingPedometer {
-            pedometer.stopUpdates()
-        } else {
-            locationManager.stopUpdatingLocation()
-        }
-        lastLocation = nil
-    }
-
-    // MARK: - CLLocationManagerDelegate
-
-    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let newLocation = locations.last else { return }
-
-        // Only use accurate locations
-        guard newLocation.horizontalAccuracy > 0 && newLocation.horizontalAccuracy < 50 else {
-            return
-        }
-
-        // Calculate distance if we have a previous location
-        if let lastLocation = lastLocation {
-            let distance = newLocation.distance(from: lastLocation) // meters
-            let distanceInMiles = distance * 0.000621371
-
-            // Only add distance if it's reasonable (not a GPS jump)
-            if distanceInMiles < 0.1 {
-                DispatchQueue.main.async {
-                    self.currentDistance += distanceInMiles
-                }
-            }
-        }
-
-        lastLocation = newLocation
-
-        // Persist route point for recovery
-        InProgressWorkoutStore.addRoutePoint(newLocation)
-    }
-
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("[WorkoutLocationManager] Error: \(error.localizedDescription)")
-    }
-
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        authorizationStatus = manager.authorizationStatus
-    }
-}
-
-// MARK: - In‑Progress Workout Banner
-
-/// Compact banner shown on the dashboard when there is an in‑progress workout
-/// but the full‑screen tracker has been dismissed. Tapping it resumes the workout.
-struct InProgressWorkoutBanner: View {
-    let state: InProgressWorkoutState
-    let onResume: () -> Void
-
-    @State private var currentTime = Date()
-    @State private var latestState: InProgressWorkoutState?
-
-    // Compute real-time elapsed time based on start time
-    private var realTimeElapsedSeconds: TimeInterval {
-        if let latest = latestState {
-            return currentTime.timeIntervalSince(latest.startTime)
-        }
-        return currentTime.timeIntervalSince(state.startTime)
-    }
-
-    private var formattedTime: String {
-        let minutes = Int(realTimeElapsedSeconds) / 60
-        let seconds = Int(realTimeElapsedSeconds) % 60
-        return String(format: "%d:%02d", minutes, seconds)
-    }
-
-    private var currentDistance: Double {
-        latestState?.currentDistance ?? state.currentDistance
-    }
-
-    var body: some View {
-        Button(action: onResume) {
-            HStack(spacing: 12) {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.85, green: 0.25, blue: 0.35),
-                                    Color(red: 0.7, green: 0.2, blue: 0.3)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 40, height: 40)
-
-                    Image(systemName: "play.fill")
-                        .foregroundColor(.white)
-                        .font(.system(size: 18, weight: .bold))
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Workout in progress")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-
-                    Text("\(String(format: "%.2f", currentDistance)) mi • \(formattedTime)")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.8))
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.7))
-            }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                    )
-            )
-        }
-        .buttonStyle(PlainButtonStyle())
-        .onAppear {
-            // Start a timer to update the time display every second
-            Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-                currentTime = Date()
-                // Reload the latest state to get updated distance
-                if let updated = InProgressWorkoutStore.load(), updated.isActive {
-                    latestState = updated
-                }
-            }
-        }
-    }
-}
-
 struct WorkoutTrackingView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
@@ -285,15 +58,396 @@ struct WorkoutTrackingView: View {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
+    // MARK: - Activity Selection
+
+    private var activitySelectionContent: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: { dismiss() }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Text("Back")
+                            .font(.body)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                }
+                Spacer()
+            }
+            .padding(.top, 16)
+
+            VStack(spacing: 40) {
+                Spacer()
+
+                VStack(spacing: 16) {
+                    Image(systemName: "figure.walk")
+                        .font(.system(size: 60))
+                        .foregroundColor(.white)
+
+                    Text("Choose Activity Type")
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+
+                    Text("Select how you'll complete your mile")
+                        .font(.title3)
+                        .foregroundColor(.white.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 32)
+
+                Spacer()
+
+                VStack(spacing: 20) {
+                    workoutOptionButton(icon: "figure.run", title: "Run", subtitle: "Track as a running workout") {
+                        selectActivity(.running)
+                    }
+                    workoutOptionButton(icon: "figure.walk", title: "Walk", subtitle: "Track as a walking workout") {
+                        selectActivity(.walking)
+                    }
+                }
+                .padding(.horizontal, 32)
+
+                Spacer()
+            }
+        }
+    }
+
+    // MARK: - Location Type Selection
+
+    private var locationTypeSelectionContent: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: {
+                    withAnimation {
+                        showLocationTypeSelection = false
+                        showActivitySelection = true
+                    }
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Text("Back")
+                            .font(.body)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                }
+                Spacer()
+            }
+            .padding(.top, 16)
+
+            VStack(spacing: 40) {
+                Spacer()
+
+                VStack(spacing: 16) {
+                    Image(systemName: selectedActivityType == .running ? "figure.run" : "figure.walk")
+                        .font(.system(size: 60))
+                        .foregroundColor(.white)
+
+                    Text("Choose Location")
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+
+                    Text("Where will you be working out?")
+                        .font(.title3)
+                        .foregroundColor(.white.opacity(0.8))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 32)
+
+                Spacer()
+
+                VStack(spacing: 20) {
+                    workoutOptionButton(icon: "location.fill", title: "Outdoor", subtitle: "Uses GPS for accurate tracking") {
+                        selectLocationType(.outdoor)
+                    }
+                    workoutOptionButton(icon: "figure.indoor.cycle", title: "Indoor", subtitle: "Uses motion sensors for distance") {
+                        selectLocationType(.indoor)
+                    }
+                }
+                .padding(.horizontal, 32)
+
+                Spacer()
+            }
+        }
+    }
+
+    // MARK: - Countdown
+
+    private var countdownContent: some View {
+        VStack {
+            Text("\(countdownNumber)")
+                .font(.system(size: 120, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .scaleEffect(countdownNumber > 0 ? 1.0 : 0.5)
+                .opacity(countdownNumber > 0 ? 1.0 : 0.0)
+                .animation(.spring(response: 0.5, dampingFraction: 0.6), value: countdownNumber)
+        }
+        .onAppear {
+            startCountdown()
+        }
+    }
+
+    // MARK: - Active Tracking
+
+    private var activeTrackingContent: some View {
+        VStack(spacing: 40) {
+            HStack {
+                Button(action: { dismiss() }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Text("Dashboard")
+                            .font(.body)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                }
+                Spacer()
+            }
+            .padding(.top, 16)
+
+            Spacer()
+
+            distanceDisplay
+
+            progressRing
+
+            timeDisplay
+
+            Spacer()
+
+            stopButton
+        }
+        .opacity(showCompletion || showPreviousProgress ? 0 : 1)
+        .overlay(previousProgressOverlay)
+        .overlay(goalCompletionOverlay)
+    }
+
+    // MARK: - Tracking Sub-Views
+
+    private var distanceDisplay: some View {
+        VStack(spacing: 12) {
+            Text("DISTANCE")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(.white.opacity(0.7))
+                .tracking(1.5)
+
+            Text(String(format: "%.2f", currentDistance))
+                .font(.system(size: 80, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .contentTransition(.numericText())
+
+            Text("miles")
+                .font(.title2)
+                .foregroundColor(.white.opacity(0.8))
+
+            if startingDistance > 0 {
+                VStack(spacing: 4) {
+                    Text("Daily Total: \(String(format: "%.2f", totalDailyDistance)) mi")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(.white.opacity(0.6))
+                }
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    private var progressRing: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.white.opacity(0.2), lineWidth: 12)
+                .frame(width: 200, height: 200)
+
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(
+                    LinearGradient(
+                        colors: progress >= 1.0 ? [.green, .green] : [.orange, .red],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    style: StrokeStyle(lineWidth: 12, lineCap: .round)
+                )
+                .frame(width: 200, height: 200)
+                .rotationEffect(.degrees(-90))
+                .animation(.easeOut(duration: 0.5), value: progress)
+
+            VStack(spacing: 4) {
+                Text("\(Int(progress * 100))%")
+                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+
+                Text("of goal")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.7))
+            }
+        }
+    }
+
+    private var timeDisplay: some View {
+        VStack(spacing: 8) {
+            Text("TIME")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(.white.opacity(0.7))
+                .tracking(1.5)
+
+            Text(formattedTime)
+                .font(.system(size: 48, weight: .semibold, design: .rounded))
+                .foregroundColor(.white)
+                .monospacedDigit()
+        }
+    }
+
+    private var stopButton: some View {
+        Button(action: { showStopConfirmation = true }) {
+            HStack(spacing: 12) {
+                if isStopping {
+                    ProgressView()
+                        .tint(.white)
+                    Text("Ending...")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                } else {
+                    Image(systemName: "stop.fill")
+                        .font(.title2)
+                    Text("Stop Workout")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                }
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 20)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.red.opacity(isStopping ? 0.15 : 0.3))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.red.opacity(isStopping ? 0.5 : 1.0), lineWidth: 2)
+                    )
+            )
+        }
+        .disabled(isStopping)
+        .padding(.horizontal, 32)
+        .padding(.bottom, 40)
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    @ViewBuilder
+    private var previousProgressOverlay: some View {
+        if showPreviousProgress {
+            VStack(spacing: 20) {
+                Image(systemName: "flag.fill")
+                    .font(.system(size: 60))
+                    .foregroundColor(.blue)
+                    .scaleEffect(showPreviousProgress ? 1.0 : 0.5)
+                    .animation(.spring(response: 0.6, dampingFraction: 0.6), value: showPreviousProgress)
+
+                Text("Back to where you were!")
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+
+                Text("\(String(format: "%.2f", startingDistance)) miles reached")
+                    .font(.title3)
+                    .foregroundColor(.white.opacity(0.9))
+            }
+            .transition(.scale.combined(with: .opacity))
+        }
+    }
+
+    @ViewBuilder
+    private var goalCompletionOverlay: some View {
+        if showCompletion {
+            VStack(spacing: 24) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 100))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.green, .green.opacity(0.7)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .scaleEffect(showCompletion ? 1.0 : 0.5)
+                    .animation(.spring(response: 0.6, dampingFraction: 0.6), value: showCompletion)
+
+                Text("Goal Complete!")
+                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+
+                Text("You did it! Keep going or finish your workout.")
+                    .font(.title3)
+                    .foregroundColor(.white.opacity(0.9))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+            }
+            .transition(.scale.combined(with: .opacity))
+        }
+    }
+
+    // MARK: - Reusable Option Button
+
+    private func workoutOptionButton(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: icon)
+                    .font(.system(size: 32))
+                    .frame(width: 50)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .opacity(0.9)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+            }
+            .foregroundColor(.white)
+            .padding(24)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.white.opacity(0.15))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                    )
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
     var body: some View {
         ZStack {
             // Red gradient background
             LinearGradient(
                 colors: [
-                    Color(red: 0.85, green: 0.25, blue: 0.35),  // Top: lighter red
-                    Color(red: 0.7, green: 0.2, blue: 0.3),     // Mid-top
-                    Color(red: 0.5, green: 0.15, blue: 0.2),    // Mid-bottom
-                    Color(red: 0.3, green: 0.1, blue: 0.15)     // Bottom: darker red
+                    Color(red: 0.85, green: 0.25, blue: 0.35),
+                    Color(red: 0.7, green: 0.2, blue: 0.3),
+                    Color(red: 0.5, green: 0.15, blue: 0.2),
+                    Color(red: 0.3, green: 0.1, blue: 0.15)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
@@ -301,477 +455,20 @@ struct WorkoutTrackingView: View {
             .ignoresSafeArea()
 
             if showActivitySelection {
-                // Activity selection view
-                VStack(spacing: 0) {
-                    // Back button at top
-                    HStack {
-                        Button(action: {
-                            dismiss()
-                        }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "chevron.left")
-                                    .font(.title3)
-                                    .fontWeight(.semibold)
-                                Text("Back")
-                                    .font(.body)
-                                    .fontWeight(.medium)
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
-                        }
-                        Spacer()
-                    }
-                    .padding(.top, 16)
-
-                    VStack(spacing: 40) {
-                        Spacer()
-
-                        // Header
-                        VStack(spacing: 16) {
-                            Image(systemName: "figure.walk")
-                                .font(.system(size: 60))
-                                .foregroundColor(.white)
-
-                            Text("Choose Activity Type")
-                                .font(.system(size: 32, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                                .multilineTextAlignment(.center)
-
-                            Text("Select how you'll complete your mile")
-                                .font(.title3)
-                                .foregroundColor(.white.opacity(0.8))
-                                .multilineTextAlignment(.center)
-                        }
-                        .padding(.horizontal, 32)
-
-                        Spacer()
-
-                    // Activity buttons
-                    VStack(spacing: 20) {
-                        // Run button
-                        Button(action: {
-                            selectActivity(.running)
-                        }) {
-                            HStack(spacing: 16) {
-                                Image(systemName: "figure.run")
-                                    .font(.system(size: 32))
-                                    .frame(width: 50)
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Run")
-                                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                                    Text("Track as a running workout")
-                                        .font(.subheadline)
-                                        .opacity(0.9)
-                                }
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .font(.title2)
-                                    .fontWeight(.semibold)
-                            }
-                            .foregroundColor(.white)
-                            .padding(24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 20)
-                                    .fill(Color.white.opacity(0.15))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 20)
-                                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
-                                    )
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-
-                        // Walk button
-                        Button(action: {
-                            selectActivity(.walking)
-                        }) {
-                            HStack(spacing: 16) {
-                                Image(systemName: "figure.walk")
-                                    .font(.system(size: 32))
-                                    .frame(width: 50)
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Walk")
-                                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                                    Text("Track as a walking workout")
-                                        .font(.subheadline)
-                                        .opacity(0.9)
-                                }
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .font(.title2)
-                                    .fontWeight(.semibold)
-                            }
-                            .foregroundColor(.white)
-                            .padding(24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 20)
-                                    .fill(Color.white.opacity(0.15))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 20)
-                                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
-                                    )
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                    .padding(.horizontal, 32)
-
-                        Spacer()
-                    }
-                }
+                activitySelectionContent
             } else if showLocationTypeSelection {
-                // Location type selection view (Indoor/Outdoor)
-                VStack(spacing: 0) {
-                    // Back button at top
-                    HStack {
-                        Button(action: {
-                            withAnimation {
-                                showLocationTypeSelection = false
-                                showActivitySelection = true
-                            }
-                        }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "chevron.left")
-                                    .font(.title3)
-                                    .fontWeight(.semibold)
-                                Text("Back")
-                                    .font(.body)
-                                    .fontWeight(.medium)
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
-                        }
-                        Spacer()
-                    }
-                    .padding(.top, 16)
-
-                    VStack(spacing: 40) {
-                        Spacer()
-
-                        // Header
-                        VStack(spacing: 16) {
-                            Image(systemName: selectedActivityType == .running ? "figure.run" : "figure.walk")
-                                .font(.system(size: 60))
-                                .foregroundColor(.white)
-
-                            Text("Choose Location")
-                                .font(.system(size: 32, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                                .multilineTextAlignment(.center)
-
-                            Text("Where will you be working out?")
-                                .font(.title3)
-                                .foregroundColor(.white.opacity(0.8))
-                                .multilineTextAlignment(.center)
-                        }
-                        .padding(.horizontal, 32)
-
-                        Spacer()
-
-                    // Location type buttons
-                    VStack(spacing: 20) {
-                        // Outdoor button
-                        Button(action: {
-                            selectLocationType(.outdoor)
-                        }) {
-                            HStack(spacing: 16) {
-                                Image(systemName: "location.fill")
-                                    .font(.system(size: 32))
-                                    .frame(width: 50)
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Outdoor")
-                                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                                    Text("Uses GPS for accurate tracking")
-                                        .font(.subheadline)
-                                        .opacity(0.9)
-                                }
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .font(.title2)
-                                    .fontWeight(.semibold)
-                            }
-                            .foregroundColor(.white)
-                            .padding(24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 20)
-                                    .fill(Color.white.opacity(0.15))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 20)
-                                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
-                                    )
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-
-                        // Indoor button
-                        Button(action: {
-                            selectLocationType(.indoor)
-                        }) {
-                            HStack(spacing: 16) {
-                                Image(systemName: "figure.indoor.cycle")
-                                    .font(.system(size: 32))
-                                    .frame(width: 50)
-
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Indoor")
-                                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                                    Text("Uses motion sensors for distance")
-                                        .font(.subheadline)
-                                        .opacity(0.9)
-                                }
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .font(.title2)
-                                    .fontWeight(.semibold)
-                            }
-                            .foregroundColor(.white)
-                            .padding(24)
-                            .background(
-                                RoundedRectangle(cornerRadius: 20)
-                                    .fill(Color.white.opacity(0.15))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 20)
-                                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
-                                    )
-                            )
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                    .padding(.horizontal, 32)
-
-                        Spacer()
-                    }
-                }
+                locationTypeSelectionContent
             } else if showCountdown {
-                // Countdown view
-                VStack {
-                    Text("\(countdownNumber)")
-                        .font(.system(size: 120, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .scaleEffect(countdownNumber > 0 ? 1.0 : 0.5)
-                        .opacity(countdownNumber > 0 ? 1.0 : 0.0)
-                        .animation(.spring(response: 0.5, dampingFraction: 0.6), value: countdownNumber)
-                }
-                .onAppear {
-                    startCountdown()
-                }
+                countdownContent
             } else if showRecap {
                 WorkoutRecapView(
                     distance: currentDistance,
                     duration: elapsedTime,
                     goalDistance: goalDistance,
-                    onDismiss: {
-                        dismiss()
-                    }
+                    onDismiss: { dismiss() }
                 )
             } else {
-                // Tracking view
-                VStack(spacing: 40) {
-                    // Back button to minimize workout and return to dashboard
-                    HStack {
-                        Button(action: {
-                            dismiss()
-                        }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "chevron.left")
-                                    .font(.title3)
-                                    .fontWeight(.semibold)
-                                Text("Dashboard")
-                                    .font(.body)
-                                    .fontWeight(.medium)
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
-                        }
-                        Spacer()
-                    }
-                    .padding(.top, 16)
-
-                    Spacer()
-
-                    // Distance display
-                    VStack(spacing: 12) {
-                        Text("DISTANCE")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white.opacity(0.7))
-                            .tracking(1.5)
-
-                        // Main counter - Workout distance (starts at 0)
-                        Text(String(format: "%.2f", currentDistance))
-                            .font(.system(size: 80, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .contentTransition(.numericText())
-
-                        Text("miles")
-                            .font(.title2)
-                            .foregroundColor(.white.opacity(0.8))
-
-                        // Smaller daily total counter
-                        if startingDistance > 0 {
-                            VStack(spacing: 4) {
-                                Text("Daily Total: \(String(format: "%.2f", totalDailyDistance)) mi")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                    .foregroundColor(.white.opacity(0.6))
-                            }
-                            .padding(.top, 4)
-                        }
-                    }
-
-                    // Progress ring
-                    ZStack {
-                        Circle()
-                            .stroke(Color.white.opacity(0.2), lineWidth: 12)
-                            .frame(width: 200, height: 200)
-
-                        Circle()
-                            .trim(from: 0, to: progress)
-                            .stroke(
-                                LinearGradient(
-                                    colors: progress >= 1.0 ? [.green, .green] : [.orange, .red],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                style: StrokeStyle(lineWidth: 12, lineCap: .round)
-                            )
-                            .frame(width: 200, height: 200)
-                            .rotationEffect(.degrees(-90))
-                            .animation(.easeOut(duration: 0.5), value: progress)
-
-                        VStack(spacing: 4) {
-                            Text("\(Int(progress * 100))%")
-                                .font(.system(size: 36, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-
-                            Text("of goal")
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                    }
-
-                    // Time display
-                    VStack(spacing: 8) {
-                        Text("TIME")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white.opacity(0.7))
-                            .tracking(1.5)
-
-                        Text(formattedTime)
-                            .font(.system(size: 48, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white)
-                            .monospacedDigit()
-                    }
-
-                    Spacer()
-
-                    // Stop button - shows confirmation dialog
-                    Button(action: {
-                        showStopConfirmation = true
-                    }) {
-                        HStack(spacing: 12) {
-                            if isStopping {
-                                ProgressView()
-                                    .tint(.white)
-                                Text("Ending...")
-                                    .font(.title3)
-                                    .fontWeight(.semibold)
-                            } else {
-                                Image(systemName: "stop.fill")
-                                    .font(.title2)
-                                Text("Stop Workout")
-                                    .font(.title3)
-                                    .fontWeight(.semibold)
-                            }
-                        }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 20)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color.red.opacity(isStopping ? 0.15 : 0.3))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(Color.red.opacity(isStopping ? 0.5 : 1.0), lineWidth: 2)
-                                )
-                        )
-                    }
-                    .disabled(isStopping)
-                    .padding(.horizontal, 32)
-                    .padding(.bottom, 40)
-                    .buttonStyle(PlainButtonStyle())
-                }
-                .opacity(showCompletion || showPreviousProgress ? 0 : 1)
-                .overlay(
-                    // Previous progress notification
-                    Group {
-                        if showPreviousProgress {
-                            VStack(spacing: 20) {
-                                Image(systemName: "flag.fill")
-                                    .font(.system(size: 60))
-                                    .foregroundColor(.blue)
-                                    .scaleEffect(showPreviousProgress ? 1.0 : 0.5)
-                                    .animation(.spring(response: 0.6, dampingFraction: 0.6), value: showPreviousProgress)
-
-                                Text("Back to where you were!")
-                                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-                                    .multilineTextAlignment(.center)
-
-                                Text("\(String(format: "%.2f", startingDistance)) miles reached")
-                                    .font(.title3)
-                                    .foregroundColor(.white.opacity(0.9))
-                            }
-                            .transition(.scale.combined(with: .opacity))
-                        }
-                    }
-                )
-                .overlay(
-                    // Goal completion celebration
-                    Group {
-                        if showCompletion {
-                            VStack(spacing: 24) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 100))
-                                    .foregroundStyle(
-                                        LinearGradient(
-                                            colors: [.green, .green.opacity(0.7)],
-                                            startPoint: .top,
-                                            endPoint: .bottom
-                                        )
-                                    )
-                                    .scaleEffect(showCompletion ? 1.0 : 0.5)
-                                    .animation(.spring(response: 0.6, dampingFraction: 0.6), value: showCompletion)
-
-                                Text("Goal Complete!")
-                                    .font(.system(size: 48, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-
-                                Text("You did it! Keep going or finish your workout.")
-                                    .font(.title3)
-                                    .foregroundColor(.white.opacity(0.9))
-                                    .multilineTextAlignment(.center)
-                                    .padding(.horizontal, 40)
-                            }
-                            .transition(.scale.combined(with: .opacity))
-                        }
-                    }
-                )
+                activeTrackingContent
             }
         }
         .onChange(of: currentDistance) { oldValue, newValue in
@@ -1311,138 +1008,3 @@ struct WorkoutTrackingView: View {
     }
 }
 
-// MARK: - Workout Recap View
-
-struct WorkoutRecapView: View {
-    let distance: Double
-    let duration: TimeInterval
-    let goalDistance: Double
-    let onDismiss: () -> Void
-
-    private var formattedTime: String {
-        let minutes = Int(duration) / 60
-        let seconds = Int(duration) % 60
-        return String(format: "%d:%02d", minutes, seconds)
-    }
-
-    private var pace: String {
-        guard distance > 0 else { return "--:--" }
-        let paceSeconds = duration / distance
-        let minutes = Int(paceSeconds) / 60
-        let seconds = Int(paceSeconds) % 60
-        return String(format: "%d:%02d", minutes, seconds)
-    }
-
-    var body: some View {
-        ZStack {
-            // Transparent background
-            Color.clear
-                .ignoresSafeArea()
-
-            VStack(spacing: 32) {
-                Spacer()
-
-                // Header
-                VStack(spacing: 12) {
-                    Image(systemName: distance >= goalDistance ? "checkmark.circle.fill" : "flag.checkered.circle.fill")
-                        .font(.system(size: 80))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: distance >= goalDistance ? [.green, .green] : [.orange, .red],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-
-                    Text(distance >= goalDistance ? "Workout Complete!" : "Great Work!")
-                        .font(.system(size: 40, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-
-                    if distance >= goalDistance {
-                        Text("You reached your goal!")
-                            .font(.title3)
-                            .foregroundColor(.white.opacity(0.9))
-                    }
-                }
-
-                // Stats
-                VStack(spacing: 20) {
-                    StatRow(icon: "figure.walk", label: "Distance", value: String(format: "%.2f mi", distance))
-                    StatRow(icon: "clock.fill", label: "Time", value: formattedTime)
-                    StatRow(icon: "speedometer", label: "Avg Pace", value: "\(pace) /mi")
-
-                    if distance >= goalDistance {
-                        StatRow(icon: "target", label: "Goal", value: "✓ Completed")
-                    } else {
-                        StatRow(icon: "target", label: "Goal Progress", value: String(format: "%.0f%%", (distance / goalDistance) * 100))
-                    }
-                }
-                .padding(24)
-                .background(
-                    RoundedRectangle(cornerRadius: 20)
-                        .fill(Color.white.opacity(0.1))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 20)
-                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                        )
-                )
-                .padding(.horizontal, 32)
-
-                Spacer()
-
-                // Done button
-                Button(action: onDismiss) {
-                    Text("Done")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 20)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 217/255, green: 64/255, blue: 63/255),
-                                            Color(red: 180/255, green: 50/255, blue: 50/255)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                        )
-                        .shadow(color: Color(red: 217/255, green: 64/255, blue: 63/255).opacity(0.4), radius: 12, x: 0, y: 6)
-                }
-                .padding(.horizontal, 32)
-                .padding(.bottom, 40)
-                .buttonStyle(PlainButtonStyle())
-            }
-        }
-    }
-}
-
-struct StatRow: View {
-    let icon: String
-    let label: String
-    let value: String
-
-    var body: some View {
-        HStack {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundColor(.white.opacity(0.7))
-                .frame(width: 32)
-
-            Text(label)
-                .font(.headline)
-                .foregroundColor(.white.opacity(0.9))
-
-            Spacer()
-
-            Text(value)
-                .font(.title3)
-                .fontWeight(.bold)
-                .foregroundColor(.white)
-        }
-    }
-}

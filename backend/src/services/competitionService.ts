@@ -301,6 +301,7 @@ interface UserData {
 		};
 		score: number;
 		remaining_lives?: number;
+		has_manual_workouts?: boolean;
 	};
 }
 
@@ -331,7 +332,24 @@ export async function getUserScores(competition: Competition): Promise<UserData>
 			return groupedData;
 		}, {});
 
-		userData[user_id] = { intervals, score: 0 };
+		// Check if user has any manual or edited workouts in the competition period
+		const endDate = competition.end_date ?? new Date().toISOString().split('T')[0];
+		const manualCheck = await db.query(
+			`SELECT EXISTS(
+				SELECT 1 FROM workouts
+				WHERE user_id = $1
+				AND local_date >= $2
+				AND local_date <= $3
+				AND source IN ('manual', 'edited')
+			) as has_manual`,
+			[user_id, competition.start_date, endDate]
+		);
+
+		userData[user_id] = {
+			intervals,
+			score: 0,
+			has_manual_workouts: manualCheck[0]?.has_manual ?? false
+		};
 	}
 
 	const intervals = getIntervalRange(competition);

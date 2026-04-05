@@ -182,7 +182,6 @@ enum ShareCardType: String, CaseIterable, Identifiable {
     case mostMiles = "Most Miles"
     case totalMiles = "Total"
     case weekSummary = "Summary"
-    case custom = "Custom"
 
     var id: String { self.rawValue }
 
@@ -194,7 +193,6 @@ enum ShareCardType: String, CaseIterable, Identifiable {
         case .mostMiles: return "star.fill"
         case .totalMiles: return "map.fill"
         case .weekSummary: return "calendar.badge.clock"
-        case .custom: return "slider.horizontal.3"
         }
     }
 
@@ -206,7 +204,6 @@ enum ShareCardType: String, CaseIterable, Identifiable {
         case .mostMiles: return .purple
         case .totalMiles: return .red
         case .weekSummary: return .cyan
-        case .custom: return .pink
         }
     }
 }
@@ -230,9 +227,6 @@ struct EnhancedShareView: View {
     @State private var showingShareSheet = false
     @State private var generatedImage: UIImage?
     @State private var showingCopiedFeedback = false
-    @State private var showingCustomBuilder = false
-    @State private var customCards: [CustomShareCardConfig] = []
-    @State private var selectedCustomCard: CustomShareCardConfig?
 
     var body: some View {
         NavigationStack {
@@ -274,16 +268,6 @@ struct EnhancedShareView: View {
                                     isSelected: selectedCard == cardType,
                                     action: {
                                         selectedCard = cardType
-                                        if cardType == .custom {
-                                            if let defaultCard = CustomShareCardConfig.getDefaultCard() {
-                                                selectedCustomCard = defaultCard
-                                            } else if let firstCard = customCards.first {
-                                                selectedCustomCard = firstCard
-                                            } else {
-                                                showingCustomBuilder = true
-                                                return
-                                            }
-                                        }
                                         generateImage()
                                     }
                                 )
@@ -309,128 +293,8 @@ struct EnhancedShareView: View {
                 }
                 .padding(.horizontal, 20)
 
-                    // Custom card selector (if custom cards exist)
-                    if selectedCard == .custom && !customCards.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Text("Custom Cards")
-                                    .font(MADTheme.Typography.headline)
-                                    .foregroundColor(.white)
-                                Spacer()
-                                Button {
-                                    showingCustomBuilder = true
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "plus.circle.fill")
-                                        Text("New")
-                                    }
-                                    .font(.caption)
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color.white.opacity(0.2))
-                                    )
-                                }
-                            }
-                            .padding(.horizontal, 20)
-
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 12) {
-                                    ForEach(customCards) { card in
-                                        VStack(spacing: 8) {
-                                            Button {
-                                                selectedCustomCard = card
-                                                generateImage()
-                                            } label: {
-                                                VStack(spacing: 6) {
-                                                    Image(systemName: "square.fill")
-                                                        .font(.title3)
-                                                        .foregroundColor(Color(hex: card.accentColor))
-
-                                                    Text(card.name)
-                                                        .font(.caption)
-                                                        .foregroundColor(.white)
-                                                        .lineLimit(1)
-                                                        .frame(maxWidth: 80)
-                                                }
-                                                .padding(.horizontal, 12)
-                                                .padding(.vertical, 10)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 12)
-                                                        .fill(selectedCustomCard?.id == card.id ? Color.white.opacity(0.2) : Color.white.opacity(0.1))
-                                                )
-                                            }
-
-                                            // Edit and Delete buttons
-                                            HStack(spacing: 8) {
-                                                Button {
-                                                    selectedCustomCard = card
-                                                    showingCustomBuilder = true
-                                                } label: {
-                                                    Image(systemName: "pencil")
-                                                        .font(.caption2)
-                                                        .foregroundColor(.white.opacity(0.8))
-                                                        .padding(6)
-                                                        .background(
-                                                            Circle()
-                                                                .fill(Color.blue.opacity(0.3))
-                                                        )
-                                                }
-
-                                                Button {
-                                                    if let index = customCards.firstIndex(where: { $0.id == card.id }) {
-                                                        customCards.remove(at: index)
-                                                        CustomShareCardConfig.saveCards(customCards)
-                                                        if selectedCustomCard?.id == card.id {
-                                                            selectedCustomCard = customCards.first
-                                                            if selectedCustomCard == nil {
-                                                                selectedCard = .streak
-                                                            }
-                                                        }
-                                                        generateImage()
-                                                    }
-                                                } label: {
-                                                    Image(systemName: "trash")
-                                                        .font(.caption2)
-                                                        .foregroundColor(.white.opacity(0.8))
-                                                        .padding(6)
-                                                        .background(
-                                                            Circle()
-                                                                .fill(Color.red.opacity(0.3))
-                                                        )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                .padding(.horizontal, 20)
-                            }
-                        }
-                    }
-
                     // Action buttons with glass effect
                     VStack(spacing: 12) {
-                        if selectedCard == .custom {
-                            Button {
-                                showingCustomBuilder = true
-                            } label: {
-                                HStack {
-                                    Image(systemName: "slider.horizontal.3")
-                                    Text("Customize Card")
-                                }
-                                .font(MADTheme.Typography.headline)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(.ultraThinMaterial)
-                                )
-                            }
-                        }
-
                         HStack(spacing: 12) {
                             Button {
                                 if let image = generatedImage {
@@ -499,31 +363,8 @@ struct EnhancedShareView: View {
                     ActivityViewController(activityItems: [image])
                 }
             }
-            .sheet(isPresented: $showingCustomBuilder) {
-                CustomCardBuilderView(
-                    user: user,
-                    currentDistance: currentDistance,
-                    progress: progress,
-                    isGoalCompleted: isGoalCompleted,
-                    fastestPace: fastestPace,
-                    mostMiles: mostMiles,
-                    totalMiles: totalMiles,
-                    existingCard: selectedCustomCard
-                ) { newCard in
-                    if let index = customCards.firstIndex(where: { $0.id == newCard.id }) {
-                        customCards[index] = newCard
-                    } else {
-                        customCards.append(newCard)
-                    }
-                    CustomShareCardConfig.saveCards(customCards)
-                    selectedCustomCard = newCard
-                    selectedCard = .custom
-                    generateImage()
-                }
-            }
             .onAppear {
                 selectedTheme = systemColorScheme
-                customCards = CustomShareCardConfig.loadSavedCards()
                 generateImage()
             }
             .onChange(of: selectedTheme) { _, _ in
@@ -542,21 +383,7 @@ struct EnhancedShareView: View {
     private func generateImage() {
         let renderer: ImageRenderer<AnyView>
 
-        if selectedCard == .custom, let customCard = selectedCustomCard {
-            renderer = ImageRenderer(content: AnyView(
-                CustomShareCardView(
-                    config: customCard,
-                    user: user,
-                    currentDistance: currentDistance,
-                    progress: progress,
-                    isGoalCompleted: isGoalCompleted,
-                    fastestPace: fastestPace,
-                    mostMiles: mostMiles,
-                    totalMiles: totalMiles
-                ).environment(\.colorScheme, selectedTheme)
-            ))
-        } else {
-            switch selectedCard {
+        switch selectedCard {
             case .streak:
                 renderer = ImageRenderer(content: AnyView(
                     StreakShareCard(streak: user.streak, isActiveToday: isGoalCompleted, isAtRisk: user.isStreakAtRisk)
@@ -597,12 +424,6 @@ struct EnhancedShareView: View {
                     WeekSummaryShareCard(currentDistance: currentDistance, totalMiles: totalMiles, streak: user.streak, fastestPace: fastestPace)
                         .environment(\.colorScheme, selectedTheme)
                 ))
-            case .custom:
-                renderer = ImageRenderer(content: AnyView(
-                    Text("No custom card selected")
-                        .environment(\.colorScheme, selectedTheme)
-                ))
-            }
         }
 
         // High resolution - tight crop with no extra space
@@ -613,6 +434,20 @@ struct EnhancedShareView: View {
 }
 
 // MARK: - Share Card Button with Better Padding
+
+// MARK: - Activity View Controller
+
+struct ActivityViewController: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - Share Card Button
 
 struct ShareCardButton: View {
     let cardType: ShareCardType

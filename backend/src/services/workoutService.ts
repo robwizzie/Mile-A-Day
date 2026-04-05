@@ -6,18 +6,19 @@ const db = PostgresService.getInstance();
 export async function uploadWorkouts(userId: string, workouts: Workout[]) {
 	const workoutQuery = `
       INSERT INTO workouts (
-        user_id, 
+        user_id,
         workout_id,
-        distance, 
-        local_date, 
+        distance,
+        local_date,
         date,
-        timezone_offset, 
-        workout_type, 
-        device_end_date, 
-        calories, 
-        total_duration
+        timezone_offset,
+        workout_type,
+        device_end_date,
+        calories,
+        total_duration,
+        source
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       ON CONFLICT (workout_id)
       DO UPDATE SET
         distance = EXCLUDED.distance,
@@ -27,7 +28,11 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
         workout_type = EXCLUDED.workout_type,
         device_end_date = EXCLUDED.device_end_date,
         calories = EXCLUDED.calories,
-        total_duration = EXCLUDED.total_duration
+        total_duration = EXCLUDED.total_duration,
+        source = CASE
+          WHEN workouts.source IN ('manual', 'edited') THEN workouts.source
+          ELSE EXCLUDED.source
+        END
       RETURNING workout_id, (xmax = 0) AS inserted
     `;
 
@@ -56,7 +61,8 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
 						workout.workoutType,
 						workout.deviceEndDate,
 						workout.calories,
-						workout.totalDuration
+						workout.totalDuration,
+						workout.source || 'healthkit'
 					]
 				},
 				...workout.splits.map(split => ({
@@ -234,4 +240,44 @@ export async function getQuantityDateRange(
 	const normalizedTypes = (workoutTypes ?? ['running', 'walking']).map(t => typeMap[t]).filter(Boolean);
 
 	return await db.query(query, [userId, start, end, normalizedTypes]);
+}
+
+export async function updateWorkout(
+	userId: string,
+	workoutId: string,
+	updates: { distance?: number; totalDuration?: number; workoutType?: string }
+) {
+	const current = await db.query(
+		'SELECT distance, total_duration, original_distance FROM workouts WHERE workout_id = $1 AND user_id = $2',
+		[workoutId, userId]
+	);
+
+	if (!current || current.length === 0) {
+		return null;
+	}
+
+	const row = current[0];
+
+	const result = await db.query(
+		`UPDATE workouts SET
+			distance = COALESCE($3, distance),
+			total_duration = COALESCE($4, total_duration),
+			workout_type = COALESCE($5, workout_type),
+			source = 'edited',
+			original_distance = COALESCE(original_distance, $6),
+			original_duration = COALESCE(original_duration, $7)
+		WHERE workout_id = $1 AND user_id = $2
+		RETURNING *`,
+		[
+			workoutId,
+			userId,
+			updates.distance ?? null,
+			updates.totalDuration ?? null,
+			updates.workoutType ?? null,
+			row.distance,
+			row.total_duration
+		]
+	);
+
+	return result[0];
 }
