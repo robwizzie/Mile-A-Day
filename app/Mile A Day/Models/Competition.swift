@@ -94,18 +94,20 @@ struct Competition: Codable, Identifiable {
         users.filter { $0.invite_status == .accepted }.count
     }
 
+    private static let isoDateFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate]
+        return f
+    }()
+
     var startDateFormatted: Date? {
         guard let dateStr = start_date else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        return formatter.date(from: dateStr)
+        return Self.isoDateFormatter.date(from: dateStr)
     }
 
     var endDateFormatted: Date? {
         guard let dateStr = end_date else { return nil }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        return formatter.date(from: dateStr)
+        return Self.isoDateFormatter.date(from: dateStr)
     }
 
     /// Computed competition status based on dates
@@ -114,11 +116,9 @@ struct Competition: Codable, Identifiable {
             return .lobby
         }
 
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
         let now = Date()
 
-        guard let startDate = formatter.date(from: startStr) else {
+        guard let startDate = Self.isoDateFormatter.date(from: startStr) else {
             return .lobby
         }
 
@@ -127,7 +127,7 @@ struct Competition: Codable, Identifiable {
         }
 
         // Start date is in the past - check end date
-        if let endStr = end_date, let endDate = formatter.date(from: endStr) {
+        if let endStr = end_date, let endDate = Self.isoDateFormatter.date(from: endStr) {
             if endDate < now {
                 return .finished
             }

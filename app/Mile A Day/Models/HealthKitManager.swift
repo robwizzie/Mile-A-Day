@@ -356,9 +356,30 @@ class HealthKitManager: ObservableObject {
     // MARK: - NEW: Persistent Workout Index (Phase 1 - Architectural Redesign)
     /// Single source of truth for workout data - eliminates inconsistencies
     #if !os(watchOS)
-    @Published var workoutIndex: WorkoutIndex?
+    @Published var workoutIndex: WorkoutIndex? {
+        didSet { _workoutsByUUID = nil }
+    }
     let workoutProcessor = WorkoutProcessor()
     var isIndexBuilding = false
+
+    /// O(1) UUID lookup cache — rebuilt lazily when workoutIndex changes
+    private var _workoutsByUUID: [String: WorkoutRecord]?
+
+    /// Non-mutating lookup of a workout record by UUID (safe to call from view body)
+    func workoutRecord(forUUID uuid: String) -> WorkoutRecord? {
+        if _workoutsByUUID == nil {
+            guard let index = workoutIndex else { return nil }
+            var dict = [String: WorkoutRecord]()
+            dict.reserveCapacity(index.totalWorkouts)
+            for (_, records) in index.workoutsByDate {
+                for record in records {
+                    dict[record.id] = record
+                }
+            }
+            _workoutsByUUID = dict
+        }
+        return _workoutsByUUID?[uuid]
+    }
     #endif
     
     func log(_ message: String) {}
@@ -1079,7 +1100,55 @@ class HealthKitManager: ObservableObject {
         
         healthStore.execute(routeQuery)
     }
-    
+
+    /// Fetches all GPS location points from the route associated with a workout.
+    /// Returns an empty array if no route data exists (indoor/manual workouts).
+    func fetchAllRouteLocations(for workout: HKWorkout) async -> [CLLocation] {
+        // Step 1: Get all HKWorkoutRoute objects for this workout
+        let routes: [HKWorkoutRoute] = await withCheckedContinuation { continuation in
+            let predicate = HKQuery.predicateForObjects(from: workout)
+            let query = HKAnchoredObjectQuery(
+                type: HKSeriesType.workoutRoute(),
+                predicate: predicate,
+                anchor: nil,
+                limit: HKObjectQueryNoLimit
+            ) { _, samples, _, _, error in
+                if let routes = samples as? [HKWorkoutRoute] {
+                    continuation.resume(returning: routes)
+                } else {
+                    continuation.resume(returning: [])
+                }
+            }
+            healthStore.execute(query)
+        }
+
+        guard !routes.isEmpty else { return [] }
+
+        // Step 2: For each route, collect all location batches
+        var allLocations: [CLLocation] = []
+
+        for route in routes {
+            let locations: [CLLocation] = await withCheckedContinuation { continuation in
+                var accumulated: [CLLocation] = []
+                let routeQuery = HKWorkoutRouteQuery(route: route) { _, locations, done, error in
+                    if let locations = locations {
+                        accumulated.append(contentsOf: locations)
+                    }
+                    if done {
+                        continuation.resume(returning: accumulated)
+                    }
+                }
+                self.healthStore.execute(routeQuery)
+            }
+            allLocations.append(contentsOf: locations)
+        }
+
+        // Sort by timestamp to ensure correct order
+        allLocations.sort { $0.timestamp < $1.timestamp }
+
+        return allLocations
+    }
+
     /// Gets the appropriate timezone for a given location
     private func getTimeZone(for location: CLLocation) -> TimeZone {
         // For more accurate timezone detection, we could use a timezone database
@@ -1170,20 +1239,9 @@ class HealthKitManager: ObservableObject {
     /// Returns the corrected time if workout is in index, otherwise returns workout's device time
     func getCorrectedLocalTime(for workout: HKWorkout) -> Date {
         #if !os(watchOS)
-        guard let index = workoutIndex else {
-            return workout.endDate // No index, return device time
+        if let record = workoutRecord(forUUID: workout.uuid.uuidString) {
+            return record.localEndTime
         }
-        
-        // Find the workout record in the index
-        for (_, records) in index.workoutsByDate {
-            if let record = records.first(where: { $0.id == workout.uuid.uuidString }) {
-                print("[WorkoutIndex] ✅ Found corrected time for workout (offset: \(record.timezoneOffset)h)")
-                return record.localEndTime
-            }
-        }
-        
-        // Not found in index, return device time
-        print("[WorkoutIndex] ⚠️ Workout not found in index, using device time")
         return workout.endDate
         #else
         return workout.endDate

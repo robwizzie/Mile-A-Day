@@ -7,12 +7,14 @@ import HealthKit
 struct UnifiedStatsGrid: View {
     let user: User
     @ObservedObject var healthManager: HealthKitManager
+    @EnvironmentObject var userManager: UserManager
     let statsType: StatsViewType
     @State private var statsData: (totalMiles: Double, mostMiles: Double, fastestPace: TimeInterval, streakDays: Int) = (0.0, 0.0, 0.0, 0)
     @State private var hasLoadedOnce = false
     @State private var isCalculating = false
     @State private var showFastestPaceDetail = false
     @State private var showMostMilesDetail = false
+    @State private var showTotalMilesDetail = false
     @State private var showGoalSheet = false
     @State private var isRefreshingFastestPace = false
 
@@ -21,14 +23,11 @@ struct UnifiedStatsGrid: View {
         case currentStreak = "Current Streak"
     }
 
-    /// Best fastest pace from all sources (user stored + HealthKit live)
+    /// HealthKit pace (from actual split times) is authoritative; backend is fallback only
     var bestAllTimeFastestPace: TimeInterval {
-        let userPace = user.fastestMilePace
         let hkPace = healthManager.fastestMilePace
-        if userPace > 0 && hkPace > 0 {
-            return min(userPace, hkPace) // lower is faster
-        }
-        return userPace > 0 ? userPace : hkPace
+        if hkPace > 0 { return hkPace }
+        return user.fastestMilePace
     }
 
     var isFastestPaceLoading: Bool {
@@ -84,41 +83,9 @@ struct UnifiedStatsGrid: View {
 
     var mostMiles: Double {
         if statsType == .allTime {
-            // Calculate all-time most miles directly from all workouts to avoid timezone/caching issues
-            let allWorkouts = healthManager.cachedWorkouts.isEmpty ? healthManager.recentWorkouts : healthManager.cachedWorkouts
-
-            // Group all workouts by day (using device timezone for all-time stats)
-            let calendar = Calendar.current
-            var workoutsByDay: [Date: [HKWorkout]] = [:]
-
-            for workout in allWorkouts {
-                let dateComponents = calendar.dateComponents([.year, .month, .day], from: workout.endDate)
-                if let date = calendar.date(from: dateComponents) {
-                    if workoutsByDay[date] == nil {
-                        workoutsByDay[date] = []
-                    }
-                    workoutsByDay[date]?.append(workout)
-                }
-            }
-
-            // Calculate most miles in a single day from all workouts
-            var maxMilesInDay: Double = 0.0
-            for (_, dayWorkouts) in workoutsByDay {
-                var totalMilesForDay: Double = 0.0
-                for workout in dayWorkouts {
-                    if let distance = workout.totalDistance {
-                        let miles = distance.doubleValue(for: HKUnit.mile())
-                        totalMilesForDay += miles
-                    }
-                }
-                if totalMilesForDay > maxMilesInDay {
-                    maxMilesInDay = totalMilesForDay
-                }
-            }
-
-            // Return calculated value, with fallbacks
-            if maxMilesInDay > 0 {
-                return maxMilesInDay
+            // Use pre-computed cached value instead of recalculating on every render
+            if healthManager.cachedMostMilesInOneDay > 0 {
+                return healthManager.cachedMostMilesInOneDay
             } else if healthManager.mostMilesInOneDay > 0 {
                 return healthManager.mostMilesInOneDay
             } else {
@@ -169,17 +136,22 @@ struct UnifiedStatsGrid: View {
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 15) {
                 // Total Miles Card
-                statsCard(
-                    icon: "map.fill",
-                    iconColor: .blue,
-                    title: statsType == .allTime ? "Total Miles" : "Streak Miles",
-                    isLoading: isCalculating && statsType == .currentStreak && !hasLoadedOnce,
-                    value: String(format: "%.1f mi", totalMiles),
-                    subtitle: streakDays > 0 && statsType == .currentStreak
-                        ? String(format: "%.1f avg/day", avgMilesPerDay)
-                        : (statsType == .allTime ? "All time" : " "),
-                    subtitleColor: .blue
-                )
+                Button {
+                    showTotalMilesDetail = true
+                } label: {
+                    statsCard(
+                        icon: "map.fill",
+                        iconColor: .blue,
+                        title: statsType == .allTime ? "Total Miles" : "Streak Miles",
+                        isLoading: isCalculating && statsType == .currentStreak && !hasLoadedOnce,
+                        value: String(format: "%.1f mi", totalMiles),
+                        subtitle: streakDays > 0 && statsType == .currentStreak
+                            ? String(format: "%.1f avg/day", avgMilesPerDay)
+                            : (statsType == .allTime ? "All time" : " "),
+                        subtitleColor: .blue
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
 
                 // Fastest Mile Card
                 Button {
@@ -280,9 +252,12 @@ struct UnifiedStatsGrid: View {
                 calculateCurrentStreakStats()
             }
         }
+        .sheet(isPresented: $showTotalMilesDetail) {
+            TotalMilesDetailView(userManager: userManager, healthManager: healthManager)
+        }
         .sheet(isPresented: $showFastestPaceDetail) {
             if statsType == .allTime {
-                FastestPaceDetailView(healthManager: healthManager)
+                FastestPaceDetailView(healthManager: healthManager, userManager: userManager)
             } else {
                 CurrentStreakFastestPaceDetailView(healthManager: healthManager, currentStreakStats: statsData)
             }

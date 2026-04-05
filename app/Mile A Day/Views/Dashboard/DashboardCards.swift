@@ -24,17 +24,20 @@ struct StreakCard: View {
     @State private var timeRemainingText: String = ""
     @State private var timer: Timer?
 
+    private static let narrowDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEEEE"
+        return f
+    }()
+
     // Streak milestone milestones
     private let milestones = [3, 5, 7, 10, 14, 21, 30, 50, 60, 75, 90, 100, 150, 200, 250, 365, 500, 1000]
 
-    /// Best fastest pace from user stored value and HealthKit live value
+    /// HealthKit pace (from actual split times) is authoritative; backend is fallback only
     private var bestFastestPace: TimeInterval {
-        let userPace = fastestPace
         let hkPace = healthManager.fastestMilePace
-        if userPace > 0 && hkPace > 0 {
-            return min(userPace, hkPace)
-        }
-        return userPace > 0 ? userPace : hkPace
+        if hkPace > 0 { return hkPace }
+        return fastestPace
     }
 
     private var nextMilestone: (value: Int, progress: Double, daysToGo: Int)? {
@@ -356,11 +359,7 @@ struct StreakCard: View {
                     let completed = healthManager.dailyMileGoals[dateKey] ?? false
                     let isToday = calendar.isDateInToday(date)
                     let isFuture = date > Date()
-                    let dayLetter = {
-                        let formatter = DateFormatter()
-                        formatter.dateFormat = "EEEEE"
-                        return formatter.string(from: date)
-                    }()
+                    let dayLetter = Self.narrowDayFormatter.string(from: date)
 
                     VStack(spacing: 4) {
                         Text(dayLetter)

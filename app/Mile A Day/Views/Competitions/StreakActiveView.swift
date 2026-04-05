@@ -13,6 +13,12 @@ struct StreakActiveView: View {
     @State private var actionFeedback: ActionFeedback?
     @State private var showEliminatedUsers = false
 
+    private static let isoDateFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate]
+        return f
+    }()
+
     private let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
     private let maxVisibleHearts = 6
 
@@ -37,23 +43,21 @@ struct StreakActiveView: View {
 
     private var intervalKey: String {
         let calendar = Calendar.current
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
         let interval = competition.options.interval ?? .day
 
         switch interval {
         case .day:
-            return formatter.string(from: calendar.startOfDay(for: selectedIntervalDate))
+            return Self.isoDateFormatter.string(from: calendar.startOfDay(for: selectedIntervalDate))
         case .week:
             var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedIntervalDate)
             components.weekday = calendar.firstWeekday
             let startOfWeek = calendar.date(from: components) ?? selectedIntervalDate
-            return formatter.string(from: startOfWeek)
+            return Self.isoDateFormatter.string(from: startOfWeek)
         case .month:
             var components = calendar.dateComponents([.year, .month], from: selectedIntervalDate)
             components.day = 1
             let startOfMonth = calendar.date(from: components) ?? selectedIntervalDate
-            return formatter.string(from: startOfMonth)
+            return Self.isoDateFormatter.string(from: startOfMonth)
         }
     }
 
@@ -206,9 +210,7 @@ struct StreakActiveView: View {
         let isFuture = date > Date()
         let currentUser = acceptedUsers.first(where: { $0.user_id == currentUserId })
 
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        let dayKey = formatter.string(from: calendar.startOfDay(for: date))
+        let dayKey = Self.isoDateFormatter.string(from: calendar.startOfDay(for: date))
         let distance = currentUser?.intervals?[dayKey] ?? 0
         let completed = distance >= goal
 

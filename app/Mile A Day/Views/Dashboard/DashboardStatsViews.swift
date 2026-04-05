@@ -118,15 +118,17 @@ struct RecentWorkoutsView: View {
                     .foregroundColor(.secondary)
                     .padding(.vertical)
             } else {
-                ForEach(workouts, id: \.uuid) { workout in
-                    Button {
-                        selectedWorkout = IdentifiableWorkout(workout: workout)
-                    } label: {
-                        WorkoutRow(workout: workout)
-                            .padding(MADTheme.Spacing.md)
-                            .madLiquidGlass()
+                LazyVStack(spacing: MADTheme.Spacing.md) {
+                    ForEach(workouts.prefix(10), id: \.uuid) { workout in
+                        Button {
+                            selectedWorkout = IdentifiableWorkout(workout: workout)
+                        } label: {
+                            WorkoutRow(workout: workout)
+                                .padding(MADTheme.Spacing.md)
+                                .madLiquidGlass()
+                        }
+                        .buttonStyle(ScaleButtonStyle())
                     }
-                    .buttonStyle(ScaleButtonStyle())
                 }
             }
         }

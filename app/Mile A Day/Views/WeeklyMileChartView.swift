@@ -91,10 +91,9 @@ struct WeeklyMileChartView: View {
     }
 
     private var bestFastestPace: TimeInterval {
-        let userPace = userManager.currentUser.fastestMilePace
         let hkPace = healthManager.fastestMilePace
-        if userPace > 0 && hkPace > 0 { return min(userPace, hkPace) }
-        return userPace > 0 ? userPace : hkPace
+        if hkPace > 0 { return hkPace }
+        return userManager.currentUser.fastestMilePace
     }
 
     private var daysCompletedThisWeek: Int {

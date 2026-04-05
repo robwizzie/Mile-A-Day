@@ -148,6 +148,7 @@ struct LeaderboardList: View {
     let users: [User]
     let valueType: LeaderboardValueType
     @ObservedObject var healthManager: HealthKitManager
+    @EnvironmentObject var userManager: UserManager
     @State private var selectedUser: User?
     @State private var showDetail = false
     @State private var animateRows = false
@@ -266,7 +267,7 @@ struct LeaderboardList: View {
             if let user = selectedUser {
                 switch valueType {
                 case .fastestPace:
-                    FastestPaceDetailView(healthManager: healthManager)
+                    FastestPaceDetailView(healthManager: healthManager, userManager: userManager)
                 case .mostMilesInDay:
                     MostMilesDetailView(miles: user.mostMilesInOneDay, healthManager: healthManager)
                 default:

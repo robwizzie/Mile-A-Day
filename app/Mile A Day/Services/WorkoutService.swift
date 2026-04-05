@@ -381,9 +381,6 @@ class WorkoutService: ObservableObject {
 
             try await builder.beginCollection(at: startDate)
 
-            // Tag as user-entered so the workout index detects it as manual
-            try await builder.addMetadata([HKMetadataKeyWasUserEntered: true])
-
             // Add distance sample
             let distanceType = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!
             let distanceQuantity = HKQuantity(unit: .mile(), doubleValue: distance)
@@ -396,13 +393,15 @@ class WorkoutService: ObservableObject {
             try await builder.addSamples([distanceSample])
 
             try await builder.endCollection(at: endDate)
-            if let finishedWorkout = try await builder.finishWorkout() {
-                // Register the HealthKit UUID so the WorkoutIndex flags it as manual
-                ManualWorkoutRegistry.markManual(finishedWorkout.uuid.uuidString)
-                print("[WorkoutService] Wrote manual workout to HealthKit (UUID: \(finishedWorkout.uuid.uuidString))")
+            guard let finishedWorkout = try await builder.finishWorkout() else {
+                print("[WorkoutService] ❌ finishWorkout returned nil")
+                return
             }
+            ManualWorkoutRegistry.markManual(finishedWorkout.uuid.uuidString)
+            print("[WorkoutService] ✅ Wrote manual workout to HealthKit and registered UUID: \(finishedWorkout.uuid.uuidString)")
+            print("[WorkoutService] Registry now has \(UserDefaults.standard.stringArray(forKey: "com.mileaday.manualWorkoutIds")?.count ?? 0) manual IDs")
         } catch {
-            print("[WorkoutService] Failed to write to HealthKit: \(error.localizedDescription)")
+            print("[WorkoutService] ❌ Failed to write to HealthKit: \(error.localizedDescription)")
         }
     }
 

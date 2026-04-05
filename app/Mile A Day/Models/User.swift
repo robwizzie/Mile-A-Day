@@ -683,6 +683,12 @@ struct Badge: Identifiable, Codable {
     var isLocked: Bool = false
     var isHidden: Bool = false // Secret badges that don't show requirements until earned
     
+    /// Extracts the numeric requirement from the badge ID (e.g. "miles_500" → 500)
+    var numericValue: Int {
+        let components = id.components(separatedBy: CharacterSet.decimalDigits.inverted)
+        return components.compactMap { Int($0) }.first ?? 0
+    }
+
     // Badge rarity (can be used for visual styling)
     var rarity: BadgeRarity {
         // Legendary badges

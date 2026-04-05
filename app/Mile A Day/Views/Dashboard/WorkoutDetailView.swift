@@ -1,5 +1,6 @@
 import SwiftUI
 import HealthKit
+import MapKit
 
 // MARK: - Workout Detail View
 
@@ -10,6 +11,8 @@ struct WorkoutDetailView: View {
     @State private var splitTimes: [TimeInterval]?
     @State private var isLoadingSplits = false
     @State private var showEditSheet = false
+    @State private var routeCoordinates: [CLLocationCoordinate2D]?
+    @State private var isLoadingRoute = false
     @EnvironmentObject var healthManager: HealthKitManager
 
     // Timezone-corrected times from index
@@ -55,14 +58,7 @@ struct WorkoutDetailView: View {
 
     /// Look up the source from the WorkoutIndex by matching UUID
     private var workoutSource: WorkoutSource {
-        guard let index = healthManager.workoutIndex else { return .healthkit }
-        let uuid = workout.uuid.uuidString
-        for (_, records) in index.workoutsByDate {
-            if let record = records.first(where: { $0.id == uuid }) {
-                return record.source
-            }
-        }
-        return .healthkit
+        healthManager.workoutRecord(forUUID: workout.uuid.uuidString)?.source ?? .healthkit
     }
 
     var body: some View {
@@ -75,6 +71,9 @@ struct WorkoutDetailView: View {
                     VStack(spacing: MADTheme.Spacing.lg) {
                         // Hero card — type, distance, date
                         heroCard
+
+                        // Route map (only shown for outdoor workouts with GPS data)
+                        routeMapSection
 
                         // Key stats row
                         keyStatsRow
@@ -122,6 +121,7 @@ struct WorkoutDetailView: View {
             .task {
                 await fetchCalories()
                 await fetchSplitTimes()
+                await fetchRouteData()
             }
         }
     }
@@ -318,7 +318,64 @@ struct WorkoutDetailView: View {
         }
     }
 
+    // MARK: - Route Map
+
+    @ViewBuilder
+    private var routeMapSection: some View {
+        if let routeCoordinates, !routeCoordinates.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: "map.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(MADTheme.Colors.redGradient)
+                    Text("Route")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.primary)
+                }
+
+                WorkoutRouteMapView(
+                    coordinates: routeCoordinates,
+                    routeColor: workoutColor
+                )
+                .frame(height: 250)
+                .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+            }
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
+        } else if isLoadingRoute {
+            VStack(spacing: MADTheme.Spacing.md) {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: "map.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(MADTheme.Colors.redGradient)
+                    Text("Route")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                }
+
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    ProgressView()
+                        .tint(.secondary)
+                        .scaleEffect(0.8)
+                    Text("Loading route...")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
+        }
+    }
+
     // MARK: - Data Fetching
+
+    private func fetchRouteData() async {
+        isLoadingRoute = true
+        let locations = await healthManager.fetchAllRouteLocations(for: workout)
+        routeCoordinates = locations.isEmpty ? nil : locations.map { $0.coordinate }
+        isLoadingRoute = false
+    }
 
     private func fetchSplitTimes() async {
         isLoadingSplits = true

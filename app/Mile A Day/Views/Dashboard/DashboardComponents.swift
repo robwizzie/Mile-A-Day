@@ -115,17 +115,24 @@ struct DayProgressView: View {
     @ObservedObject var userManager: UserManager
     let isSelected: Bool
 
+    private static let dayLetterFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "E"
+        return f
+    }()
+
+    private static let dayNumberFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d"
+        return f
+    }()
+
     private var dayLetter: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "E"
-        let day = formatter.string(from: date)
-        return String(day.prefix(1))
+        String(Self.dayLetterFormatter.string(from: date).prefix(1))
     }
 
     private var dayNumber: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "d"
-        return formatter.string(from: date)
+        Self.dayNumberFormatter.string(from: date)
     }
 
     private var isToday: Bool {

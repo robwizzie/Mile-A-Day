@@ -5,13 +5,15 @@ struct ProfileView: View {
     @ObservedObject var userManager: UserManager
     @ObservedObject var healthManager: HealthKitManager
 
-    @State private var showingMostMilesDetail = false
-    @State private var showingFastestPaceDetail = false
+    @State private var activeSheet: ProfileSheetType?
     @State private var showingLogoutConfirmation = false
-    @State private var showingUsernameSetup = false
-    @State private var showingEditProfile = false
     @State private var currentProfileImage: UIImage?
-    @State private var showingPrivacySettings = false
+
+    enum ProfileSheetType: String, Identifiable {
+        case totalMiles, fastestPace, mostMiles
+        case editProfile, usernameSetup, privacySettings
+        var id: String { rawValue }
+    }
 
     var body: some View {
         ScrollView {
@@ -42,24 +44,25 @@ struct ProfileView: View {
         .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.large)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .sheet(isPresented: $showingMostMilesDetail) {
-            MostMilesDetailView(miles: userManager.currentUser.mostMilesInOneDay, healthManager: healthManager)
-        }
-        .sheet(isPresented: $showingFastestPaceDetail) {
-            FastestPaceDetailView(healthManager: healthManager)
-        }
-        .sheet(isPresented: $showingEditProfile) {
-            EditProfileView(userManager: userManager) {
-                showingEditProfile = false
-                currentProfileImage = getCustomProfileImage() ?? getAppleProfileImage()
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .totalMiles:
+                TotalMilesDetailView(userManager: userManager, healthManager: healthManager)
+            case .fastestPace:
+                FastestPaceDetailView(healthManager: healthManager, userManager: userManager)
+            case .mostMiles:
+                MostMilesDetailView(miles: userManager.currentUser.mostMilesInOneDay, healthManager: healthManager)
+            case .editProfile:
+                EditProfileView(userManager: userManager) {
+                    activeSheet = nil
+                    currentProfileImage = getCustomProfileImage() ?? getAppleProfileImage()
+                }
+            case .usernameSetup:
+                UsernameSetupView()
+                    .environmentObject(userManager)
+            case .privacySettings:
+                PrivacySettingsView()
             }
-        }
-        .sheet(isPresented: $showingUsernameSetup) {
-            UsernameSetupView()
-                .environmentObject(userManager)
-        }
-        .sheet(isPresented: $showingPrivacySettings) {
-            PrivacySettingsView()
         }
         .alert("Sign Out", isPresented: $showingLogoutConfirmation) {
             Button("Cancel", role: .cancel) { }
@@ -91,7 +94,7 @@ struct ProfileView: View {
                 VStack(spacing: MADTheme.Spacing.lg) {
                     // Profile Image with edit overlay
                     Button {
-                        showingEditProfile = true
+                        activeSheet = .editProfile
                     } label: {
                         ZStack {
                             Circle()
@@ -167,7 +170,7 @@ struct ProfileView: View {
 
                     // Edit Profile Button
                     Button {
-                        showingEditProfile = true
+                        activeSheet = .editProfile
                     } label: {
                         HStack(spacing: MADTheme.Spacing.sm) {
                             Image(systemName: "pencil")
@@ -306,16 +309,21 @@ struct ProfileView: View {
             }
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: MADTheme.Spacing.md) {
-                MADStatCard(
-                    title: "Total Miles",
-                    value: userManager.currentUser.totalMiles.milesFormatted,
-                    icon: "map.fill",
-                    iconColor: .blue,
-                    backgroundColor: .blue.opacity(0.1)
-                )
+                Button {
+                    activeSheet = .totalMiles
+                } label: {
+                    MADStatCard(
+                        title: "Total Miles",
+                        value: userManager.currentUser.totalMiles.milesFormatted,
+                        icon: "map.fill",
+                        iconColor: .blue,
+                        backgroundColor: .blue.opacity(0.1)
+                    )
+                }
+                .buttonStyle(ScaleButtonStyle())
 
                 Button {
-                    showingFastestPaceDetail = true
+                    activeSheet = .fastestPace
                 } label: {
                     MADStatCard(
                         title: "Best Pace",
@@ -328,7 +336,7 @@ struct ProfileView: View {
                 .buttonStyle(ScaleButtonStyle())
 
                 Button {
-                    showingMostMilesDetail = true
+                    activeSheet = .mostMiles
                 } label: {
                     MADStatCard(
                         title: "Best Day",
@@ -428,7 +436,7 @@ struct ProfileView: View {
 
                 settingsDivider
 
-                Button(action: { showingPrivacySettings = true }) {
+                Button(action: { activeSheet = .privacySettings }) {
                     MADSettingsRow(
                         icon: "lock.shield.fill",
                         title: "Privacy Settings",
@@ -535,12 +543,9 @@ struct ProfileView: View {
     // MARK: - Helpers
 
     private var bestFastestMilePace: TimeInterval {
-        let userPace = userManager.currentUser.fastestMilePace
         let hkPace = healthManager.fastestMilePace
-        if userPace > 0 && hkPace > 0 {
-            return min(userPace, hkPace)
-        }
-        return userPace > 0 ? userPace : hkPace
+        if hkPace > 0 { return hkPace }
+        return userManager.currentUser.fastestMilePace
     }
 
     private func formatPace(_ pace: TimeInterval) -> String {

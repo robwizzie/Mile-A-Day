@@ -31,6 +31,7 @@ struct ManualWorkoutRegistry {
         var ids = manualIds
         ids.insert(workoutId)
         UserDefaults.standard.set(Array(ids), forKey: manualKey)
+        print("[ManualWorkoutRegistry] ✅ Marked \(workoutId.prefix(8)) as manual. Total manual: \(ids.count)")
     }
 
     static func markEdited(_ workoutId: String) {
@@ -40,8 +41,16 @@ struct ManualWorkoutRegistry {
     }
 
     static func sourceFor(_ workoutId: String) -> WorkoutSource? {
-        if editedIds.contains(workoutId) { return .edited }
-        if manualIds.contains(workoutId) { return .manual }
+        let manual = manualIds
+        let edited = editedIds
+        if edited.contains(workoutId) {
+            print("[ManualWorkoutRegistry] Found \(workoutId.prefix(8)) in edited set")
+            return .edited
+        }
+        if manual.contains(workoutId) {
+            print("[ManualWorkoutRegistry] Found \(workoutId.prefix(8)) in manual set")
+            return .manual
+        }
         return nil
     }
 
@@ -63,31 +72,31 @@ struct ManualWorkoutRegistry {
 struct WorkoutIndex: Codable {
     /// Pre-computed workout mappings by LOCAL date (timezone-corrected)
     var workoutsByDate: [String: [WorkoutRecord]] // String key for Codable
-    
+
     /// Pre-computed list of days with qualifying workouts (>= 0.95 miles)
     var qualifyingDays: Set<String> // String dates for Codable
-    
+
     /// Current streak count (pre-computed)
     var currentStreak: Int
-    
+
     /// When this index was last updated
     var lastUpdated: Date
-    
+
     /// Latest workout date in the index
     var latestWorkoutDate: Date?
-    
+
     /// UUID of latest processed workout (for incremental updates)
     var latestWorkoutUUID: String?
-    
+
     /// Version of the index format (for future migrations)
     var version: Int
-    
+
     /// Total number of workouts in index
     var totalWorkouts: Int
-    
+
     /// Total lifetime miles (sum of all workout distances)
     var totalLifetimeMiles: Double
-    
+
     init() {
         self.workoutsByDate = [:]
         self.qualifyingDays = Set()
@@ -99,9 +108,9 @@ struct WorkoutIndex: Codable {
         self.totalWorkouts = 0
         self.totalLifetimeMiles = 0.0
     }
-    
+
     // MARK: - Computed Properties
-    
+
     /// Get workouts for a specific date (instant lookup)
     func workouts(for date: Date) -> [WorkoutRecord] {
         let key = dateKey(from: date)
@@ -131,7 +140,22 @@ struct WorkoutIndex: Codable {
             return max(best, dayMiles)
         }
     }
-    
+
+    /// The date key (yyyy-MM-dd) of the day with the most miles
+    var mostMilesInOneDayDateKey: String? {
+        workoutsByDate.max(by: { lhs, rhs in
+            let lhsMiles = lhs.value.reduce(0.0) { $0 + $1.distance }
+            let rhsMiles = rhs.value.reduce(0.0) { $0 + $1.distance }
+            return lhsMiles < rhsMiles
+        })?.key
+    }
+
+    /// Workout records for the day with the most miles
+    var mostMilesInOneDayRecords: [WorkoutRecord] {
+        guard let key = mostMilesInOneDayDateKey else { return [] }
+        return workoutsByDate[key] ?? []
+    }
+
     // MARK: - Helper Methods
     
     private func dateKey(from date: Date) -> String {
@@ -143,11 +167,15 @@ struct WorkoutIndex: Codable {
                      components.day ?? 0)
     }
     
+    private static let dateKeyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone.current
+        return f
+    }()
+
     private func dateFromKey(_ key: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = TimeZone.current
-        return formatter.date(from: key)
+        Self.dateKeyFormatter.date(from: key)
     }
     
     // MARK: - Index Persistence
@@ -275,17 +303,16 @@ struct WorkoutRecord: Codable, Identifiable {
         self.processedDate = Date()
 
         // Determine workout source: manual, edited, or healthkit
-        if let registeredSource = ManualWorkoutRegistry.sourceFor(workout.uuid.uuidString) {
-            // Local registry (covers in-app manual entries and edits from this session onward)
+        let workoutUUID = workout.uuid.uuidString
+        if let registeredSource = ManualWorkoutRegistry.sourceFor(workoutUUID) {
             self.source = registeredSource
+            print("[WorkoutRecord] ✅ UUID \(workoutUUID.prefix(8)) found in registry → \(registeredSource)")
         } else {
-            let bundleId = workout.sourceRevision.source.bundleIdentifier
             let wasUserEntered = (workout.metadata?[HKMetadataKeyWasUserEntered] as? Bool) == true
-            let isFromHealthApp = bundleId == "com.apple.health"
-            // Workouts written by our own app to HealthKit are manual entries
-            // (real workouts come from Apple Watch / Apple Fitness, not our app)
-            let isFromOurApp = bundleId == Bundle.main.bundleIdentifier
-            self.source = (wasUserEntered || isFromHealthApp || isFromOurApp) ? .manual : .healthkit
+            let isFromHealthApp = workout.sourceRevision.source.bundleIdentifier == "com.apple.health"
+            let bundleId = workout.sourceRevision.source.bundleIdentifier
+            self.source = (wasUserEntered || isFromHealthApp) ? .manual : .healthkit
+            print("[WorkoutRecord] UUID \(workoutUUID.prefix(8)) not in registry (bundle: \(bundleId), wasUserEntered: \(wasUserEntered)) → \(self.source)")
         }
     }
 

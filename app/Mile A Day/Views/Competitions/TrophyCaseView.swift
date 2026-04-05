@@ -5,6 +5,18 @@ struct TrophyCaseView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var animateIn = false
 
+    private static let isoDateFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate]
+        return f
+    }()
+
+    private static let displayDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d, yyyy"
+        return f
+    }()
+
     var body: some View {
         ScrollView {
             VStack(spacing: MADTheme.Spacing.xl) {
@@ -301,12 +313,8 @@ struct TrophyCaseView: View {
 
     // MARK: - Helpers
     private func formattedDate(_ dateString: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        guard let date = formatter.date(from: dateString) else { return dateString }
-        let display = DateFormatter()
-        display.dateFormat = "MMM d, yyyy"
-        return display.string(from: date)
+        guard let date = Self.isoDateFormatter.date(from: dateString) else { return dateString }
+        return Self.displayDateFormatter.string(from: date)
     }
 
     private func formatScore(_ trophy: CompetitionTrophy) -> String {

@@ -1,9 +1,8 @@
 import SwiftUI
 import HealthKit
 
-// MARK: - Current Streak Detail Views
+// MARK: - Current Streak Fastest Pace Detail View
 
-// Current Streak Fastest Pace Detail View
 struct CurrentStreakFastestPaceDetailView: View {
     @ObservedObject var healthManager: HealthKitManager
     let currentStreakStats: (totalMiles: Double, mostMiles: Double, fastestPace: TimeInterval, streakDays: Int)
@@ -13,12 +12,10 @@ struct CurrentStreakFastestPaceDetailView: View {
     @State private var selectedWorkout: IdentifiableWorkout?
 
     var formattedPace: String {
-        guard currentStreakStats.fastestPace > 0 else { return "Not yet recorded" }
-
+        guard currentStreakStats.fastestPace > 0 else { return "N/A" }
         let totalMinutes = currentStreakStats.fastestPace
         let minutes = Int(totalMinutes)
         let seconds = Int((totalMinutes - Double(minutes)) * 60)
-
         return String(format: "%d:%02d /mi", minutes, seconds)
     }
 
@@ -29,158 +26,39 @@ struct CurrentStreakFastestPaceDetailView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: MADTheme.Spacing.xl) {
-                    // Top banner
-                    VStack(spacing: MADTheme.Spacing.md) {
-                        Text("Current Streak")
-                            .font(MADTheme.Typography.headline)
-                            .foregroundColor(MADTheme.Colors.secondaryText)
+            ZStack {
+                MADTheme.Colors.appBackgroundGradient
+                    .ignoresSafeArea()
 
-                        Text("Fastest Mile Pace")
-                            .font(MADTheme.Typography.title1)
-                            .fontWeight(.bold)
-                            .foregroundColor(MADTheme.Colors.primaryText)
+                ScrollView {
+                    VStack(spacing: MADTheme.Spacing.lg) {
+                        // Hero card
+                        heroCard
 
-                        Text(formattedPace)
-                                .font(.system(size: 48, weight: .bold, design: .rounded))
-                            .foregroundColor(MADTheme.Colors.success)
-                            .padding(.top, MADTheme.Spacing.sm)
-                    }
-                    .padding(MADTheme.Spacing.xl)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .fill(MADTheme.Colors.success.opacity(0.1))
-                    )
-                    .madCard(hasShadow: false)
+                        // Key stats row
+                        keyStatsRow
 
-                    // Stats grid
-                    LazyVGrid(columns: [
-                        GridItem(.flexible()),
-                        GridItem(.flexible())
-                    ], spacing: MADTheme.Spacing.lg) {
-                        StatBox(
-                            title: "Pace",
-                            value: formattedPace,
-                            icon: "hare.fill",
-                            color: MADTheme.Colors.success
-                        )
-                        StatBox(
-                            title: "Speed",
-                            value: speedMph,
-                            icon: "speedometer",
-                            color: Color.blue
-                        )
-                        StatBox(
-                            title: "Streak Days",
-                            value: "\(currentStreakStats.streakDays)",
-                            icon: "flame.fill",
-                            color: .orange
-                        )
-                        StatBox(
-                            title: "Total Miles",
-                            value: String(format: "%.1f mi", currentStreakStats.totalMiles),
-                            icon: "map.fill",
-                            color: .blue
-                        )
-                    }
-                    .padding(.horizontal, MADTheme.Spacing.lg)
-
-                    // Performance categories
-                    if currentStreakStats.fastestPace > 0 {
-                        performanceSection
-                    }
-
-                    // Workouts during streak
-                    if isLoading {
-                        ProgressView("Loading streak workouts...")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if !streakWorkouts.isEmpty {
-                        VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-                            Text("Fastest Mile During Current Streak")
-                                .font(MADTheme.Typography.title3)
-                                .fontWeight(.bold)
-                                .foregroundColor(MADTheme.Colors.primaryText)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                                ForEach(streakWorkouts.prefix(10), id: \.uuid) { workout in
-                                Button {
-                                    selectedWorkout = IdentifiableWorkout(workout: workout)
-                                } label: {
-                                    WorkoutRow(workout: workout)
-                                        .padding(MADTheme.Spacing.lg)
-                                        .madCard()
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
+                        // Performance categories
+                        if currentStreakStats.fastestPace > 0 {
+                            performanceSection
                         }
-                        .padding(.horizontal, MADTheme.Spacing.lg)
+
+                        // Workouts section
+                        workoutsSection
                     }
-
-                    // Tips and achievements
-                    VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-                        Text("Medals")
-                            .font(MADTheme.Typography.title3)
-                            .fontWeight(.bold)
-                            .foregroundColor(MADTheme.Colors.primaryText)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        HStack(spacing: MADTheme.Spacing.lg) {
-                            Image(systemName: "stopwatch.fill")
-                                .font(.largeTitle)
-                                .foregroundColor(.orange)
-
-                            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                                Text("Your fastest pace in current streak!")
-                                    .font(MADTheme.Typography.headline)
-                                    .foregroundColor(MADTheme.Colors.primaryText)
-
-                                Text("You've run a mile at \(formattedPace) during your current streak. Great job!")
-                                    .font(MADTheme.Typography.body)
-                                    .foregroundColor(MADTheme.Colors.secondaryText)
-                            }
-                        }
-                        .padding(MADTheme.Spacing.lg)
-                        .madCard()
-
-                        // Tips for improving pace
-                        HStack(spacing: MADTheme.Spacing.lg) {
-                            Image(systemName: "bolt.fill")
-                                .font(.largeTitle)
-                                .foregroundColor(.yellow)
-
-                            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                                Text("Improve your pace!")
-                                    .font(MADTheme.Typography.headline)
-                                    .foregroundColor(MADTheme.Colors.primaryText)
-
-                                Text("Try interval training and tempo runs to increase your speed over time.")
-                                    .font(MADTheme.Typography.body)
-                                    .foregroundColor(MADTheme.Colors.secondaryText)
-                            }
-                        }
-                        .padding(MADTheme.Spacing.lg)
-                        .madCard()
-                    }
-                    .padding(.horizontal, MADTheme.Spacing.lg)
+                    .padding(MADTheme.Spacing.md)
                 }
-                .padding(MADTheme.Spacing.lg)
-                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
-            .clipped()
-            .scrollDisabled(false)
-            .background(MADTheme.Colors.secondaryBackground)
-            .navigationTitle("Streak Pace Record")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .scrollContentBackground(.hidden)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         dismiss()
                     }
-                    .madTertiaryButton()
+                    .foregroundColor(MADTheme.Colors.madRed)
+                    .fontWeight(.semibold)
                 }
             }
             .sheet(item: $selectedWorkout) { identifiableWorkout in
@@ -192,43 +70,100 @@ struct CurrentStreakFastestPaceDetailView: View {
         }
     }
 
-    private var performanceSection: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-            Text("Performance Category")
-                .font(MADTheme.Typography.title3)
-                .fontWeight(.bold)
-                .foregroundColor(MADTheme.Colors.primaryText)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    // MARK: - Hero Card
 
-            VStack(spacing: MADTheme.Spacing.md) {
+    private var heroCard: some View {
+        VStack(spacing: MADTheme.Spacing.md) {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "hare.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Current Streak")
+                    .font(MADTheme.Typography.smallBold)
+            }
+            .foregroundColor(MADTheme.Colors.success)
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.vertical, MADTheme.Spacing.xs + 2)
+            .background(
+                Capsule()
+                    .fill(MADTheme.Colors.success.opacity(0.15))
+            )
+
+            Text(formattedPace)
+                .font(.system(size: 52, weight: .bold, design: .rounded))
+                .foregroundColor(.primary)
+
+            Text("Fastest Mile Pace")
+                .font(MADTheme.Typography.body)
+                .foregroundColor(.secondary)
+        }
+        .padding(MADTheme.Spacing.lg)
+        .frame(maxWidth: .infinity)
+        .madLiquidGlass()
+    }
+
+    // MARK: - Key Stats Row
+
+    private var keyStatsRow: some View {
+        HStack(spacing: MADTheme.Spacing.sm) {
+            DashboardStatBox(
+                title: "Pace",
+                value: formattedPace.replacingOccurrences(of: " /mi", with: ""),
+                icon: "hare.fill",
+                color: MADTheme.Colors.success
+            )
+            DashboardStatBox(
+                title: "Speed",
+                value: speedMph,
+                icon: "speedometer",
+                color: .blue
+            )
+            DashboardStatBox(
+                title: "Streak",
+                value: "\(currentStreakStats.streakDays)d",
+                icon: "flame.fill",
+                color: .orange
+            )
+        }
+    }
+
+    // MARK: - Performance Section
+
+    private var performanceSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(MADTheme.Colors.redGradient)
+                Text("Performance Category")
+                    .font(MADTheme.Typography.headline)
+                    .foregroundColor(.primary)
+            }
+
+            VStack(spacing: MADTheme.Spacing.sm) {
                 PerformanceCategoryRow(
                     category: "Elite",
                     paceRange: "< 5:00",
                     isActive: currentStreakStats.fastestPace < 5.0,
                     color: .purple
                 )
-
                 PerformanceCategoryRow(
                     category: "Competitive",
                     paceRange: "5:00 - 6:30",
                     isActive: currentStreakStats.fastestPace >= 5.0 && currentStreakStats.fastestPace < 6.5,
                     color: MADTheme.Colors.madRed
                 )
-
                 PerformanceCategoryRow(
                     category: "Recreational",
                     paceRange: "6:30 - 8:00",
                     isActive: currentStreakStats.fastestPace >= 6.5 && currentStreakStats.fastestPace < 8.0,
-                    color: Color.blue
+                    color: .blue
                 )
-
                 PerformanceCategoryRow(
                     category: "Fitness",
                     paceRange: "8:00 - 10:00",
                     isActive: currentStreakStats.fastestPace >= 8.0 && currentStreakStats.fastestPace < 10.0,
                     color: MADTheme.Colors.success
                 )
-
                 PerformanceCategoryRow(
                     category: "Beginner",
                     paceRange: "10:00+",
@@ -237,25 +172,73 @@ struct CurrentStreakFastestPaceDetailView: View {
                 )
             }
         }
-        .padding(.horizontal, MADTheme.Spacing.lg)
+        .padding(MADTheme.Spacing.md)
+        .madLiquidGlass()
     }
+
+    // MARK: - Workouts Section
+
+    @ViewBuilder
+    private var workoutsSection: some View {
+        if isLoading {
+            VStack(spacing: MADTheme.Spacing.md) {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: "flag.checkered")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(MADTheme.Colors.redGradient)
+                    Text("Fastest Mile During Streak")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                }
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    ProgressView()
+                        .tint(.secondary)
+                        .scaleEffect(0.8)
+                    Text("Loading workouts...")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
+        } else if !streakWorkouts.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: "flag.checkered")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(MADTheme.Colors.redGradient)
+                    Text("Fastest Mile During Streak")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.primary)
+                }
+                ForEach(streakWorkouts.prefix(10), id: \.uuid) { workout in
+                    Button {
+                        selectedWorkout = IdentifiableWorkout(workout: workout)
+                    } label: {
+                        WorkoutRow(workout: workout)
+                            .padding(MADTheme.Spacing.md)
+                            .background(Color.white.opacity(0.05))
+                            .cornerRadius(MADTheme.CornerRadius.medium)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
+        }
+    }
+
+    // MARK: - Data Loading
 
     private func loadStreakWorkouts() async {
         isLoading = true
-
-        // Use the pre-calculated workouts from HealthKitManager
-        // This avoids recalculating split times for every workout
         let allStreakWorkouts = healthManager.getWorkoutsForCurrentStreak()
         let fastestMileWorkouts = healthManager.currentStreakFastestMileWorkouts
 
-        // Get all workouts from the day(s) that contain the fastest mile
         var dayWorkouts: [HKWorkout] = []
-
         if !fastestMileWorkouts.isEmpty {
-            // Get all unique days that contain fastest mile workouts
             let fastestDays = Set(fastestMileWorkouts.map { Calendar.current.startOfDay(for: $0.endDate) })
-
-            // Get all workouts from those days
             dayWorkouts = allStreakWorkouts.filter { workout in
                 let workoutDay = Calendar.current.startOfDay(for: workout.endDate)
                 return fastestDays.contains(workoutDay)
@@ -267,16 +250,10 @@ struct CurrentStreakFastestPaceDetailView: View {
             self.isLoading = false
         }
     }
-
-    private func formatPace(minutesPerMile: TimeInterval) -> String {
-        let totalMinutes = minutesPerMile
-        let minutes = Int(totalMinutes)
-        let seconds = Int((totalMinutes - Double(minutes)) * 60)
-        return String(format: "%d:%02d /mi", minutes, seconds)
-    }
 }
 
-// Current Streak Most Miles Detail View
+// MARK: - Current Streak Most Miles Detail View
+
 struct CurrentStreakMostMilesDetailView: View {
     let mostMiles: Double
     @ObservedObject var healthManager: HealthKitManager
@@ -285,161 +262,33 @@ struct CurrentStreakMostMilesDetailView: View {
     @State private var streakWorkouts: [HKWorkout] = []
     @State private var isLoading = true
     @State private var selectedWorkout: IdentifiableWorkout?
+    @State private var bestDayDateString: String?
 
     var body: some View {
         NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: MADTheme.Spacing.xl) {
-                    // Top banner
-                    VStack(spacing: MADTheme.Spacing.md) {
-                        Text("Current Streak")
-                            .font(MADTheme.Typography.headline)
-                            .foregroundColor(MADTheme.Colors.secondaryText)
+            ZStack {
+                MADTheme.Colors.appBackgroundGradient
+                    .ignoresSafeArea()
 
-                        Text("Most Miles in One Day")
-                            .font(MADTheme.Typography.title1)
-                            .fontWeight(.bold)
-                            .foregroundColor(MADTheme.Colors.primaryText)
-
-                        Text(mostMiles.milesFormatted)
-                            .font(.system(size: 48, weight: .bold, design: .rounded))
-                            .foregroundColor(Color.purple)
-                            .padding(.top, MADTheme.Spacing.sm)
+                ScrollView {
+                    VStack(spacing: MADTheme.Spacing.lg) {
+                        heroCard
+                        keyStatsRow
+                        workoutsSection
                     }
-                    .padding(MADTheme.Spacing.xl)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .fill(Color.purple.opacity(0.1))
-                    )
-                    .madCard(hasShadow: false)
-
-                    // Stats grid
-                    LazyVGrid(columns: [
-                        GridItem(.flexible()),
-                        GridItem(.flexible())
-                    ], spacing: MADTheme.Spacing.lg) {
-                        StatBox(
-                            title: "Distance",
-                            value: mostMiles.milesFormatted,
-                            icon: "map.fill",
-                            color: Color.purple
-                        )
-                        StatBox(
-                            title: "Steps",
-                            value: String(format: "%.0f steps", mostMiles * 2000),
-                            icon: "figure.walk",
-                            color: MADTheme.Colors.success
-                        )
-                        StatBox(
-                            title: "Calories Burned",
-                            value: String(format: "%.0f calories", mostMiles * 100),
-                            icon: "flame.fill",
-                            color: MADTheme.Colors.warning
-                        )
-                        StatBox(
-                            title: "Streak Days",
-                            value: "\(currentStreakStats.streakDays)",
-                            icon: "flame.fill",
-                            color: .orange
-                        )
-                    }
-                    .padding(.horizontal, MADTheme.Spacing.lg)
-
-                    // Workouts during streak
-                    if isLoading {
-                        ProgressView("Loading streak workouts...")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if !streakWorkouts.isEmpty {
-                        VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-                            Text("Most Miles During Current Streak")
-                                .font(MADTheme.Typography.title3)
-                                .fontWeight(.bold)
-                                .foregroundColor(MADTheme.Colors.primaryText)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                                ForEach(streakWorkouts.prefix(10), id: \.uuid) { workout in
-                                Button {
-                                    selectedWorkout = IdentifiableWorkout(workout: workout)
-                                } label: {
-                                    WorkoutRow(workout: workout)
-                                        .padding(MADTheme.Spacing.lg)
-                                        .madCard()
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                            }
-                        }
-                        .padding(.horizontal, MADTheme.Spacing.lg)
-                    }
-
-                    // Tips and achievements
-                    VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-                        Text("Medals")
-                            .font(MADTheme.Typography.title3)
-                            .fontWeight(.bold)
-                            .foregroundColor(MADTheme.Colors.primaryText)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        HStack(spacing: MADTheme.Spacing.lg) {
-                            Image(systemName: "trophy.fill")
-                                .font(.largeTitle)
-                                .foregroundColor(.yellow)
-
-                            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                                Text("Streak Distance Record!")
-                                    .font(MADTheme.Typography.headline)
-                                    .foregroundColor(MADTheme.Colors.primaryText)
-
-                                Text("You've covered \(mostMiles.milesFormatted) in a single day during your current streak. Amazing achievement!")
-                                    .font(MADTheme.Typography.body)
-                                    .foregroundColor(MADTheme.Colors.secondaryText)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        .padding(MADTheme.Spacing.lg)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .madCard()
-
-                        // Tips for improving distance
-                        HStack(spacing: MADTheme.Spacing.lg) {
-                            Image(systemName: "figure.run")
-                                .font(.largeTitle)
-                                .foregroundColor(MADTheme.Colors.success)
-
-                            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                                Text("Build Endurance!")
-                                    .font(MADTheme.Typography.headline)
-                                    .foregroundColor(MADTheme.Colors.primaryText)
-
-                                Text("Gradually increase your daily distance and incorporate long runs into your training.")
-                                    .font(MADTheme.Typography.body)
-                                    .foregroundColor(MADTheme.Colors.secondaryText)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        .padding(MADTheme.Spacing.lg)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .madCard()
-                    }
-                    .padding(.horizontal, MADTheme.Spacing.lg)
-                    .frame(maxWidth: .infinity)
+                    .padding(MADTheme.Spacing.md)
                 }
-                .padding(MADTheme.Spacing.lg)
-                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
-            .clipped()
-            .scrollDisabled(false)
-            .background(MADTheme.Colors.secondaryBackground)
-            .navigationTitle("Streak Distance Record")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .scrollContentBackground(.hidden)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         dismiss()
                     }
-                    .madTertiaryButton()
+                    .foregroundColor(MADTheme.Colors.madRed)
+                    .fontWeight(.semibold)
                 }
             }
             .sheet(item: $selectedWorkout) { identifiableWorkout in
@@ -451,20 +300,134 @@ struct CurrentStreakMostMilesDetailView: View {
         }
     }
 
+    // MARK: - Hero Card
+
+    private var heroCard: some View {
+        VStack(spacing: MADTheme.Spacing.md) {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Current Streak")
+                    .font(MADTheme.Typography.smallBold)
+            }
+            .foregroundColor(.purple)
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.vertical, MADTheme.Spacing.xs + 2)
+            .background(
+                Capsule()
+                    .fill(Color.purple.opacity(0.15))
+            )
+
+            Text(mostMiles.milesFormatted)
+                .font(.system(size: 52, weight: .bold, design: .rounded))
+                .foregroundColor(.primary)
+
+            VStack(spacing: MADTheme.Spacing.xs) {
+                Text("Most Miles in One Day")
+                    .font(MADTheme.Typography.body)
+                    .foregroundColor(.secondary)
+
+                if let dateString = bestDayDateString {
+                    Text(dateString)
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .padding(MADTheme.Spacing.lg)
+        .frame(maxWidth: .infinity)
+        .madLiquidGlass()
+    }
+
+    // MARK: - Key Stats Row
+
+    private var keyStatsRow: some View {
+        HStack(spacing: MADTheme.Spacing.sm) {
+            DashboardStatBox(
+                title: "Distance",
+                value: mostMiles.milesFormatted,
+                icon: "map.fill",
+                color: .purple
+            )
+            DashboardStatBox(
+                title: "Est. Steps",
+                value: String(format: "%.0f", mostMiles * 2000),
+                icon: "figure.walk",
+                color: MADTheme.Colors.success
+            )
+            DashboardStatBox(
+                title: "Streak",
+                value: "\(currentStreakStats.streakDays)d",
+                icon: "flame.fill",
+                color: .orange
+            )
+        }
+    }
+
+    // MARK: - Workouts Section
+
+    @ViewBuilder
+    private var workoutsSection: some View {
+        if isLoading {
+            VStack(spacing: MADTheme.Spacing.md) {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: "figure.run")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(MADTheme.Colors.redGradient)
+                    Text("Workouts That Day")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                }
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    ProgressView()
+                        .tint(.secondary)
+                        .scaleEffect(0.8)
+                    Text("Loading workouts...")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
+        } else if !streakWorkouts.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: "figure.run")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(MADTheme.Colors.redGradient)
+                    Text("Workouts That Day")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.primary)
+                }
+                ForEach(streakWorkouts.prefix(10), id: \.uuid) { workout in
+                    Button {
+                        selectedWorkout = IdentifiableWorkout(workout: workout)
+                    } label: {
+                        WorkoutRow(workout: workout)
+                            .padding(MADTheme.Spacing.md)
+                            .background(Color.white.opacity(0.05))
+                            .cornerRadius(MADTheme.CornerRadius.medium)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
+        }
+    }
+
+    // MARK: - Data Loading
+
     private func loadStreakWorkouts() async {
         isLoading = true
-
-        // Get workouts for the specific day that had the most miles
-        // We need to find which day had the most miles and get workouts from that day only
         let allStreakWorkouts = healthManager.getWorkoutsForCurrentStreak()
         let workoutsByDay = Dictionary(grouping: allStreakWorkouts) { workout in
             Calendar.current.startOfDay(for: workout.endDate)
         }
 
-        // Find the day with the most miles
         var mostMilesDay: Date?
         var maxMiles = 0.0
-
         for (date, workouts) in workoutsByDay {
             let dayMiles = workouts.reduce(0.0) { total, workout in
                 if let distance = workout.totalDistance {
@@ -472,26 +435,27 @@ struct CurrentStreakMostMilesDetailView: View {
                 }
                 return total
             }
-
             if dayMiles > maxMiles {
                 maxMiles = dayMiles
                 mostMilesDay = date
             }
         }
 
-        // Get workouts from the specific day with most miles
         let dayWorkouts = mostMilesDay != nil ? (workoutsByDay[mostMilesDay!] ?? []) : []
+
+        // Format best day date
+        var dateString: String?
+        if let day = mostMilesDay {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .none
+            dateString = formatter.string(from: day)
+        }
 
         await MainActor.run {
             self.streakWorkouts = dayWorkouts
+            self.bestDayDateString = dateString
             self.isLoading = false
         }
-    }
-
-    private func formatPace(minutesPerMile: TimeInterval) -> String {
-        let totalMinutes = minutesPerMile
-        let minutes = Int(totalMinutes)
-        let seconds = Int((totalMinutes - Double(minutes)) * 60)
-        return String(format: "%d:%02d /mi", minutes, seconds)
     }
 }
