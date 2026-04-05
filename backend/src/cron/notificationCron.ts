@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import { flushBatchedNotifications } from '../services/pushNotificationService.js';
+import { flushBatchedNotifications, cleanupNotificationLogs } from '../services/pushNotificationService.js';
 import { checkCompetitionsEndingSoon, checkStreaksBroken, checkClashTies } from '../services/notificationService.js';
 
 export function startNotificationCron(): void {
@@ -55,5 +55,18 @@ export function startNotificationCron(): void {
 		timezone: 'America/New_York'
 	});
 
-	console.log('Notification cron jobs scheduled (12:05 AM, 10 AM, 6 PM, 11:55 PM ET).');
+	// Clean up old notification logs at 3 AM ET daily
+	cron.schedule('0 3 * * *', async () => {
+		console.log('[CRON] Cleaning up old notification logs...');
+		try {
+			await cleanupNotificationLogs();
+			console.log('[CRON] Notification log cleanup complete.');
+		} catch (error: any) {
+			console.error('[CRON] Error cleaning up logs:', error.message);
+		}
+	}, {
+		timezone: 'America/New_York'
+	});
+
+	console.log('Notification cron jobs scheduled (12:05 AM, 3 AM, 10 AM, 6 PM, 11:55 PM ET).');
 }

@@ -369,36 +369,66 @@ export async function flushBatchedNotifications(): Promise<void> {
 	}
 
 	for (const [userId, notifications] of Object.entries(byUser)) {
-		const starts = notifications.filter(n => n.type === 'competition_started');
-		const finishes = notifications.filter(n => n.type === 'competition_finished');
+		const compNotifs = notifications.filter(n =>
+			n.type === 'competition_started' || n.type === 'competition_finished'
+		);
+		const otherNotifs = notifications.filter(n =>
+			n.type !== 'competition_started' && n.type !== 'competition_finished'
+		);
 
-		let title: string;
-		let body: string;
-		let type: NotificationType;
+		// Handle competition start/finish notifications (batch into digest)
+		if (compNotifs.length > 0) {
+			const starts = compNotifs.filter(n => n.type === 'competition_started');
+			const finishes = compNotifs.filter(n => n.type === 'competition_finished');
 
-		if (starts.length > 0 && finishes.length > 0) {
-			title = 'Competition updates';
-			body = 'You have several updates to your competitions — open to check in';
-			type = 'competition_updates';
-		} else if (starts.length === 1) {
-			title = 'Competition started';
-			body = `${starts[0].competition_name} has begun!`;
-			type = 'competition_started';
-		} else if (starts.length > 1) {
-			title = 'Competitions started';
-			body = 'Multiple competitions have started — open to check in';
-			type = 'competition_started';
-		} else if (finishes.length === 1) {
-			title = 'Competition finished';
-			body = `${finishes[0].competition_name} has finished!`;
-			type = 'competition_finished';
-		} else {
-			title = 'Competitions finished';
-			body = 'Multiple competitions have finished — open to check in';
-			type = 'competition_finished';
+			let title: string;
+			let body: string;
+			let type: NotificationType;
+
+			if (starts.length > 0 && finishes.length > 0) {
+				title = 'Competition updates';
+				body = 'You have several updates to your competitions — open to check in';
+				type = 'competition_updates';
+			} else if (starts.length === 1) {
+				title = 'Competition started';
+				body = `${starts[0].competition_name} has begun!`;
+				type = 'competition_started';
+			} else if (starts.length > 1) {
+				title = 'Competitions started';
+				body = 'Multiple competitions have started — open to check in';
+				type = 'competition_started';
+			} else if (finishes.length === 1) {
+				title = 'Competition finished';
+				body = `${finishes[0].competition_name} has finished!`;
+				type = 'competition_finished';
+			} else {
+				title = 'Competitions finished';
+				body = 'Multiple competitions have finished — open to check in';
+				type = 'competition_finished';
+			}
+
+			await sendPush(userId, { title, body, type });
 		}
 
-		await sendPush(userId, { title, body, type });
+		// Handle other throttled notifications (send digest summary)
+		if (otherNotifs.length > 0) {
+			if (otherNotifs.length === 1) {
+				// Single throttled notification: send it directly
+				const n = otherNotifs[0];
+				await sendPush(userId, {
+					title: n.competition_name || 'Notification', // competition_name stores the original title
+					body: `You have a notification you missed`,
+					type: (n.type as NotificationType) || 'competition_updates',
+				});
+			} else {
+				// Multiple: send digest
+				await sendPush(userId, {
+					title: 'Catch up on activity',
+					body: `You have ${otherNotifs.length} notifications from while you were away`,
+					type: 'competition_updates',
+				});
+			}
+		}
 	}
 
 	// Mark all as sent
@@ -469,4 +499,21 @@ export async function logFlex(senderId: string, targetId: string, competitionId:
 		`INSERT INTO flex_log (sender_id, target_id, competition_id, message) VALUES ($1, $2, $3, $4)`,
 		[senderId, targetId, competitionId, message]
 	);
+}
+
+// ─── Cleanup ────────────────────────────────────────────────────────
+
+/**
+ * Clean up old log entries to prevent unbounded table growth.
+ * Should be called daily via cron.
+ */
+export async function cleanupNotificationLogs(): Promise<void> {
+	const results = await Promise.all([
+		db.query(`DELETE FROM notification_log WHERE created_at < NOW() - INTERVAL '30 days'`),
+		db.query(`DELETE FROM pending_notifications WHERE sent_at IS NOT NULL AND sent_at < NOW() - INTERVAL '7 days'`),
+		db.query(`DELETE FROM nudge_log WHERE created_at < NOW() - INTERVAL '7 days'`),
+		db.query(`DELETE FROM friend_nudge_log WHERE created_at < NOW() - INTERVAL '7 days'`),
+		db.query(`DELETE FROM flex_log WHERE created_at < NOW() - INTERVAL '30 days'`),
+	]);
+	console.log('[Cleanup] Cleaned up old notification logs');
 }
