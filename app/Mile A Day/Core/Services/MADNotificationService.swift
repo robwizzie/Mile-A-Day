@@ -110,9 +110,10 @@ final class MADNotificationService: NSObject, ObservableObject {
     }
 
     /// Updates the daily reminder with intelligent scheduling.
-    /// Schedules a one-shot notification for today (or tomorrow if past the hour).
-    /// If the user has already completed their goal, no reminder is scheduled —
-    /// there's no value in sending a "you already did it" push.
+    /// Schedules a one-shot notification for the next occurrence of the reminder hour.
+    /// Content changes based on whether the user has completed their goal:
+    /// - Completed: "Way to go!" congratulatory message
+    /// - Not completed: "Mile still waiting…" motivational nudge
     /// Must be called on every foreground resume and health data update so the
     /// notification always reflects the latest completion state.
     func updateDailyReminder(isCompleted: Bool, currentMiles: Double = 0, goalMiles: Double = 1.0, at hour: Int? = nil) {
@@ -125,11 +126,7 @@ final class MADNotificationService: NSObject, ObservableObject {
 
         let reminderHour = hour ?? prefs.dailyReminderHour
 
-        // If the user already completed their mile, don't schedule anything.
-        // They don't need a reminder or a congratulations push.
-        if isCompleted { return }
-
-        // Schedule a one-shot "Mile still waiting…" for the next occurrence of reminderHour.
+        // Schedule a one-shot notification for the next occurrence of reminderHour.
         // One-shot ensures stale content can never fire on a future day — the app must
         // re-evaluate and reschedule each time it runs.
         let now = Date()
@@ -152,18 +149,18 @@ final class MADNotificationService: NSObject, ObservableObject {
 
         let content = UNMutableNotificationContent()
         content.sound = .default
-        content.title = "Mile still waiting…"
-        content.body = "Don't forget to log your daily mile! Lace up and get moving."
+
+        if isCompleted {
+            content.title = "Way to go!"
+            content.body = "You crushed your mile today. See you tomorrow at the start line!"
+        } else {
+            content.title = "Mile still waiting…"
+            content.body = "Don't forget to log your daily mile! Lace up and get moving."
+        }
 
         schedule(content: content, trigger: .calendar(trigger), identifier: Identifier.dailyReminder)
     }
     
-    /// Cancels any pending daily reminder. Call when the user completes their mile
-    /// so the "Mile still waiting" notification is removed immediately.
-    func cancelDailyReminder() {
-        center.removePendingNotificationRequests(withIdentifiers: [Identifier.dailyReminder])
-    }
-
     // MARK: - Smart Notification Logic
     
     /// Checks if we should send a completion notification based on current progress
@@ -346,13 +343,15 @@ extension MADNotificationService {
 // MARK: - UNUserNotificationCenterDelegate
 extension MADNotificationService: UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        // For daily reminders, suppress if user has completed their goal.
-        // Check both WidgetDataStore (freshest persisted state) and cancel the
-        // pending notification so it doesn't fire again.
+        // For daily reminders, do a last-second check: if the content says
+        // "Mile still waiting" but the user has actually completed their goal,
+        // suppress it. This catches the edge case where HealthKit data arrived
+        // after the notification was scheduled but before it fired.
         if notification.request.identifier == Identifier.dailyReminder {
             let widgetData = WidgetDataStore.load()
             let isCompleted = widgetData.miles >= widgetData.goal
-            if isCompleted {
+            let isReminderContent = notification.request.content.title.contains("waiting")
+            if isCompleted && isReminderContent {
                 center.removePendingNotificationRequests(withIdentifiers: [Identifier.dailyReminder])
                 return []
             }

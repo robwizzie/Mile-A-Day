@@ -132,16 +132,11 @@ struct MainTabView: View {
         }
         .onChange(of: healthManager.todaysDistance) { _, newDistance in
             let isCompleted = newDistance >= userManager.currentUser.goalMiles
-            if isCompleted {
-                // Cancel immediately — don't wait for the next scheduling window
-                notificationService.cancelDailyReminder()
-            } else {
-                notificationService.updateDailyReminder(
-                    isCompleted: false,
-                    currentMiles: newDistance,
-                    goalMiles: userManager.currentUser.goalMiles
-                )
-            }
+            notificationService.updateDailyReminder(
+                isCompleted: isCompleted,
+                currentMiles: newDistance,
+                goalMiles: userManager.currentUser.goalMiles
+            )
             // Keep widget data in sync so the willPresent check has fresh data
             WidgetDataStore.save(todayMiles: newDistance, goal: userManager.currentUser.goalMiles)
         }

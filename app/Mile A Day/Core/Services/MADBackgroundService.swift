@@ -266,8 +266,12 @@ final class MADBackgroundService: NSObject, ObservableObject {
             // Update user completion status
             userManager.completeRun(miles: todaysDistance)
 
-            // Cancel the "Mile still waiting" reminder — user already did it
-            notificationService.cancelDailyReminder()
+            // Switch to congratulatory message
+            notificationService.updateDailyReminder(
+                isCompleted: true,
+                currentMiles: todaysDistance,
+                goalMiles: goalMiles
+            )
         } else {
             // Re-evaluate the daily reminder with fresh data (one-shot, non-repeating)
             notificationService.updateDailyReminder(
