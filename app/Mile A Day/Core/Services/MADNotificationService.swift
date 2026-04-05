@@ -276,11 +276,15 @@ final class MADNotificationService: NSObject, ObservableObject {
         switch type {
         case "friend_request": return prefs.friendRequestReceivedEnabled
         case "friend_request_accepted": return prefs.friendRequestAcceptedEnabled
+        case "friend_nudge": return prefs.friendNudgeEnabled
+        case "friend_activity": return prefs.friendCompletedEnabled
         case "competition_invite": return prefs.competitionInviteEnabled
         case "competition_accepted": return prefs.competitionAcceptedEnabled
         case "competition_started", "competition_updates": return prefs.competitionStartEnabled
         case "competition_finished": return prefs.competitionFinishEnabled
         case "competition_nudge": return prefs.competitionNudgeEnabled
+        case "competition_flex": return prefs.competitionFlexEnabled
+        case "competition_milestone": return prefs.competitionMilestonesEnabled
         default: return true
         }
     }

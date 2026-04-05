@@ -10,6 +10,7 @@ import devRoutes from './routes/devRoutes.js';
 import workoutRoutes from './routes/workoutRoutes.js';
 import competitionRoutes from './routes/competitionRoutes.js';
 import deviceRoutes from './routes/deviceRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
 import { authenticateToken } from './middleware/auth.js';
 import { startCompetitionCron } from './cron/competitionCron.js';
 import { startNotificationCron } from './cron/notificationCron.js';
@@ -64,6 +65,7 @@ app.use('/friends', friendRoutes);
 app.use('/workouts', workoutRoutes);
 app.use('/competitions', competitionRoutes);
 app.use('/devices', deviceRoutes);
+app.use('/notifications', notificationRoutes);
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 	console.error('Error:', err.message);

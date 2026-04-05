@@ -14,11 +14,9 @@ extension CompetitionDetailView {
             // 2. Enhanced leaderboard (podium + rows with nudge)
             enhancedLeaderboard
 
-            // 3. Flex action (if eligible)
-            if canFlex {
-                flexButton
-            } else if FlexNudgeTracker.hasSentFlexToday(competitionId: competition.competition_id) {
-                flexSentIndicator
+            // 3. Flex section (per-user flex with messages)
+            if hasFlexableUsers {
+                flexSection
             }
 
             // 4. Mode-specific content
@@ -404,76 +402,70 @@ extension CompetitionDetailView {
         }
     }
 
-    // MARK: - Flex Button
-    var flexButton: some View {
+    // MARK: - Flex Section
+    var flexSection: some View {
         let typeColor = Color(hex: competition.type.gradient[0])
-        let subtitle: String = {
-            switch competition.type {
-            case .streaks: return "Let them know you finished"
-            case .clash: return "Show off your lead"
-            case .apex: return "They'll know you put in work"
-            case .targets: return "You hit your target"
-            case .race: return "You're making progress"
-            }
-        }()
+        let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
+        let acceptedUsers = competition.users.filter { $0.invite_status == .accepted && $0.user_id != currentUserId }
+        let currentUser = competition.users.first(where: { $0.user_id == currentUserId })
+        let myScore = currentUser?.score ?? 0
 
-        return Button { sendFlex() } label: {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: "hand.raised.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(typeColor)
-                    .shadow(color: typeColor.opacity(0.4), radius: 4)
+        // Filter to only users we're beating and haven't flexed on today
+        let flexableUsers = acceptedUsers.filter { user in
+            let theirScore = user.score ?? 0
+            return myScore > theirScore && !FlexNudgeTracker.hasSentFlexToday(targetUserId: user.user_id)
+        }
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Flex on everyone")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                    Text(subtitle)
-                        .font(.system(size: 10, design: .rounded))
-                        .foregroundColor(.white.opacity(0.35))
+        let alreadyFlexed = acceptedUsers.filter { user in
+            FlexNudgeTracker.hasSentFlexToday(targetUserId: user.user_id)
+        }
+
+        return VStack(spacing: MADTheme.Spacing.sm) {
+            if !flexableUsers.isEmpty {
+                VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                    HStack(spacing: MADTheme.Spacing.xs) {
+                        Image(systemName: "hand.raised.fill")
+                            .font(.system(size: 13))
+                            .foregroundColor(typeColor)
+                        Text("Flex on opponents")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                    .padding(.horizontal, MADTheme.Spacing.sm)
+
+                    ForEach(flexableUsers, id: \.user_id) { user in
+                        FlexUserRow(
+                            user: user,
+                            typeColor: typeColor,
+                            competitionType: competition.type,
+                            onFlex: { message in
+                                sendFlexToUser(user, message: message)
+                            }
+                        )
+                    }
                 }
-
-                Spacer()
-
-                Image(systemName: "paperplane.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.3))
             }
-            .padding(MADTheme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .stroke(typeColor.opacity(0.25), lineWidth: 1)
-                    )
-            )
+
+            if !alreadyFlexed.isEmpty {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: "hand.raised.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.green.opacity(0.5))
+                    Text("Flexed on \(alreadyFlexed.count) \(alreadyFlexed.count == 1 ? "opponent" : "opponents") today")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.3))
+                    Spacer()
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.green.opacity(0.35))
+                }
+                .padding(MADTheme.Spacing.md)
+                .background(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                        .fill(Color.white.opacity(0.03))
+                )
+            }
         }
-        .buttonStyle(ScaleButtonStyle())
-    }
-
-    // MARK: - Flex Sent Indicator
-    var flexSentIndicator: some View {
-        HStack(spacing: MADTheme.Spacing.sm) {
-            Image(systemName: "hand.raised.fill")
-                .font(.system(size: 14))
-                .foregroundColor(.green.opacity(0.6))
-
-            Text("Flex sent today")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.35))
-
-            Spacer()
-
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 12))
-                .foregroundColor(.green.opacity(0.4))
-        }
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(Color.white.opacity(0.03))
-        )
     }
 
     // MARK: - Nudge Eligibility
@@ -494,50 +486,33 @@ extension CompetitionDetailView {
     }
 
     // MARK: - Flex Eligibility
-    var canFlex: Bool {
-        guard !FlexNudgeTracker.hasSentFlexToday(competitionId: competition.competition_id) else {
-            return false
-        }
-
+    var hasFlexableUsers: Bool {
         let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
-        guard let currentUser = competition.users.first(where: { $0.user_id == currentUserId }) else {
-            return false
-        }
+        let currentUser = competition.users.first(where: { $0.user_id == currentUserId })
+        let myScore = currentUser?.score ?? 0
+        let acceptedUsers = competition.users.filter { $0.invite_status == .accepted && $0.user_id != currentUserId }
 
-        let todayKey = intervalKey(for: Date())
-        let distance = currentUser.intervals?[todayKey] ?? 0
-        let goal = competition.options.goal
-
-        switch competition.type {
-        case .streaks:
-            return distance >= goal
-        case .targets:
-            return distance >= goal
-        case .clash:
-            let acceptedUsers = competition.users.filter { $0.invite_status == .accepted }
-            let bestOpponent = acceptedUsers
-                .filter { $0.user_id != currentUser.user_id }
-                .map { $0.intervals?[todayKey] ?? 0 }
-                .max() ?? 0
-            return distance > 0 && distance >= bestOpponent
-        case .apex:
-            return distance > 0
-        case .race:
-            return distance > 0
+        return acceptedUsers.contains { user in
+            let theirScore = user.score ?? 0
+            return myScore > theirScore
         }
     }
 
     // MARK: - Flex/Nudge Actions
-    func sendFlex() {
+    func sendFlexToUser(_ user: CompetitionUser, message: String?) {
         isSendingAction = true
         Task {
             do {
-                try await competitionService.sendFlex(competitionId: competition.competition_id)
+                try await competitionService.sendFlex(
+                    competitionId: competition.competition_id,
+                    targetUserId: user.user_id,
+                    message: message
+                )
                 await MainActor.run {
                     isSendingAction = false
-                    FlexNudgeTracker.markFlexSent(competitionId: competition.competition_id)
+                    FlexNudgeTracker.markFlexSent(targetUserId: user.user_id)
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    showActionFeedback(ActionFeedback(icon: "hand.raised.fill", message: "Flex sent!", isError: false))
+                    showActionFeedback(ActionFeedback(icon: "hand.raised.fill", message: "Flexed on \(user.displayName)!", isError: false))
                 }
             } catch {
                 await MainActor.run {

@@ -71,12 +71,16 @@ function getApnsToken(): string | null {
 export type NotificationType =
 	| 'friend_request'
 	| 'friend_request_accepted'
+	| 'friend_nudge'
+	| 'friend_activity'
 	| 'competition_invite'
 	| 'competition_accepted'
 	| 'competition_started'
 	| 'competition_finished'
 	| 'competition_updates'
-	| 'competition_nudge';
+	| 'competition_nudge'
+	| 'competition_flex'
+	| 'competition_milestone';
 
 interface PushPayload {
 	title: string;
@@ -321,5 +325,45 @@ export async function logNudge(competitionId: string, senderId: string, targetId
 	await db.query(
 		`INSERT INTO nudge_log (competition_id, sender_id, target_id) VALUES ($1, $2, $3)`,
 		[competitionId, senderId, targetId]
+	);
+}
+
+// ─── Friend Nudge Rate Limiting ─────────────────────────────────────
+
+export async function canFriendNudge(senderId: string, targetId: string): Promise<boolean> {
+	const result = await db.query(
+		`SELECT id FROM friend_nudge_log
+		WHERE sender_id = $1 AND target_id = $2
+			AND created_at > NOW() - INTERVAL '24 hours'
+		LIMIT 1`,
+		[senderId, targetId]
+	);
+	return result.length === 0;
+}
+
+export async function logFriendNudge(senderId: string, targetId: string): Promise<void> {
+	await db.query(
+		`INSERT INTO friend_nudge_log (sender_id, target_id) VALUES ($1, $2)`,
+		[senderId, targetId]
+	);
+}
+
+// ─── Flex Rate Limiting (per sender→target per day, across all competitions) ──
+
+export async function canFlex(senderId: string, targetId: string): Promise<boolean> {
+	const result = await db.query(
+		`SELECT id FROM flex_log
+		WHERE sender_id = $1 AND target_id = $2
+			AND created_at > NOW() - INTERVAL '24 hours'
+		LIMIT 1`,
+		[senderId, targetId]
+	);
+	return result.length === 0;
+}
+
+export async function logFlex(senderId: string, targetId: string, competitionId: string, message: string | null): Promise<void> {
+	await db.query(
+		`INSERT INTO flex_log (sender_id, target_id, competition_id, message) VALUES ($1, $2, $3, $4)`,
+		[senderId, targetId, competitionId, message]
 	);
 }

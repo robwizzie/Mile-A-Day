@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { flushBatchedNotifications } from '../services/pushNotificationService.js';
+import { checkCompetitionsEndingSoon } from '../services/notificationService.js';
 
 export function startNotificationCron(): void {
 	// Flush batched competition start/finish notifications at 10 AM ET
@@ -15,5 +16,18 @@ export function startNotificationCron(): void {
 		timezone: 'America/New_York'
 	});
 
-	console.log('Notification cron job scheduled (10 AM ET).');
+	// Check for competitions ending tomorrow at 6 PM ET
+	cron.schedule('0 18 * * *', async () => {
+		console.log('[CRON] Checking competitions ending soon...');
+		try {
+			await checkCompetitionsEndingSoon();
+			console.log('[CRON] Ending soon check complete.');
+		} catch (error: any) {
+			console.error('[CRON] Error checking ending soon:', error.message);
+		}
+	}, {
+		timezone: 'America/New_York'
+	});
+
+	console.log('Notification cron jobs scheduled (10 AM & 6 PM ET).');
 }

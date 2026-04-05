@@ -468,8 +468,17 @@ struct DeleteCompetitionResponse: Codable {
     let message: String
 }
 
+struct FlexRequest: Codable {
+    let target_user_id: String
+    let message: String?
+}
+
 struct FlexResponse: Codable {
     let message: String
+}
+
+struct FlexPresetsResponse: Codable {
+    let presets: [String]
 }
 
 struct NudgeRequest: Codable {
@@ -478,6 +487,47 @@ struct NudgeRequest: Codable {
 
 struct NudgeResponse: Codable {
     let message: String
+}
+
+struct FriendNudgeResponse: Codable {
+    let message: String
+}
+
+struct NudgeStatusResponse: Codable {
+    let can_nudge: Bool
+    let has_completed_mile: Bool
+    let already_nudged_today: Bool
+}
+
+struct NudgeStatusBatchResponse: Codable {
+    let statuses: [String: NudgeStatusResponse]
+}
+
+// MARK: - Notification Settings Models
+
+struct NotificationSettingsResponse: Codable {
+    let nudges_enabled: Bool
+    let flexes_enabled: Bool
+    let friend_activity_enabled: Bool
+    let competition_invites_enabled: Bool
+    let competition_updates_enabled: Bool
+    let competition_milestones_enabled: Bool
+    let quiet_hours_start: Int?
+    let quiet_hours_end: Int?
+}
+
+struct FriendNotificationSetting: Codable, Identifiable {
+    let friend_id: String
+    let username: String?
+    let muted: Bool
+    let nudges_muted: Bool
+    let activity_muted: Bool
+
+    var id: String { friend_id }
+}
+
+struct FriendNotificationSettingsResponse: Codable {
+    let settings: [FriendNotificationSetting]
 }
 
 // MARK: - Trophy Models

@@ -6,6 +6,7 @@ import {
 	getFriendshipHandler,
 	getSentRequests
 } from '../controllers/friendshipsController.js';
+import { nudgeFriend, checkNudgeStatus, checkNudgeStatusBatch } from '../controllers/friendNudgeController.js';
 import { requireSelfAccess } from '../middleware/auth.js';
 
 const router = Router();
@@ -19,5 +20,10 @@ router.patch('/ignore', requireSelfAccess('toUser'), getFriendshipHandler('ignor
 router.delete('/decline', requireSelfAccess('toUser'), getFriendshipHandler('rejected'));
 router.delete('/cancel', requireSelfAccess('fromUser'), getFriendshipHandler('rejected'));
 router.delete('/remove', requireSelfAccess('fromUser'), getFriendshipHandler('removed'));
+
+// Nudge routes
+router.post('/:friendId/nudge', nudgeFriend);
+router.get('/:friendId/nudge-status', checkNudgeStatus);
+router.post('/nudge-status/batch', checkNudgeStatusBatch);
 
 export default router;
