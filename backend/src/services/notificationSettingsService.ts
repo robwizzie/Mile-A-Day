@@ -141,6 +141,10 @@ export async function updateFriendNotificationSettings(
 		[userId, friendId]
 	);
 
+	if (rows.length === 0) {
+		throw new Error('Friend notification setting not found after upsert');
+	}
+
 	return {
 		friend_id: rows[0].friend_id,
 		username: rows[0].username,

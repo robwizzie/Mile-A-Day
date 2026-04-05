@@ -19,6 +19,14 @@ export async function getPreferences(req: AuthenticatedRequest, res: Response) {
 
 export async function updatePreferences(req: AuthenticatedRequest, res: Response) {
 	try {
+		const { quiet_hours_start, quiet_hours_end } = req.body;
+		if (quiet_hours_start !== undefined && quiet_hours_start !== null && (quiet_hours_start < 0 || quiet_hours_start > 23)) {
+			return res.status(400).json({ error: 'quiet_hours_start must be 0-23 or null' });
+		}
+		if (quiet_hours_end !== undefined && quiet_hours_end !== null && (quiet_hours_end < 0 || quiet_hours_end > 23)) {
+			return res.status(400).json({ error: 'quiet_hours_end must be 0-23 or null' });
+		}
+
 		const updated = await updateNotificationPreferences(req.userId!, req.body);
 		res.status(200).json(updated);
 	} catch (error: any) {
