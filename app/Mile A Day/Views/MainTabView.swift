@@ -129,7 +129,6 @@ struct MainTabView: View {
 
     private func handlePendingNotification() {
         guard let type = notificationService.pendingNotificationType else { return }
-        notificationService.pendingNotificationType = nil
         Task {
             switch type {
             case "friend_request", "friend_request_accepted":
@@ -140,7 +139,7 @@ struct MainTabView: View {
                 await competitionService.refreshAllData()
                 selectedTab = 1
             default:
-                break
+                notificationService.pendingNotificationType = nil
             }
         }
     }

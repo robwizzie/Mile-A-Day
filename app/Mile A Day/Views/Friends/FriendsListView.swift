@@ -56,6 +56,7 @@ struct FriendsListView: View {
                 // Handle cold-launch deep link
                 if MADNotificationService.shared.pendingNotificationType == "friend_request" {
                     selectedTab = 1
+                    MADNotificationService.shared.pendingNotificationType = nil
                 }
             }
             .refreshable {

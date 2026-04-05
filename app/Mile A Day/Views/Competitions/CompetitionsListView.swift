@@ -59,6 +59,7 @@ struct CompetitionsListView: View {
             // Handle cold-launch deep link
             if MADNotificationService.shared.pendingNotificationType == "competition_invite" {
                 selectedTab = 1
+                MADNotificationService.shared.pendingNotificationType = nil
             }
         }
         .refreshable {

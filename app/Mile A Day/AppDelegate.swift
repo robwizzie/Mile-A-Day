@@ -10,6 +10,14 @@ import UIKit
 class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // Ensure the notification delegate is set before the system delivers
+        // a pending notification response on cold launch.
+        _ = MADNotificationService.shared
+        return true
+    }
+
+    func application(_ application: UIApplication,
                      supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         // Force the app to stay in portrait only
         return .portrait
