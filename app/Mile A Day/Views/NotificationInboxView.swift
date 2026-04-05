@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct NotificationInboxView: View {
+    var onUnreadCountChanged: ((Int) -> Void)?
+
     @StateObject private var friendService = FriendService()
     @State private var notifications: [InAppNotification] = []
     @State private var unreadCount = 0
@@ -75,6 +77,9 @@ struct NotificationInboxView: View {
         }
         .refreshable {
             await loadNotifications()
+        }
+        .onChange(of: unreadCount) { _, newCount in
+            onUnreadCountChanged?(newCount)
         }
     }
 

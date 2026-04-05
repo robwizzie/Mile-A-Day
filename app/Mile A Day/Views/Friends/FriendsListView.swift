@@ -16,6 +16,7 @@ struct FriendsListView: View {
     @State private var nudgingFriendId: String?
     @State private var nudgeFeedback: NudgeFeedback?
     @State private var bellShakeIds: Set<String> = []
+    @State private var bellAnimatedIds: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -267,6 +268,9 @@ struct FriendsListView: View {
                 .buttonStyle(ScaleButtonStyle())
                 .disabled(nudgingFriendId != nil)
                 .onAppear {
+                    // Only animate once per friend per session
+                    guard !bellAnimatedIds.contains(friend.user_id) else { return }
+                    bellAnimatedIds.insert(friend.user_id)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         withAnimation(.easeInOut(duration: 0.6)) {
                             bellShakeIds.insert(friend.user_id)
@@ -626,13 +630,8 @@ struct TabButton: View {
 }
 
 // MARK: - Bell Shake Animation Modifier
-struct BellShakeModifier: ViewModifier, Animatable {
+struct BellShakeModifier: ViewModifier {
     var isShaking: Bool
-
-    var animatableData: CGFloat {
-        get { isShaking ? 1 : 0 }
-        set { }
-    }
 
     func body(content: Content) -> some View {
         content

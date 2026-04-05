@@ -16,16 +16,16 @@ const db = PostgresService.getInstance();
  */
 export async function notifyFriendsOfMileCompletion(userId: string): Promise<void> {
 	try {
-		// Check if we already sent completion notifications today
+		// Atomically claim this notification slot (prevents race condition duplicates)
 		const today = new Date().toISOString().split('T')[0];
-		const alreadySent = await db.query(
-			`SELECT id FROM workout_completion_notifications
-			WHERE user_id = $1 AND notified_date = $2
-			LIMIT 1`,
+		const claimed = await db.query(
+			`INSERT INTO workout_completion_notifications (user_id, notified_date) VALUES ($1, $2)
+			ON CONFLICT (user_id, notified_date) DO NOTHING
+			RETURNING id`,
 			[userId, today]
 		);
 
-		if (alreadySent.length > 0) return;
+		if (claimed.length === 0) return; // Already sent today
 
 		// Get user info
 		const [user] = await db.query('SELECT username FROM users WHERE user_id = $1', [userId]);
@@ -39,13 +39,6 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<voi
 		);
 
 		if (friends.length === 0) return;
-
-		// Log that we've sent notifications today
-		await db.query(
-			`INSERT INTO workout_completion_notifications (user_id, notified_date) VALUES ($1, $2)
-			ON CONFLICT (user_id, notified_date) DO NOTHING`,
-			[userId, today]
-		);
 
 		// Send to up to 5 friends (respect notification settings)
 		let sentCount = 0;
@@ -133,18 +126,13 @@ async function checkMilestonesForCompetition(
 		const milestoneKey = `milestone_race_50_${fullComp.id}_${userId}`;
 
 		if (userScore >= halfGoal) {
-			const alreadySent = await db.query(
-				'SELECT id FROM milestone_notifications WHERE milestone_key = $1 LIMIT 1',
-				[milestoneKey]
+			const claimed = await db.query(
+				`INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)
+				ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
+				[milestoneKey, fullComp.id, userId]
 			);
 
-			if (alreadySent.length === 0) {
-				await db.query(
-					'INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)',
-					[milestoneKey, fullComp.id, userId]
-				);
-
-				// Notify all OTHER participants
+			if (claimed.length > 0) {
 				for (const u of acceptedUsers) {
 					if (u.user_id === userId) continue;
 					const shouldSend = await shouldSendNotification(u.user_id, null, 'competition_milestone');
@@ -167,17 +155,13 @@ async function checkMilestonesForCompetition(
 		const milestoneKey = `milestone_oneaway_${fullComp.id}_${userId}`;
 
 		if (userScore === threshold) {
-			const alreadySent = await db.query(
-				'SELECT id FROM milestone_notifications WHERE milestone_key = $1 LIMIT 1',
-				[milestoneKey]
+			const claimed = await db.query(
+				`INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)
+				ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
+				[milestoneKey, fullComp.id, userId]
 			);
 
-			if (alreadySent.length === 0) {
-				await db.query(
-					'INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)',
-					[milestoneKey, fullComp.id, userId]
-				);
-
+			if (claimed.length > 0) {
 				const modeLabel = fullComp.type === 'clash' ? 'win' : 'point';
 				for (const u of acceptedUsers) {
 					if (u.user_id === userId) continue;
@@ -230,21 +214,17 @@ export async function checkCompetitionsEndingSoon(): Promise<void> {
 
 		for (const comp of endingSoon) {
 			const milestoneKey = `milestone_ending_${comp.id}`;
-			const alreadySent = await db.query(
-				'SELECT id FROM milestone_notifications WHERE milestone_key = $1 LIMIT 1',
-				[milestoneKey]
-			);
-
-			if (alreadySent.length > 0) continue;
-
-			await db.query(
-				'INSERT INTO milestone_notifications (milestone_key, competition_id) VALUES ($1, $2)',
+			const claimed = await db.query(
+				`INSERT INTO milestone_notifications (milestone_key, competition_id) VALUES ($1, $2)
+				ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
 				[milestoneKey, comp.id]
 			);
 
+			if (claimed.length === 0) continue;
+
 			const acceptedUsers = comp.users.filter((u: any) => u.invite_status === 'accepted');
 			for (const u of acceptedUsers) {
-				const shouldSend = await shouldSendNotification(u.user_id, null, 'competition_update');
+				const shouldSend = await shouldSendNotification(u.user_id, null, 'competition_milestone');
 				if (!shouldSend) continue;
 
 				sendPush(u.user_id, {
@@ -325,18 +305,13 @@ export async function checkStreaksBroken(): Promise<void> {
 				const streakLength = parseInt(streakResult[0]?.streak_length ?? '0');
 				if (streakLength < 10) continue;
 
-				// Check if we already sent this notification
 				const milestoneKey = `streak_broken_${user_id}_${yesterdayStr}`;
-				const alreadySent = await db.query(
-					'SELECT id FROM milestone_notifications WHERE milestone_key = $1 LIMIT 1',
-					[milestoneKey]
-				);
-				if (alreadySent.length > 0) continue;
-
-				await db.query(
-					'INSERT INTO milestone_notifications (milestone_key, user_id) VALUES ($1, $2)',
+				const claimed = await db.query(
+					`INSERT INTO milestone_notifications (milestone_key, user_id) VALUES ($1, $2)
+					ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
 					[milestoneKey, user_id]
 				);
+				if (claimed.length === 0) continue;
 
 				// Notify their friends
 				const friends = await db.query(
@@ -427,16 +402,12 @@ export async function checkPersonalBest(userId: string): Promise<void> {
 				if (previousBest <= 0 || todayDistance <= previousBest) continue;
 
 				const milestoneKey = `pb_${comp.id}_${userId}_${today}`;
-				const alreadySent = await db.query(
-					'SELECT id FROM milestone_notifications WHERE milestone_key = $1 LIMIT 1',
-					[milestoneKey]
-				);
-				if (alreadySent.length > 0) continue;
-
-				await db.query(
-					'INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)',
+				const claimed = await db.query(
+					`INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)
+					ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
 					[milestoneKey, comp.id, userId]
 				);
+				if (claimed.length === 0) continue;
 
 				const fullComp = await getCompetition(comp.id);
 				if (!fullComp) continue;
@@ -522,16 +493,12 @@ export async function checkLeadChanges(userId: string): Promise<void> {
 				if (leaderId !== userId || isTied || maxScore <= 0) continue;
 
 				const milestoneKey = `lead_change_${comp.id}_${userId}_${today}`;
-				const alreadySent = await db.query(
-					'SELECT id FROM milestone_notifications WHERE milestone_key = $1 LIMIT 1',
-					[milestoneKey]
-				);
-				if (alreadySent.length > 0) continue;
-
-				await db.query(
-					'INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)',
+				const claimed = await db.query(
+					`INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)
+					ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
 					[milestoneKey, comp.id, userId]
 				);
+				if (claimed.length === 0) continue;
 
 				// Notify all other participants
 				for (const u of acceptedUsers) {
@@ -611,16 +578,12 @@ export async function checkClashTies(): Promise<void> {
 				if (leaders.length < 2 || maxScore <= 0) continue;
 
 				const milestoneKey = `clash_tie_${comp.id}_${today}`;
-				const alreadySent = await db.query(
-					'SELECT id FROM milestone_notifications WHERE milestone_key = $1 LIMIT 1',
-					[milestoneKey]
-				);
-				if (alreadySent.length > 0) continue;
-
-				await db.query(
-					'INSERT INTO milestone_notifications (milestone_key, competition_id) VALUES ($1, $2)',
+				const claimed = await db.query(
+					`INSERT INTO milestone_notifications (milestone_key, competition_id) VALUES ($1, $2)
+					ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
 					[milestoneKey, comp.id]
 				);
+				if (claimed.length === 0) continue;
 
 				// Get usernames for the tied users
 				const tiedNames = await db.query(

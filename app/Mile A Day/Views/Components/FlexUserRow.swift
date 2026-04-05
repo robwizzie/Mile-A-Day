@@ -5,7 +5,7 @@ struct FlexUserRow: View {
     let user: CompetitionUser
     let typeColor: Color
     let competitionType: CompetitionType
-    let onFlex: (String?) -> Void
+    let onFlex: (String?, @escaping (Bool) -> Void) -> Void
 
     @State private var isExpanded = false
     @State private var customMessage = ""
@@ -221,22 +221,24 @@ struct FlexUserRow: View {
     }
 
     private func sendFlex(message: String?) {
+        guard !isSending else { return }
         isSending = true
         sentMessage = message
-        onFlex(message)
-        // Show sent indicator with message
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+
+        onFlex(message) { success in
             isSending = false
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isExpanded = false
-                showSentIndicator = true
-            }
-            customMessage = ""
-        }
-        // Hide sent indicator after a few seconds
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                showSentIndicator = false
+            if success {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isExpanded = false
+                    showSentIndicator = true
+                }
+                customMessage = ""
+                // Hide sent indicator after a few seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showSentIndicator = false
+                    }
+                }
             }
         }
     }

@@ -45,7 +45,9 @@ struct MainTabView: View {
                             }
                         }
                         .navigationDestination(isPresented: $showNotificationInbox) {
-                            NotificationInboxView()
+                            NotificationInboxView { newCount in
+                                unreadNotificationCount = newCount
+                            }
                         }
                 }
             }

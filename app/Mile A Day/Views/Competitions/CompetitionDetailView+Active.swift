@@ -438,8 +438,8 @@ extension CompetitionDetailView {
                             user: user,
                             typeColor: typeColor,
                             competitionType: competition.type,
-                            onFlex: { message in
-                                sendFlexToUser(user, message: message)
+                            onFlex: { message, completion in
+                                sendFlexToUser(user, message: message, completion: completion)
                             }
                         )
                     }
@@ -499,7 +499,7 @@ extension CompetitionDetailView {
     }
 
     // MARK: - Flex/Nudge Actions
-    func sendFlexToUser(_ user: CompetitionUser, message: String?) {
+    func sendFlexToUser(_ user: CompetitionUser, message: String?, completion: ((Bool) -> Void)? = nil) {
         isSendingAction = true
         Task {
             do {
@@ -513,12 +513,14 @@ extension CompetitionDetailView {
                     FlexNudgeTracker.markFlexSent(targetUserId: user.user_id)
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     showActionFeedback(ActionFeedback(icon: "hand.raised.fill", message: "Flexed on \(user.displayName)!", isError: false))
+                    completion?(true)
                 }
             } catch {
                 await MainActor.run {
                     isSendingAction = false
                     let msg = (error as? CompetitionServiceError)?.errorDescription ?? "Could not send flex"
                     showActionFeedback(ActionFeedback(icon: "xmark.circle", message: msg, isError: true))
+                    completion?(false)
                 }
             }
         }

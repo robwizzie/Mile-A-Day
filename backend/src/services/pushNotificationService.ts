@@ -1,4 +1,5 @@
 import { PostgresService } from './DbService.js';
+import { getNotificationPreferences } from './notificationSettingsService.js';
 import fs from 'fs';
 import path from 'path';
 import http2 from 'http2';
@@ -200,19 +201,56 @@ async function logNotificationSent(userId: string, type: NotificationType): Prom
 	);
 }
 
+async function isUserInQuietHours(userId: string): Promise<boolean> {
+	const prefs = await getNotificationPreferences(userId);
+	if (prefs.quiet_hours_start === null || prefs.quiet_hours_end === null) return false;
+
+	const now = new Date();
+	const etHour = parseInt(
+		new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', hour12: false }).format(now)
+	);
+
+	if (prefs.quiet_hours_start > prefs.quiet_hours_end) {
+		// Spans midnight (e.g., 22 to 8)
+		return etHour >= prefs.quiet_hours_start || etHour < prefs.quiet_hours_end;
+	}
+	return etHour >= prefs.quiet_hours_start && etHour < prefs.quiet_hours_end;
+}
+
 // ─── Public API ──────────────────────────────────────────────────────
 
 export async function sendPush(userId: string, payload: PushPayload): Promise<void> {
-	// Smart throttling: check daily cap (high-priority types bypass)
+	// Check user's custom quiet hours
 	if (!HIGH_PRIORITY_TYPES.includes(payload.type)) {
-		const dailyCount = await getDailyNotificationCount(userId);
-		if (dailyCount >= DAILY_NOTIFICATION_CAP) {
-			console.log(`[Push] Throttled "${payload.type}" for user ${userId} (${dailyCount}/${DAILY_NOTIFICATION_CAP} today)`);
-			// Queue for digest instead
+		const inQuiet = await isUserInQuietHours(userId);
+		if (inQuiet) {
+			console.log(`[Push] Quiet hours for user ${userId}, queueing "${payload.type}"`);
 			await db.query(
 				`INSERT INTO pending_notifications (user_id, type, competition_id, competition_name)
 				VALUES ($1, $2, $3, $4)`,
-				[userId, payload.type, payload.data?.competition_id || '', payload.body]
+				[userId, payload.type, payload.data?.competition_id ?? null, payload.title]
+			);
+			await logNotificationSent(userId, payload.type);
+			// Still store in inbox so user can see it later
+			storeInAppNotification(userId, payload).catch(err =>
+				console.error('[Push] Error storing in-app notification:', err.message)
+			);
+			return;
+		}
+
+		// Smart throttling: check daily cap
+		const dailyCount = await getDailyNotificationCount(userId);
+		if (dailyCount >= DAILY_NOTIFICATION_CAP) {
+			console.log(`[Push] Throttled "${payload.type}" for user ${userId} (${dailyCount}/${DAILY_NOTIFICATION_CAP} today)`);
+			await db.query(
+				`INSERT INTO pending_notifications (user_id, type, competition_id, competition_name)
+				VALUES ($1, $2, $3, $4)`,
+				[userId, payload.type, payload.data?.competition_id ?? null, payload.title]
+			);
+			await logNotificationSent(userId, payload.type);
+			// Still store in inbox
+			storeInAppNotification(userId, payload).catch(err =>
+				console.error('[Push] Error storing in-app notification:', err.message)
 			);
 			return;
 		}
@@ -225,6 +263,10 @@ export async function sendPush(userId: string, payload: PushPayload): Promise<vo
 
 	if (tokens.length === 0) {
 		console.log(`[Push] No device tokens found for user ${userId}`);
+		// Still store in inbox even without device tokens
+		storeInAppNotification(userId, payload).catch(err =>
+			console.error('[Push] Error storing in-app notification:', err.message)
+		);
 		return;
 	}
 

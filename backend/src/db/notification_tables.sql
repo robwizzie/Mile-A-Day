@@ -1,6 +1,32 @@
 -- Notification System Tables
 -- Run these against the PostgreSQL database manually
 
+-- Competition nudge log (rate limiting for competition-based nudges)
+CREATE TABLE IF NOT EXISTS nudge_log (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    competition_id TEXT NOT NULL,
+    sender_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_nudge_log_lookup
+    ON nudge_log (competition_id, sender_id, target_id, created_at DESC);
+
+-- Pending notifications (quiet hours batching + throttle overflow)
+CREATE TABLE IF NOT EXISTS pending_notifications (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    competition_id TEXT,
+    competition_name TEXT,
+    sent_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_notifications_unsent
+    ON pending_notifications (sent_at) WHERE sent_at IS NULL;
+
 -- Friend nudge log (for friends list nudges, separate from competition nudges)
 CREATE TABLE IF NOT EXISTS friend_nudge_log (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
