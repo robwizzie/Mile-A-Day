@@ -4,6 +4,7 @@ import UIKit
 
 extension Notification.Name {
     static let didReceivePushNotification = Notification.Name("didReceivePushNotification")
+    static let didTapPushNotification = Notification.Name("didTapPushNotification")
 }
 
 /// A singleton that centralises all notification related logic for MAD.
@@ -23,6 +24,9 @@ final class MADNotificationService: NSObject, ObservableObject {
     // Expose authorisation status to SwiftUI views
     @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
     
+    // Stores notification type from a tap when the app was not yet fully loaded
+    @Published var pendingNotificationType: String?
+
     // Track when we last sent a completion notification to prevent duplicates
     private var lastCompletionNotificationDate: Date?
     private let userDefaults = UserDefaults.standard
@@ -355,9 +359,12 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         guard let type = userInfo["type"] as? String else { return }
         let data = userInfo["data"] as? [String: String] ?? [:]
 
-        // Post a notification so the app can navigate to the right screen
+        // Store for cold-launch case (MainTabView may not be mounted yet)
+        pendingNotificationType = type
+
+        // Post a tap-specific notification so the app can navigate to the right screen
         NotificationCenter.default.post(
-            name: .didReceivePushNotification,
+            name: .didTapPushNotification,
             object: nil,
             userInfo: ["type": type, "data": data]
         )

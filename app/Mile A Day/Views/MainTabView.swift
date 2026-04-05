@@ -46,6 +46,7 @@ struct MainTabView: View {
         .tint(MADTheme.Colors.madRed)
         .onAppear {
             initializeApp()
+            handlePendingNotification()
         }
         .task {
             await competitionService.refreshAllData()
@@ -59,6 +60,22 @@ struct MainTabView: View {
                     await friendService.refreshAllData()
                 case "competition_invite":
                     await competitionService.refreshAllData()
+                default:
+                    break
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
+            guard let type = notification.userInfo?["type"] as? String else { return }
+            Task {
+                switch type {
+                case "friend_request", "friend_request_accepted":
+                    await friendService.refreshAllData()
+                    selectedTab = 2
+                case "competition_invite", "competition_accepted", "competition_started",
+                     "competition_finished", "competition_updates", "competition_nudge":
+                    await competitionService.refreshAllData()
+                    selectedTab = 1
                 default:
                     break
                 }
@@ -108,6 +125,24 @@ struct MainTabView: View {
 
         // Sync widget data
         syncWidgetData()
+    }
+
+    private func handlePendingNotification() {
+        guard let type = notificationService.pendingNotificationType else { return }
+        notificationService.pendingNotificationType = nil
+        Task {
+            switch type {
+            case "friend_request", "friend_request_accepted":
+                await friendService.refreshAllData()
+                selectedTab = 2
+            case "competition_invite", "competition_accepted", "competition_started",
+                 "competition_finished", "competition_updates", "competition_nudge":
+                await competitionService.refreshAllData()
+                selectedTab = 1
+            default:
+                break
+            }
+        }
     }
 
     private func syncWidgetData() {

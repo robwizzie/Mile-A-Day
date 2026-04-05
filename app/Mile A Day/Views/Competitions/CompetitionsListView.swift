@@ -56,10 +56,20 @@ struct CompetitionsListView: View {
                 await competitionService.refreshAllData()
             }
             trophyService.updateTrophies(from: competitionService.competitions)
+            // Handle cold-launch deep link
+            if MADNotificationService.shared.pendingNotificationType == "competition_invite" {
+                selectedTab = 1
+            }
         }
         .refreshable {
             await competitionService.refreshAllData()
             trophyService.updateTrophies(from: competitionService.competitions)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
+            guard let type = notification.userInfo?["type"] as? String else { return }
+            if type == "competition_invite" {
+                selectedTab = 1
+            }
         }
         .onChange(of: showingCreateCompetition) { _, isPresented in
             if !isPresented {

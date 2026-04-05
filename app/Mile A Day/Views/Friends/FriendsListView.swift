@@ -53,9 +53,19 @@ struct FriendsListView: View {
                 if friendService.friends.isEmpty && friendService.friendRequests.isEmpty && friendService.sentRequests.isEmpty {
                     await friendService.refreshAllData()
                 }
+                // Handle cold-launch deep link
+                if MADNotificationService.shared.pendingNotificationType == "friend_request" {
+                    selectedTab = 1
+                }
             }
             .refreshable {
                 await friendService.refreshAllData()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
+                guard let type = notification.userInfo?["type"] as? String else { return }
+                if type == "friend_request" {
+                    selectedTab = 1
+                }
             }
             .alert("Unfriend \(userToUnfriend?.displayName ?? "User")?", isPresented: $showingUnfriendAlert) {
                 Button("Cancel", role: .cancel) { }
