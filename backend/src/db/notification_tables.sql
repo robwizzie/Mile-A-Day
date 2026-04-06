@@ -1,5 +1,7 @@
 -- Notification System Tables
--- Run these against the PostgreSQL database manually
+-- Run this entire file against the PostgreSQL database.
+-- All statements use IF NOT EXISTS / IF EXISTS so it's safe to re-run.
+-- NOTE: device_tokens table is NOT here — it already exists from the push notification setup.
 
 -- Competition nudge log (rate limiting for competition-based nudges)
 CREATE TABLE IF NOT EXISTS nudge_log (
@@ -70,13 +72,25 @@ CREATE TABLE IF NOT EXISTS notification_settings (
 CREATE TABLE IF NOT EXISTS friend_notification_settings (
     user_id TEXT NOT NULL,
     friend_id TEXT NOT NULL,
-    muted BOOLEAN DEFAULT FALSE,
-    nudges_muted BOOLEAN DEFAULT FALSE,
-    activity_muted BOOLEAN DEFAULT FALSE,
+    muted BOOLEAN NOT NULL DEFAULT FALSE,
+    nudges_muted BOOLEAN NOT NULL DEFAULT FALSE,
+    activity_muted BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (user_id, friend_id)
 );
+
+-- Fix any existing NULL boolean values from previous schema (safe to re-run)
+UPDATE friend_notification_settings SET
+    muted = COALESCE(muted, FALSE),
+    nudges_muted = COALESCE(nudges_muted, FALSE),
+    activity_muted = COALESCE(activity_muted, FALSE)
+WHERE muted IS NULL OR nudges_muted IS NULL OR activity_muted IS NULL;
+
+-- Add NOT NULL constraints if table already existed without them
+ALTER TABLE friend_notification_settings ALTER COLUMN muted SET NOT NULL;
+ALTER TABLE friend_notification_settings ALTER COLUMN nudges_muted SET NOT NULL;
+ALTER TABLE friend_notification_settings ALTER COLUMN activity_muted SET NOT NULL;
 
 -- Workout completion notifications (prevents duplicate daily notifications)
 CREATE TABLE IF NOT EXISTS workout_completion_notifications (
