@@ -2,11 +2,17 @@ import Foundation
 
 /// Utilities for working with JWT tokens
 enum TokenUtils {
-    
+
+    /// Cached expiry to avoid re-decoding the same JWT on every API call.
+    private static var cachedExpiry: (token: String, expiry: Date)?
+
     /// Decode JWT and extract expiration time
     /// - Parameter token: JWT token string
     /// - Returns: Expiration date if valid, nil otherwise
     static func getExpirationDate(from token: String) -> Date? {
+        if let cached = cachedExpiry, cached.token == token {
+            return cached.expiry
+        }
         let parts = token.components(separatedBy: ".")
         guard parts.count == 3 else {
             return nil
@@ -30,8 +36,10 @@ enum TokenUtils {
               let exp = json["exp"] as? TimeInterval else {
             return nil
         }
-        
-        return Date(timeIntervalSince1970: exp)
+
+        let expiry = Date(timeIntervalSince1970: exp)
+        cachedExpiry = (token, expiry)
+        return expiry
     }
     
     /// Check if access token is expired or expiring soon

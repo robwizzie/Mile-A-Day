@@ -17,6 +17,7 @@ struct UnifiedStatsGrid: View {
     @State private var showTotalMilesDetail = false
     @State private var showGoalSheet = false
     @State private var isRefreshingFastestPace = false
+    @State private var cachedAllTimeMostMiles: Double = 0
 
     enum StatsViewType: String, CaseIterable {
         case allTime = "All Time"
@@ -83,9 +84,8 @@ struct UnifiedStatsGrid: View {
 
     var mostMiles: Double {
         if statsType == .allTime {
-            // Use pre-computed cached value instead of recalculating on every render
-            if healthManager.cachedMostMilesInOneDay > 0 {
-                return healthManager.cachedMostMilesInOneDay
+            if cachedAllTimeMostMiles > 0 {
+                return cachedAllTimeMostMiles
             } else if healthManager.mostMilesInOneDay > 0 {
                 return healthManager.mostMilesInOneDay
             } else {
@@ -238,9 +238,13 @@ struct UnifiedStatsGrid: View {
             }
         }
         .onAppear {
+            recalculateAllTimeMostMiles()
             if statsType == .currentStreak {
                 calculateCurrentStreakStats()
             }
+        }
+        .onChange(of: healthManager.cachedWorkouts.count) { _, _ in
+            recalculateAllTimeMostMiles()
         }
         .onChange(of: healthManager.retroactiveStreak) { _, _ in
             if statsType == .currentStreak {
@@ -248,6 +252,7 @@ struct UnifiedStatsGrid: View {
             }
         }
         .onChange(of: statsType) { _, newType in
+            recalculateAllTimeMostMiles()
             if newType == .currentStreak {
                 calculateCurrentStreakStats()
             }
@@ -336,6 +341,25 @@ struct UnifiedStatsGrid: View {
         )
     }
 
+    private func recalculateAllTimeMostMiles() {
+        let allWorkouts = healthManager.cachedWorkouts.isEmpty ? healthManager.recentWorkouts : healthManager.cachedWorkouts
+        guard !allWorkouts.isEmpty else { return }
+
+        let calendar = Calendar.current
+        var workoutsByDay: [Date: Double] = [:]
+
+        for workout in allWorkouts {
+            if let distance = workout.totalDistance {
+                let dateComponents = calendar.dateComponents([.year, .month, .day], from: workout.endDate)
+                if let date = calendar.date(from: dateComponents) {
+                    workoutsByDay[date, default: 0] += distance.doubleValue(for: HKUnit.mile())
+                }
+            }
+        }
+
+        cachedAllTimeMostMiles = workoutsByDay.values.max() ?? 0
+    }
+
     private func calculateCurrentStreakStats() {
         // Show cached data immediately to avoid content shift
         let cached = healthManager.cachedCurrentStreakStats
@@ -345,9 +369,7 @@ struct UnifiedStatsGrid: View {
 
         isCalculating = !hasLoadedOnce
 
-        DispatchQueue.global(qos: .userInitiated).async {
-            let stats = healthManager.calculateCurrentStreakStats()
-
+        healthManager.calculateCurrentStreakStats { stats in
             DispatchQueue.main.async {
                 self.statsData = stats
                 self.isCalculating = false

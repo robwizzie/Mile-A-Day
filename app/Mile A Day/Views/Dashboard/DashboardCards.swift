@@ -23,6 +23,7 @@ struct StreakCard: View {
     @State private var showingShareSheet = false
     @State private var timeRemainingText: String = ""
     @State private var timer: Timer?
+    @State private var isVisible = false
 
     private static let narrowDayFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -130,7 +131,7 @@ struct StreakCard: View {
                             .frame(width: 90, height: 90)
                             .scaleEffect(animateFire ? 1.15 : 0.95)
                             .opacity(animateFire ? 0.9 : 0.5)
-                            .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: animateFire)
+                            .animation(isVisible ? .easeInOut(duration: 1.5).repeatForever(autoreverses: true) : .default, value: animateFire)
 
                         // Inner circle background - green/orange when completed
                         Circle()
@@ -157,7 +158,7 @@ struct StreakCard: View {
                                 )
                             )
                             .scaleEffect(animateFire ? 1.15 : 1.0)
-                            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateFire)
+                            .animation(isVisible ? .easeInOut(duration: 0.8).repeatForever(autoreverses: true) : .default, value: animateFire)
                             .shadow(color: statusColor.opacity(0.7), radius: animateFire ? 15 : 8)
                     } else {
                         // Consistent color when not completed - white if not at risk, red tint if at risk
@@ -284,6 +285,7 @@ struct StreakCard: View {
         }
         .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
         .onAppear {
+            isVisible = true
             updateTimeRemaining()
             startTimer()
             // Start fire animation only if goal is completed
@@ -307,6 +309,7 @@ struct StreakCard: View {
             updateTimeRemaining()
         }
         .onDisappear {
+            isVisible = false
             timer?.invalidate()
             timer = nil
         }

@@ -562,17 +562,25 @@ class WorkoutSyncService: ObservableObject {
         UserDefaults.standard.set(date, forKey: lastSyncedWorkoutDateKey)
     }
 
-    private func markWorkoutsAsSynced(_ workoutIds: [String]) {
-        var uploadedIds = getUploadedWorkoutIds()
-        uploadedIds.formUnion(workoutIds)
+    /// In-memory cache of uploaded workout IDs to avoid repeated UserDefaults reads.
+    private var uploadedIdsCache: Set<String>?
 
-        // Store as array (Set isn't directly storable)
-        UserDefaults.standard.set(Array(uploadedIds), forKey: uploadedWorkoutIdsKey)
+    private func markWorkoutsAsSynced(_ workoutIds: [String]) {
+        if uploadedIdsCache == nil {
+            uploadedIdsCache = getUploadedWorkoutIds()
+        }
+        uploadedIdsCache!.formUnion(workoutIds)
+        UserDefaults.standard.set(Array(uploadedIdsCache!), forKey: uploadedWorkoutIdsKey)
     }
 
     private func getUploadedWorkoutIds() -> Set<String> {
+        if let cached = uploadedIdsCache {
+            return cached
+        }
         if let array = UserDefaults.standard.array(forKey: uploadedWorkoutIdsKey) as? [String] {
-            return Set(array)
+            let ids = Set(array)
+            uploadedIdsCache = ids
+            return ids
         }
         return Set()
     }

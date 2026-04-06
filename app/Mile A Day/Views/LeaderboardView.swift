@@ -39,21 +39,21 @@ struct LeaderboardView: View {
                     .padding(.vertical, MADTheme.Spacing.sm)
                 }
 
-                // Leaderboard content
-                TabView(selection: $selectedTab) {
-                    LeaderboardList(users: userManager.getLeaderboardByStreak(), valueType: .streak, healthManager: healthManager)
-                        .tag(0)
-
-                    LeaderboardList(users: userManager.getLeaderboardByTotalMiles(), valueType: .totalMiles, healthManager: healthManager)
-                        .tag(1)
-
-                    LeaderboardList(users: userManager.getLeaderboardByPersonalRecord(), valueType: .fastestPace, healthManager: healthManager)
-                        .tag(2)
-
-                    LeaderboardList(users: userManager.getLeaderboardByMostMilesInDay(), valueType: .mostMilesInDay, healthManager: healthManager)
-                        .tag(3)
+                // Leaderboard content — render only the selected tab
+                Group {
+                    switch selectedTab {
+                    case 0:
+                        LeaderboardList(users: userManager.getLeaderboardByStreak(), valueType: .streak, healthManager: healthManager)
+                    case 1:
+                        LeaderboardList(users: userManager.getLeaderboardByTotalMiles(), valueType: .totalMiles, healthManager: healthManager)
+                    case 2:
+                        LeaderboardList(users: userManager.getLeaderboardByPersonalRecord(), valueType: .fastestPace, healthManager: healthManager)
+                    case 3:
+                        LeaderboardList(users: userManager.getLeaderboardByMostMilesInDay(), valueType: .mostMilesInDay, healthManager: healthManager)
+                    default:
+                        EmptyView()
+                    }
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
                 .animation(.easeInOut, value: selectedTab)
             }
         }

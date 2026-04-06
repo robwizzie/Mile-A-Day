@@ -179,19 +179,33 @@ extension HealthKitManager {
                 return false
             }
 
-            // Process each qualifying workout to get the fastest mile time
-            for workout in qualifyingWorkouts {
+            // Process qualifying workouts in batches to avoid HealthKit queue saturation
+            let lock = NSLock()
+            let batchSize = 10
+            for batchStart in stride(from: 0, to: qualifyingWorkouts.count, by: batchSize) {
+                let batchEnd = min(batchStart + batchSize, qualifyingWorkouts.count)
+                let batch = Array(qualifyingWorkouts[batchStart..<batchEnd])
+
                 dispatchGroup.enter()
+                let batchGroup = DispatchGroup()
 
-                self.calculateFastestMileTime(from: workout) { mileTime in
-                    defer { dispatchGroup.leave() }
-
-                    if let mileTime = mileTime {
-                        processedWorkouts += 1
-                        if mileTime < fastestPace {
-                            fastestPace = mileTime
+                for workout in batch {
+                    batchGroup.enter()
+                    self.calculateFastestMileTime(from: workout) { mileTime in
+                        defer { batchGroup.leave() }
+                        if let mileTime = mileTime {
+                            lock.lock()
+                            processedWorkouts += 1
+                            if mileTime < fastestPace {
+                                fastestPace = mileTime
+                            }
+                            lock.unlock()
                         }
                     }
+                }
+
+                batchGroup.notify(queue: .global()) {
+                    dispatchGroup.leave()
                 }
             }
 
@@ -287,7 +301,7 @@ extension HealthKitManager {
         // OPTIMIZATION: If we already have a cached fastest pace and it's been calculated recently,
         // only check NEW workouts (those after the last calculation)
         var fastestPace: TimeInterval = cachedFastestMilePace > 0 ? cachedFastestMilePace : .infinity
-        var processedWorkouts = 0
+        let lock = NSLock()
         let dispatchGroup = DispatchGroup()
 
         // Determine which workouts to process
@@ -320,19 +334,31 @@ extension HealthKitManager {
             log("[HealthKit] FULL CALCULATION: Processing all \(workoutsToProcess.count) qualifying workouts")
         }
 
-        // Process each qualifying workout to get the fastest mile time
-        for workout in workoutsToProcess {
+        // Process qualifying workouts in batches to avoid HealthKit queue saturation
+        let batchSize = 10
+        for batchStart in stride(from: 0, to: workoutsToProcess.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, workoutsToProcess.count)
+            let batch = Array(workoutsToProcess[batchStart..<batchEnd])
+
             dispatchGroup.enter()
+            let batchGroup = DispatchGroup()
 
-            self.calculateFastestMileTime(from: workout) { mileTime in
-                defer { dispatchGroup.leave() }
-
+            for workout in batch {
+                batchGroup.enter()
+                self.calculateFastestMileTime(from: workout) { mileTime in
+                    defer { batchGroup.leave() }
                     if let mileTime = mileTime {
-                        processedWorkouts += 1
+                        lock.lock()
                         if mileTime < fastestPace {
                             fastestPace = mileTime
                         }
+                        lock.unlock()
                     }
+                }
+            }
+
+            batchGroup.notify(queue: .global()) {
+                dispatchGroup.leave()
             }
         }
 

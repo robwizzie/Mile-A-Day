@@ -78,11 +78,6 @@ struct MainTabView: View {
             initializeApp()
             handlePendingNotification()
         }
-        .task {
-            await competitionService.refreshAllData()
-            await friendService.refreshAllData()
-            await refreshUnreadCount()
-        }
         .onReceive(NotificationCenter.default.publisher(for: .didReceivePushNotification)) { notification in
             guard let type = notification.userInfo?["type"] as? String else { return }
             Task {

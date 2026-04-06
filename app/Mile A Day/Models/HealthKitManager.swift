@@ -147,22 +147,21 @@ struct WorkoutIndex: Codable {
         workoutsByDate.keys.compactMap { dateFromKey($0) }.sorted()
     }
     
+    private static let dateKeyFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar.current
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
     private func dateKey(from date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar.current
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: date)
+        Self.dateKeyFormatter.string(from: date)
     }
-    
+
     private func dateFromKey(_ key: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar.current
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone.current
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.date(from: key)
+        Self.dateKeyFormatter.date(from: key)
     }
 }
 

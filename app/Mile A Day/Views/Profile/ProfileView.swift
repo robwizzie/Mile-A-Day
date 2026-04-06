@@ -101,7 +101,7 @@ struct ProfileView: View {
                                 .fill(Color.white.opacity(0.1))
                                 .frame(width: 128, height: 128)
 
-                            if let image = currentProfileImage ?? getCustomProfileImage() ?? getAppleProfileImage() {
+                            if let image = currentProfileImage {
                                 Image(uiImage: image)
                                     .resizable()
                                     .aspectRatio(contentMode: .fill)

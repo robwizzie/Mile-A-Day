@@ -94,16 +94,18 @@ extension HealthKitManager {
     // MARK: - Current Streak Stats Functions
 
     // Calculate current streak stats (total miles, most miles, fastest pace during current streak)
-    func calculateCurrentStreakStats() -> (totalMiles: Double, mostMiles: Double, fastestPace: TimeInterval, streakDays: Int) {
+    func calculateCurrentStreakStats(completion: @escaping ((totalMiles: Double, mostMiles: Double, fastestPace: TimeInterval, streakDays: Int)) -> Void) {
 
         let currentStreakDays = retroactiveStreak
         guard currentStreakDays > 0 else {
-            return (0.0, 0.0, 0.0, 0)
+            completion((0.0, 0.0, 0.0, 0))
+            return
         }
 
         // Check if we can use cached data
         if canUseCurrentStreakCache(streakDays: currentStreakDays) {
-            return cachedCurrentStreakStats
+            completion(cachedCurrentStreakStats)
+            return
         }
 
         let streakWorkouts = getWorkoutsForCurrentStreak()
@@ -131,23 +133,21 @@ extension HealthKitManager {
             mostMiles = max(mostMiles, dayMiles)
         }
 
-        // Smart fastest pace calculation
-        let fastestPace = calculateSmartCurrentStreakFastestPace(streakWorkouts: streakWorkouts)
-
-        let newStats = (totalMiles, mostMiles, fastestPace, currentStreakDays)
-
-        // UPDATE: Ensure caching happens on main thread
-        DispatchQueue.main.async { [weak self] in
+        // Smart fastest pace calculation (non-blocking)
+        calculateSmartCurrentStreakFastestPace(streakWorkouts: streakWorkouts) { [weak self] fastestPace in
             guard let self = self else { return }
-            self.cachedCurrentStreakStats = newStats
-            self.lastCurrentStreakStatsUpdate = Date()
-            self.saveCachedData() // This should also be on main thread since it updates @Published properties
 
-            // Find workouts that achieved this fastest mile pace
-            self.findCurrentStreakFastestMileWorkouts()
+            let newStats = (totalMiles, mostMiles, fastestPace, currentStreakDays)
+
+            DispatchQueue.main.async {
+                self.cachedCurrentStreakStats = newStats
+                self.lastCurrentStreakStatsUpdate = Date()
+                self.saveCachedData()
+                self.findCurrentStreakFastestMileWorkouts()
+            }
+
+            completion(newStats)
         }
-
-        return newStats
     }
 
     func canUseCurrentStreakCache(streakDays: Int) -> Bool {
@@ -174,22 +174,24 @@ extension HealthKitManager {
         return true
     }
 
-    func calculateSmartCurrentStreakFastestPace(streakWorkouts: [HKWorkout]) -> TimeInterval {
+    func calculateSmartCurrentStreakFastestPace(streakWorkouts: [HKWorkout], completion: @escaping (TimeInterval) -> Void) {
         // OPTIMIZATION 1: Check if All Time fastest mile is within current streak
         if findWorkoutWithAllTimeFastestMile(in: streakWorkouts) != nil {
-            return fastestMilePace
+            completion(fastestMilePace)
+            return
         }
 
         // OPTIMIZATION 2: Check if we have a cached value that's still valid for this streak
         if cachedCurrentStreakFastestPace > 0 && cachedCurrentStreakStats.streakDays == retroactiveStreak {
             // Check if any new qualifying workouts have been added since last calculation
             if !hasNewQualifyingWorkoutsSinceLastStreakCalculation(streakWorkouts: streakWorkouts) {
-                return cachedCurrentStreakFastestPace
+                completion(cachedCurrentStreakFastestPace)
+                return
             }
         }
 
         // FALLBACK: Calculate from scratch using actual split times
-        return calculateFastestMileForWorkouts(streakWorkouts)
+        calculateFastestMileForWorkouts(streakWorkouts, completion: completion)
     }
 
     func findWorkoutWithAllTimeFastestMile(in streakWorkouts: [HKWorkout]) -> HKWorkout? {
@@ -237,7 +239,7 @@ extension HealthKitManager {
         return false
     }
 
-    func calculateFastestMileForWorkouts(_ workouts: [HKWorkout]) -> TimeInterval {
+    func calculateFastestMileForWorkouts(_ workouts: [HKWorkout], completion: @escaping (TimeInterval) -> Void) {
         let qualifyingWorkouts = workouts.filter { workout in
             if let distance = workout.totalDistance {
                 return distance.doubleValue(for: HKUnit.mile()) >= 0.95
@@ -245,9 +247,13 @@ extension HealthKitManager {
             return false
         }
 
-        guard !qualifyingWorkouts.isEmpty else { return 0.0 }
+        guard !qualifyingWorkouts.isEmpty else {
+            completion(0.0)
+            return
+        }
 
         var fastestPace: TimeInterval = .infinity
+        let lock = NSLock()
         let dispatchGroup = DispatchGroup()
 
         for workout in qualifyingWorkouts {
@@ -256,14 +262,19 @@ extension HealthKitManager {
             calculateFastestMileTime(from: workout) { mileTime in
                 defer { dispatchGroup.leave() }
 
-                if let mileTime = mileTime, mileTime < fastestPace {
-                    fastestPace = mileTime
+                if let mileTime = mileTime {
+                    lock.lock()
+                    if mileTime < fastestPace {
+                        fastestPace = mileTime
+                    }
+                    lock.unlock()
                 }
             }
         }
 
-        _ = dispatchGroup.wait(timeout: .now() + 10) // 10 second timeout
-        return fastestPace == .infinity ? 0.0 : fastestPace
+        dispatchGroup.notify(queue: .main) {
+            completion(fastestPace == .infinity ? 0.0 : fastestPace)
+        }
     }
 
     /// Find workouts that achieved the fastest mile pace

@@ -4,6 +4,7 @@ import SwiftUI
 
 struct CelebrationConfetti: View {
     @State private var particles: [ConfettiPiece2] = []
+    @State private var screenSize: CGSize = .zero
 
     private let confettiColors: [Color] = [
         MADTheme.Colors.madRed,
@@ -17,61 +18,72 @@ struct CelebrationConfetti: View {
     ]
 
     var body: some View {
+        // Read geometry once, then render particles outside GeometryReader
+        // to avoid layout recalculation on every animation frame
         GeometryReader { geo in
-            ZStack {
-                ForEach(particles) { particle in
-                    ConfettiPieceView(particle: particle, screenSize: geo.size)
-                }
-            }
-            .onAppear {
-                let centerX = geo.size.width / 2
-
-                let wave1 = (0..<25).map { _ in
-                    ConfettiPiece2(
-                        color: confettiColors.randomElement()!,
-                        startX: centerX + CGFloat.random(in: -40...40),
-                        startY: -20,
-                        shape: CelebrationConfettiShape.allCases.randomElement()!,
-                        size: CGFloat.random(in: 6...12),
-                        delay: Double.random(in: 0...0.3),
-                        duration: Double.random(in: 2.5...4.0),
-                        swayAmount: CGFloat.random(in: 30...80),
-                        driftX: CGFloat.random(in: -60...60)
-                    )
-                }
-
-                let wave2 = (0..<15).map { _ -> ConfettiPiece2 in
-                    let fromLeft = Bool.random()
-                    return ConfettiPiece2(
-                        color: confettiColors.randomElement()!,
-                        startX: fromLeft ? -10 : geo.size.width + 10,
-                        startY: CGFloat.random(in: 50...200),
-                        shape: CelebrationConfettiShape.allCases.randomElement()!,
-                        size: CGFloat.random(in: 5...10),
-                        delay: Double.random(in: 0.3...0.7),
-                        duration: Double.random(in: 2.0...3.5),
-                        swayAmount: CGFloat.random(in: 20...50),
-                        driftX: fromLeft ? CGFloat.random(in: 30...120) : CGFloat.random(in: -120 ... -30)
-                    )
-                }
-
-                let wave3 = (0..<10).map { _ in
-                    ConfettiPiece2(
-                        color: confettiColors.randomElement()!,
-                        startX: CGFloat.random(in: 0...geo.size.width),
-                        startY: -30,
-                        shape: CelebrationConfettiShape.allCases.randomElement()!,
-                        size: CGFloat.random(in: 4...8),
-                        delay: Double.random(in: 1.0...1.8),
-                        duration: Double.random(in: 3.0...5.0),
-                        swayAmount: CGFloat.random(in: 20...40),
-                        driftX: CGFloat.random(in: -30...30)
-                    )
-                }
-
-                particles = wave1 + wave2 + wave3
+            Color.clear.onAppear {
+                screenSize = geo.size
+                spawnParticles()
             }
         }
+        .overlay {
+            if screenSize != .zero {
+                ZStack {
+                    ForEach(particles) { particle in
+                        ConfettiPieceView(particle: particle, screenSize: screenSize)
+                    }
+                }
+            }
+        }
+    }
+
+    private func spawnParticles() {
+        let centerX = screenSize.width / 2
+
+        let wave1 = (0..<15).map { _ in
+            ConfettiPiece2(
+                color: confettiColors.randomElement()!,
+                startX: centerX + CGFloat.random(in: -40...40),
+                startY: -20,
+                shape: CelebrationConfettiShape.allCases.randomElement()!,
+                size: CGFloat.random(in: 6...12),
+                delay: Double.random(in: 0...0.3),
+                duration: Double.random(in: 2.5...4.0),
+                swayAmount: CGFloat.random(in: 30...80),
+                driftX: CGFloat.random(in: -60...60)
+            )
+        }
+
+        let wave2 = (0..<8).map { _ -> ConfettiPiece2 in
+            let fromLeft = Bool.random()
+            return ConfettiPiece2(
+                color: confettiColors.randomElement()!,
+                startX: fromLeft ? -10 : screenSize.width + 10,
+                startY: CGFloat.random(in: 50...200),
+                shape: CelebrationConfettiShape.allCases.randomElement()!,
+                size: CGFloat.random(in: 5...10),
+                delay: Double.random(in: 0.3...0.7),
+                duration: Double.random(in: 2.0...3.5),
+                swayAmount: CGFloat.random(in: 20...50),
+                driftX: fromLeft ? CGFloat.random(in: 30...120) : CGFloat.random(in: -120 ... -30)
+            )
+        }
+
+        let wave3 = (0..<5).map { _ in
+            ConfettiPiece2(
+                color: confettiColors.randomElement()!,
+                startX: CGFloat.random(in: 0...screenSize.width),
+                startY: -30,
+                shape: CelebrationConfettiShape.allCases.randomElement()!,
+                size: CGFloat.random(in: 4...8),
+                delay: Double.random(in: 1.0...1.8),
+                duration: Double.random(in: 3.0...5.0),
+                swayAmount: CGFloat.random(in: 20...40),
+                driftX: CGFloat.random(in: -30...30)
+            )
+        }
+
+        particles = wave1 + wave2 + wave3
     }
 }
 

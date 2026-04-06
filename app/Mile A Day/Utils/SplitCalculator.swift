@@ -6,6 +6,9 @@ import HealthKit
 /// timestamp-based durations anchored to the workout start time.
 enum SplitCalculator {
 
+    /// Shared HealthKit store — avoid creating a new instance per query.
+    private static let healthStore = HKHealthStore()
+
     /// Maximum human running speed in meters per second (~2:00/mile, faster than Usain Bolt's 100m average).
     private static let maxHumanSpeed = 13.4
 
@@ -104,7 +107,6 @@ enum SplitCalculator {
         distanceType: HKQuantityType
     ) async -> [HKQuantitySample] {
         await withCheckedContinuation { continuation in
-            let healthStore = HKHealthStore()
             let predicate = HKQuery.predicateForObjects(from: workout)
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
 

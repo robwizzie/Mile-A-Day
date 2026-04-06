@@ -23,6 +23,7 @@ struct FlameAnimationView: View {
     @State private var flickerPhase: Bool = false
     @State private var emberParticles: [EmberParticle] = []
     @State private var showParticles: Bool = false
+    @State private var isVisible: Bool = false
 
     private var flameSize: CGFloat { size }
     private let glowColor = MADTheme.Colors.madRed
@@ -119,6 +120,8 @@ struct FlameAnimationView: View {
                     .offset(y: 20)
             }
         }
+        .onAppear { isVisible = true }
+        .onDisappear { isVisible = false }
         .onChange(of: isIgnited) { _, newValue in
             if newValue {
                 startIgnitionSequence()
@@ -178,6 +181,7 @@ struct FlameAnimationView: View {
     }
 
     private func startFlickerLoop() {
+        guard isVisible else { return }
         withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
             flickerPhase = true
         }

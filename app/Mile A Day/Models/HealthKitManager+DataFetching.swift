@@ -19,20 +19,21 @@ extension HealthKitManager {
         }
         #endif
 
-        // Always fetch today's data (fresh)
+        // Phase 1: Critical data for today's UI — fetch immediately
         fetchTodaysDistance()
         fetchRecentWorkouts()
-        fetchTodaysSteps()
-        fetchMonthlyStepsData()
 
-        // Always calculate personal records to populate cachedWorkouts
-        calculatePersonalRecords()
+        // Phase 2: Background stats — slight delay to prioritize today's data
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self = self else { return }
+            self.fetchTodaysSteps()
+            self.fetchMonthlyStepsData()
+            self.calculatePersonalRecords()
 
-        // Smart caching: only fetch if we need new workout data
-        if needsNewWorkoutFetch() {
-            fetchWorkoutsSmartly()
-        } else {
-            // Data is already loaded from cache in init()
+            // Smart caching: only fetch if we need new workout data
+            if self.needsNewWorkoutFetch() {
+                self.fetchWorkoutsSmartly()
+            }
         }
     }
 
@@ -323,30 +324,32 @@ extension HealthKitManager {
         var dailySteps: [Date: Int] = [:]
         let group = DispatchGroup()
 
-        // Query for steps (one query per day)
-        var currentDate = startOfMonth
-        while currentDate < endOfMonth {
-            let startOfDay = calendar.startOfDay(for: currentDate)
-            let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+        // Single batch query for all daily step counts (replaces 30+ individual queries)
+        group.enter()
 
-            group.enter()
+        let anchorDate = calendar.startOfDay(for: startOfMonth)
+        let interval = DateComponents(day: 1)
+        let stepPredicate = HKQuery.predicateForSamples(withStart: startOfMonth, end: endOfMonth, options: .strictStartDate)
 
-            let stepPredicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay, options: .strictStartDate)
+        let collectionQuery = HKStatisticsCollectionQuery(
+            quantityType: stepType,
+            quantitySamplePredicate: stepPredicate,
+            options: .cumulativeSum,
+            anchorDate: anchorDate,
+            intervalComponents: interval
+        )
 
-            let stepQuery = HKStatisticsQuery(
-                quantityType: stepType,
-                quantitySamplePredicate: stepPredicate,
-                options: .cumulativeSum
-            ) { _, result, error in
-                defer { group.leave() }
+        collectionQuery.initialResultsHandler = { _, results, error in
+            defer { group.leave() }
 
-                let steps = result?.sumQuantity()?.doubleValue(for: HKUnit.count()) ?? 0
-                dailySteps[startOfDay] = Int(steps)
+            guard let statsCollection = results else { return }
+            statsCollection.enumerateStatistics(from: startOfMonth, to: endOfMonth) { stats, _ in
+                let steps = stats.sumQuantity()?.doubleValue(for: HKUnit.count()) ?? 0
+                dailySteps[stats.startDate] = Int(steps)
             }
-
-            healthStore.execute(stepQuery)
-            currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate) ?? currentDate
         }
+
+        healthStore.execute(collectionQuery)
 
         // CRITICAL FIX: Fetch ALL workouts for the month and use timezone-aware grouping
         // This ensures calendar matches streak calculation exactly
@@ -380,6 +383,9 @@ extension HealthKitManager {
             // Convert to dailyMileGoals dictionary
             var dailyMileGoals: [Date: Bool] = [:]
 
+            let debugFormatter = DateFormatter()
+            debugFormatter.dateFormat = "M/d/yy"
+
             for (date, dayWorkouts) in workoutsByDay {
                 let totalMiles = dayWorkouts.reduce(0.0) { total, workout in
                     if let distance = workout.totalDistance {
@@ -391,11 +397,8 @@ extension HealthKitManager {
                 // Use same threshold as streak (>= 0.95 miles)
                 dailyMileGoals[date] = totalMiles >= 0.95
 
-                // Debug logging for verification
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateFormat = "M/d/yy"
                 if totalMiles >= 0.95 {
-                    self.log("[HealthKit] 📅 \(dateFormatter.string(from: date)): ✅ \(String(format: "%.2f", totalMiles)) miles")
+                    self.log("[HealthKit] 📅 \(debugFormatter.string(from: date)): ✅ \(String(format: "%.2f", totalMiles)) miles")
                 }
             }
 
