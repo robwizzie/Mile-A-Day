@@ -543,7 +543,7 @@ struct FriendsListView: View {
                 self.nudgeStatuses = statuses
             }
         } catch {
-            // Silently fail - nudge buttons just won't show
+            print("[FriendsList] ❌ loadNudgeStatuses failed: \(error)")
         }
     }
 
@@ -570,6 +570,7 @@ struct FriendsListView: View {
                     ))
                 }
             } catch {
+                print("[FriendsList] ❌ Nudge failed: \(error)")
                 await MainActor.run {
                     nudgingFriendId = nil
                     showNudgeFeedback(NudgeFeedback(

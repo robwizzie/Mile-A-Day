@@ -203,7 +203,7 @@ export async function getTodayMiles(userId: string) {
 	const todayMilesQuery = `
 	WITH user_tz AS (
 		SELECT COALESCE(
-			(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY start_date DESC LIMIT 1),
+			(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
 			0
 		) AS tz_offset
 	)

@@ -444,6 +444,7 @@ struct NotificationSettingsView: View {
                     isLoadingFriendSettings = false
                 }
             } catch {
+                print("[NotifSettings] ❌ loadFriendSettings failed: \(error)")
                 await MainActor.run {
                     isLoadingFriendSettings = false
                 }
@@ -472,7 +473,7 @@ struct NotificationSettingsView: View {
                 )
                 await MainActor.run { updateLocalFriendSetting(updated) }
             } catch {
-                // Revert on failure
+                print("[NotifSettings] ❌ toggleFriendMute failed: \(error)")
                 await MainActor.run {
                     let reverted = FriendNotificationSetting(
                         friend_id: friendId,
@@ -507,6 +508,7 @@ struct NotificationSettingsView: View {
                 )
                 await MainActor.run { updateLocalFriendSetting(updated) }
             } catch {
+                print("[NotifSettings] ❌ toggleFriendNudgesMute failed: \(error)")
                 await MainActor.run {
                     let reverted = FriendNotificationSetting(
                         friend_id: friendId,
@@ -541,6 +543,7 @@ struct NotificationSettingsView: View {
                 )
                 await MainActor.run { updateLocalFriendSetting(updated) }
             } catch {
+                print("[NotifSettings] ❌ toggleFriendActivityMute failed: \(error)")
                 await MainActor.run {
                     let reverted = FriendNotificationSetting(
                         friend_id: friendId,
