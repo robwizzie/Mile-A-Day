@@ -17,10 +17,9 @@ Gamified fitness app: run a mile every day, build streaks, compete with friends.
 - No test runner configured
 
 ### Website (`cd website`)
-- Dev: `pnpm dev`
-- Build: `pnpm build`
-- Lint: `pnpm lint`
-- Uses pnpm, NOT npm
+- Dev: `npm run dev`
+- Build: `npm run build`
+- Lint: `npm run lint`
 
 ### iOS (`app/`)
 - Build via Xcode only. Do not attempt `xcodebuild` from CLI.
@@ -39,7 +38,7 @@ Gamified fitness app: run a mile every day, build streaks, compete with friends.
 3. **JWT uses `jose`** - Auth middleware uses `jwtVerify` from `jose`, NOT `jsonwebtoken`. The `jsonwebtoken` package is also installed but only used for token signing in some auth flows.
 4. **No migrations system** - Database schema changes are done manually against PostgreSQL. No ORM.
 5. **No CI/CD** - No automated tests or deployment pipeline. Be extra careful with changes.
-6. **No shared package manager** - Backend uses npm, website uses pnpm. No monorepo tooling.
+6. **No shared package manager** - Backend and website both use npm. No monorepo tooling.
 7. **`.claudeignore` excludes `project.pbxproj`** - This is intentional. Never ask to read it.
 
 ## Code Style

@@ -18,7 +18,7 @@ globs: website/**
 - Single page site: `page.tsx` composes section components in order.
 
 ## Package Manager
-Use `pnpm` for all operations. Do NOT use npm.
+Use `npm` for all operations.
 
 ## Tailwind CSS 4
 - No `tailwind.config.js` - Tailwind 4 uses CSS-based configuration.
