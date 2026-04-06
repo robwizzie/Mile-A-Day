@@ -6,8 +6,6 @@ struct StreakActiveView: View {
     let competition: Competition
     let selectedIntervalDate: Date
     @ObservedObject var competitionService: CompetitionService
-    @State private var showNudgeConfirm = false
-    @State private var nudgeTargetUser: CompetitionUser?
     @State private var showFlexConfirm = false
     @State private var isSendingAction = false
     @State private var actionFeedback: ActionFeedback?
@@ -78,16 +76,6 @@ struct StreakActiveView: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Send a notification to all competitors that you've completed your goal. Once per day.")
-        }
-        .confirmationDialog("Send a nudge?", isPresented: $showNudgeConfirm, titleVisibility: .visible) {
-            Button("Send Nudge") {
-                if let user = nudgeTargetUser { sendNudge(to: user) }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            if let user = nudgeTargetUser {
-                Text("Send \(user.displayName) a reminder to get their run in. Once per person per day.")
-            }
         }
         .overlay(alignment: .top) {
             if let feedback = actionFeedback {
@@ -352,20 +340,6 @@ struct StreakActiveView: View {
                     todayStatus(distance: distance, completed: completed)
                 }
 
-                // Nudge affordance for others
-                if !isMe && isToday && !completed {
-                    Button {
-                        nudgeTargetUser = user
-                        showNudgeConfirm = true
-                    } label: {
-                        Image(systemName: "bell.badge")
-                            .font(.system(size: 12))
-                            .foregroundColor(.orange)
-                            .frame(width: 30, height: 30)
-                            .background(Circle().fill(Color.orange.opacity(0.1)))
-                    }
-                    .buttonStyle(ScaleButtonStyle())
-                }
             }
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.vertical, 10)
@@ -572,25 +546,6 @@ struct StreakActiveView: View {
         }
     }
 
-    private func sendNudge(to user: CompetitionUser) {
-        isSendingAction = true
-        Task {
-            do {
-                try await competitionService.sendNudge(competitionId: competition.competition_id, targetUserId: user.user_id)
-                await MainActor.run {
-                    isSendingAction = false
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    showFeedback(ActionFeedback(icon: "bell.badge.fill", message: "Nudge sent to \(user.displayName)!", isError: false))
-                }
-            } catch {
-                await MainActor.run {
-                    isSendingAction = false
-                    let msg = (error as? CompetitionServiceError)?.errorDescription ?? "Could not send nudge"
-                    showFeedback(ActionFeedback(icon: "xmark.circle", message: msg, isError: true))
-                }
-            }
-        }
-    }
 
     private func showFeedback(_ feedback: ActionFeedback) {
         withAnimation(.easeInOut(duration: 0.2)) { actionFeedback = feedback }

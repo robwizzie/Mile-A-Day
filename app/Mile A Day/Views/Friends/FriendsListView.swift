@@ -555,12 +555,13 @@ struct FriendsListView: View {
                 await MainActor.run {
                     nudgingFriendId = nil
                     FlexNudgeTracker.markFriendNudgeSent(friendId: friend.user_id)
-                    // Update local status
+                    // Update local status — preserve existing miles/completion
+                    let existing = nudgeStatuses[friend.user_id]
                     nudgeStatuses[friend.user_id] = NudgeStatusResponse(
                         can_nudge: false,
-                        has_completed_mile: false,
+                        has_completed_mile: existing?.has_completed_mile ?? false,
                         already_nudged_today: true,
-                        today_miles: nil
+                        today_miles: existing?.today_miles
                     )
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     showNudgeFeedback(NudgeFeedback(
