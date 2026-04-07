@@ -8,7 +8,8 @@ import SwiftUI
 struct BadgeUnlockCelebrationView: View {
     let badge: Badge
     @ObservedObject var manager = CelebrationManager.shared
-    
+    @Environment(\.scenePhase) private var scenePhase
+
     // Animation states
     @State private var overlayOpacity: Double = 0
     @State private var showMedal = false
@@ -20,6 +21,7 @@ struct BadgeUnlockCelebrationView: View {
     @State private var showConfetti = false
     @State private var showContent = false
     @State private var showButtons = false
+    @State private var hasStartedAnimation: Bool = false
     
     // Haptic generators
     private let impactGenerator = UIImpactFeedbackGenerator(style: .heavy)
@@ -321,11 +323,23 @@ struct BadgeUnlockCelebrationView: View {
             .ignoresSafeArea()
             .opacity(overlayOpacity)
             .onAppear {
-                startCelebrationSequence()
+                startAnimationIfActive()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active && !hasStartedAnimation {
+                    startAnimationIfActive()
+                }
             }
         }
     }
-    
+
+    private func startAnimationIfActive() {
+        guard !hasStartedAnimation else { return }
+        guard scenePhase == .active else { return }
+        hasStartedAnimation = true
+        startCelebrationSequence()
+    }
+
     // MARK: - Background View
     
     private var badgeBackgroundView: some View {

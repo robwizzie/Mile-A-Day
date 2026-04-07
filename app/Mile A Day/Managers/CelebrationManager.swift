@@ -302,7 +302,11 @@ class CelebrationManager: ObservableObject {
     @Published var currentCelebration: CelebrationType?
     @Published var isShowingCelebration = false
     @Published var pendingAction: CelebrationDismissAction = .none
-    
+
+    /// Whether the app is currently in the foreground and visible to the user.
+    /// Celebrations are deferred until this is true so animations aren't wasted in the background.
+    @Published var appIsActive: Bool = true
+
     /// Tracks whether goal completion has been shown today (to prevent duplicates)
     @AppStorage("lastGoalCelebrationDate") private var lastGoalCelebrationDateString: String = ""
 
@@ -338,8 +342,9 @@ class CelebrationManager: ObservableObject {
                 print("[CelebrationManager] ⏭️  Goal celebration already shown today (\(lastGoalCelebrationDateString)), skipping")
                 return
             }
-            print("[CelebrationManager] ✅ Goal celebration will be shown (last shown: \(lastGoalCelebrationDateString.isEmpty ? "never" : lastGoalCelebrationDateString), today: \(formatDate(Date())))")
-            markGoalCelebrationShown()
+            print("[CelebrationManager] ✅ Goal celebration queued (last shown: \(lastGoalCelebrationDateString.isEmpty ? "never" : lastGoalCelebrationDateString), today: \(formatDate(Date())))")
+            // Note: markGoalCelebrationShown() is called in showNextCelebration() when it's actually displayed,
+            // not here, to prevent marking as "shown" while the app is in the background.
         }
 
         // Avoid duplicates in queue
@@ -356,7 +361,7 @@ class CelebrationManager: ObservableObject {
         celebrationQueue.append(celebration)
         celebrationQueue.sort { priority(of: $0) < priority(of: $1) }
 
-        // If nothing is currently showing, show the next one
+        // If nothing is currently showing and app is active, show the next one
         if !isShowingCelebration {
             showNextCelebration()
         }
@@ -404,12 +409,36 @@ class CelebrationManager: ObservableObject {
         }
     }
 
-    /// Show the next celebration in the queue
+    /// Show the next celebration in the queue (only when app is active/visible)
     private func showNextCelebration() {
         guard !celebrationQueue.isEmpty else { return }
+        guard appIsActive else {
+            print("[CelebrationManager] ⏸️ App is not active, deferring celebration until foreground")
+            return
+        }
 
-        currentCelebration = celebrationQueue.removeFirst()
+        let next = celebrationQueue.removeFirst()
+
+        // Mark goal celebration as shown now that the user will actually see it
+        if case .goalCompleted = next {
+            markGoalCelebrationShown()
+        }
+
+        currentCelebration = next
         isShowingCelebration = true
+    }
+
+    /// Called when the app returns to the foreground. Resumes showing any queued celebrations.
+    func onAppBecameActive() {
+        appIsActive = true
+        if !isShowingCelebration {
+            showNextCelebration()
+        }
+    }
+
+    /// Called when the app goes to the background. Prevents new celebrations from being shown.
+    func onAppResignedActive() {
+        appIsActive = false
     }
 
     /// Clear all celebrations (useful for testing or reset)

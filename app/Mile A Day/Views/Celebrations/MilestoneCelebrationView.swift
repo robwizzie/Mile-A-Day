@@ -11,12 +11,14 @@ struct MilestoneCelebrationView: View {
     let icon: String
 
     @ObservedObject var manager = CelebrationManager.shared
+    @Environment(\.scenePhase) private var scenePhase
     @State private var scale: CGFloat = 0.5
     @State private var opacity: Double = 0
     @State private var iconRotation: Double = 0
     @State private var showBurst = false
     @State private var showStars = false
     @State private var showContent = false
+    @State private var hasStartedAnimation: Bool = false
 
     var body: some View {
         ZStack {
@@ -170,8 +172,20 @@ struct MilestoneCelebrationView: View {
         .ignoresSafeArea()
         .opacity(opacity)
         .onAppear {
-            animateIn()
+            startAnimationIfActive()
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active && !hasStartedAnimation {
+                startAnimationIfActive()
+            }
+        }
+    }
+
+    private func startAnimationIfActive() {
+        guard !hasStartedAnimation else { return }
+        guard scenePhase == .active else { return }
+        hasStartedAnimation = true
+        animateIn()
     }
 
     private func animateIn() {

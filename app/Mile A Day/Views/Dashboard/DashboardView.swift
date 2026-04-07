@@ -24,6 +24,7 @@ struct DashboardView: View {
     @State private var showInstructions = false
     @State private var showWorkoutUploadAlert = false
     @StateObject private var celebrationManager = CelebrationManager.shared
+    @Environment(\.scenePhase) private var scenePhase
     /// Controls presentation of the in‑progress workout tracking UI.
     @State private var showWorkoutView = false
     /// Whether to show a compact "Resume workout" banner when an in‑progress workout exists
@@ -417,6 +418,15 @@ struct DashboardView: View {
                     Text("Error: \(error)")
                 } else {
                     Text("Upload completed")
+                }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    celebrationManager.onAppBecameActive()
+                    // Re-check celebrations in case data changed while backgrounded
+                    checkAndShowGoalCelebration()
+                } else if newPhase == .background || newPhase == .inactive {
+                    celebrationManager.onAppResignedActive()
                 }
             }
             .onChange(of: healthManager.hasLoadedInitialData) { _, isLoaded in

@@ -4,6 +4,7 @@ import SwiftUI
 
 struct PostGoalEncouragementView: View {
     @ObservedObject var manager = CelebrationManager.shared
+    @Environment(\.scenePhase) private var scenePhase
     var stats: GoalCompletionStats
 
     // Phased animation states
@@ -17,6 +18,9 @@ struct PostGoalEncouragementView: View {
     @State private var confettiTrigger: Bool = false
     @State private var iconScale: CGFloat = 0.3
     @State private var glowOpacity: Double = 0
+
+    // Track whether the animation has already started
+    @State private var hasStartedAnimation: Bool = false
 
     private let impactMedium = UIImpactFeedbackGenerator(style: .medium)
     private let impactHeavy = UIImpactFeedbackGenerator(style: .heavy)
@@ -178,9 +182,25 @@ struct PostGoalEncouragementView: View {
             .ignoresSafeArea()
             .opacity(overlayOpacity)
             .onAppear {
-                startExtraMileSequence()
+                startAnimationIfActive()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active && !hasStartedAnimation {
+                    startAnimationIfActive()
+                }
             }
         }
+    }
+
+    /// Only start the animation sequence when the app is in the foreground
+    private func startAnimationIfActive() {
+        guard !hasStartedAnimation else { return }
+        guard scenePhase == .active else {
+            print("[ExtraMile] ⏸️ Deferring animation start until app is active")
+            return
+        }
+        hasStartedAnimation = true
+        startExtraMileSequence()
     }
 
     // MARK: - Background

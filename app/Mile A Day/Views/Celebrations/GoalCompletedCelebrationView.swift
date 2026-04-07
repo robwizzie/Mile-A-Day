@@ -10,6 +10,7 @@ import SwiftUI
 
 struct GoalCompletedCelebrationView: View {
     @ObservedObject var manager = CelebrationManager.shared
+    @Environment(\.scenePhase) private var scenePhase
     var stats: GoalCompletionStats = .placeholder
 
     // Phase 1: Flame Ignition
@@ -32,6 +33,9 @@ struct GoalCompletedCelebrationView: View {
     @State private var showStats: Bool = false
     @State private var showMotivation: Bool = false
     @State private var showButtons: Bool = false
+
+    // Track whether the animation has already started
+    @State private var hasStartedAnimation: Bool = false
 
     // Share - use Identifiable wrapper so .sheet(item:) works on first tap
     @State private var shareItem: ShareableImage? = nil
@@ -133,9 +137,25 @@ struct GoalCompletedCelebrationView: View {
             .ignoresSafeArea()
             .opacity(overlayOpacity)
             .onAppear {
-                startCelebrationSequence()
+                startAnimationIfActive()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active && !hasStartedAnimation {
+                    startAnimationIfActive()
+                }
             }
         }
+    }
+
+    /// Only start the animation sequence when the app is in the foreground
+    private func startAnimationIfActive() {
+        guard !hasStartedAnimation else { return }
+        guard scenePhase == .active else {
+            print("[GoalCelebration] ⏸️ Deferring animation start until app is active")
+            return
+        }
+        hasStartedAnimation = true
+        startCelebrationSequence()
     }
 
     // MARK: - Background
