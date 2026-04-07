@@ -138,6 +138,19 @@ struct CompetitionCard: View {
                                 )
                                 .font(MADTheme.Typography.caption)
                                 .foregroundColor(.white.opacity(0.5))
+
+                                Text("\u{00B7}")
+                                    .foregroundColor(.white.opacity(0.3))
+
+                                ForEach(competition.workouts, id: \.self) { activity in
+                                    HStack(spacing: 2) {
+                                        Image(systemName: activity.icon)
+                                            .font(.system(size: 8))
+                                        Text(activity.displayName)
+                                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                                    }
+                                    .foregroundColor(activity.color)
+                                }
                             }
                         }
 
@@ -746,9 +759,6 @@ struct CompetitionLeaderboardRow: View {
     let unit: CompetitionUnit
     let isCurrentUser: Bool
     var firstTo: Int = 0
-    var showNudge: Bool = false
-    var nudgeDisabled: Bool = false
-    var onNudge: (() -> Void)? = nil
 
     private var isEliminated: Bool {
         guard competitionType == .streaks, firstTo > 0 else { return false }
@@ -892,20 +902,6 @@ struct CompetitionLeaderboardRow: View {
                     .foregroundColor(.white.opacity(isEliminated ? 0.4 : 0.9))
             }
 
-            // Nudge button
-            if showNudge && !isCurrentUser && !isEliminated {
-                Button {
-                    onNudge?()
-                } label: {
-                    Image(systemName: nudgeDisabled ? "bell.slash.fill" : "bell.badge")
-                        .font(.system(size: 12))
-                        .foregroundColor(nudgeDisabled ? .white.opacity(0.15) : .orange)
-                        .frame(width: 30, height: 30)
-                        .background(Circle().fill(nudgeDisabled ? Color.white.opacity(0.03) : Color.orange.opacity(0.1)))
-                }
-                .buttonStyle(ScaleButtonStyle())
-                .disabled(nudgeDisabled)
-            }
         }
         .padding(MADTheme.Spacing.md)
         .background(
@@ -948,7 +944,9 @@ struct ActivityToggle: View {
             .padding(.vertical, MADTheme.Spacing.sm)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.pill)
-                    .fill(isSelected ? MADTheme.Colors.primaryGradient : LinearGradient(colors: [Color.white.opacity(0.1)], startPoint: .leading, endPoint: .trailing))
+                    .fill(isSelected
+                        ? LinearGradient(colors: [activity.color, activity.color.opacity(0.7)], startPoint: .leading, endPoint: .trailing)
+                        : LinearGradient(colors: [Color.white.opacity(0.1)], startPoint: .leading, endPoint: .trailing))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.pill)

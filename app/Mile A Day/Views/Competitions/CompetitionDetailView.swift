@@ -19,9 +19,7 @@ struct CompetitionDetailView: View {
     @State var heartsAnimated = false
     @State var raceAnimated = false
 
-    // Flex/Nudge state
-    @State var showNudgeConfirm = false
-    @State var nudgeTargetUser: CompetitionUser?
+    // Flex state
     @State var isSendingAction = false
     @State var actionFeedback: ActionFeedback?
 
@@ -37,6 +35,10 @@ struct CompetitionDetailView: View {
 
     // Hero count-up animation
     @State var heroAnimated = false
+
+    // Streak calendar
+    @State var streakCalendarMonth: Date = Date()
+    @State var selectedStreakDay: Date? = nil
 
     var body: some View {
         ZStack {

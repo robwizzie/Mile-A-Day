@@ -12,7 +12,6 @@ extension CompetitionDetailView {
             .filter { $0.invite_status == .accepted }
             .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
         let gradientColors = competition.type.gradient.map { Color(hex: $0) }
-        let todayKey = intervalKey(for: Date())
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             // Section header
@@ -46,12 +45,10 @@ extension CompetitionDetailView {
                         enhancedPodium(rankedUsers: Array(rankedUsers.prefix(3)), gradientColors: gradientColors, currentUserId: currentUserId)
                     }
 
-                    // Ranked rows with nudge
+                    // Ranked rows
                     VStack(spacing: MADTheme.Spacing.sm) {
                         ForEach(Array(rankedUsers.enumerated()), id: \.element.id) { index, user in
                             let isMe = user.user_id == currentUserId
-                            let showNudge = !isMe && shouldShowNudge(for: user, todayKey: todayKey)
-                            let nudgeDisabled = FlexNudgeTracker.hasSentNudgeToday(competitionId: competition.competition_id, targetUserId: user.user_id)
 
                             CompetitionLeaderboardRow(
                                 rank: index + 1,
@@ -59,13 +56,7 @@ extension CompetitionDetailView {
                                 competitionType: competition.type,
                                 unit: competition.options.unit,
                                 isCurrentUser: isMe,
-                                firstTo: competition.options.first_to,
-                                showNudge: showNudge,
-                                nudgeDisabled: nudgeDisabled,
-                                onNudge: {
-                                    nudgeTargetUser = user
-                                    showNudgeConfirm = true
-                                }
+                                firstTo: competition.options.first_to
                             )
                             .opacity(leaderboardAnimated ? 1 : 0)
                             .offset(y: leaderboardAnimated ? 0 : 15)
@@ -301,7 +292,7 @@ extension CompetitionDetailView {
         case .clash:
             clashIntervalView(key: key, users: acceptedUsers, currentUserId: currentUserId)
         case .streaks:
-            streaksIntervalView(key: key, users: acceptedUsers, currentUserId: currentUserId)
+            EmptyView()
         case .apex:
             apexIntervalView(key: key, users: acceptedUsers, currentUserId: currentUserId)
         case .targets:
@@ -383,278 +374,318 @@ extension CompetitionDetailView {
         }
     }
 
-    // MARK: - Streaks Interval View
-    func streaksIntervalView(key: String, users: [CompetitionUser], currentUserId: String?) -> some View {
+    // MARK: - Streak Month View
+    var streakCalendarStrip: some View {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let acceptedUsers = competition.users.filter { $0.invite_status == .accepted }
+        let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
+        let currentUser = acceptedUsers.first(where: { $0.user_id == currentUserId })
         let goal = competition.options.goal
-        let firstTo = competition.options.first_to
+        // Parse start_date as a local calendar date (not UTC) to avoid timezone shift
+        let compStart: Date = {
+            guard let dateStr = competition.start_date else { return today }
+            let parts = dateStr.prefix(10).split(separator: "-")
+            guard parts.count == 3,
+                  let year = Int(parts[0]),
+                  let month = Int(parts[1]),
+                  let day = Int(parts[2]) else { return today }
+            var comps = DateComponents()
+            comps.year = year
+            comps.month = month
+            comps.day = day
+            return calendar.date(from: comps) ?? today
+        }()
 
-        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            // Section header
+        let monthStart: Date = {
+            var comps = calendar.dateComponents([.year, .month], from: streakCalendarMonth)
+            comps.day = 1
+            return calendar.date(from: comps) ?? today
+        }()
+
+        let daysInMonth = calendar.range(of: .day, in: .month, for: monthStart)?.count ?? 30
+        let firstWeekday = calendar.component(.weekday, from: monthStart)
+        let leadingBlanks = (firstWeekday - calendar.firstWeekday + 7) % 7
+
+        let formatter: ISO8601DateFormatter = {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [.withFullDate]
+            return f
+        }()
+
+        let monthName = monthStart.formatted(.dateTime.month(.wide).year())
+        let weekdaySymbols = calendar.veryShortWeekdaySymbols
+        let reorderedWeekdays: [String] = {
+            let start = calendar.firstWeekday - 1
+            return Array(weekdaySymbols[start...]) + Array(weekdaySymbols[..<start])
+        }()
+
+        // Can navigate back if comp started before this month
+        let compStartMonth: Date = {
+            var comps = calendar.dateComponents([.year, .month], from: compStart)
+            comps.day = 1
+            return calendar.date(from: comps) ?? compStart
+        }()
+        let canGoBack = monthStart > compStartMonth
+
+        // Can navigate forward only if not already showing the current month
+        let todayMonth: Date = {
+            var comps = calendar.dateComponents([.year, .month], from: today)
+            comps.day = 1
+            return calendar.date(from: comps) ?? today
+        }()
+        let canGoForward = monthStart < todayMonth
+
+        return VStack(spacing: MADTheme.Spacing.md) {
+            // Month header with navigation arrows
             HStack {
-                Text("Streak Status")
-                    .font(MADTheme.Typography.title3)
-                    .foregroundColor(.white)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        streakCalendarMonth = calendar.date(byAdding: .month, value: -1, to: streakCalendarMonth) ?? streakCalendarMonth
+                        selectedStreakDay = nil
+                    }
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(canGoBack ? .white.opacity(0.6) : .white.opacity(0.15))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!canGoBack)
 
                 Spacer()
 
-                if firstTo > 0 {
-                    HStack(spacing: 5) {
-                        Image(systemName: "heart.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(.red)
-                            .shadow(color: .red.opacity(0.5), radius: 2)
-                        Text("\(firstTo) \(firstTo == 1 ? "life" : "lives") each")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundColor(.white.opacity(0.5))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        Capsule()
-                            .fill(Color.white.opacity(0.06))
-                    )
-                }
-            }
-            .padding(.horizontal, MADTheme.Spacing.sm)
+                Text(monthName)
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
 
-            VStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(users, id: \.id) { user in
-                    let distance = user.intervals?[key] ?? 0
+                Spacer()
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        streakCalendarMonth = calendar.date(byAdding: .month, value: 1, to: streakCalendarMonth) ?? streakCalendarMonth
+                        selectedStreakDay = nil
+                    }
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(canGoForward ? .white.opacity(0.6) : .white.opacity(0.15))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!canGoForward)
+            }
+
+            // Weekday headers + day grid
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 7), spacing: 2) {
+                ForEach(reorderedWeekdays, id: \.self) { day in
+                    Text(day)
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.3))
+                        .frame(height: 16)
+                }
+
+                ForEach(0..<leadingBlanks, id: \.self) { _ in
+                    Color.clear.frame(height: 32)
+                }
+
+                ForEach(1...daysInMonth, id: \.self) { day in
+                    let date: Date = {
+                        var comps = calendar.dateComponents([.year, .month], from: monthStart)
+                        comps.day = day
+                        return calendar.date(from: comps) ?? today
+                    }()
+                    let isTodayDate = calendar.isDateInToday(date)
+                    let isFuture = date > today
+                    let isBeforeComp = date < compStart
+                    let isInCompRange = !isBeforeComp && !isFuture
+                    let dayKey = formatter.string(from: calendar.startOfDay(for: date))
+                    let distance = currentUser?.intervals?[dayKey] ?? 0
                     let completed = distance >= goal
-                    let isToday = Calendar.current.isDateInToday(selectedIntervalDate)
-                    let missed = missedDates(for: user)
+                    let missed = isInCompRange && !isTodayDate && !completed
+                    let isSelected = selectedStreakDay.map { calendar.isDate($0, inSameDayAs: date) } ?? false
 
-                    // Use server-provided remaining_lives when available, fall back to local calculation
-                    let heartsRemaining: Int = {
-                        if let serverLives = user.remaining_lives {
-                            return max(0, serverLives)
-                        } else if firstTo > 0 {
-                            return max(0, firstTo - min(missed.count, firstTo))
-                        }
-                        return 0
-                    }()
-                    let livesLost: Int = {
-                        if firstTo > 0 {
-                            if let serverLives = user.remaining_lives {
-                                return max(0, firstTo - serverLives)
-                            }
-                            return min(missed.count, firstTo)
-                        }
-                        return 0
-                    }()
-                    let isEliminated: Bool = {
-                        if firstTo > 0 {
-                            if let serverLives = user.remaining_lives {
-                                return serverLives <= 0
-                            }
-                            return missed.count >= firstTo
-                        }
-                        return false
-                    }()
-
-                    VStack(spacing: MADTheme.Spacing.sm) {
-                        // Main user info row
-                        HStack(spacing: MADTheme.Spacing.md) {
-                            // Avatar with status ring
-                            ZStack {
-                                AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 42)
-                                    .opacity(isEliminated ? 0.5 : 1.0)
-                                    .overlay(
-                                        Circle()
-                                            .stroke(
-                                                LinearGradient(
-                                                    colors: isEliminated ? [Color.red.opacity(0.3), Color.red.opacity(0.1)] :
-                                                        (completed ? [Color.green.opacity(0.8), Color.green.opacity(0.4)] :
-                                                        (isToday ? [Color.orange.opacity(0.6), Color.yellow.opacity(0.3)] :
-                                                        [Color.red.opacity(0.6), Color.red.opacity(0.3)])),
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                ),
-                                                lineWidth: 2.5
-                                            )
-                                    )
-
-                                // Small status badge
-                                if !isEliminated {
-                                    ZStack {
-                                        Circle()
-                                            .fill(completed ? Color.green : (isToday ? Color.orange : Color.red))
-                                            .frame(width: 16, height: 16)
-                                        Image(systemName: completed ? "checkmark" : (isToday ? "figure.run" : "xmark"))
-                                            .font(.system(size: 8, weight: .bold))
-                                            .foregroundColor(.white)
-                                    }
-                                    .offset(x: 15, y: 15)
-                                }
-                            }
-
-                            // Name + status text
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack(spacing: MADTheme.Spacing.xs) {
-                                    Text(user.displayName)
-                                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                                        .foregroundColor(.white.opacity(isEliminated ? 0.4 : 1.0))
-
-                                    if isEliminated {
-                                        Text("OUT")
-                                            .font(.system(size: 8, weight: .heavy, design: .rounded))
-                                            .foregroundColor(.white.opacity(0.8))
-                                            .padding(.horizontal, 6)
-                                            .padding(.vertical, 2)
-                                            .background(
-                                                Capsule()
-                                                    .fill(Color.red.opacity(0.5))
-                                            )
-                                    }
-                                }
-
-                                if !isEliminated {
-                                    if completed {
-                                        HStack(spacing: 4) {
-                                            Text("\(String(format: "%.1f", distance)) \(competition.options.unit.shortDisplayName)")
-                                                .foregroundColor(.green)
-                                            if distance > goal {
-                                                Text("+\(String(format: "%.1f", distance - goal))")
-                                                    .foregroundColor(.green.opacity(0.5))
-                                            }
-                                        }
-                                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                                    } else if isToday {
-                                        HStack(spacing: 4) {
-                                            Text("\(String(format: "%.1f", distance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
-                                                .font(.system(size: 12, weight: .medium, design: .rounded))
-                                                .foregroundColor(.white.opacity(0.6))
-                                        }
-                                    } else {
-                                        Text("Missed")
-                                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                                            .foregroundColor(.red.opacity(0.6))
-                                    }
+                    Button {
+                        if isInCompRange || isTodayDate {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                if isSelected {
+                                    selectedStreakDay = nil
                                 } else {
-                                    if !missed.isEmpty {
-                                        Text("Eliminated \(formatBreakDate(missed.last!))")
-                                            .font(.system(size: 11, design: .rounded))
-                                            .foregroundColor(.white.opacity(0.25))
-                                    }
+                                    selectedStreakDay = date
                                 }
-                            }
-
-                            Spacer()
-
-                            // Streak counter - more prominent
-                            VStack(spacing: 2) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "flame.fill")
-                                        .font(.system(size: 15))
-                                        .foregroundColor(isEliminated ? .gray.opacity(0.3) : .orange)
-                                        .shadow(color: isEliminated ? .clear : .orange.opacity(0.4), radius: 4)
-                                    Text("\(Int(user.score ?? 0))")
-                                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                                        .foregroundColor(.white.opacity(isEliminated ? 0.3 : 1.0))
-                                }
-                                Text("day streak")
-                                    .font(.system(size: 9, weight: .medium, design: .rounded))
-                                    .foregroundColor(.white.opacity(isEliminated ? 0.2 : 0.35))
                             }
                         }
-
-                        // Lives row - clean capsule style
-                        if firstTo > 0 {
-                            HStack(spacing: 5) {
-                                ForEach(0..<firstTo, id: \.self) { i in
-                                    let isAlive = i < heartsRemaining
-
-                                    Image(systemName: isAlive ? "heart.fill" : "heart")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(isAlive ? .red : .white.opacity(0.15))
-                                        .shadow(color: isAlive ? .red.opacity(0.3) : .clear, radius: 3)
-                                        .scaleEffect(heartsAnimated ? 1.0 : 0.1)
-                                        .opacity(heartsAnimated ? 1.0 : 0)
-                                        .animation(
-                                            .spring(response: 0.35, dampingFraction: isAlive ? 0.55 : 0.3)
-                                            .delay(Double(i) * 0.07),
-                                            value: heartsAnimated
-                                        )
-                                }
-
-                                Spacer()
-
-                                if isEliminated {
-                                    Text("No lives remaining")
-                                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                                        .foregroundColor(.red.opacity(0.4))
-                                } else if livesLost > 0 {
-                                    Text("\(heartsRemaining) remaining")
-                                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                                        .foregroundColor(.white.opacity(0.3))
-                                }
+                    } label: {
+                        ZStack {
+                            if isBeforeComp || isFuture {
+                                Text("\(day)")
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.1))
+                            } else if completed {
+                                Circle()
+                                    .fill(Color.green.opacity(isSelected ? 0.9 : 0.65))
+                                    .frame(width: 28, height: 28)
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.white)
+                            } else if isTodayDate {
+                                Circle()
+                                    .fill(Color.orange.opacity(isSelected ? 0.9 : 0.7))
+                                    .frame(width: 28, height: 28)
+                                Text("\(day)")
+                                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                            } else if missed {
+                                Circle()
+                                    .fill(Color.red.opacity(isSelected ? 0.4 : 0.25))
+                                    .frame(width: 28, height: 28)
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.red.opacity(0.7))
+                            } else {
+                                Text("\(day)")
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.4))
                             }
-                            .padding(.top, 2)
                         }
+                        .frame(height: 32)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(isSelected ? Color.white.opacity(0.4) : (isTodayDate ? Color.orange.opacity(0.5) : .clear), lineWidth: 1.5)
+                        )
                     }
-                    .padding(MADTheme.Spacing.md)
-                    .background(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .fill(Color.white.opacity(
-                                isEliminated ? 0.02 : (user.user_id == currentUserId ? 0.08 : 0.03)
-                            ))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                    .stroke(
-                                        isEliminated
-                                            ? LinearGradient(
-                                                colors: [Color.red.opacity(0.15), Color.red.opacity(0.05)],
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                              )
-                                            : (user.user_id == currentUserId
-                                                ? LinearGradient(colors: [MADTheme.Colors.primary.opacity(0.6), MADTheme.Colors.primary.opacity(0.2)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                                                : LinearGradient(colors: [Color.white.opacity(0.06), Color.white.opacity(0.02)], startPoint: .topLeading, endPoint: .bottomTrailing)),
-                                        lineWidth: 1
-                                    )
-                            )
-                    )
-                    .opacity(isEliminated ? 0.55 : 1.0)
+                    .buttonStyle(.plain)
+                    .disabled(isBeforeComp || isFuture)
                 }
             }
-            .padding(MADTheme.Spacing.lg)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(
-                                LinearGradient(
-                                    colors: competition.type.gradient.map { Color(hex: $0).opacity(0.3) } + [Color.clear],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
-                    )
-            )
-        }
-        .onAppear {
-            heartsAnimated = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
-                    heartsAnimated = true
-                }
+
+            // Day detail panel
+            if let selected = selectedStreakDay {
+                streakDayDetail(date: selected, users: acceptedUsers, goal: goal, formatter: formatter)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
+
+            // Legend
+            HStack(spacing: MADTheme.Spacing.lg) {
+                legendItem(color: .green, label: "Completed")
+                legendItem(color: .orange, label: "Today")
+                legendItem(color: .red, label: "Missed")
+            }
+            .padding(.top, MADTheme.Spacing.xs)
         }
+        .padding(MADTheme.Spacing.lg)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                )
+        )
     }
 
-    /// Formats an ISO8601 date key (e.g. "2026-02-20") into a readable label (e.g. "Feb 20")
-    func formatBreakDate(_ isoKey: String) -> String {
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withFullDate]
-        isoFormatter.timeZone = TimeZone(identifier: "UTC")!
-        guard let date = isoFormatter.date(from: isoKey) else { return isoKey }
+    // MARK: - Day Detail Panel
+    func streakDayDetail(date: Date, users: [CompetitionUser], goal: Double, formatter: ISO8601DateFormatter) -> some View {
+        let calendar = Calendar.current
+        let dayKey = formatter.string(from: calendar.startOfDay(for: date))
+        let isTodayDate = calendar.isDateInToday(date)
+        let dateLabel = isTodayDate ? "Today" : date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
 
-        let displayFormatter = DateFormatter()
-        displayFormatter.dateFormat = "MMM d"
-        displayFormatter.timeZone = TimeZone(identifier: "UTC")!
-        return displayFormatter.string(from: date)
+        return VStack(spacing: MADTheme.Spacing.sm) {
+            // Date header
+            HStack {
+                Text(dateLabel)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.8))
+                Spacer()
+                Text("Goal: \(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+
+            // Each user's status for this day
+            ForEach(users, id: \.id) { user in
+                let distance = user.intervals?[dayKey] ?? 0
+                let completed = distance >= goal
+
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 26)
+                        .overlay(
+                            Circle().stroke(completed ? Color.green.opacity(0.6) : Color.red.opacity(0.3), lineWidth: 1.5)
+                        )
+
+                    Text(user.displayName)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.8))
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    if completed {
+                        HStack(spacing: 3) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(.green)
+                            Text("\(String(format: "%.1f", distance)) \(competition.options.unit.shortDisplayName)")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundColor(.green)
+                        }
+                    } else if isTodayDate && distance > 0 {
+                        Text("\(String(format: "%.1f", distance))/\(competition.options.goalFormatted)")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundColor(.orange)
+                    } else if isTodayDate {
+                        Text("Not yet")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.3))
+                    } else {
+                        HStack(spacing: 3) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundColor(.red.opacity(0.6))
+                            if distance > 0 {
+                                Text("\(String(format: "%.1f", distance)) \(competition.options.unit.shortDisplayName)")
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .foregroundColor(.red.opacity(0.6))
+                            } else {
+                                Text("Missed")
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .foregroundColor(.red.opacity(0.5))
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 3)
+            }
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
+    }
+
+    func legendItem(color: Color, icon: String? = nil, label: String) -> some View {
+        HStack(spacing: 4) {
+            if let icon = icon {
+                Image(systemName: icon)
+                    .font(.system(size: 8))
+                    .foregroundColor(color.opacity(0.7))
+            } else {
+                Circle()
+                    .fill(color.opacity(0.65))
+                    .frame(width: 8, height: 8)
+            }
+            Text(label)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.4))
+        }
     }
 
     // MARK: - Apex Interval View
@@ -968,44 +999,6 @@ extension CompetitionDetailView {
     }
 
     // MARK: - Streak Helpers
-
-    /// Returns the ISO8601 date keys for days where the user failed to meet the goal.
-    /// Only counts completed past days — the current day is never included.
-    func missedDates(for user: CompetitionUser) -> [String] {
-        guard let startDateStr = competition.start_date else { return [] }
-        let intervals = user.intervals ?? [:]
-        let goal = competition.options.goal
-
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withFullDate]
-        formatter.timeZone = TimeZone(identifier: "UTC")!
-
-        guard let startDate = formatter.date(from: startDateStr) else { return [] }
-
-        var utcCalendar = Calendar(identifier: .gregorian)
-        utcCalendar.timeZone = TimeZone(identifier: "UTC")!
-
-        let todayUTC = utcCalendar.startOfDay(for: Date())
-        var currentDate = utcCalendar.startOfDay(for: startDate)
-        var missed: [String] = []
-
-        // Only check completed past days — stop before today
-        while currentDate < todayUTC {
-            let key = formatter.string(from: currentDate)
-            let distance = intervals[key] ?? 0
-            if distance < goal {
-                missed.append(key)
-            }
-            guard let nextDate = utcCalendar.date(byAdding: .day, value: 1, to: currentDate) else { break }
-            currentDate = nextDate
-        }
-
-        return missed
-    }
-
-    func missCount(for user: CompetitionUser) -> Int {
-        return missedDates(for: user).count
-    }
 
     // MARK: - Interval Helpers
     func intervalKey(for date: Date) -> String {

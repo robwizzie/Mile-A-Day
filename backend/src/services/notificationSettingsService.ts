@@ -51,34 +51,42 @@ export async function updateNotificationPreferences(
 	userId: string,
 	prefs: Partial<NotificationPreferences>
 ): Promise<NotificationPreferences> {
-	await db.query(
-		`INSERT INTO notification_settings (
-			user_id, nudges_enabled, flexes_enabled, friend_activity_enabled,
-			competition_invites_enabled, competition_updates_enabled,
-			competition_milestones_enabled, quiet_hours_start, quiet_hours_end
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (user_id) DO UPDATE SET
-			nudges_enabled = COALESCE($2, notification_settings.nudges_enabled),
-			flexes_enabled = COALESCE($3, notification_settings.flexes_enabled),
-			friend_activity_enabled = COALESCE($4, notification_settings.friend_activity_enabled),
-			competition_invites_enabled = COALESCE($5, notification_settings.competition_invites_enabled),
-			competition_updates_enabled = COALESCE($6, notification_settings.competition_updates_enabled),
-			competition_milestones_enabled = COALESCE($7, notification_settings.competition_milestones_enabled),
-			quiet_hours_start = COALESCE($8, notification_settings.quiet_hours_start),
-			quiet_hours_end = COALESCE($9, notification_settings.quiet_hours_end),
-			updated_at = NOW()`,
-		[
-			userId,
-			prefs.nudges_enabled ?? null,
-			prefs.flexes_enabled ?? null,
-			prefs.friend_activity_enabled ?? null,
-			prefs.competition_invites_enabled ?? null,
-			prefs.competition_updates_enabled ?? null,
-			prefs.competition_milestones_enabled ?? null,
-			prefs.quiet_hours_start ?? null,
-			prefs.quiet_hours_end ?? null,
-		]
-	);
+	// Build SET clauses dynamically so we only update fields that were explicitly provided.
+	// This avoids the COALESCE problem where null can't be distinguished from "not provided".
+	const setClauses: string[] = [];
+	const values: any[] = [userId];
+	let paramIdx = 2;
+
+	const fields: { key: keyof NotificationPreferences; value: any }[] = [
+		{ key: 'nudges_enabled', value: prefs.nudges_enabled },
+		{ key: 'flexes_enabled', value: prefs.flexes_enabled },
+		{ key: 'friend_activity_enabled', value: prefs.friend_activity_enabled },
+		{ key: 'competition_invites_enabled', value: prefs.competition_invites_enabled },
+		{ key: 'competition_updates_enabled', value: prefs.competition_updates_enabled },
+		{ key: 'competition_milestones_enabled', value: prefs.competition_milestones_enabled },
+		{ key: 'quiet_hours_start', value: prefs.quiet_hours_start },
+		{ key: 'quiet_hours_end', value: prefs.quiet_hours_end },
+	];
+
+	for (const field of fields) {
+		if (field.value !== undefined) {
+			setClauses.push(`${field.key} = $${paramIdx}`);
+			values.push(field.value ?? null);
+			paramIdx++;
+		}
+	}
+
+	if (setClauses.length > 0) {
+		// Ensure row exists with defaults, then update only the provided fields
+		await db.query(
+			`INSERT INTO notification_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+			[userId]
+		);
+		await db.query(
+			`UPDATE notification_settings SET ${setClauses.join(', ')}, updated_at = NOW() WHERE user_id = $1`,
+			values
+		);
+	}
 
 	return getNotificationPreferences(userId);
 }
@@ -116,22 +124,39 @@ export async function updateFriendNotificationSettings(
 	friendId: string,
 	settings: { muted?: boolean; nudges_muted?: boolean; activity_muted?: boolean }
 ): Promise<FriendNotificationSettings> {
+	// Ensure a row exists with defaults, then update only the provided fields.
+	// This avoids NOT NULL violations when only one field is sent (e.g. just "muted").
 	await db.query(
-		`INSERT INTO friend_notification_settings (user_id, friend_id, muted, nudges_muted, activity_muted)
-		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (user_id, friend_id) DO UPDATE SET
-			muted = COALESCE($3, friend_notification_settings.muted),
-			nudges_muted = COALESCE($4, friend_notification_settings.nudges_muted),
-			activity_muted = COALESCE($5, friend_notification_settings.activity_muted),
-			updated_at = NOW()`,
-		[
-			userId,
-			friendId,
-			settings.muted ?? null,
-			settings.nudges_muted ?? null,
-			settings.activity_muted ?? null,
-		]
+		`INSERT INTO friend_notification_settings (user_id, friend_id)
+		VALUES ($1, $2)
+		ON CONFLICT DO NOTHING`,
+		[userId, friendId]
 	);
+
+	const setClauses: string[] = [];
+	const values: any[] = [userId, friendId];
+	let paramIdx = 3;
+
+	if (settings.muted !== undefined) {
+		setClauses.push(`muted = $${paramIdx++}`);
+		values.push(settings.muted);
+	}
+	if (settings.nudges_muted !== undefined) {
+		setClauses.push(`nudges_muted = $${paramIdx++}`);
+		values.push(settings.nudges_muted);
+	}
+	if (settings.activity_muted !== undefined) {
+		setClauses.push(`activity_muted = $${paramIdx++}`);
+		values.push(settings.activity_muted);
+	}
+
+	if (setClauses.length > 0) {
+		await db.query(
+			`UPDATE friend_notification_settings SET ${setClauses.join(', ')}, updated_at = NOW()
+			WHERE user_id = $1 AND friend_id = $2`,
+			values
+		);
+	}
 
 	const rows = await db.query(
 		`SELECT fns.friend_id, fns.muted, fns.nudges_muted, fns.activity_muted, u.username

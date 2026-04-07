@@ -338,17 +338,15 @@ extension CompetitionDetailView {
     }
 
     // MARK: - Info Section (shared)
-    var infoSection: some View {
+    var infoContent: some View {
         VStack(spacing: MADTheme.Spacing.md) {
             // Type-specific settings
             switch competition.type {
             case .apex:
-                // Unit + Duration
                 InfoRow(icon: "ruler", title: "Unit", value: competition.options.unit.displayName)
                 durationRow
 
             case .streaks:
-                // Goal + Unit, Interval, Lives
                 InfoRow(
                     icon: "target",
                     title: "Goal",
@@ -362,7 +360,6 @@ extension CompetitionDetailView {
                 }
 
             case .targets:
-                // Goal + Unit, Interval, Lives, Duration
                 InfoRow(
                     icon: "target",
                     title: "Goal",
@@ -377,7 +374,6 @@ extension CompetitionDetailView {
                 durationRow
 
             case .clash:
-                // Unit, Points to Win, Interval
                 InfoRow(icon: "ruler", title: "Unit", value: competition.options.unit.displayName)
                 if competition.options.first_to > 0 {
                     InfoRow(icon: "star", title: "Points to Win", value: "\(competition.options.first_to)")
@@ -387,7 +383,6 @@ extension CompetitionDetailView {
                 }
 
             case .race:
-                // Goal + Unit
                 InfoRow(
                     icon: "target",
                     title: "Goal",
@@ -395,31 +390,30 @@ extension CompetitionDetailView {
                 )
             }
 
-            // Activities (all types)
-            InfoRow(
-                icon: "figure.run",
-                title: "Activities",
-                value: competition.workouts.map { $0.displayName }.joined(separator: ", ")
-            )
-
+            // Activities (all types) — colored pills
+            ActivitiesInfoRow(activities: competition.workouts)
         }
-        .padding(MADTheme.Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .stroke(
-                            LinearGradient(
-                                colors: [Color.white.opacity(0.2), Color.clear],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                )
-        )
-        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+    }
+
+    var infoSection: some View {
+        infoContent
+            .padding(MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.2), Color.clear],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
+                    )
+            )
+            .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
     }
 
     @ViewBuilder
@@ -470,7 +464,10 @@ extension CompetitionDetailView {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.white)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
 
         ToolbarItem(placement: .navigationBarTrailing) {

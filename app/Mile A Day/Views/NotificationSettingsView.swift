@@ -423,6 +423,25 @@ struct NotificationSettingsView: View {
             UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [MADNotificationService.Identifier.dailyReminder])
         }
 
+        // Sync preferences to the backend so push notification filtering works
+        Task {
+            do {
+                let backendSettings: [String: Any] = [
+                    "nudges_enabled": prefs.friendNudgeEnabled && prefs.competitionNudgeEnabled,
+                    "flexes_enabled": prefs.competitionFlexEnabled,
+                    "friend_activity_enabled": prefs.friendCompletedEnabled,
+                    "competition_invites_enabled": prefs.competitionInviteEnabled,
+                    "competition_updates_enabled": prefs.competitionAcceptedEnabled && prefs.competitionStartEnabled && prefs.competitionFinishEnabled,
+                    "competition_milestones_enabled": prefs.competitionMilestonesEnabled,
+                    "quiet_hours_start": prefs.dndEnabled ? prefs.dndStartHour : NSNull(),
+                    "quiet_hours_end": prefs.dndEnabled ? prefs.dndEndHour : NSNull(),
+                ]
+                _ = try await friendService.updateNotificationSettings(backendSettings)
+            } catch {
+                print("[NotifSettings] ❌ Failed to sync preferences to backend: \(error)")
+            }
+        }
+
         // Show feedback
         withAnimation(.easeInOut(duration: 0.2)) { savedFeedback = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {

@@ -28,6 +28,43 @@ struct InfoRow: View {
     }
 }
 
+// MARK: - Activities Info Row
+struct ActivitiesInfoRow: View {
+    let activities: [CompetitionActivity]
+
+    var body: some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            Image(systemName: "figure.run")
+                .font(.title3)
+                .foregroundColor(MADTheme.Colors.madRed)
+                .frame(width: 30)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Activities")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.7))
+
+                HStack(spacing: 6) {
+                    ForEach(activities, id: \.self) { activity in
+                        HStack(spacing: 4) {
+                            Image(systemName: activity.icon)
+                                .font(.system(size: 10))
+                            Text(activity.displayName)
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                        }
+                        .foregroundColor(activity.color)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Capsule().fill(activity.backgroundColor))
+                    }
+                }
+            }
+
+            Spacer()
+        }
+    }
+}
+
 // MARK: - Invite Friend View
 struct InviteFriendView: View {
     let competition: Competition
@@ -207,7 +244,6 @@ struct FriendInviteRow: View {
 // MARK: - Flex/Nudge Tracker
 struct FlexNudgeTracker {
     private static let flexPrefix = "flex_sent_"
-    private static let nudgePrefix = "nudge_sent_"
     private static let friendNudgePrefix = "friend_nudge_sent_"
 
     // Competition flex: per target user per day (across all competitions)
@@ -226,15 +262,6 @@ struct FlexNudgeTracker {
 
     static func markFlexSent(competitionId: String) {
         UserDefaults.standard.set(true, forKey: flexPrefix + "comp_" + competitionId + "_" + todayKey())
-    }
-
-    // Competition nudge
-    static func hasSentNudgeToday(competitionId: String, targetUserId: String) -> Bool {
-        UserDefaults.standard.bool(forKey: nudgePrefix + competitionId + "_" + targetUserId + "_" + todayKey())
-    }
-
-    static func markNudgeSent(competitionId: String, targetUserId: String) {
-        UserDefaults.standard.set(true, forKey: nudgePrefix + competitionId + "_" + targetUserId + "_" + todayKey())
     }
 
     // Friend nudge (from friends list, not competition)

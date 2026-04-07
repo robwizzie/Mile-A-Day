@@ -11,16 +11,16 @@ extension CompetitionDetailView {
             // 1. Compact hero status
             heroStatusSection
 
-            // 2. Enhanced leaderboard (podium + rows with nudge)
+            // 2. Flex section (always visible)
+            flexSection
+
+            // 3. Enhanced leaderboard (podium + rows)
             enhancedLeaderboard
 
-            // 3. Flex section (per-user flex with messages)
-            if hasFlexableUsers {
-                flexSection
-            }
-
             // 4. Mode-specific content
-            if competition.type != .race {
+            if competition.type == .streaks {
+                streakCalendarStrip
+            } else if competition.type != .race {
                 intervalNavigator
                 intervalContent
             } else {
@@ -30,19 +30,10 @@ extension CompetitionDetailView {
             // 5. Collapsible settings dropdown
             settingsDropdown
         }
-        .confirmationDialog("Send a nudge?", isPresented: $showNudgeConfirm, titleVisibility: .visible) {
-            Button("Send Nudge") {
-                if let user = nudgeTargetUser { sendNudge(to: user) }
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            if let user = nudgeTargetUser {
-                Text("Send \(user.displayName) a reminder to lace up and run. Once per person per day.")
-            }
-        }
         .overlay(alignment: .top) {
             if let feedback = actionFeedback {
                 feedbackBanner(feedback)
+                    .allowsHitTesting(false)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .zIndex(10)
             }
@@ -74,6 +65,10 @@ extension CompetitionDetailView {
 
             // Compact tracked activities + time remaining
             HStack(spacing: MADTheme.Spacing.sm) {
+                if competition.endDateFormatted == nil {
+                    Spacer()
+                }
+
                 ForEach(competition.workouts, id: \.self) { activity in
                     HStack(spacing: 4) {
                         Image(systemName: activity.icon)
@@ -81,15 +76,15 @@ extension CompetitionDetailView {
                         Text(activity.displayName)
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                     }
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(activity.color)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.white.opacity(0.06)))
+                    .background(Capsule().fill(activity.backgroundColor))
                 }
 
-                Spacer()
-
                 if let endDate = competition.endDateFormatted {
+                    Spacer()
+
                     let remaining = endDate.timeIntervalSince(Date())
                     let days = Int(remaining / 86400)
                     let hours = Int(remaining.truncatingRemainder(dividingBy: 86400) / 3600)
@@ -103,6 +98,8 @@ extension CompetitionDetailView {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
                     .background(Capsule().fill(Color.green.opacity(0.1)))
+                } else {
+                    Spacer()
                 }
             }
         }
@@ -403,6 +400,17 @@ extension CompetitionDetailView {
     }
 
     // MARK: - Flex Section
+    private var flexMotivationalMessages: [String] {
+        [
+            "Take the lead to flex on your opponents",
+            "Get ahead and show them who's boss",
+            "Outrun the competition to unlock flex",
+            "Lace up and take first — then talk trash",
+            "Lead the pack to earn bragging rights",
+            "One good run away from flexing on everyone"
+        ]
+    }
+
     var flexSection: some View {
         let typeColor = Color(hex: competition.type.gradient[0])
         let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
@@ -420,8 +428,18 @@ extension CompetitionDetailView {
             FlexNudgeTracker.hasSentFlexToday(targetUserId: user.user_id)
         }
 
+        let canFlex = !flexableUsers.isEmpty
+
+        // Pick a consistent motivational message based on competition ID (changes daily)
+        let messageIndex: Int = {
+            let daysSinceEpoch = Int(Date().timeIntervalSince1970 / 86400)
+            let hash = abs(competition.competition_id.hashValue &+ daysSinceEpoch)
+            return hash % flexMotivationalMessages.count
+        }()
+
         return VStack(spacing: MADTheme.Spacing.sm) {
-            if !flexableUsers.isEmpty {
+            if canFlex {
+                // User is leading — show flex options
                 VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                     HStack(spacing: MADTheme.Spacing.xs) {
                         Image(systemName: "hand.raised.fill")
@@ -444,9 +462,8 @@ extension CompetitionDetailView {
                         )
                     }
                 }
-            }
-
-            if !alreadyFlexed.isEmpty {
+            } else if !alreadyFlexed.isEmpty {
+                // Already flexed on everyone
                 HStack(spacing: MADTheme.Spacing.sm) {
                     Image(systemName: "hand.raised.fill")
                         .font(.system(size: 12))
@@ -464,41 +481,42 @@ extension CompetitionDetailView {
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                         .fill(Color.white.opacity(0.03))
                 )
+            } else {
+                // Not leading — show motivational teaser
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: "hand.raised.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(typeColor.opacity(0.4))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Flex")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.35))
+                        Text(flexMotivationalMessages[messageIndex])
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.25))
+                    }
+
+                    Spacer()
+
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 10))
+                        .foregroundColor(.white.opacity(0.15))
+                }
+                .padding(MADTheme.Spacing.md)
+                .background(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                        .fill(Color.white.opacity(0.02))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                .stroke(typeColor.opacity(0.08), lineWidth: 1)
+                        )
+                )
             }
         }
     }
 
-    // MARK: - Nudge Eligibility
-    func shouldShowNudge(for user: CompetitionUser, todayKey: String) -> Bool {
-        let distance = user.intervals?[todayKey] ?? 0
-        let goal = competition.options.goal
-
-        switch competition.type {
-        case .streaks, .targets:
-            return distance < goal
-        case .clash:
-            return true // Can always nudge opponents in clash
-        case .apex:
-            return distance == 0 // Nudge if they haven't run today
-        case .race:
-            return distance == 0 // Nudge if they haven't run today
-        }
-    }
-
-    // MARK: - Flex Eligibility
-    var hasFlexableUsers: Bool {
-        let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
-        let currentUser = competition.users.first(where: { $0.user_id == currentUserId })
-        let myScore = currentUser?.score ?? 0
-        let acceptedUsers = competition.users.filter { $0.invite_status == .accepted && $0.user_id != currentUserId }
-
-        return acceptedUsers.contains { user in
-            let theirScore = user.score ?? 0
-            return myScore > theirScore
-        }
-    }
-
-    // MARK: - Flex/Nudge Actions
+    // MARK: - Flex Actions
     func sendFlexToUser(_ user: CompetitionUser, message: String?, completion: ((Bool) -> Void)? = nil) {
         isSendingAction = true
         Task {
@@ -521,27 +539,6 @@ extension CompetitionDetailView {
                     let msg = (error as? CompetitionServiceError)?.errorDescription ?? "Could not send flex"
                     showActionFeedback(ActionFeedback(icon: "xmark.circle", message: msg, isError: true))
                     completion?(false)
-                }
-            }
-        }
-    }
-
-    func sendNudge(to user: CompetitionUser) {
-        isSendingAction = true
-        Task {
-            do {
-                try await competitionService.sendNudge(competitionId: competition.competition_id, targetUserId: user.user_id)
-                await MainActor.run {
-                    isSendingAction = false
-                    FlexNudgeTracker.markNudgeSent(competitionId: competition.competition_id, targetUserId: user.user_id)
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    showActionFeedback(ActionFeedback(icon: "bell.badge.fill", message: "Nudge sent to \(user.displayName)!", isError: false))
-                }
-            } catch {
-                await MainActor.run {
-                    isSendingAction = false
-                    let msg = (error as? CompetitionServiceError)?.errorDescription ?? "Could not send nudge"
-                    showActionFeedback(ActionFeedback(icon: "xmark.circle", message: msg, isError: true))
                 }
             }
         }
@@ -575,30 +572,37 @@ extension CompetitionDetailView {
     var settingsDropdown: some View {
         VStack(spacing: 0) {
             // Tappable header
-            HStack {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 13))
-                    .foregroundColor(.white.opacity(0.4))
-                Text("Competition Details")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.5))
-                Spacer()
-                Image(systemName: showSettings ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.25))
-            }
-            .padding(MADTheme.Spacing.md)
-            .contentShape(Rectangle())
-            .onTapGesture {
+            Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     showSettings.toggle()
                 }
+            } label: {
+                HStack {
+                    Image(systemName: "gearshape.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.4))
+                    Text("Competition Details")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.25))
+                        .rotationEffect(.degrees(showSettings ? 90 : 0))
+                }
+                .padding(MADTheme.Spacing.md)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
 
             if showSettings {
-                infoSection
+                Divider()
+                    .background(Color.white.opacity(0.1))
+                    .padding(.horizontal, MADTheme.Spacing.md)
+
+                infoContent
+                    .padding(MADTheme.Spacing.lg)
                     .transition(.opacity.combined(with: .move(edge: .top)))
-                    .padding(.top, -MADTheme.Spacing.sm)
             }
         }
         .background(

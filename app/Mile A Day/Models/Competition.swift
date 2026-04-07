@@ -241,6 +241,20 @@ enum CompetitionActivity: String, Codable, CaseIterable {
         case .walk: return "figure.walk"
         }
     }
+
+    var color: Color {
+        switch self {
+        case .run: return Color(red: 0.35, green: 0.7, blue: 1.0)
+        case .walk: return Color(red: 0.35, green: 0.85, blue: 0.55)
+        }
+    }
+
+    var backgroundColor: Color {
+        switch self {
+        case .run: return Color(red: 0.35, green: 0.7, blue: 1.0).opacity(0.12)
+        case .walk: return Color(red: 0.35, green: 0.85, blue: 0.55).opacity(0.12)
+        }
+    }
 }
 
 /// Competition options
