@@ -663,8 +663,13 @@ struct FriendWorkout: Codable, Identifiable {
     }
 
     var formattedDuration: String {
-        let minutes = Int(totalDuration / 60)
-        let seconds = Int(totalDuration.truncatingRemainder(dividingBy: 60))
+        let totalSeconds = Int(totalDuration)
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
         return String(format: "%d:%02d", minutes, seconds)
     }
 }

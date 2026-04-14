@@ -75,13 +75,18 @@ extension CompetitionDetailView {
             // Competition recap
             competitionRecap(rankedUsers: rankedUsers)
 
-            // Full standings (everyone beyond podium)
-            if rankedUsers.count > 3 {
-                remainingStandings(rankedUsers: rankedUsers, currentUserId: currentUserId)
-            }
+            // Full standings — all participants
+            fullStandings(rankedUsers: rankedUsers, currentUserId: currentUserId)
 
-            // Competition info
-            infoSection
+            // Competition settings
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                Text("Settings")
+                    .font(MADTheme.Typography.title3)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, MADTheme.Spacing.sm)
+
+                infoSection
+            }
         }
     }
 
@@ -223,8 +228,7 @@ extension CompetitionDetailView {
 
     // MARK: - Competition Recap
     func competitionRecap(rankedUsers: [CompetitionUser]) -> some View {
-        let totalDistance = rankedUsers.reduce(0.0) { $0 + ($1.score ?? 0) }
-        let avgScore = rankedUsers.isEmpty ? 0 : totalDistance / Double(rankedUsers.count)
+        let unit = competition.options.unit.shortDisplayName
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             Text("Recap")
@@ -233,27 +237,12 @@ extension CompetitionDetailView {
                 .padding(.horizontal, MADTheme.Spacing.sm)
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: MADTheme.Spacing.md) {
+                // Shared: participants & duration
                 recapStatCard(
                     icon: "person.2.fill",
                     title: "Participants",
                     value: "\(rankedUsers.count)",
                     color: .blue
-                )
-
-                recapStatCard(
-                    icon: competition.type.icon,
-                    title: "Type",
-                    value: competition.type.displayName,
-                    color: Color(hex: competition.type.gradient[0])
-                )
-
-                recapStatCard(
-                    icon: "chart.bar.fill",
-                    title: competition.type == .streaks ? "Avg Streak" : "Avg Score",
-                    value: competition.type == .streaks || competition.type == .clash || competition.type == .targets
-                        ? String(format: "%.0f", avgScore)
-                        : String(format: "%.1f %@", avgScore, competition.options.unit.shortDisplayName),
-                    color: .green
                 )
 
                 if let startDate = competition.startDateFormatted, let endDate = competition.endDateFormatted {
@@ -263,6 +252,83 @@ extension CompetitionDetailView {
                         title: "Duration",
                         value: "\(max(1, days)) day\(days == 1 ? "" : "s")",
                         color: .purple
+                    )
+                }
+
+                // Type-specific stats
+                switch competition.type {
+                case .race, .apex:
+                    let winnerScore = rankedUsers.first?.score ?? 0
+                    let totalDistance = rankedUsers.reduce(0.0) { $0 + ($1.score ?? 0) }
+                    let avgDistance = rankedUsers.isEmpty ? 0 : totalDistance / Double(rankedUsers.count)
+
+                    recapStatCard(
+                        icon: "trophy.fill",
+                        title: competition.type == .race ? "Winner's Distance" : "Top Distance",
+                        value: String(format: "%.1f %@", winnerScore, unit),
+                        color: .yellow
+                    )
+
+                    recapStatCard(
+                        icon: "chart.bar.fill",
+                        title: "Avg Distance",
+                        value: String(format: "%.1f %@", avgDistance, unit),
+                        color: .green
+                    )
+
+                case .streaks:
+                    let winnerStreak = Int(rankedUsers.first?.score ?? 0)
+                    let avgStreak = rankedUsers.isEmpty ? 0 : rankedUsers.reduce(0.0) { $0 + ($1.score ?? 0) } / Double(rankedUsers.count)
+
+                    recapStatCard(
+                        icon: "flame.fill",
+                        title: "Best Streak",
+                        value: "\(winnerStreak) day\(winnerStreak == 1 ? "" : "s")",
+                        color: .orange
+                    )
+
+                    recapStatCard(
+                        icon: "chart.bar.fill",
+                        title: "Avg Streak",
+                        value: String(format: "%.0f day%@", avgStreak, avgStreak == 1 ? "" : "s"),
+                        color: .green
+                    )
+
+                case .clash:
+                    let winnerWins = Int(rankedUsers.first?.score ?? 0)
+                    let totalRounds = rankedUsers.first?.intervals?.count ?? 0
+
+                    recapStatCard(
+                        icon: "bolt.fill",
+                        title: "Winner's Wins",
+                        value: "\(winnerWins)",
+                        color: .yellow
+                    )
+
+                    recapStatCard(
+                        icon: "number",
+                        title: "Total Rounds",
+                        value: "\(totalRounds)",
+                        color: .cyan
+                    )
+
+                case .targets:
+                    let winnerPoints = Int(rankedUsers.first?.score ?? 0)
+                    let totalIntervals = rankedUsers.first?.intervals?.count ?? 0
+                    let hitRate = totalIntervals > 0 ? Double(winnerPoints) / Double(totalIntervals) * 100 : 0
+
+                    recapStatCard(
+                        icon: "target",
+                        title: "Winner's Points",
+                        value: "\(winnerPoints)",
+                        color: .yellow
+                    )
+
+                    recapStatCard(
+                        icon: "percent",
+                        title: "Goal Hit Rate",
+                        value: String(format: "%.0f%%", hitRate),
+                        color: .green
                     )
                 }
             }
@@ -295,27 +361,92 @@ extension CompetitionDetailView {
         )
     }
 
-    // MARK: - Remaining Standings
-    func remainingStandings(rankedUsers: [CompetitionUser], currentUserId: String?) -> some View {
+    // MARK: - Full Standings
+    func fullStandings(rankedUsers: [CompetitionUser], currentUserId: String?) -> some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Full Standings")
+            Text("Standings")
                 .font(MADTheme.Typography.title3)
                 .foregroundColor(.white)
                 .padding(.horizontal, MADTheme.Spacing.sm)
 
-            VStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(Array(rankedUsers.dropFirst(3).enumerated()), id: \.element.id) { index, user in
-                    CompetitionLeaderboardRow(
-                        rank: index + 4,
-                        user: user,
-                        competitionType: competition.type,
-                        unit: competition.options.unit,
-                        isCurrentUser: user.user_id == currentUserId,
-                        firstTo: competition.options.first_to
+            VStack(spacing: 0) {
+                ForEach(Array(rankedUsers.enumerated()), id: \.element.id) { index, user in
+                    let rank = index + 1
+                    let isCurrentUser = user.user_id == currentUserId
+                    let medalColors: [Color] = {
+                        switch rank {
+                        case 1: return [.yellow, .orange]
+                        case 2: return [Color(white: 0.85), Color(white: 0.6)]
+                        case 3: return [.brown, Color(red: 0.7, green: 0.4, blue: 0.2)]
+                        default: return [.white.opacity(0.4), .white.opacity(0.2)]
+                        }
+                    }()
+
+                    HStack(spacing: MADTheme.Spacing.md) {
+                        // Rank
+                        ZStack {
+                            if rank <= 3 {
+                                Circle()
+                                    .fill(LinearGradient(colors: medalColors, startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    .frame(width: 32, height: 32)
+                                Text("\(rank)")
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                            } else {
+                                Circle()
+                                    .fill(Color.white.opacity(0.08))
+                                    .frame(width: 32, height: 32)
+                                Text("\(rank)")
+                                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.5))
+                            }
+                        }
+
+                        // Avatar + Name
+                        AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 36)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(user.displayName)
+                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+
+                                if isCurrentUser {
+                                    Text("YOU")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 2)
+                                        .background(Capsule().fill(MADTheme.Colors.madRed))
+                                }
+                            }
+                        }
+
+                        Spacer()
+
+                        // Score
+                        Text(scoreLabel(for: user))
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundColor(rank == 1 ? .yellow : .white.opacity(0.8))
+                    }
+                    .padding(.horizontal, MADTheme.Spacing.md)
+                    .padding(.vertical, MADTheme.Spacing.sm + 2)
+                    .background(
+                        isCurrentUser
+                            ? RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                .fill(MADTheme.Colors.madRed.opacity(0.08))
+                            : nil
                     )
+
+                    if index < rankedUsers.count - 1 {
+                        Divider()
+                            .background(Color.white.opacity(0.06))
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                    }
                 }
             }
-            .padding(MADTheme.Spacing.lg)
+            .padding(.vertical, MADTheme.Spacing.sm)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                     .fill(.ultraThinMaterial)

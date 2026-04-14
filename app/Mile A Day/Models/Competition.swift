@@ -244,15 +244,15 @@ enum CompetitionActivity: String, Codable, CaseIterable {
 
     var color: Color {
         switch self {
-        case .run: return Color(red: 0.35, green: 0.7, blue: 1.0)
-        case .walk: return Color(red: 0.35, green: 0.85, blue: 0.55)
+        case .run: return MADTheme.Colors.madRed
+        case .walk: return .blue
         }
     }
 
     var backgroundColor: Color {
         switch self {
-        case .run: return Color(red: 0.35, green: 0.7, blue: 1.0).opacity(0.12)
-        case .walk: return Color(red: 0.35, green: 0.85, blue: 0.55).opacity(0.12)
+        case .run: return MADTheme.Colors.madRed.opacity(0.12)
+        case .walk: return Color.blue.opacity(0.12)
         }
     }
 }

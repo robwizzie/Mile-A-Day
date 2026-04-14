@@ -2,8 +2,11 @@ import SwiftUI
 
 struct TrophyCaseView: View {
     @ObservedObject var trophyService: TrophyService
+    @ObservedObject var competitionService: CompetitionService
     @Environment(\.dismiss) private var dismiss
     @State private var animateIn = false
+    @State private var selectedCompetition: Competition?
+    @State private var isLoadingCompetition = false
 
     private static let isoDateFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -49,6 +52,32 @@ struct TrophyCaseView: View {
             withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
                 animateIn = true
             }
+        }
+        .sheet(item: $selectedCompetition) { competition in
+            NavigationStack {
+                CompetitionDetailView(competition: competition, competitionService: competitionService)
+            }
+        }
+        .overlay {
+            if isLoadingCompetition {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                    .overlay(ProgressView().tint(.white))
+            }
+        }
+    }
+
+    // MARK: - Load Competition
+    private func loadCompetition(_ id: String) {
+        isLoadingCompetition = true
+        Task {
+            do {
+                let competition = try await competitionService.loadCompetition(id: id)
+                selectedCompetition = competition
+            } catch {
+                print("[TrophyCaseView] Failed to load competition: \(error)")
+            }
+            isLoadingCompetition = false
         }
     }
 
@@ -229,85 +258,114 @@ struct TrophyCaseView: View {
             }
 
             ForEach(trophyService.trophies.sorted(by: { $0.completedDate > $1.completedDate })) { trophy in
-                trophyRow(trophy)
+                Button {
+                    loadCompetition(trophy.id)
+                } label: {
+                    trophyRow(trophy)
+                }
+                .buttonStyle(.plain)
             }
         }
     }
 
     private func trophyRow(_ trophy: CompetitionTrophy) -> some View {
-        HStack(spacing: MADTheme.Spacing.md) {
-            // Medal or placement
-            if let medal = trophy.medal {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: medal.gradient,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
+        let medalColors: [Color] = trophy.medal?.gradient ?? [Color.white.opacity(0.4), Color.white.opacity(0.2)]
+        let accentColor = trophy.medal?.color ?? Color.white.opacity(0.4)
+
+        return HStack(spacing: MADTheme.Spacing.md) {
+            // Placement badge
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: medalColors,
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
                         )
-                        .frame(width: 44, height: 44)
+                    )
+                    .frame(width: 48, height: 48)
+                    .shadow(color: accentColor.opacity(0.4), radius: 6, y: 2)
 
+                if trophy.medal != nil {
                     Image(systemName: "medal.fill")
-                        .font(.system(size: 20))
+                        .font(.system(size: 22))
                         .foregroundColor(.white)
-                }
-            } else {
-                ZStack {
-                    Circle()
-                        .fill(Color.white.opacity(0.1))
-                        .frame(width: 44, height: 44)
-
+                } else {
                     Text("#\(trophy.placement)")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.6))
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
                 }
             }
 
             // Info
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(trophy.competitionName)
-                    .font(MADTheme.Typography.callout)
-                    .fontWeight(.semibold)
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .foregroundColor(.white)
                     .lineLimit(1)
 
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    Image(systemName: trophy.competitionType.icon)
-                        .font(.system(size: 10))
-                        .foregroundColor(Color(hex: trophy.competitionType.gradient[0]))
-
-                    Text(trophy.competitionType.displayName)
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(.white.opacity(0.5))
-
-                    Text("·")
-                        .foregroundColor(.white.opacity(0.3))
+                HStack(spacing: 6) {
+                    // Type pill
+                    HStack(spacing: 4) {
+                        Image(systemName: trophy.competitionType.icon)
+                            .font(.system(size: 9))
+                        Text(trophy.competitionType.displayName)
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(Color(hex: trophy.competitionType.gradient[0]))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(Color(hex: trophy.competitionType.gradient[0]).opacity(0.15))
+                    )
 
                     Text(formattedDate(trophy.completedDate))
-                        .font(MADTheme.Typography.caption)
+                        .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.4))
                 }
+
+                // Placement text
+                Text(placementText(trophy))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(accentColor)
             }
 
             Spacer()
 
-            // Score
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(formatScore(trophy))
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
+            // Score + chevron
+            HStack(spacing: MADTheme.Spacing.sm) {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(formatScore(trophy))
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
 
-                Text(scoreUnitLabel(trophy))
-                    .font(MADTheme.Typography.caption)
-                    .foregroundColor(.white.opacity(0.4))
+                    Text(scoreUnitLabel(trophy))
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.4))
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.3))
             }
         }
         .padding(MADTheme.Spacing.md)
+        .padding(.vertical, 2)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                 .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .stroke(
+                            LinearGradient(
+                                colors: [accentColor.opacity(0.2), Color.clear],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
         )
     }
 
@@ -334,6 +392,17 @@ struct TrophyCaseView: View {
         }
     }
 
+    private func placementText(_ trophy: CompetitionTrophy) -> String {
+        let ordinal: String
+        switch trophy.placement {
+        case 1: ordinal = "1st"
+        case 2: ordinal = "2nd"
+        case 3: ordinal = "3rd"
+        default: ordinal = "\(trophy.placement)th"
+        }
+        return "\(ordinal) of \(trophy.totalParticipants) competitors"
+    }
+
     private func scoreUnitLabel(_ trophy: CompetitionTrophy) -> String {
         switch trophy.competitionType {
         case .clash:
@@ -350,6 +419,6 @@ struct TrophyCaseView: View {
 
 #Preview {
     NavigationStack {
-        TrophyCaseView(trophyService: TrophyService.shared)
+        TrophyCaseView(trophyService: TrophyService.shared, competitionService: CompetitionService())
     }
 }
