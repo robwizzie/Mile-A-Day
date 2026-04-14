@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth.js';
-import { getCompetition } from '../services/competitionService.js';
+import { getCompetition, getTodayET } from '../services/competitionService.js';
 import { getUser } from '../services/userService.js';
 import { sendPush, canNudge, logNudge } from '../services/pushNotificationService.js';
 import { shouldSendNotification } from '../services/notificationSettingsService.js';
@@ -24,10 +24,11 @@ export async function nudgeUser(req: AuthenticatedRequest, res: Response) {
 		}
 
 		// Competition must be active (started, not finished)
-		if (!competition.start_date || new Date(competition.start_date + ' EST') > new Date()) {
+		const todayET = getTodayET();
+		if (!competition.start_date || competition.start_date > todayET) {
 			return res.status(400).json({ error: 'Competition has not started yet' });
 		}
-		if (competition.end_date && new Date(competition.end_date + ' EST') <= new Date()) {
+		if (competition.end_date && competition.end_date < todayET) {
 			return res.status(400).json({ error: 'Competition has already ended' });
 		}
 

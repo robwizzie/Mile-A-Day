@@ -10,7 +10,8 @@ import {
 	updateCompetitionInvite,
 	updateCompetition,
 	deleteCompetition,
-	removeUserFromCompetition
+	removeUserFromCompetition,
+	getTodayET
 } from '../services/competitionService.js';
 import { getUser } from '../services/userService.js';
 import { CompetitionUser } from '../types/competitions.js';
@@ -61,7 +62,7 @@ export async function startComp(req: AuthenticatedRequest, res: Response) {
 		}
 
 		// Must not be already started
-		if (competition.start_date && new Date(competition.start_date + ' EST') <= new Date()) {
+		if (competition.start_date && competition.start_date <= getTodayET()) {
 			return res.status(400).json({ error: 'Competition has already started' });
 		}
 
@@ -233,7 +234,7 @@ export async function removeUserFromComp(req: AuthenticatedRequest, res: Respons
 		}
 
 		// Can only remove from lobby (not started yet)
-		if (competition.start_date && new Date(competition.start_date + ' EST') <= new Date()) {
+		if (competition.start_date && competition.start_date <= getTodayET()) {
 			return res.status(400).json({ error: 'Cannot remove users from a competition that has already started' });
 		}
 

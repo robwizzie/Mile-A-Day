@@ -8,6 +8,27 @@ const WORKOUT_TYPE_MAP: Record<string, string> = { run: 'running', walk: 'walkin
 
 const db = PostgresService.getInstance();
 
+const ET_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+
+export function getTodayET(): string {
+	return ET_DATE_FORMATTER.format(new Date());
+}
+
+function etDateToUtcMs(dateStr: string): number {
+	const [y, m, d] = dateStr.split('-').map(Number);
+	const utcGuess = Date.UTC(y, m - 1, d);
+	const parts = new Intl.DateTimeFormat('en-US', {
+		timeZone: 'America/New_York',
+		hourCycle: 'h23',
+		year: 'numeric', month: '2-digit', day: '2-digit',
+		hour: '2-digit', minute: '2-digit', second: '2-digit'
+	}).formatToParts(new Date(utcGuess));
+	const get = (type: string) => parseInt(parts.find(p => p.type === type)!.value, 10);
+	const etAsUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+	const offsetMs = etAsUtc - utcGuess;
+	return utcGuess - offsetMs;
+}
+
 interface CreateCompetitionParams {
 	competition_name: string;
 	start_date?: string;
@@ -62,6 +83,10 @@ function checkKeys(params: CreateCompetitionParams) {
 
 	if (type === 'streaks') {
 		requiredKeys.push('goal', 'unit', 'interval');
+
+		if (end_date === undefined && options.duration_hours === undefined && options.first_to === undefined) {
+			missingKeys.push('(first_to, end_date, or duration_hours)');
+		}
 	} else if (type === 'apex') {
 		requiredKeys.push('unit');
 
@@ -130,8 +155,8 @@ export async function getCompetition(competitionId: string): Promise<Competition
 		return competition;
 	}
 
-	// Calculate scores for started competitions (start_date in the past)
-	if (competition.start_date && new Date(competition.start_date + ' EST') <= new Date()) {
+	// Calculate scores for started competitions (start_date on or before today in ET)
+	if (competition.start_date && competition.start_date <= getTodayET()) {
 		const userScores = await getUserScores(competition);
 		competition.users = competition.users.map((user: CompetitionUser) => ({ ...user, ...userScores[user.user_id] }));
 	}
@@ -144,16 +169,17 @@ export async function getCompetitions(
 	{ page = 1, status = 'active', pageSize = 10 }: { page: number; status: string; pageSize: number }
 ): Promise<Competition[]> {
 	let statusCondition = '';
+	const TODAY_ET_SQL = "(NOW() AT TIME ZONE 'America/New_York')::date";
 
 	if (status === 'get_set' || status === 'lobby') {
-		statusCondition = 'AND (c.start_date IS NULL OR c.start_date > NOW())';
+		statusCondition = `AND (c.start_date IS NULL OR c.start_date > ${TODAY_ET_SQL})`;
 	} else if (status === 'go') {
-		statusCondition = 'AND c.start_date <= NOW() AND (c.end_date IS NULL OR c.end_date > NOW())';
+		statusCondition = `AND c.start_date <= ${TODAY_ET_SQL} AND (c.end_date IS NULL OR c.end_date >= ${TODAY_ET_SQL})`;
 	} else if (status === 'active') {
 		// Lobby + currently running (excludes finished)
-		statusCondition = 'AND (c.start_date IS NULL OR c.end_date IS NULL OR c.end_date > NOW())';
+		statusCondition = `AND (c.start_date IS NULL OR c.end_date IS NULL OR c.end_date >= ${TODAY_ET_SQL})`;
 	} else if (status === 'finished') {
-		statusCondition = 'AND (c.end_date IS NOT NULL AND c.end_date < NOW())';
+		statusCondition = `AND (c.end_date IS NOT NULL AND c.end_date < ${TODAY_ET_SQL})`;
 	}
 	// status === 'all' or 'on_your_mark' => no date filter from statusCondition
 
@@ -313,7 +339,10 @@ interface UserData {
 	};
 }
 
-export async function getUserScores(competition: Competition): Promise<UserData> {
+export async function getUserScores(
+	competition: Competition,
+	{ excludeCurrentInterval = false }: { excludeCurrentInterval?: boolean } = {}
+): Promise<UserData> {
 	const userData: UserData = {};
 
 	// Only called when start_date is non-null (guarded by caller)
@@ -341,7 +370,7 @@ export async function getUserScores(competition: Competition): Promise<UserData>
 		}, {});
 
 		// Check if user has any manual or edited workouts in the competition period
-		const endDate = competition.end_date ?? new Date().toISOString().split('T')[0];
+		const endDate = competition.end_date ?? getTodayET();
 		const manualCheck = await db.query(
 			`SELECT EXISTS(
 				SELECT 1 FROM workouts
@@ -360,66 +389,75 @@ export async function getUserScores(competition: Competition): Promise<UserData>
 		};
 	}
 
-	const intervals = getIntervalRange(competition);
-	const todaysInterval = getCurrentInterval(new Date(), competition.options.interval);
+	const allIntervals = getIntervalRange(competition);
+	const todaysInterval = getCurrentInterval(getTodayET(), competition.options.interval);
 
-	for (let interval of intervals) {
-		Object.entries(userData).forEach(([userId, { intervals }]) => {
-			if (!intervals[interval]) {
+	// Determine the inclusive end index for scoring:
+	// - If excludeCurrentInterval=true, stop one interval before today.
+	// - Otherwise, include today (or end_date if past today).
+	const todayIdx = allIntervals.indexOf(todaysInterval);
+	let scoringEndIdx: number;
+	if (excludeCurrentInterval) {
+		scoringEndIdx = todayIdx >= 0 ? todayIdx - 1 : allIntervals.length - 1;
+	} else {
+		scoringEndIdx = todayIdx >= 0 ? todayIdx : allIntervals.length - 1;
+	}
+
+	// Zero-fill userData.intervals for all intervals up to scoringEndIdx
+	for (let i = 0; i <= scoringEndIdx; i++) {
+		const interval = allIntervals[i];
+		Object.keys(userData).forEach(userId => {
+			if (!userData[userId].intervals[interval]) {
 				userData[userId].intervals[interval] = 0;
 			}
 		});
-
-		if (todaysInterval === interval) {
-			break;
-		}
 	}
 
 	if (competition.type === 'streaks') {
-		const totalLives = competition.options.lives ?? 1;
+		// iOS sends "lives" as options.first_to; accept either key as lives source.
+		const totalLives = competition.options.lives ?? competition.options.first_to ?? 1;
 
 		// Initialize remaining_lives for each user
 		Object.keys(userData).forEach(userId => {
 			userData[userId].remaining_lives = totalLives;
 		});
 
-		for (let interval of intervals) {
-			Object.entries(userData).forEach(([userId, { intervals }]) => {
-				if (intervals[interval] >= competition.options.goal) {
+		for (let i = 0; i <= scoringEndIdx; i++) {
+			const interval = allIntervals[i];
+			const isToday = interval === todaysInterval;
+			Object.keys(userData).forEach(userId => {
+				// Once eliminated, stay eliminated — score freezes.
+				if ((userData[userId].remaining_lives ?? 0) <= 0) return;
+
+				const userIntervals = userData[userId].intervals;
+				if ((userIntervals[interval] ?? 0) >= competition.options.goal) {
 					userData[userId].score++;
-				} else if (todaysInterval != interval) {
+				} else if (!isToday) {
+					// Don't penalize on today's partial-day data.
 					userData[userId].remaining_lives!--;
-					if (userData[userId].remaining_lives! <= 0) {
-						userData[userId].score = 0;
-						userData[userId].remaining_lives = totalLives;
-					}
 				}
 			});
-
-			if (todaysInterval === interval) {
-				break;
-			}
 		}
 	} else if (competition.type === 'apex') {
-		Object.entries(userData).forEach(([userId, { intervals }]) => {
-			const score = Object.values(intervals).reduce((total, quantity) => total + quantity, 0);
+		Object.keys(userData).forEach(userId => {
+			let score = 0;
+			for (let i = 0; i <= scoringEndIdx; i++) {
+				score += userData[userId].intervals[allIntervals[i]] ?? 0;
+			}
 			userData[userId].score = score;
 		});
 	} else if (competition.type === 'clash') {
-		for (let interval of intervals) {
-			if (todaysInterval === interval) {
-				break;
-			}
-
+		// Clash always excludes today's partial-day data (per-interval head-to-head).
+		const clashEndIdx = todayIdx >= 0 ? todayIdx - 1 : scoringEndIdx;
+		for (let i = 0; i <= clashEndIdx; i++) {
+			const interval = allIntervals[i];
 			const userQuantities: { [quantities: number]: string[] } = {};
 
-			Object.entries(userData).forEach(([userId, { intervals }]) => {
-				const quantity = intervals[interval];
-
+			Object.keys(userData).forEach(userId => {
+				const quantity = userData[userId].intervals[interval] ?? 0;
 				if (!Object.keys(userQuantities).includes(quantity.toString())) {
 					userQuantities[quantity] = [];
 				}
-
 				userQuantities[quantity].push(userId);
 			});
 
@@ -430,20 +468,20 @@ export async function getUserScores(competition: Competition): Promise<UserData>
 			}
 		}
 	} else if (competition.type === 'targets') {
-		for (let interval of intervals) {
-			Object.entries(userData).forEach(([userId, { intervals }]) => {
-				if (intervals[interval] >= competition.options.goal) {
+		for (let i = 0; i <= scoringEndIdx; i++) {
+			const interval = allIntervals[i];
+			Object.keys(userData).forEach(userId => {
+				if ((userData[userId].intervals[interval] ?? 0) >= competition.options.goal) {
 					userData[userId].score++;
 				}
 			});
-
-			if (todaysInterval === interval) {
-				break;
-			}
 		}
 	} else if (competition.type === 'race') {
-		Object.entries(userData).forEach(([userId, { intervals }]) => {
-			const score = Object.values(intervals).reduce((total, quantity) => total + quantity, 0);
+		Object.keys(userData).forEach(userId => {
+			let score = 0;
+			for (let i = 0; i <= scoringEndIdx; i++) {
+				score += userData[userId].intervals[allIntervals[i]] ?? 0;
+			}
 			userData[userId].score = score;
 		});
 	}
@@ -485,30 +523,44 @@ function getCurrentInterval(currentDate: Date | string | number, interval?: 'day
 
 function getIntervalRange(competition: Competition): string[] {
 	if (!competition.start_date) return [];
-	const currentDate = new Date(competition.start_date + ' EST');
-	const endDate = competition.end_date ? new Date(competition.end_date + ' EST') : new Date();
 
-	const intervals = [];
+	const intervals: string[] = [];
+	const endDateStr = competition.end_date ?? getTodayET();
+
+	const [sy, sm, sd] = competition.start_date.split('-').map(Number);
+	const [ey, em, ed] = endDateStr.split('-').map(Number);
+
+	// Pure calendar-date iteration via UTC math — DST-free because we never mix timezones.
+	const endUtcMs = Date.UTC(ey, em - 1, ed);
+	let currentMs = Date.UTC(sy, sm - 1, sd);
 
 	if (competition.options.interval === 'week') {
-		const dayOfWeek = currentDate.getDay();
+		const dayOfWeek = new Date(currentMs).getUTCDay();
 		const daysUntilSunday = (7 - dayOfWeek) % 7;
-		currentDate.setDate(currentDate.getDate() + daysUntilSunday);
+		currentMs += daysUntilSunday * 86400000;
 	}
 
-	while (currentDate <= endDate) {
-		const intervalKey = getCurrentInterval(currentDate, competition.options.interval);
+	const toDateStr = (ms: number): string => {
+		const d = new Date(ms);
+		const y = d.getUTCFullYear();
+		const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+		const day = String(d.getUTCDate()).padStart(2, '0');
+		return `${y}-${m}-${day}`;
+	};
+
+	while (currentMs <= endUtcMs) {
+		const intervalKey = getCurrentInterval(toDateStr(currentMs), competition.options.interval);
 		intervals.push(intervalKey);
 
-		if (competition.options.interval === 'day') {
-			currentDate.setDate(currentDate.getDate() + 1);
-		} else if (competition.options.interval === 'week') {
-			currentDate.setDate(currentDate.getDate() + 7);
+		if (competition.options.interval === 'week') {
+			currentMs += 7 * 86400000;
 		} else if (competition.options.interval === 'month') {
-			currentDate.setMonth(currentDate.getMonth() + 1);
+			const nd = new Date(currentMs);
+			nd.setUTCMonth(nd.getUTCMonth() + 1);
+			currentMs = nd.getTime();
 		} else {
-			// Default to day if no interval specified
-			currentDate.setDate(currentDate.getDate() + 1);
+			// 'day' or default
+			currentMs += 86400000;
 		}
 	}
 
@@ -524,9 +576,9 @@ export async function checkRaceCompletions(userId: string): Promise<void> {
 			AND cu.invite_status = 'accepted'
 			AND c.type = 'race'
 			AND c.start_date IS NOT NULL
-			AND c.start_date <= NOW()
+			AND c.start_date <= (NOW() AT TIME ZONE 'America/New_York')::date
 			AND c.winner IS NULL
-			AND (c.end_date IS NULL OR c.end_date > NOW())`,
+			AND (c.end_date IS NULL OR c.end_date >= (NOW() AT TIME ZONE 'America/New_York')::date)`,
 		[userId]
 	);
 
@@ -538,8 +590,7 @@ export async function checkRaceCompletions(userId: string): Promise<void> {
 			.filter(Boolean);
 
 		const startDate = race.start_date!;
-		const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
-		const today = formatter.format(new Date());
+		const today = getTodayET();
 		const endDate = race.end_date ?? today;
 
 		const [result] = await db.query<{ total: number }>(
@@ -564,8 +615,7 @@ export async function checkRaceCompletions(userId: string): Promise<void> {
 
 export async function resolveExpiredCompetitions(): Promise<void> {
 	const now = new Date();
-	const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
-	const todayStr = formatter.format(now);
+	const todayStr = getTodayET();
 
 	const candidates = await db.query<Competition & { id: string }>(
 		`SELECT c.*, ${USERS_AGG_SQL}
@@ -573,7 +623,7 @@ export async function resolveExpiredCompetitions(): Promise<void> {
 		LEFT JOIN competition_users cu ON cu.competition_id = c.id
 		LEFT JOIN users u ON u.user_id = cu.user_id
 		WHERE c.start_date IS NOT NULL
-			AND c.start_date <= NOW()
+			AND c.start_date <= (NOW() AT TIME ZONE 'America/New_York')::date
 			AND c.winner IS NULL
 		GROUP BY c.id`
 	);
@@ -591,14 +641,14 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 	let shouldResolve = false;
 	let computedEndDate: string | null = null;
 
-	// Check 1: end_date has passed
-	if (competition.end_date && new Date(competition.end_date + ' EST') <= now) {
+	// Check 1: end_date has passed (string compare is DST-free since both sides are 'YYYY-MM-DD')
+	if (competition.end_date && competition.end_date < todayStr) {
 		shouldResolve = true;
 	}
 
 	// Check 2: duration_hours elapsed (no end_date set yet)
-	if (!shouldResolve && !competition.end_date && competition.options.duration_hours) {
-		const startMs = new Date(competition.start_date + ' EST').getTime();
+	if (!shouldResolve && !competition.end_date && competition.options.duration_hours && competition.start_date) {
+		const startMs = etDateToUtcMs(competition.start_date);
 		const durationMs = competition.options.duration_hours * 60 * 60 * 1000;
 		if (now.getTime() >= startMs + durationMs) {
 			shouldResolve = true;
@@ -606,11 +656,25 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 		}
 	}
 
-	// Check 3: first_to condition (clash, targets)
-	if (!shouldResolve && competition.options.first_to) {
-		const scores = await getUserScores(competition);
-		const maxScore = Math.max(...Object.values(scores).map(s => s.score));
-		if (maxScore >= competition.options.first_to) {
+	// Check 3: first_to condition (clash, targets only — races use goal, apex uses duration,
+	// streaks use first_to as "lives" via checkStreaksEliminated below).
+	if (!shouldResolve && competition.options.first_to && (competition.type === 'clash' || competition.type === 'targets')) {
+		const scores = await getUserScores(competition, { excludeCurrentInterval: true });
+		const scoreValues = Object.values(scores);
+		if (scoreValues.length > 0) {
+			const maxScore = Math.max(...scoreValues.map(s => s.score));
+			if (maxScore >= competition.options.first_to) {
+				shouldResolve = true;
+				computedEndDate = todayStr;
+			}
+		}
+	}
+
+	// Check 3b: streaks — all accepted users eliminated (remaining_lives === 0)
+	if (!shouldResolve && competition.type === 'streaks') {
+		const scores = await getUserScores(competition, { excludeCurrentInterval: true });
+		const scoreValues = Object.values(scores);
+		if (scoreValues.length > 0 && scoreValues.every(s => (s.remaining_lives ?? 0) <= 0)) {
 			shouldResolve = true;
 			computedEndDate = todayStr;
 		}
@@ -618,7 +682,7 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 
 	// Check 4: race goal reached (backup for races not caught on upload)
 	if (!shouldResolve && competition.type === 'race') {
-		const scores = await getUserScores(competition);
+		const scores = await getUserScores(competition, { excludeCurrentInterval: true });
 		for (const data of Object.values(scores)) {
 			if (data.score >= competition.options.goal) {
 				shouldResolve = true;
@@ -638,7 +702,7 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 		competition.end_date = computedEndDate;
 	}
 
-	const finalScores = await getUserScores(competition);
+	const finalScores = await getUserScores(competition, { excludeCurrentInterval: true });
 	const sortedUsers = Object.entries(finalScores).sort(([, a], [, b]) => b.score - a.score);
 
 	if (sortedUsers.length === 0) return;
