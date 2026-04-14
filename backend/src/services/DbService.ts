@@ -1,4 +1,8 @@
-import { Pool, QueryResultRow } from 'pg';
+import { Pool, QueryResultRow, types } from 'pg';
+
+// Return DATE columns (OID 1082) as 'YYYY-MM-DD' strings instead of JS Date objects.
+// JS Date is local-midnight and causes TZ confusion; the backend treats these columns as strings.
+types.setTypeParser(1082, (val: string) => val);
 
 type QueryConfig = {
 	query: string;
