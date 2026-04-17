@@ -15,6 +15,7 @@ globs: backend/**
 - `PostgresService` is a singleton wrapping `pg.Pool`. Get it via `PostgresService.getInstance()`.
 - Raw SQL queries only (no ORM). Use parameterized queries (`$1, $2, ...`).
 - Connection string from `DATABASE_URL` env var.
+- Services instantiate `PostgresService.getInstance()` at module top-level. `server.ts` MUST `import 'dotenv/config'` as its first line — if dotenv loads after the route imports, the Pool gets `connectionString: undefined` and falls back to OS user (error: `no pg_hba.conf entry for host ..., user "<osuser>", database "<osuser>"`).
 
 ## Auth Pattern
 - Public routes (`/auth/*`, `/dev/*`, `/status`) are mounted BEFORE `authenticateToken` middleware in server.ts.

@@ -550,7 +550,12 @@ struct EditCompetitionSettingsView: View {
                 goal = competition.options.goal
                 unit = competition.options.unit
                 interval = competition.options.interval ?? .day
-                firstTo = competition.options.first_to
+                // For streaks the editor's +/- control represents lives; fall back
+                // to first_to for legacy streak competitions that predate the
+                // dedicated `lives` field.
+                firstTo = competition.type == .streaks
+                    ? competition.streakLives
+                    : competition.options.first_to
                 durationHours = competition.options.duration_hours
                 selectedWorkouts = Set(competition.workouts)
             }
@@ -580,13 +585,15 @@ struct EditCompetitionSettingsView: View {
         isSaving = true
         Task {
             do {
+                let isStreaks = competition.type == .streaks
                 let updated = try await competitionService.updateCompetition(
                     id: competition.competition_id,
                     name: name,
                     workouts: Array(selectedWorkouts),
                     goal: goal,
                     unit: unit,
-                    firstTo: firstTo,
+                    firstTo: isStreaks ? nil : firstTo,
+                    lives: isStreaks ? firstTo : nil,
                     history: false,
                     interval: interval
                 )
@@ -659,7 +666,8 @@ struct CompetitionConfettiView: View {
                 options: CompetitionOptions(
                     goal: 1.0,
                     unit: .miles,
-                    first_to: 5,
+                    first_to: 0,
+                    lives: 3,
                     history: false,
                     interval: .day,
                     duration_hours: 168

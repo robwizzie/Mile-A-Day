@@ -369,84 +369,19 @@ extension CompetitionDetailView {
                 .foregroundColor(.white)
                 .padding(.horizontal, MADTheme.Spacing.sm)
 
-            VStack(spacing: 0) {
-                ForEach(Array(rankedUsers.enumerated()), id: \.element.id) { index, user in
-                    let rank = index + 1
-                    let isCurrentUser = user.user_id == currentUserId
-                    let medalColors: [Color] = {
-                        switch rank {
-                        case 1: return [.yellow, .orange]
-                        case 2: return [Color(white: 0.85), Color(white: 0.6)]
-                        case 3: return [.brown, Color(red: 0.7, green: 0.4, blue: 0.2)]
-                        default: return [.white.opacity(0.4), .white.opacity(0.2)]
-                        }
-                    }()
-
-                    HStack(spacing: MADTheme.Spacing.md) {
-                        // Rank
-                        ZStack {
-                            if rank <= 3 {
-                                Circle()
-                                    .fill(LinearGradient(colors: medalColors, startPoint: .topLeading, endPoint: .bottomTrailing))
-                                    .frame(width: 32, height: 32)
-                                Text("\(rank)")
-                                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-                            } else {
-                                Circle()
-                                    .fill(Color.white.opacity(0.08))
-                                    .frame(width: 32, height: 32)
-                                Text("\(rank)")
-                                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.5))
-                            }
-                        }
-
-                        // Avatar + Name
-                        AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 36)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text(user.displayName)
-                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                    .foregroundColor(.white)
-                                    .lineLimit(1)
-
-                                if isCurrentUser {
-                                    Text("YOU")
-                                        .font(.system(size: 8, weight: .bold))
-                                        .foregroundColor(.white)
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 2)
-                                        .background(Capsule().fill(MADTheme.Colors.madRed))
-                                }
-                            }
-                        }
-
-                        Spacer()
-
-                        // Score
-                        Text(scoreLabel(for: user))
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundColor(rank == 1 ? .yellow : .white.opacity(0.8))
-                    }
-                    .padding(.horizontal, MADTheme.Spacing.md)
-                    .padding(.vertical, MADTheme.Spacing.sm + 2)
-                    .background(
-                        isCurrentUser
-                            ? RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                .fill(MADTheme.Colors.madRed.opacity(0.08))
-                            : nil
+            VStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(Array(rankedUsers.dropFirst(3).enumerated()), id: \.element.id) { index, user in
+                    CompetitionLeaderboardRow(
+                        rank: index + 4,
+                        user: user,
+                        competitionType: competition.type,
+                        unit: competition.options.unit,
+                        isCurrentUser: user.user_id == currentUserId,
+                        totalLives: competition.type == .streaks ? competition.streakLives : 0
                     )
-
-                    if index < rankedUsers.count - 1 {
-                        Divider()
-                            .background(Color.white.opacity(0.06))
-                            .padding(.horizontal, MADTheme.Spacing.md)
-                    }
                 }
             }
-            .padding(.vertical, MADTheme.Spacing.sm)
+            .padding(MADTheme.Spacing.lg)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                     .fill(.ultraThinMaterial)
@@ -486,8 +421,9 @@ extension CompetitionDetailView {
                 if let interval = competition.options.interval {
                     InfoRow(icon: "arrow.trianglehead.2.clockwise", title: "Interval", value: interval.displayName)
                 }
-                if competition.options.first_to > 0 {
-                    InfoRow(icon: "heart", title: "Lives", value: "\(competition.options.first_to)")
+                let streakLives = competition.streakLives
+                if streakLives > 0 {
+                    InfoRow(icon: "heart", title: "Lives", value: "\(streakLives)")
                 }
 
             case .targets:

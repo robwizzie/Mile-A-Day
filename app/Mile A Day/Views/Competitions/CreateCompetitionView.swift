@@ -996,13 +996,15 @@ struct CreateCompetitionView: View {
 
         Task {
             do {
+                let isStreaks = selectedType == .streaks
                 let competitionId = try await competitionService.createCompetition(
                     name: competitionName.isEmpty ? autoName : competitionName,
                     type: selectedType,
                     workouts: Array(selectedWorkouts),
                     goal: needsGoal ? goal : 0,
                     unit: unit,
-                    firstTo: firstTo,
+                    firstTo: isStreaks ? 0 : firstTo,
+                    lives: isStreaks ? firstTo : nil,
                     history: false,
                     interval: interval,
                     durationHours: computedDurationHours

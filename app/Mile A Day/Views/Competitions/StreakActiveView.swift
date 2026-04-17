@@ -37,7 +37,7 @@ struct StreakActiveView: View {
     }
 
     private var goal: Double { competition.options.goal }
-    private var firstTo: Int { competition.options.first_to }
+    private var totalLives: Int { competition.streakLives }
 
     private var intervalKey: String {
         let calendar = Calendar.current
@@ -132,8 +132,8 @@ struct StreakActiveView: View {
             }
 
             // Lives
-            if firstTo > 0, let currentUser = currentUser {
-                livesRow(lives: currentUser.remaining_lives ?? firstTo)
+            if totalLives > 0, let currentUser = currentUser {
+                livesRow(lives: currentUser.remaining_lives ?? totalLives)
             }
         }
         .frame(maxWidth: .infinity)
@@ -150,15 +150,15 @@ struct StreakActiveView: View {
     }
 
     private func livesRow(lives: Int) -> some View {
-        let displayCount = min(firstTo, maxVisibleHearts)
+        let displayCount = min(totalLives, maxVisibleHearts)
         return HStack(spacing: 5) {
             ForEach(0..<displayCount, id: \.self) { i in
                 Image(systemName: i < lives ? "heart.fill" : "heart")
                     .font(.system(size: 14))
                     .foregroundColor(i < lives ? .red : .white.opacity(0.15))
             }
-            if firstTo > maxVisibleHearts {
-                Text("+\(firstTo - maxVisibleHearts)")
+            if totalLives > maxVisibleHearts {
+                Text("+\(totalLives - maxVisibleHearts)")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.35))
             }
@@ -288,7 +288,7 @@ struct StreakActiveView: View {
         let streak = Int(user.score ?? 0)
         let distance = user.intervals?[intervalKey] ?? 0
         let completed = distance >= goal
-        let lives = user.remaining_lives ?? firstTo
+        let lives = user.remaining_lives ?? totalLives
 
         return VStack(spacing: 0) {
             HStack(spacing: 10) {
@@ -319,7 +319,7 @@ struct StreakActiveView: View {
                         }
                     }
 
-                    if firstTo > 0 {
+                    if totalLives > 0 {
                         miniLives(lives: lives)
                     }
                 }
@@ -368,15 +368,15 @@ struct StreakActiveView: View {
     }
 
     private func miniLives(lives: Int) -> some View {
-        let count = min(firstTo, maxVisibleHearts)
+        let count = min(totalLives, maxVisibleHearts)
         return HStack(spacing: 2) {
             ForEach(0..<count, id: \.self) { i in
                 Circle()
                     .fill(i < lives ? Color.red : Color.white.opacity(0.1))
                     .frame(width: 5, height: 5)
             }
-            if firstTo > maxVisibleHearts {
-                Text("+\(firstTo - maxVisibleHearts)")
+            if totalLives > maxVisibleHearts {
+                Text("+\(totalLives - maxVisibleHearts)")
                     .font(.system(size: 6, weight: .medium))
                     .foregroundColor(.white.opacity(0.2))
             }
@@ -557,7 +557,7 @@ struct StreakActiveView: View {
     // MARK: - Helpers
 
     private func userIsEliminated(_ user: CompetitionUser) -> Bool {
-        guard firstTo > 0, let lives = user.remaining_lives else { return false }
+        guard totalLives > 0, let lives = user.remaining_lives else { return false }
         return lives <= 0
     }
 }

@@ -135,6 +135,13 @@ struct Competition: Codable, Identifiable {
 
         return .active
     }
+
+    /// Total lives for a streak competition. Reads from options.lives (preferred)
+    /// and falls back to options.first_to for legacy records created before the
+    /// dedicated `lives` field existed.
+    var streakLives: Int {
+        options.lives ?? (options.first_to > 0 ? options.first_to : 0)
+    }
 }
 
 /// Competition lifecycle status - derived from dates
@@ -262,20 +269,22 @@ struct CompetitionOptions: Codable {
     let goal: Double
     let unit: CompetitionUnit
     let first_to: Int
+    let lives: Int?
     let history: Bool?
     let interval: CompetitionInterval?
     let duration_hours: Int?
 
     /// Default values for when the server returns null options
     static let defaults = CompetitionOptions(
-        goal: 0, unit: .miles, first_to: 0,
+        goal: 0, unit: .miles, first_to: 0, lives: nil,
         history: nil, interval: nil, duration_hours: nil
     )
 
-    init(goal: Double, unit: CompetitionUnit, first_to: Int, history: Bool?, interval: CompetitionInterval?, duration_hours: Int?) {
+    init(goal: Double, unit: CompetitionUnit, first_to: Int, lives: Int?, history: Bool?, interval: CompetitionInterval?, duration_hours: Int?) {
         self.goal = goal
         self.unit = unit
         self.first_to = first_to
+        self.lives = lives
         self.history = history
         self.interval = interval
         self.duration_hours = duration_hours
@@ -286,6 +295,7 @@ struct CompetitionOptions: Codable {
         goal = try container.decodeIfPresent(Double.self, forKey: .goal) ?? 0
         unit = try container.decodeIfPresent(CompetitionUnit.self, forKey: .unit) ?? .miles
         first_to = try container.decodeIfPresent(Int.self, forKey: .first_to) ?? 0
+        lives = try container.decodeIfPresent(Int.self, forKey: .lives)
         history = try container.decodeIfPresent(Bool.self, forKey: .history)
         interval = try container.decodeIfPresent(CompetitionInterval.self, forKey: .interval)
         duration_hours = try container.decodeIfPresent(Int.self, forKey: .duration_hours)
@@ -428,6 +438,7 @@ struct CompetitionOptionsRequest: Codable {
     let goal: Double
     let unit: CompetitionUnit
     let first_to: Int
+    let lives: Int?
     let history: Bool
     let interval: CompetitionInterval
     let duration_hours: Int?
@@ -447,6 +458,7 @@ struct PartialCompetitionOptionsRequest: Codable {
     let goal: Double?
     let unit: CompetitionUnit?
     let first_to: Int?
+    let lives: Int?
     let history: Bool?
     let interval: CompetitionInterval?
 }

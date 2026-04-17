@@ -181,15 +181,16 @@ struct CompetitionCard: View {
                             if let interval = competition.options.interval {
                                 StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
                             }
-                            if competition.options.first_to > 0 {
+                            let streakLives = competition.streakLives
+                            if streakLives > 0 {
                                 if let currentUserId = UserDefaults.standard.string(forKey: "backendUserId"),
                                    let currentUser = competition.users.first(where: { $0.user_id == currentUserId }),
                                    let lives = currentUser.remaining_lives {
-                                    LivesChip(remaining: lives, total: competition.options.first_to)
+                                    LivesChip(remaining: lives, total: streakLives)
                                 } else {
                                     StatChip(
                                         icon: "heart",
-                                        text: "\(competition.options.first_to) \(competition.options.first_to == 1 ? "life" : "lives")"
+                                        text: "\(streakLives) \(streakLives == 1 ? "life" : "lives")"
                                     )
                                 }
                             }
@@ -555,10 +556,11 @@ struct InviteCard: View {
                         if let interval = competition.options.interval {
                             StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
                         }
-                        if competition.options.first_to > 0 {
+                        let streakLives = competition.streakLives
+                        if streakLives > 0 {
                             StatChip(
                                 icon: "heart",
-                                text: "\(competition.options.first_to) \(competition.options.first_to == 1 ? "life" : "lives")"
+                                text: "\(streakLives) \(streakLives == 1 ? "life" : "lives")"
                             )
                         }
 
@@ -758,10 +760,11 @@ struct CompetitionLeaderboardRow: View {
     let competitionType: CompetitionType
     let unit: CompetitionUnit
     let isCurrentUser: Bool
-    var firstTo: Int = 0
+    /// Total streak lives for the competition. Ignored outside streak competitions.
+    var totalLives: Int = 0
 
     private var isEliminated: Bool {
-        guard competitionType == .streaks, firstTo > 0 else { return false }
+        guard competitionType == .streaks, totalLives > 0 else { return false }
         guard let lives = user.remaining_lives else { return false }
         return lives <= 0
     }
@@ -872,15 +875,15 @@ struct CompetitionLeaderboardRow: View {
                 }
 
                 // Lives indicator for streaks - clean heart icons instead of dots
-                if competitionType == .streaks && firstTo > 0, let lives = user.remaining_lives {
+                if competitionType == .streaks && totalLives > 0, let lives = user.remaining_lives {
                     HStack(spacing: 2) {
-                        ForEach(0..<min(firstTo, 6), id: \.self) { i in
+                        ForEach(0..<min(totalLives, 6), id: \.self) { i in
                             Image(systemName: i < lives ? "heart.fill" : "heart")
                                 .font(.system(size: 7))
                                 .foregroundColor(i < lives ? .red : .white.opacity(0.15))
                         }
-                        if firstTo > 6 {
-                            Text("+\(firstTo - 6)")
+                        if totalLives > 6 {
+                            Text("+\(totalLives - 6)")
                                 .font(.system(size: 8, weight: .medium))
                                 .foregroundColor(.white.opacity(0.3))
                         }
