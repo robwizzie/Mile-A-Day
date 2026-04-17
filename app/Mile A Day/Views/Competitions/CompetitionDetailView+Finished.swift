@@ -311,7 +311,7 @@ extension CompetitionDetailView {
                         competitionType: competition.type,
                         unit: competition.options.unit,
                         isCurrentUser: user.user_id == currentUserId,
-                        firstTo: competition.options.first_to
+                        totalLives: competition.type == .streaks ? competition.streakLives : 0
                     )
                 }
             }
@@ -355,8 +355,9 @@ extension CompetitionDetailView {
                 if let interval = competition.options.interval {
                     InfoRow(icon: "arrow.trianglehead.2.clockwise", title: "Interval", value: interval.displayName)
                 }
-                if competition.options.first_to > 0 {
-                    InfoRow(icon: "heart", title: "Lives", value: "\(competition.options.first_to)")
+                let streakLives = competition.streakLives
+                if streakLives > 0 {
+                    InfoRow(icon: "heart", title: "Lives", value: "\(streakLives)")
                 }
 
             case .targets:

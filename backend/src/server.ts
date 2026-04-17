@@ -1,8 +1,8 @@
+import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import dotenv from 'dotenv';
 import userRoutes from './routes/usersRoutes.js';
 import friendRoutes from './routes/friendshipsRoutes.js';
 import authRoutes from './routes/authRoutes.js';
@@ -18,8 +18,6 @@ import { PostgresService } from './services/DbService.js';
 import { webcrypto } from 'node:crypto';
 
 (globalThis as any).crypto ??= webcrypto;
-
-dotenv.config();
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '3000');

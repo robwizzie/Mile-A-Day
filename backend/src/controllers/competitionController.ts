@@ -77,13 +77,15 @@ export async function startComp(req: AuthenticatedRequest, res: Response) {
 			});
 		}
 
-		// Calculate dates
-		const now = new Date();
-		const startDate = now.toISOString().split('T')[0]; // YYYY-MM-DD
+		// Start at midnight ET tomorrow so the first official day is a full day for everyone
+		const todayET = getTodayET(); // 'YYYY-MM-DD' in ET
+		const [y, m, d] = todayET.split('-').map(Number);
+		const tomorrowUTC = new Date(Date.UTC(y, m - 1, d + 1));
+		const startDate = tomorrowUTC.toISOString().split('T')[0];
 
 		let endDate: string | undefined;
 		if (competition.options.duration_hours) {
-			const end = new Date(now.getTime() + competition.options.duration_hours * 60 * 60 * 1000);
+			const end = new Date(tomorrowUTC.getTime() + competition.options.duration_hours * 60 * 60 * 1000);
 			endDate = end.toISOString().split('T')[0];
 		}
 

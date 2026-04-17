@@ -86,6 +86,7 @@ class CompetitionService: ObservableObject {
         goal: Double,
         unit: CompetitionUnit,
         firstTo: Int,
+        lives: Int? = nil,
         history: Bool,
         interval: CompetitionInterval,
         durationHours: Int?
@@ -102,6 +103,7 @@ class CompetitionService: ObservableObject {
                 goal: goal,
                 unit: unit,
                 first_to: firstTo,
+                lives: lives,
                 history: history,
                 interval: interval,
                 duration_hours: durationHours
@@ -165,6 +167,7 @@ class CompetitionService: ObservableObject {
         goal: Double? = nil,
         unit: CompetitionUnit? = nil,
         firstTo: Int? = nil,
+        lives: Int? = nil,
         history: Bool? = nil,
         interval: CompetitionInterval? = nil
     ) async throws -> Competition {
@@ -183,6 +186,7 @@ class CompetitionService: ObservableObject {
                 goal: goal,
                 unit: unit,
                 first_to: firstTo,
+                lives: lives,
                 history: history,
                 interval: interval
             )

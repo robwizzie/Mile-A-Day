@@ -84,8 +84,13 @@ function checkKeys(params: CreateCompetitionParams) {
 	if (type === 'streaks') {
 		requiredKeys.push('goal', 'unit', 'interval');
 
-		if (end_date === undefined && options.duration_hours === undefined && options.first_to === undefined) {
-			missingKeys.push('(first_to, end_date, or duration_hours)');
+		if (
+			end_date === undefined &&
+			options.duration_hours === undefined &&
+			options.lives === undefined &&
+			options.first_to === undefined
+		) {
+			missingKeys.push('(lives, end_date, or duration_hours)');
 		}
 	} else if (type === 'apex') {
 		requiredKeys.push('unit');
@@ -406,7 +411,7 @@ export async function getUserScores(
 	}
 
 	if (competition.type === 'streaks') {
-		// iOS sends "lives" as options.first_to; accept either key as lives source.
+		// Prefer options.lives; fall back to options.first_to for legacy streak competitions.
 		const totalLives = competition.options.lives ?? competition.options.first_to ?? 1;
 
 		// Initialize remaining_lives for each user
@@ -597,7 +602,7 @@ export async function checkRaceCompletions(userId: string): Promise<void> {
 
 		if (result.total >= race.options.goal) {
 			await db.query(
-				`UPDATE competitions SET end_date = $1, winner = $2 WHERE id = $3 AND winner IS NULL`,
+				`UPDATE competitions SET end_date = $1, winner = $2, ended = true WHERE id = $3 AND winner IS NULL`,
 				[today, userId, race.id]
 			);
 			await resolveCompetitionPlacements(race.id);
@@ -701,7 +706,7 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 
 	const winnerId = sortedUsers[0][0];
 	await db.query(
-		`UPDATE competitions SET winner = $1 WHERE id = $2 AND winner IS NULL`,
+		`UPDATE competitions SET winner = $1, ended = true WHERE id = $2 AND winner IS NULL`,
 		[winnerId, competition.id]
 	);
 

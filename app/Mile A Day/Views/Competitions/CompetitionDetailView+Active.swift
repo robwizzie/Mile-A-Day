@@ -136,7 +136,7 @@ extension CompetitionDetailView {
         let streak = Int(user?.score ?? 0)
         let completed = todayDistance >= goal
         let remaining = max(0, goal - todayDistance)
-        let firstTo = competition.options.first_to
+        let totalLives = competition.streakLives
 
         return VStack(spacing: 10) {
             HStack(spacing: 8) {
@@ -171,16 +171,16 @@ extension CompetitionDetailView {
                     .background(Capsule().fill(Color.orange.opacity(0.12)))
             }
 
-            if firstTo > 0, let user = user {
-                let lives = user.remaining_lives ?? firstTo
+            if totalLives > 0, let user = user {
+                let lives = user.remaining_lives ?? totalLives
                 HStack(spacing: 4) {
-                    ForEach(0..<min(firstTo, 6), id: \.self) { i in
+                    ForEach(0..<min(totalLives, 6), id: \.self) { i in
                         Image(systemName: i < lives ? "heart.fill" : "heart")
                             .font(.system(size: 12))
                             .foregroundColor(i < lives ? .red : .white.opacity(0.15))
                     }
-                    if firstTo > 6 {
-                        Text("+\(firstTo - 6)")
+                    if totalLives > 6 {
+                        Text("+\(totalLives - 6)")
                             .font(.system(size: 9, weight: .semibold, design: .rounded))
                             .foregroundColor(.white.opacity(0.3))
                     }

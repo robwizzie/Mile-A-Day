@@ -56,7 +56,7 @@ extension CompetitionDetailView {
                                 competitionType: competition.type,
                                 unit: competition.options.unit,
                                 isCurrentUser: isMe,
-                                firstTo: competition.options.first_to
+                                totalLives: competition.type == .streaks ? competition.streakLives : 0
                             )
                             .opacity(leaderboardAnimated ? 1 : 0)
                             .offset(y: leaderboardAnimated ? 0 : 15)

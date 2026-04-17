@@ -1320,10 +1320,10 @@ Creates a new competition. The authenticated user becomes the owner and is autom
 | :------- | :----- | :--------------------------------------- | :------: |
 | goal     | Number | Goal value for the competition           |    ✅    |
 | unit     | String | Unit of measurement: "miles" or "steps"  |    ✅    |
-| first_to | Number | Number of wins needed (for some types)   |    ✅    |
+| first_to | Number | Points needed to win (clash/targets). Legacy alias for `lives` on streaks (accepted but `lives` is preferred). |    ✖️    |
 | history  | Boolean| Whether to include historical data       |    ✖️    |
 | interval | String | Time interval: "day", "week", or "month" |    ✖️    |
-| lives    | Number | Number of streak lives (streaks type only, default: 1). Each missed interval costs one life instead of breaking the streak. The streak resets when all lives are lost. |    ✖️    |
+| lives    | Number | Streak lives (streaks only, default: 1). Each missed interval costs one life; once lives hit zero the user is eliminated. |    ✖️    |
 
 #### Examples
 
@@ -1344,7 +1344,6 @@ Creates a new competition. The authenticated user becomes the owner and is autom
 >     "options": {
 >         "goal": 1,
 >         "unit": "miles",
->         "first_to": 5,
 >         "history": false,
 >         "interval": "day",
 >         "lives": 3
@@ -1375,7 +1374,6 @@ Creates a new competition. The authenticated user becomes the owner and is autom
 >     "options": {
 >         "goal": 1,
 >         "unit": "miles",
->         "first_to": 5,
 >         "history": false,
 >         "interval": "day",
 >         "lives": 3
@@ -1425,9 +1423,9 @@ Retrieves all competitions for the authenticated user with pagination and option
 >             "options": {
 >                 "goal": 1,
 >                 "unit": "miles",
->                 "first_to": 5,
 >                 "history": false,
->                 "interval": "day"
+>                 "interval": "day",
+>                 "lives": 3
 >             },
 >             "owner": "peter",
 >             "users": [
@@ -1488,7 +1486,6 @@ Retrieves details for a specific competition.
 >         "options": {
 >             "goal": 1,
 >             "unit": "miles",
->             "first_to": 5,
 >             "history": false,
 >             "interval": "day",
 >             "lives": 3
@@ -1558,10 +1555,10 @@ Any of the following fields can be included. Only specified fields will be updat
 | :------- | :------ | :--------------------------------------- |
 | goal     | Number  | Goal value for the competition           |
 | unit     | String  | Unit of measurement: "miles" or "steps"  |
-| first_to | Number  | Number of wins needed (for some types)   |
+| first_to | Number  | Points needed to win (clash/targets). Legacy alias for `lives` on streaks. |
 | history  | Boolean | Whether to include historical data       |
 | interval | String  | Time interval: "day", "week", or "month" |
-| lives    | Number  | Number of streak lives (streaks type only, default: 1) |
+| lives    | Number  | Streak lives (streaks only, default: 1). |
 
 #### Examples
 
@@ -1595,9 +1592,9 @@ Any of the following fields can be included. Only specified fields will be updat
 >         "options": {
 >             "goal": 2,
 >             "unit": "miles",
->             "first_to": 5,
 >             "history": false,
->             "interval": "day"
+>             "interval": "day",
+>             "lives": 3
 >         },
 >         "owner": "peter",
 >         "users": [
@@ -1784,7 +1781,7 @@ Accepts a pending competition invite for the authenticated user.
 >         "options": {
 >             "goal": 1,
 >             "unit": "miles",
->             "first_to": 5
+>             "lives": 3
 >         },
 >         "owner": "peter",
 >         "users": [
@@ -1849,7 +1846,7 @@ Declines a pending competition invite for the authenticated user.
 >         "options": {
 >             "goal": 1,
 >             "unit": "miles",
->             "first_to": 5
+>             "lives": 3
 >         },
 >         "owner": "peter",
 >         "users": [
