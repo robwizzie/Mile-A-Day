@@ -75,13 +75,18 @@ extension CompetitionDetailView {
             // Competition recap
             competitionRecap(rankedUsers: rankedUsers)
 
-            // Full standings (everyone beyond podium)
-            if rankedUsers.count > 3 {
-                remainingStandings(rankedUsers: rankedUsers, currentUserId: currentUserId)
-            }
+            // Full standings — all participants
+            fullStandings(rankedUsers: rankedUsers, currentUserId: currentUserId)
 
-            // Competition info
-            infoSection
+            // Competition settings
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                Text("Settings")
+                    .font(MADTheme.Typography.title3)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, MADTheme.Spacing.sm)
+
+                infoSection
+            }
         }
     }
 
@@ -223,8 +228,7 @@ extension CompetitionDetailView {
 
     // MARK: - Competition Recap
     func competitionRecap(rankedUsers: [CompetitionUser]) -> some View {
-        let totalDistance = rankedUsers.reduce(0.0) { $0 + ($1.score ?? 0) }
-        let avgScore = rankedUsers.isEmpty ? 0 : totalDistance / Double(rankedUsers.count)
+        let unit = competition.options.unit.shortDisplayName
 
         return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             Text("Recap")
@@ -233,27 +237,12 @@ extension CompetitionDetailView {
                 .padding(.horizontal, MADTheme.Spacing.sm)
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: MADTheme.Spacing.md) {
+                // Shared: participants & duration
                 recapStatCard(
                     icon: "person.2.fill",
                     title: "Participants",
                     value: "\(rankedUsers.count)",
                     color: .blue
-                )
-
-                recapStatCard(
-                    icon: competition.type.icon,
-                    title: "Type",
-                    value: competition.type.displayName,
-                    color: Color(hex: competition.type.gradient[0])
-                )
-
-                recapStatCard(
-                    icon: "chart.bar.fill",
-                    title: competition.type == .streaks ? "Avg Streak" : "Avg Score",
-                    value: competition.type == .streaks || competition.type == .clash || competition.type == .targets
-                        ? String(format: "%.0f", avgScore)
-                        : String(format: "%.1f %@", avgScore, competition.options.unit.shortDisplayName),
-                    color: .green
                 )
 
                 if let startDate = competition.startDateFormatted, let endDate = competition.endDateFormatted {
@@ -263,6 +252,83 @@ extension CompetitionDetailView {
                         title: "Duration",
                         value: "\(max(1, days)) day\(days == 1 ? "" : "s")",
                         color: .purple
+                    )
+                }
+
+                // Type-specific stats
+                switch competition.type {
+                case .race, .apex:
+                    let winnerScore = rankedUsers.first?.score ?? 0
+                    let totalDistance = rankedUsers.reduce(0.0) { $0 + ($1.score ?? 0) }
+                    let avgDistance = rankedUsers.isEmpty ? 0 : totalDistance / Double(rankedUsers.count)
+
+                    recapStatCard(
+                        icon: "trophy.fill",
+                        title: competition.type == .race ? "Winner's Distance" : "Top Distance",
+                        value: String(format: "%.1f %@", winnerScore, unit),
+                        color: .yellow
+                    )
+
+                    recapStatCard(
+                        icon: "chart.bar.fill",
+                        title: "Avg Distance",
+                        value: String(format: "%.1f %@", avgDistance, unit),
+                        color: .green
+                    )
+
+                case .streaks:
+                    let winnerStreak = Int(rankedUsers.first?.score ?? 0)
+                    let avgStreak = rankedUsers.isEmpty ? 0 : rankedUsers.reduce(0.0) { $0 + ($1.score ?? 0) } / Double(rankedUsers.count)
+
+                    recapStatCard(
+                        icon: "flame.fill",
+                        title: "Best Streak",
+                        value: "\(winnerStreak) day\(winnerStreak == 1 ? "" : "s")",
+                        color: .orange
+                    )
+
+                    recapStatCard(
+                        icon: "chart.bar.fill",
+                        title: "Avg Streak",
+                        value: String(format: "%.0f day%@", avgStreak, avgStreak == 1 ? "" : "s"),
+                        color: .green
+                    )
+
+                case .clash:
+                    let winnerWins = Int(rankedUsers.first?.score ?? 0)
+                    let totalRounds = rankedUsers.first?.intervals?.count ?? 0
+
+                    recapStatCard(
+                        icon: "bolt.fill",
+                        title: "Winner's Wins",
+                        value: "\(winnerWins)",
+                        color: .yellow
+                    )
+
+                    recapStatCard(
+                        icon: "number",
+                        title: "Total Rounds",
+                        value: "\(totalRounds)",
+                        color: .cyan
+                    )
+
+                case .targets:
+                    let winnerPoints = Int(rankedUsers.first?.score ?? 0)
+                    let totalIntervals = rankedUsers.first?.intervals?.count ?? 0
+                    let hitRate = totalIntervals > 0 ? Double(winnerPoints) / Double(totalIntervals) * 100 : 0
+
+                    recapStatCard(
+                        icon: "target",
+                        title: "Winner's Points",
+                        value: "\(winnerPoints)",
+                        color: .yellow
+                    )
+
+                    recapStatCard(
+                        icon: "percent",
+                        title: "Goal Hit Rate",
+                        value: String(format: "%.0f%%", hitRate),
+                        color: .green
                     )
                 }
             }
@@ -295,10 +361,10 @@ extension CompetitionDetailView {
         )
     }
 
-    // MARK: - Remaining Standings
-    func remainingStandings(rankedUsers: [CompetitionUser], currentUserId: String?) -> some View {
+    // MARK: - Full Standings
+    func fullStandings(rankedUsers: [CompetitionUser], currentUserId: String?) -> some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Full Standings")
+            Text("Standings")
                 .font(MADTheme.Typography.title3)
                 .foregroundColor(.white)
                 .padding(.horizontal, MADTheme.Spacing.sm)

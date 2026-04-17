@@ -48,7 +48,7 @@ struct CompetitionsListView: View {
         }
         .sheet(isPresented: $showingTrophyCase) {
             NavigationStack {
-                TrophyCaseView(trophyService: trophyService)
+                TrophyCaseView(trophyService: trophyService, competitionService: competitionService)
             }
         }
         .task {

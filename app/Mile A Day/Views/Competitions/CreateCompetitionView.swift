@@ -42,10 +42,7 @@ struct CreateCompetitionView: View {
         selectedFriends.first
     }
 
-    var friendBestDistance: Double {
-        // In a real implementation, fetch from friend stats
-        return goal * 2.4
-    }
+
 
     // Contextual labels based on competition type
     var goalLabel: String {
@@ -429,33 +426,53 @@ struct CreateCompetitionView: View {
             }
             .padding(.horizontal, MADTheme.Spacing.sm)
 
-            HStack(spacing: MADTheme.Spacing.sm) {
-                ForEach([CompetitionUnit.miles, CompetitionUnit.kilometers, CompetitionUnit.steps], id: \.self) { unitOption in
-                    Button {
+            unitSelectorButtons
+                .padding(.horizontal, MADTheme.Spacing.sm)
+        }
+    }
+
+    // MARK: - Shared Unit Selector
+
+    var unitSelectorButtons: some View {
+        HStack(spacing: MADTheme.Spacing.sm) {
+            ForEach([CompetitionUnit.miles, CompetitionUnit.kilometers, CompetitionUnit.steps], id: \.self) { unitOption in
+                let isAvailable = unitOption == .miles
+                let isSelected = unit == unitOption
+
+                Button {
+                    if isAvailable {
                         unit = unitOption
-                    } label: {
+                    }
+                } label: {
+                    VStack(spacing: 2) {
                         Text(unitOption == .steps ? "Steps" : unitOption.rawValue.capitalized)
                             .font(MADTheme.Typography.callout)
-                            .fontWeight(unit == unitOption ? .semibold : .regular)
-                            .foregroundColor(unit == unitOption ? .white : .white.opacity(0.6))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, MADTheme.Spacing.sm)
-                            .background(
-                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                    .fill(unit == unitOption ? MADTheme.Colors.primary.opacity(0.3) : Color.white.opacity(0.05))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                    .stroke(
-                                        unit == unitOption ? MADTheme.Colors.primary : Color.white.opacity(0.1),
-                                        lineWidth: unit == unitOption ? 2 : 1
-                                    )
-                            )
+                            .fontWeight(isSelected ? .semibold : .regular)
+                            .foregroundColor(isAvailable ? (isSelected ? .white : .white.opacity(0.6)) : .white.opacity(0.3))
+
+                        if !isAvailable {
+                            Text("Coming Soon")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundColor(.white.opacity(0.3))
+                        }
                     }
-                    .buttonStyle(ScaleButtonStyle())
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, MADTheme.Spacing.sm)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                            .fill(isSelected ? MADTheme.Colors.primary.opacity(0.3) : Color.white.opacity(0.05))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                            .stroke(
+                                isSelected ? MADTheme.Colors.primary : Color.white.opacity(0.1),
+                                lineWidth: isSelected ? 2 : 1
+                            )
+                    )
                 }
+                .buttonStyle(ScaleButtonStyle())
+                .disabled(!isAvailable)
             }
-            .padding(.horizontal, MADTheme.Spacing.sm)
         }
     }
 
@@ -476,32 +493,7 @@ struct CreateCompetitionView: View {
 
             VStack(spacing: MADTheme.Spacing.lg) {
                 // Unit selector
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    ForEach([CompetitionUnit.miles, CompetitionUnit.kilometers, CompetitionUnit.steps], id: \.self) { unitOption in
-                        Button {
-                            unit = unitOption
-                        } label: {
-                            Text(unitOption == .steps ? "Steps" : unitOption.rawValue.capitalized)
-                                .font(MADTheme.Typography.callout)
-                                .fontWeight(unit == unitOption ? .semibold : .regular)
-                                .foregroundColor(unit == unitOption ? .white : .white.opacity(0.6))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, MADTheme.Spacing.sm)
-                                .background(
-                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                        .fill(unit == unitOption ? MADTheme.Colors.primary.opacity(0.3) : Color.white.opacity(0.05))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                        .stroke(
-                                            unit == unitOption ? MADTheme.Colors.primary : Color.white.opacity(0.1),
-                                            lineWidth: unit == unitOption ? 2 : 1
-                                        )
-                                )
-                        }
-                        .buttonStyle(ScaleButtonStyle())
-                    }
-                }
+                unitSelectorButtons
                 .padding(.horizontal, MADTheme.Spacing.sm)
 
                 // Goal picker with +/- buttons
@@ -573,12 +565,6 @@ struct CreateCompetitionView: View {
                 }
                 .padding(.horizontal, MADTheme.Spacing.sm)
 
-                // Friend's best
-                if let friend = firstSelectedFriend {
-                    Text("\(friend.displayName)'s best  \(String(format: "%.0f", friendBestDistance)) \(unit.shortDisplayName)")
-                        .font(MADTheme.Typography.callout)
-                        .foregroundColor(.white.opacity(0.6))
-                }
             }
             .padding(.vertical, MADTheme.Spacing.lg)
             .background(

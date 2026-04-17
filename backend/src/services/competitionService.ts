@@ -207,6 +207,14 @@ export async function getCompetitions(
 
 	const competitions = await db.query(query, [userId, pageSize, (page - 1) * pageSize]);
 
+	// Compute scores for started competitions (same logic as getCompetition singular)
+	for (const competition of competitions) {
+		if (competition.start_date && new Date(competition.start_date + ' EST') <= new Date()) {
+			const userScores = await getUserScores(competition);
+			competition.users = competition.users.map((user: CompetitionUser) => ({ ...user, ...userScores[user.user_id] }));
+		}
+	}
+
 	return competitions;
 }
 
