@@ -20,6 +20,7 @@ struct StreakCard: View {
     @Environment(\.colorScheme) var colorScheme
     @State private var animateStreak = false
     @State private var animateFire = false
+    @State private var animateUrgency = false
     @State private var showingShareSheet = false
     @State private var timeRemainingText: String = ""
     @State private var timer: Timer?
@@ -159,15 +160,46 @@ struct StreakCard: View {
                             .scaleEffect(animateFire ? 1.15 : 1.0)
                             .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateFire)
                             .shadow(color: statusColor.opacity(0.7), radius: animateFire ? 15 : 8)
+                    } else if isAtRisk {
+                        // At-risk state: countdown ring around flame
+                        let countdownProgress: Double = {
+                            guard let remaining = user.timeUntilStreakReset else { return 0 }
+                            // 6 hours = 21600 seconds (from 6pm to midnight)
+                            return min(remaining / 21600, 1.0)
+                        }()
+
+                        Circle()
+                            .fill(Color.red.opacity(0.1))
+                            .frame(width: 70, height: 70)
+
+                        // Countdown ring
+                        Circle()
+                            .trim(from: 0, to: countdownProgress)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [.red, .orange],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                            )
+                            .frame(width: 74, height: 74)
+                            .rotationEffect(.degrees(-90))
+
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 36))
+                            .foregroundColor(.red.opacity(0.8))
+                            .scaleEffect(animateUrgency ? 1.05 : 0.95)
+                            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: animateUrgency)
                     } else {
-                        // Consistent color when not completed - white if not at risk, red tint if at risk
+                        // Default: not completed, not at risk
                         Circle()
                             .fill(statusColor.opacity(0.1))
                             .frame(width: 70, height: 70)
 
                         Image(systemName: "flame.fill")
                             .font(.system(size: 36))
-                            .foregroundColor(isAtRisk ? statusColor.opacity(0.8) : .white.opacity(0.7))
+                            .foregroundColor(.white.opacity(0.7))
                     }
                 }
             }
@@ -268,6 +300,29 @@ struct StreakCard: View {
                     .foregroundColor(.green)
                     .padding(.top, 24)
                     .padding(.trailing, 24)
+            } else if isAtRisk && !timeRemainingText.isEmpty {
+                // Enhanced urgency treatment for at-risk streaks
+                HStack(spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.red)
+                    Text(formattedTimeOnly)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.red)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(Color.red.opacity(0.15))
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(Color.red.opacity(0.3), lineWidth: 1)
+                )
+                .opacity(animateUrgency ? 1.0 : 0.6)
+                .padding(.top, 20)
+                .padding(.trailing, 20)
             } else if !timeRemainingText.isEmpty {
                 HStack(spacing: 4) {
                     Image(systemName: "clock.fill")
@@ -291,6 +346,12 @@ struct StreakCard: View {
                 animateFire = true
             } else {
                 animateFire = false
+            }
+            // Start urgency pulse if at risk
+            if isAtRisk && !isGoalCompleted {
+                withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+                    animateUrgency = true
+                }
             }
         }
         .onChange(of: isGoalCompleted) { oldValue, newValue in

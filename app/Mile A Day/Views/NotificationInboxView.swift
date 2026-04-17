@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct NotificationInboxView: View {
+    @ObservedObject var competitionService: CompetitionService
     var onUnreadCountChanged: ((Int) -> Void)?
 
     @StateObject private var friendService = FriendService()
@@ -8,6 +9,7 @@ struct NotificationInboxView: View {
     @State private var unreadCount = 0
     @State private var isLoading = true
     @State private var hasMore = true
+    @State private var selectedCompetition: Competition?
 
     var body: some View {
         ZStack {
@@ -81,15 +83,56 @@ struct NotificationInboxView: View {
         .onChange(of: unreadCount) { _, newCount in
             onUnreadCountChanged?(newCount)
         }
+        .sheet(item: $selectedCompetition) { competition in
+            NavigationStack {
+                CompetitionDetailView(competition: competition, competitionService: competitionService)
+            }
+        }
     }
 
     // MARK: - Notification Row
 
+    private func handleNotificationTap(_ notification: InAppNotification) {
+        if !notification.is_read {
+            markRead(notification)
+        }
+
+        let type = notification.type
+        switch type {
+        case "friend_request", "friend_request_accepted", "friend_nudge", "friend_activity":
+            NotificationCenter.default.post(
+                name: NSNotification.Name("MAD_SwitchTab"),
+                object: nil,
+                userInfo: ["tab": 2]
+            )
+        case "competition_invite", "competition_accepted", "competition_started",
+             "competition_finished", "competition_nudge", "competition_flex",
+             "competition_milestone", "lead_change", "clash_tie":
+            if let compId = notification.data?["competition_id"],
+               let comp = competitionService.competitions.first(where: { $0.competition_id == compId })
+                       ?? competitionService.invites.first(where: { $0.competition_id == compId }) {
+                selectedCompetition = comp
+            } else {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("MAD_SwitchTab"),
+                    object: nil,
+                    userInfo: ["tab": 1]
+                )
+            }
+        case "personal_best":
+            NotificationCenter.default.post(
+                name: NSNotification.Name("MAD_SwitchTab"),
+                object: nil,
+                userInfo: ["tab": 3]
+            )
+        default:
+            break
+        }
+    }
+
     private func notificationRow(_ notification: InAppNotification) -> some View {
         Button {
-            if !notification.is_read {
-                markRead(notification)
-            }
+            handleNotificationTap(notification)
         } label: {
             HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
                 // Type icon
@@ -256,6 +299,6 @@ struct NotificationInboxView: View {
 
 #Preview {
     NavigationStack {
-        NotificationInboxView()
+        NotificationInboxView(competitionService: CompetitionService())
     }
 }

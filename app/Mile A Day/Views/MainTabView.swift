@@ -21,6 +21,8 @@ struct MainTabView: View {
                 NavigationStack {
                     DashboardView(healthManager: healthManager, userManager: userManager)
                         .environmentObject(notificationService)
+                        .environmentObject(competitionService)
+                        .environmentObject(friendService)
                         .toolbar {
                             ToolbarItem(placement: .topBarTrailing) {
                                 Button {
@@ -45,7 +47,7 @@ struct MainTabView: View {
                             }
                         }
                         .navigationDestination(isPresented: $showNotificationInbox) {
-                            NotificationInboxView { newCount in
+                            NotificationInboxView(competitionService: competitionService) { newCount in
                                 unreadNotificationCount = newCount
                             }
                         }
@@ -116,6 +118,11 @@ struct MainTabView: View {
                     break
                 }
                 await refreshUnreadCount()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MAD_SwitchTab"))) { notification in
+            if let tab = notification.userInfo?["tab"] as? Int {
+                selectedTab = tab
             }
         }
         .onChange(of: scenePhase) { _, newPhase in

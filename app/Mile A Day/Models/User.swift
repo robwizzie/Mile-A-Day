@@ -533,8 +533,31 @@ struct User: Identifiable, Codable {
             }
         }
         
+        // Daily challenge badges
+        let challengeBadges: [(String, String, String)] = [
+            ("challenge_1", "Challenge Accepted", "Complete your first daily challenge!"),
+            ("challenge_5", "Challenge Seeker", "Complete 5 daily challenges!"),
+            ("challenge_10", "Challenge Pro", "Complete 10 daily challenges!"),
+            ("challenge_25", "Challenge Master", "Complete 25 daily challenges!"),
+            ("challenge_50", "Challenge Legend", "Complete 50 daily challenges!"),
+            ("challenge_100", "Challenge Immortal", "Complete 100 daily challenges!")
+        ]
+
+        for (badgeId, name, description) in challengeBadges {
+            if !hasBadge(id: badgeId) {
+                lockedBadges.append(Badge(
+                    id: badgeId,
+                    name: name,
+                    description: description,
+                    dateAwarded: Date.distantFuture,
+                    isNew: false,
+                    isLocked: true
+                ))
+            }
+        }
+
         // Note: Hidden badges are NOT shown in locked list - they're surprises!
-        
+
         return lockedBadges
     }
     
@@ -654,6 +677,8 @@ struct User: Identifiable, Codable {
             return .speed
         } else if id.starts(with: "daily_") {
             return .distance
+        } else if id.starts(with: "challenge_") {
+            return .special
         } else if id.starts(with: "special_") {
             return .special
         } else if id.starts(with: "hidden_") || id.starts(with: "secret_") {

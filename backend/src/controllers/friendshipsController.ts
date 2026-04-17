@@ -4,7 +4,8 @@ import {
 	getFriends as getUserFriends,
 	getFriendRequests as getUserFriendRequests,
 	getSentRequests as getUserSentRequests,
-	updateFriendship
+	updateFriendship,
+	getFriendsActivityToday as getActivityToday
 } from '../services/friendshipService.js';
 import hasRequiredKeys from '../utils/hasRequiredKeys.js';
 import { getUser, getUsers } from '../services/userService.js';
@@ -90,6 +91,21 @@ export async function sendRequest(req: Request, res: Response) {
 	}).catch(err => console.error('[Push] Error sending friend request notification:', err.message));
 
 	res.send(friendResult);
+}
+
+export async function getFriendsActivityToday(req: Request, res: Response) {
+	if (!hasRequiredKeys(['userId'], req, res)) return;
+
+	const { userId } = req.params;
+
+	const user = await getUser({ userId });
+	if (!user) {
+		return res.status(400).send({ error: `No user found with ID ${userId}` });
+	}
+
+	const activity = await getActivityToday(userId);
+
+	res.send(activity);
 }
 
 export function getFriendshipHandler(status: 'accepted' | 'rejected' | 'ignored' | 'removed') {

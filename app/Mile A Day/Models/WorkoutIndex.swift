@@ -156,8 +156,28 @@ struct WorkoutIndex: Codable {
         return workoutsByDate[key] ?? []
     }
 
+    // MARK: - Weekly Aggregation
+
+    /// Total miles for days starting on the given date, up to `dayCount` days
+    func weekTotal(startingOn weekStart: Date, dayCount: Int = 7) -> (miles: Double, daysCompleted: Int) {
+        let calendar = Calendar.current
+        var weekMiles = 0.0
+        var daysCompleted = 0
+
+        for offset in 0..<dayCount {
+            guard let date = calendar.date(byAdding: .day, value: offset, to: calendar.startOfDay(for: weekStart)) else { continue }
+            let dayMiles = totalMiles(for: date)
+            weekMiles += dayMiles
+            if hasQualifyingWorkout(on: date) {
+                daysCompleted += 1
+            }
+        }
+
+        return (weekMiles, daysCompleted)
+    }
+
     // MARK: - Helper Methods
-    
+
     private func dateKey(from date: Date) -> String {
         let calendar = Calendar.current
         let components = calendar.dateComponents([.year, .month, .day], from: date)

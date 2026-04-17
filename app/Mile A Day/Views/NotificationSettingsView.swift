@@ -110,9 +110,6 @@ struct NotificationSettingsView: View {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 showFriendSettings.toggle()
                             }
-                            if showFriendSettings && friendSettings.isEmpty {
-                                loadFriendSettings()
-                            }
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -246,6 +243,7 @@ struct NotificationSettingsView: View {
         }
         .task {
             await friendService.refreshAllData()
+            await loadFriendSettingsAsync()
         }
     }
 
@@ -299,111 +297,13 @@ struct NotificationSettingsView: View {
     private var friendNotificationList: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
             ForEach(friendService.friends) { friend in
-                friendNotificationRow(friend: friend)
+                FriendNotificationRowView(
+                    friend: friend,
+                    settings: $friendSettings,
+                    friendService: friendService
+                )
             }
         }
-    }
-
-    private func friendNotificationRow(friend: BackendUser) -> some View {
-        let setting = friendSettings.first(where: { $0.friend_id == friend.user_id })
-        let isMuted = setting?.muted ?? false
-        let nudgesMuted = setting?.nudges_muted ?? false
-        let activityMuted = setting?.activity_muted ?? false
-
-        return VStack(spacing: MADTheme.Spacing.sm) {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                AvatarView(name: friend.displayName, imageURL: friend.profile_image_url, size: 32)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(friend.displayName)
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
-                    if let username = friend.username {
-                        Text("@\(username)")
-                            .font(.system(size: 10, design: .rounded))
-                            .foregroundColor(.white.opacity(0.4))
-                    }
-                }
-
-                Spacer()
-
-                // Mute all toggle
-                Button {
-                    toggleFriendMute(friendId: friend.user_id, currentlyMuted: isMuted)
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: isMuted ? "bell.slash.fill" : "bell.fill")
-                            .font(.system(size: 12))
-                        Text(isMuted ? "Muted" : "On")
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                    }
-                    .foregroundColor(isMuted ? .red.opacity(0.7) : .green.opacity(0.7))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .fill(isMuted ? Color.red.opacity(0.1) : Color.green.opacity(0.08))
-                            .overlay(
-                                Capsule()
-                                    .stroke(isMuted ? Color.red.opacity(0.2) : Color.green.opacity(0.15), lineWidth: 1)
-                            )
-                    )
-                }
-                .buttonStyle(ScaleButtonStyle())
-            }
-
-            if !isMuted {
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    Text("Tap to toggle:")
-                        .font(.system(size: 9, design: .rounded))
-                        .foregroundColor(.white.opacity(0.25))
-
-                    notificationToggleChip(
-                        label: "Nudges",
-                        icon: "bell.badge",
-                        isEnabled: !nudgesMuted,
-                        action: { toggleFriendNudgesMute(friendId: friend.user_id, currentlyMuted: nudgesMuted) }
-                    )
-
-                    notificationToggleChip(
-                        label: "Activity",
-                        icon: "figure.run",
-                        isEnabled: !activityMuted,
-                        action: { toggleFriendActivityMute(friendId: friend.user_id, currentlyMuted: activityMuted) }
-                    )
-
-                    Spacer()
-                }
-            }
-        }
-        .padding(MADTheme.Spacing.sm)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                .fill(Color.white.opacity(0.03))
-        )
-    }
-
-    private func notificationToggleChip(label: String, icon: String, isEnabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: isEnabled ? icon : "slash.circle")
-                    .font(.system(size: 9))
-                Text(label)
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-            }
-            .foregroundColor(isEnabled ? .green.opacity(0.8) : .red.opacity(0.7))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule()
-                    .fill(isEnabled ? Color.green.opacity(0.06) : Color.red.opacity(0.08))
-                    .overlay(
-                        Capsule()
-                            .stroke(isEnabled ? Color.green.opacity(0.12) : Color.red.opacity(0.15), lineWidth: 1)
-                    )
-            )
-        }
-        .buttonStyle(ScaleButtonStyle())
     }
 
     // MARK: - Actions
@@ -449,139 +349,151 @@ struct NotificationSettingsView: View {
         }
     }
 
-    private func loadFriendSettings() {
-        isLoadingFriendSettings = true
-        Task {
-            do {
-                // Load friends list if not already loaded
-                if friendService.friends.isEmpty {
-                    try await friendService.loadFriends()
-                }
-                let settings = try await friendService.getFriendNotificationSettings()
-                await MainActor.run {
-                    friendSettings = settings
-                    isLoadingFriendSettings = false
-                }
-            } catch {
-                print("[NotifSettings] ❌ loadFriendSettings failed: \(error)")
-                await MainActor.run {
-                    isLoadingFriendSettings = false
-                }
+    private func loadFriendSettingsAsync() async {
+        await MainActor.run { isLoadingFriendSettings = true }
+        do {
+            if friendService.friends.isEmpty {
+                try await friendService.loadFriends()
             }
+            let settings = try await friendService.getFriendNotificationSettings()
+            await MainActor.run {
+                friendSettings = settings
+                isLoadingFriendSettings = false
+            }
+        } catch {
+            print("[NotifSettings] ❌ loadFriendSettings failed: \(error)")
+            await MainActor.run { isLoadingFriendSettings = false }
         }
     }
 
-    private func toggleFriendMute(friendId: String, currentlyMuted: Bool) {
-        // Optimistic update
-        let existing = friendSettings.first(where: { $0.friend_id == friendId })
-        let optimistic = FriendNotificationSetting(
-            friend_id: friendId,
-            username: existing?.username,
-            muted: !currentlyMuted,
-            nudges_muted: existing?.nudges_muted ?? false,
-            activity_muted: existing?.activity_muted ?? false
+}
+
+// MARK: - Friend Notification Row
+
+struct FriendNotificationRowView: View {
+    let friend: BackendUser
+    @Binding var settings: [FriendNotificationSetting]
+    let friendService: FriendService
+
+    private var isMuted: Bool {
+        settings.first(where: { $0.friend_id == friend.user_id })?.muted ?? false
+    }
+    private var isNudgesMuted: Bool {
+        settings.first(where: { $0.friend_id == friend.user_id })?.nudges_muted ?? false
+    }
+    private var isActivityMuted: Bool {
+        settings.first(where: { $0.friend_id == friend.user_id })?.activity_muted ?? false
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Friend header + mute all toggle
+            HStack(spacing: MADTheme.Spacing.sm) {
+                AvatarView(name: friend.displayName, imageURL: friend.profile_image_url, size: 32)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(friend.displayName)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white)
+                    if let username = friend.username {
+                        Text("@\(username)")
+                            .font(.system(size: 10, design: .rounded))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
+                }
+
+                Spacer()
+
+                Toggle("", isOn: Binding(
+                    get: { !isMuted },
+                    set: { newEnabled in
+                        syncToBackend(muted: !newEnabled)
+                    }
+                ))
+                .labelsHidden()
+                .tint(MADTheme.Colors.madRed)
+            }
+
+            if !isMuted {
+                Divider().overlay(Color.white.opacity(0.06)).padding(.vertical, 8)
+
+                // Sub-toggles
+                VStack(spacing: 6) {
+                    HStack {
+                        Image(systemName: "bell.badge")
+                            .font(.system(size: 11))
+                            .foregroundColor(.orange)
+                            .frame(width: 20)
+                        Text("Nudges")
+                            .font(.system(size: 13, design: .rounded))
+                            .foregroundColor(.white.opacity(0.8))
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { !isNudgesMuted },
+                            set: { newEnabled in
+                                syncToBackend(nudgesMuted: !newEnabled)
+                            }
+                        ))
+                        .labelsHidden()
+                        .tint(MADTheme.Colors.madRed)
+                        .scaleEffect(0.85)
+                    }
+
+                    HStack {
+                        Image(systemName: "figure.run")
+                            .font(.system(size: 11))
+                            .foregroundColor(.green)
+                            .frame(width: 20)
+                        Text("Activity")
+                            .font(.system(size: 13, design: .rounded))
+                            .foregroundColor(.white.opacity(0.8))
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { !isActivityMuted },
+                            set: { newEnabled in
+                                syncToBackend(activityMuted: !newEnabled)
+                            }
+                        ))
+                        .labelsHidden()
+                        .tint(MADTheme.Colors.madRed)
+                        .scaleEffect(0.85)
+                    }
+                }
+                .padding(.leading, 4)
+            }
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                .fill(Color.white.opacity(0.03))
         )
-        updateLocalFriendSetting(optimistic)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-
-        Task {
-            do {
-                let updated = try await friendService.updateFriendNotificationSettings(
-                    friendId: friendId,
-                    muted: !currentlyMuted
-                )
-                await MainActor.run { updateLocalFriendSetting(updated) }
-            } catch {
-                print("[NotifSettings] ❌ toggleFriendMute failed: \(error)")
-                await MainActor.run {
-                    let reverted = FriendNotificationSetting(
-                        friend_id: friendId,
-                        username: existing?.username,
-                        muted: currentlyMuted,
-                        nudges_muted: existing?.nudges_muted ?? false,
-                        activity_muted: existing?.activity_muted ?? false
-                    )
-                    updateLocalFriendSetting(reverted)
-                }
-            }
-        }
     }
 
-    private func toggleFriendNudgesMute(friendId: String, currentlyMuted: Bool) {
-        let existing = friendSettings.first(where: { $0.friend_id == friendId })
-        let optimistic = FriendNotificationSetting(
-            friend_id: friendId,
-            username: existing?.username,
-            muted: existing?.muted ?? false,
-            nudges_muted: !currentlyMuted,
-            activity_muted: existing?.activity_muted ?? false
+    private func syncToBackend(muted: Bool? = nil, nudgesMuted: Bool? = nil, activityMuted: Bool? = nil) {
+        let updated = FriendNotificationSetting(
+            friend_id: friend.user_id,
+            username: friend.username,
+            muted: muted ?? isMuted,
+            nudges_muted: nudgesMuted ?? isNudgesMuted,
+            activity_muted: activityMuted ?? isActivityMuted
         )
-        updateLocalFriendSetting(optimistic)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-
-        Task {
-            do {
-                let updated = try await friendService.updateFriendNotificationSettings(
-                    friendId: friendId,
-                    nudgesMuted: !currentlyMuted
-                )
-                await MainActor.run { updateLocalFriendSetting(updated) }
-            } catch {
-                print("[NotifSettings] ❌ toggleFriendNudgesMute failed: \(error)")
-                await MainActor.run {
-                    let reverted = FriendNotificationSetting(
-                        friend_id: friendId,
-                        username: existing?.username,
-                        muted: existing?.muted ?? false,
-                        nudges_muted: currentlyMuted,
-                        activity_muted: existing?.activity_muted ?? false
-                    )
-                    updateLocalFriendSetting(reverted)
-                }
-            }
-        }
-    }
-
-    private func toggleFriendActivityMute(friendId: String, currentlyMuted: Bool) {
-        let existing = friendSettings.first(where: { $0.friend_id == friendId })
-        let optimistic = FriendNotificationSetting(
-            friend_id: friendId,
-            username: existing?.username,
-            muted: existing?.muted ?? false,
-            nudges_muted: existing?.nudges_muted ?? false,
-            activity_muted: !currentlyMuted
-        )
-        updateLocalFriendSetting(optimistic)
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-
-        Task {
-            do {
-                let updated = try await friendService.updateFriendNotificationSettings(
-                    friendId: friendId,
-                    activityMuted: !currentlyMuted
-                )
-                await MainActor.run { updateLocalFriendSetting(updated) }
-            } catch {
-                print("[NotifSettings] ❌ toggleFriendActivityMute failed: \(error)")
-                await MainActor.run {
-                    let reverted = FriendNotificationSetting(
-                        friend_id: friendId,
-                        username: existing?.username,
-                        muted: existing?.muted ?? false,
-                        nudges_muted: existing?.nudges_muted ?? false,
-                        activity_muted: currentlyMuted
-                    )
-                    updateLocalFriendSetting(reverted)
-                }
-            }
-        }
-    }
-
-    private func updateLocalFriendSetting(_ setting: FriendNotificationSetting) {
-        if let index = friendSettings.firstIndex(where: { $0.friend_id == setting.friend_id }) {
-            friendSettings[index] = setting
+        if let index = settings.firstIndex(where: { $0.friend_id == friend.user_id }) {
+            settings[index] = updated
         } else {
-            friendSettings.append(setting)
+            settings.append(updated)
+        }
+
+        Task {
+            do {
+                _ = try await friendService.updateFriendNotificationSettings(
+                    friendId: friend.user_id,
+                    muted: muted,
+                    nudgesMuted: nudgesMuted,
+                    activityMuted: activityMuted
+                )
+            } catch {
+                print("[NotifSettings] ❌ sync failed: \(error)")
+            }
         }
     }
 }

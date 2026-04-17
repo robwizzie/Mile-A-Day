@@ -100,6 +100,54 @@ export async function sendFriendRequest(user1: string, user2: string): Promise<M
 	}
 }
 
+export interface FriendActivity {
+	user_id: string;
+	username: string | null;
+	first_name: string | null;
+	last_name: string | null;
+	profile_image_url: string | null;
+	today_miles: number;
+	completed_today: boolean;
+}
+
+export async function getFriendsActivityToday(userId: string): Promise<FriendActivity[]> {
+	const results = await db.query(
+		`
+		SELECT
+			u.user_id,
+			u.username,
+			u.first_name,
+			u.last_name,
+			u.profile_image_url,
+			COALESCE((
+				SELECT SUM(w.distance)
+				FROM workouts w
+				WHERE w.user_id = u.user_id
+				AND w.local_date = (
+					NOW() + (
+						COALESCE(
+							(SELECT timezone_offset FROM workouts WHERE user_id = u.user_id ORDER BY device_end_date DESC LIMIT 1),
+							0
+						) || ' minutes'
+					)::interval
+				)::date
+			), 0)::float as today_miles
+		FROM friendships f
+		JOIN users u ON u.user_id = f.friend_id
+		WHERE f.user_id = $1
+			AND f.status = 'accepted'
+		ORDER BY today_miles DESC
+		`,
+		[userId]
+	);
+
+	return results.map((r: any) => ({
+		...r,
+		today_miles: parseFloat(r.today_miles) || 0,
+		completed_today: parseFloat(r.today_miles) >= 1.0
+	}));
+}
+
 export async function updateFriendship(
 	user1: string,
 	user2: string,

@@ -8,6 +8,7 @@ import SwiftUI
 struct BadgeDetailView: View {
     let badge: Badge
     var userManager: UserManager?
+    @AppStorage("trackedBadgeIds") private var trackedBadgeIdsRaw: String = ""
 
     // Animation states
     @State private var showMedal = false
@@ -15,6 +16,24 @@ struct BadgeDetailView: View {
     @State private var shimmerOffset: CGFloat = -300
     @State private var glowPulse = false
     @State private var ribbonDrop = false
+
+    private var trackedBadgeIds: Set<String> {
+        Set(trackedBadgeIdsRaw.split(separator: ",").map(String.init))
+    }
+
+    private var isTracked: Bool {
+        trackedBadgeIds.contains(badge.id)
+    }
+
+    private func toggleTracked() {
+        var ids = trackedBadgeIds
+        if ids.contains(badge.id) {
+            ids.remove(badge.id)
+        } else {
+            ids.insert(badge.id)
+        }
+        trackedBadgeIdsRaw = ids.sorted().joined(separator: ",")
+    }
     
     var body: some View {
         ZStack {
@@ -378,12 +397,39 @@ struct BadgeDetailView: View {
                 .foregroundColor(.white.opacity(0.7))
                 .multilineTextAlignment(.center)
                 .lineSpacing(4)
-            
+
+            // Track button
+            if !badge.isHidden {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        toggleTracked()
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: isTracked ? "pin.fill" : "pin")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text(isTracked ? "Tracking" : "Track this Medal")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(isTracked ? .white : .cyan)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(
+                        Capsule()
+                            .fill(isTracked ? Color.cyan : Color.cyan.opacity(0.15))
+                    )
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.cyan.opacity(0.3), lineWidth: isTracked ? 0 : 1)
+                    )
+                }
+            }
+
             // Your progress (when we have user stats)
             if let um = userManager {
                 lockedProgressCard(user: um.currentUser)
             }
-            
+
             // How to unlock card
             VStack(spacing: 12) {
                 HStack(spacing: 6) {
@@ -394,7 +440,7 @@ struct BadgeDetailView: View {
                         .tracking(1.5)
                 }
                 .foregroundColor(.orange)
-                
+
                 Text(getUnlockText())
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.85))

@@ -14,6 +14,8 @@ struct DashboardView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     @EnvironmentObject var notificationService: MADNotificationService
+    @EnvironmentObject var competitionService: CompetitionService
+    @EnvironmentObject var friendService: FriendService
     @StateObject private var workoutService = WorkoutService()
     @StateObject private var syncService = WorkoutSyncService.shared
 
@@ -37,6 +39,10 @@ struct DashboardView: View {
 
     /// User preference: "chart" (line chart) or "streak" (streak card)
     @AppStorage("weekViewStyle") private var weekViewStyle: String = "streak"
+
+    /// Collapsible section state
+    @AppStorage("statsCollapsed") private var statsCollapsed: Bool = true
+    @AppStorage("workoutsCollapsed") private var workoutsCollapsed: Bool = true
 
     /// Navigation state for badges view from celebration
     @State private var navigateToBadgesFromCelebration = false
@@ -442,13 +448,9 @@ struct DashboardView: View {
                 }
             }
             .onChange(of: healthManager.todaysDistance) { oldValue, newValue in
-                // Check for goal completion when distance updates (e.g., after data loads)
-                if newValue > oldValue && newValue > 0 {
-                    checkAndShowGoalCelebration()
-                    // Also check for extra mile when distance increases after goal already celebrated
-                    if celebrationManager.hasShownGoalCelebrationToday {
-                        checkAndShowPostGoalEncouragement()
-                    }
+                // Check for extra mile when distance increases after goal already celebrated
+                if newValue > oldValue && newValue > 0 && celebrationManager.hasShownGoalCelebrationToday {
+                    checkAndShowPostGoalEncouragement()
                 }
             }
             .onChange(of: healthManager.todaysWorkouts.count) { oldValue, newValue in
@@ -484,18 +486,13 @@ struct DashboardView: View {
     private func refreshData() {
         isRefreshing = true
 
-        // Fetch data in order to ensure consistency
         healthManager.fetchAllWorkoutData()
-
-        // Refresh fastest pace from backend
         fetchFastestPaceFromBackend()
 
-        // Use Task for better performance than DispatchQueue
+        // Brief delay for HealthKit data to settle, then update UI
         Task { @MainActor in
-            // Reduced delay for faster UI responsiveness (from 2.5s to 1s)
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
 
-            // Update user manager with fresh HealthKit data
             userManager.updateUserWithHealthKitData(
                 retroactiveStreak: healthManager.retroactiveStreak,
                 currentMiles: healthManager.todaysDistance,
@@ -505,10 +502,6 @@ struct DashboardView: View {
             )
 
             syncWidgetData()
-
-            // Shorter additional delay (from 3s total to 1.5s total)
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            syncWidgetData()
             isRefreshing = false
         }
     }
@@ -516,14 +509,11 @@ struct DashboardView: View {
     private func refreshDataAsync() async {
         isRefreshing = true
         healthManager.fetchAllWorkoutData()
-
-        // Refresh fastest pace from backend
         fetchFastestPaceFromBackend()
 
-        // Reduced delay for faster UI responsiveness (from 2.5s to 1s)
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        // Brief delay for HealthKit data to settle
+        try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
 
-        // Update user manager with fresh HealthKit data
         userManager.updateUserWithHealthKitData(
             retroactiveStreak: healthManager.retroactiveStreak,
             currentMiles: healthManager.todaysDistance,
@@ -532,10 +522,6 @@ struct DashboardView: View {
             mostMilesInDay: healthManager.mostMilesInOneDay
         )
 
-        syncWidgetData()
-
-        // Shorter additional delay (from 3s total to 1.5s total)
-        try? await Task.sleep(nanoseconds: 500_000_000)
         syncWidgetData()
         isRefreshing = false
     }
@@ -624,6 +610,9 @@ struct DashboardView: View {
                     userManager: userManager
                 )
                 .padding(.horizontal, 16)
+            } else if weekViewStyle == "trends" {
+                WeeklyTrendCard(healthManager: healthManager, userManager: userManager)
+                    .padding(.horizontal, 16)
             } else {
                 streakSection
                     .padding(.horizontal, 16)
@@ -635,6 +624,7 @@ struct DashboardView: View {
         let tabs: [(id: String, label: String, icon: String)] = [
             ("streak", "Streak", "flame.fill"),
             ("chart", "This Week", "chart.xyaxis.line"),
+            ("trends", "Trends", "chart.line.uptrend.xyaxis"),
         ]
 
         return HStack(spacing: 4) {
@@ -676,8 +666,12 @@ struct DashboardView: View {
     private var dashboardContent: some View {
         VStack(spacing: 16) {
             inProgressBannerSection
+            competitionInvitesSection
+            dailyChallengeSection
             instructionsSection
             todayProgressSection
+            friendActivitySection
+            activeCompetitionSection
             stepsAndBadgesSection
             statsAndHistorySection
         }
@@ -761,6 +755,37 @@ struct DashboardView: View {
         )
     }
 
+    // MARK: - Daily Challenge Section
+
+    private var dailyChallengeSection: some View {
+        DailyChallengeCard(healthManager: healthManager, userManager: userManager)
+    }
+
+    // MARK: - Friend Activity Section
+
+    private var friendActivitySection: some View {
+        FriendActivityStripView(friendService: friendService)
+    }
+
+    // MARK: - Competition Invites Section
+
+    @ViewBuilder
+    private var competitionInvitesSection: some View {
+        if !competitionService.invites.isEmpty {
+            CompetitionInviteBanner(inviteCount: competitionService.invites.count)
+        }
+    }
+
+    // MARK: - Active Competition Section
+
+    @ViewBuilder
+    private var activeCompetitionSection: some View {
+        let activeCompetitions = competitionService.competitions.filter { $0.status == .active }
+        if let competition = activeCompetitions.first {
+            ActiveCompetitionBannerCard(competition: competition)
+        }
+    }
+
     private var stepsAndBadgesSection: some View {
         VStack(spacing: 12) {
             CalendarPreviewCard(
@@ -769,16 +794,21 @@ struct DashboardView: View {
             )
 
             BadgesPreviewCard(
-                userManager: userManager
+                userManager: userManager,
+                healthManager: healthManager
             )
         }
     }
 
     private var statsAndHistorySection: some View {
         VStack(spacing: 12) {
-            StatsGridView(user: userManager.currentUser, healthManager: healthManager)
+            DashboardCollapsibleSection(title: "Your Stats", icon: "chart.bar.fill", isCollapsed: $statsCollapsed) {
+                StatsGridView(user: userManager.currentUser, healthManager: healthManager)
+            }
 
-            RecentWorkoutsView(workouts: healthManager.recentWorkouts)
+            DashboardCollapsibleSection(title: "Recent Workouts", icon: "figure.run", isCollapsed: $workoutsCollapsed) {
+                RecentWorkoutsView(workouts: healthManager.recentWorkouts)
+            }
         }
     }
 }

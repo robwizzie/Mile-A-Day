@@ -546,6 +546,20 @@ class FriendService: ObservableObject {
         )
     }
 
+    // MARK: - Friend Activity (Dashboard)
+
+    /// Fetch today's activity for all friends (who ran today, who didn't)
+    func fetchFriendsActivityToday() async throws -> [FriendActivityItem] {
+        guard let currentUserId = getCurrentUserId() else {
+            throw FriendServiceError.notAuthenticated
+        }
+
+        return try await makeRequest(
+            endpoint: "/friends/activity/today/\(currentUserId)",
+            responseType: [FriendActivityItem].self
+        )
+    }
+
     // MARK: - Friend Workout Data
 
     /// Fetch recent workouts for a friend
@@ -605,6 +619,31 @@ class FriendService: ObservableObject {
             responseType: UnreadCountResponse.self
         )
         return response.unread_count
+    }
+}
+
+// MARK: - Friend Activity Models
+
+/// Today's activity status for a friend
+struct FriendActivityItem: Codable, Identifiable {
+    let user_id: String
+    let username: String?
+    let first_name: String?
+    let last_name: String?
+    let profile_image_url: String?
+    let today_miles: Double
+    let completed_today: Bool
+
+    var id: String { user_id }
+
+    var displayName: String {
+        if let username = username, !username.isEmpty {
+            return username
+        }
+        if let first = first_name {
+            return first
+        }
+        return "User"
     }
 }
 

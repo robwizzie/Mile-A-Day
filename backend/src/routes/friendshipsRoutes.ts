@@ -4,13 +4,15 @@ import {
 	getFriendRequests,
 	sendRequest,
 	getFriendshipHandler,
-	getSentRequests
+	getSentRequests,
+	getFriendsActivityToday
 } from '../controllers/friendshipsController.js';
 import { nudgeFriend, checkNudgeStatus, checkNudgeStatusBatch } from '../controllers/friendNudgeController.js';
 import { requireSelfAccess } from '../middleware/auth.js';
 
 const router = Router();
 
+router.get('/activity/today/:userId', requireSelfAccess('userId'), getFriendsActivityToday);
 router.get('/:userId', requireSelfAccess('userId'), getFriends);
 router.get('/requests/:userId', requireSelfAccess('userId'), getFriendRequests);
 router.get('/sent-requests/:userId', requireSelfAccess('userId'), getSentRequests);
