@@ -234,7 +234,7 @@ struct BadgesPreviewCard: View {
     @ObservedObject var healthManager: HealthKitManager
     @State private var shimmerPhase: CGFloat = -1
     @AppStorage("trackedBadgeIds") private var trackedBadgeIdsRaw: String = ""
-    @AppStorage("dailyChallengesCompleted") private var challengesCompletedCount: Int = 0
+    @State private var challengesCompletedCount: Int = ChallengeService.shared.allCompletions().count
 
     private var trackedBadgeIds: Set<String> {
         Set(trackedBadgeIdsRaw.split(separator: ",").map(String.init))
@@ -446,6 +446,10 @@ struct BadgesPreviewCard: View {
             withAnimation(.linear(duration: 2.5).repeatForever(autoreverses: false)) {
                 shimmerPhase = 1.5
             }
+            challengesCompletedCount = ChallengeService.shared.allCompletions().count
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChallengeService.changedNotification)) { _ in
+            challengesCompletedCount = ChallengeService.shared.allCompletions().count
         }
     }
 }
@@ -697,110 +701,25 @@ struct DailyChallengeCard: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     @Environment(\.colorScheme) var colorScheme
-    @AppStorage("dailyChallengesCompleted") private var challengesCompletedCount: Int = 0
-    @AppStorage("lastChallengeCompletedDate") private var lastCompletedDate: String = ""
-
-    private var todayDateString: String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
-    }
-
-    private var alreadyCountedToday: Bool {
-        lastCompletedDate == todayDateString
-    }
+    @State private var challengesCompletedCount: Int = ChallengeService.shared.allCompletions().count
 
     /// Deterministic daily challenge based on current date and user stats
     private var todaysChallenge: DailyChallenge? {
-        let calendar = Calendar.current
-        let dayOfYear = calendar.ordinality(of: .day, in: .year, for: Date()) ?? 1
-        let user = userManager.currentUser
-        let avgPace = user.fastestMilePace
-
-        // Pool of challenge templates
-        let challenges: [DailyChallenge] = [
-            DailyChallenge(
-                title: "Beat Your Pace",
-                description: avgPace > 0
-                    ? "Run faster than \(formatPace(avgPace + 0.5)) min/mi today"
-                    : "Set a new personal best pace today",
-                icon: "bolt.fill",
-                gradient: [.orange, .red],
-                type: .pace
-            ),
-            DailyChallenge(
-                title: "Double Down",
-                description: "Run 2+ miles today instead of just 1",
-                icon: "2.circle.fill",
-                gradient: [.purple, .blue],
-                type: .distance
-            ),
-            DailyChallenge(
-                title: "Early Bird",
-                description: "Complete your mile before noon",
-                icon: "sunrise.fill",
-                gradient: [.yellow, .orange],
-                type: .time
-            ),
-            DailyChallenge(
-                title: "Walk It Out",
-                description: "Walk your mile today — slow and steady",
-                icon: "figure.walk",
-                gradient: [.green, .teal],
-                type: .activity
-            ),
-            DailyChallenge(
-                title: "Speed Round",
-                description: "Finish your mile in under 12 minutes",
-                icon: "timer",
-                gradient: [.red, .pink],
-                type: .pace
-            ),
-            DailyChallenge(
-                title: "Bonus Mile",
-                description: "Run an extra half mile beyond your goal",
-                icon: "plus.circle.fill",
-                gradient: [.cyan, .blue],
-                type: .distance
-            ),
-            DailyChallenge(
-                title: "10K Steps",
-                description: "Hit 10,000 steps alongside your mile",
-                icon: "shoeprints.fill",
-                gradient: [.mint, .green],
-                type: .steps
-            ),
-        ]
-
-        let index = dayOfYear % challenges.count
-        return challenges[index]
+        DailyChallengeCatalog.todays(for: userManager.currentUser)
     }
 
     private var challengeProgress: Double? {
         guard let challenge = todaysChallenge else { return nil }
-        let distance = healthManager.todaysDistance
-        let goal = userManager.currentUser.goalMiles
-
-        switch challenge.type {
-        case .distance:
-            if challenge.title == "Double Down" {
-                return min(distance / 2.0, 1.0)
-            } else {
-                return min(distance / (goal + 0.5), 1.0)
-            }
-        case .steps:
-            return min(Double(healthManager.todaysSteps) / 10000.0, 1.0)
-        case .time:
-            // Check if completed before noon
-            if let lastCompletion = userManager.currentUser.lastCompletionDate,
-               Calendar.current.isDateInToday(lastCompletion) {
-                let hour = Calendar.current.component(.hour, from: lastCompletion)
-                return hour < 12 ? 1.0 : 0.5
-            }
-            return distance >= goal * 0.95 ? 0.5 : 0
-        case .pace, .activity:
-            return distance >= goal * 0.95 ? 1.0 : min(distance / goal, 0.99)
-        }
+        let ctx = DailyChallengeCatalog.Context(
+            distance: healthManager.todaysDistance,
+            steps: healthManager.todaysSteps,
+            goalMiles: userManager.currentUser.goalMiles,
+            lastCompletion: userManager.currentUser.lastCompletionDate,
+            todaysFastestPace: healthManager.todaysFastestPace,
+            userFastestMilePace: userManager.currentUser.fastestMilePace,
+            todaysWalkingDistance: healthManager.todaysWalkingDistance
+        )
+        return DailyChallengeCatalog.progress(for: challenge, ctx: ctx)
     }
 
     private var isCompleted: Bool {
@@ -907,25 +826,35 @@ struct DailyChallengeCard: View {
                 }
             )
             .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
-            .onChange(of: isCompleted) { _, completed in
-                if completed && !alreadyCountedToday {
-                    challengesCompletedCount += 1
-                    lastCompletedDate = todayDateString
-                    awardChallengeBadges()
-                }
+            .onChange(of: isCompleted, initial: true) { _, completed in
+                recordIfNewlyComplete(completed: completed)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: ChallengeService.changedNotification)) { _ in
+                challengesCompletedCount = ChallengeService.shared.allCompletions().count
             }
         }
     }
 
-    private func formatPace(_ pace: TimeInterval) -> String {
-        let minutes = Int(pace)
-        let seconds = Int((pace - Double(minutes)) * 60)
-        return "\(minutes):\(String(format: "%02d", seconds))"
+    private func recordIfNewlyComplete(completed: Bool) {
+        guard completed, let challenge = todaysChallenge else { return }
+        let today = Calendar.current.startOfDay(for: Date())
+        guard ChallengeService.shared.completion(on: today) == nil else { return }
+
+        let record = ChallengeCompletion(
+            date: today,
+            challengeKey: challenge.key,
+            title: challenge.title,
+            icon: challenge.icon,
+            description: challenge.description
+        )
+        ChallengeService.shared.recordCompletion(record)
+        challengesCompletedCount = ChallengeService.shared.allCompletions().count
+        awardChallengeBadges()
     }
 
     private func awardChallengeBadges() {
         guard let challenge = todaysChallenge else { return }
-        let count = challengesCompletedCount
+        let count = ChallengeService.shared.allCompletions().count
 
         let milestones: [(Int, String, String, String)] = [
             (1,   "challenge_1",   "Challenge Accepted",  "Completed your first daily challenge!"),
@@ -936,6 +865,7 @@ struct DailyChallengeCard: View {
             (100, "challenge_100", "Challenge Immortal",  "Completed 100 daily challenges!"),
         ]
 
+        var newlyAwarded: [Badge] = []
         for (threshold, id, name, description) in milestones {
             if count >= threshold && !userManager.currentUser.badges.contains(where: { $0.id == id }) {
                 let badge = Badge(
@@ -944,14 +874,21 @@ struct DailyChallengeCard: View {
                     description: "\(description) Today: \(challenge.title)"
                 )
                 userManager.currentUser.badges.append(badge)
+                newlyAwarded.append(badge)
             }
         }
 
-        userManager.saveUserData()
+        if !newlyAwarded.isEmpty {
+            userManager.saveUserData()
+            for badge in newlyAwarded {
+                CelebrationManager.shared.addCelebration(.badgeUnlocked(badge: badge))
+            }
+        }
     }
 }
 
 struct DailyChallenge {
+    let key: String
     let title: String
     let description: String
     let icon: String

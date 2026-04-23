@@ -758,7 +758,12 @@ struct DashboardView: View {
     // MARK: - Daily Challenge Section
 
     private var dailyChallengeSection: some View {
-        DailyChallengeCard(healthManager: healthManager, userManager: userManager)
+        NavigationLink {
+            DailyChallengesView(healthManager: healthManager, userManager: userManager)
+        } label: {
+            DailyChallengeCard(healthManager: healthManager, userManager: userManager)
+        }
+        .buttonStyle(PlainButtonStyle())
     }
 
     // MARK: - Friend Activity Section

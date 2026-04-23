@@ -152,6 +152,9 @@ struct MainTabView: View {
     // MARK: - Configuration
 
     private func initializeApp() {
+        // One-time wipe of buggy v1 challenge data (pace predicate auto-completed on distance).
+        ChallengeService.runLegacyCleanupIfNeeded(userManager: userManager)
+
         // Reset daily notification tracking for new day
         notificationService.resetDailyNotificationTracking()
 

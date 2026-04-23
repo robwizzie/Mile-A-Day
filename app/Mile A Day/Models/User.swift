@@ -721,7 +721,8 @@ struct Badge: Identifiable, Codable {
            id.starts(with: "miles_1000") || id.starts(with: "miles_2500") ||
            id.starts(with: "daily_marathon") || id.starts(with: "daily_ultra") ||
            id.starts(with: "pace_5min") || id.starts(with: "pace_6min") ||
-           id.starts(with: "hidden_") || id.starts(with: "secret_") {
+           id.starts(with: "hidden_") || id.starts(with: "secret_") ||
+           id == "challenge_100" {
             return .legendary
         }
         // Rare badges
@@ -730,7 +731,8 @@ struct Badge: Identifiable, Codable {
                 id.starts(with: "miles_500") || id.starts(with: "miles_750") ||
                 id.starts(with: "daily_half") || id.starts(with: "daily_15") || id.starts(with: "daily_20") ||
                 id.starts(with: "pace_7min") || id.starts(with: "pace_8min") ||
-                id.starts(with: "special_") {
+                id.starts(with: "special_") ||
+                id == "challenge_25" || id == "challenge_50" {
             return .rare
         }
         // Common badges

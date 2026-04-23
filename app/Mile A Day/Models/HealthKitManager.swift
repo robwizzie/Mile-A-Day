@@ -767,6 +767,15 @@ class HealthKitManager: ObservableObject {
         return pace
     }
 
+    /// Today's walking distance in miles (sum of walking-type workouts only).
+    var todaysWalkingDistance: Double {
+        todaysWorkouts.reduce(0.0) { sum, workout in
+            guard workout.workoutActivityType == .walking,
+                  let distance = workout.totalDistance else { return sum }
+            return sum + distance.doubleValue(for: HKUnit.mile())
+        }
+    }
+
     /// Today's fastest pace from individual workouts (best single workout pace today)
     var todaysFastestPace: TimeInterval? {
         var fastestPace: TimeInterval = .infinity

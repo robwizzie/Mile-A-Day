@@ -161,36 +161,51 @@ struct StreakCard: View {
                             .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateFire)
                             .shadow(color: statusColor.opacity(0.7), radius: animateFire ? 15 : 8)
                     } else if isAtRisk {
-                        // At-risk state: countdown ring around flame
+                        // At-risk state: countdown ring around flame with time label below
                         let countdownProgress: Double = {
                             guard let remaining = user.timeUntilStreakReset else { return 0 }
                             // 6 hours = 21600 seconds (from 6pm to midnight)
                             return min(remaining / 21600, 1.0)
                         }()
 
-                        Circle()
-                            .fill(Color.red.opacity(0.1))
-                            .frame(width: 70, height: 70)
+                        VStack(spacing: 6) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.red.opacity(0.1))
+                                    .frame(width: 70, height: 70)
 
-                        // Countdown ring
-                        Circle()
-                            .trim(from: 0, to: countdownProgress)
-                            .stroke(
-                                LinearGradient(
-                                    colors: [.red, .orange],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                style: StrokeStyle(lineWidth: 3, lineCap: .round)
-                            )
-                            .frame(width: 74, height: 74)
-                            .rotationEffect(.degrees(-90))
+                                // Countdown ring
+                                Circle()
+                                    .trim(from: 0, to: countdownProgress)
+                                    .stroke(
+                                        LinearGradient(
+                                            colors: [.red, .orange],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        ),
+                                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                                    )
+                                    .frame(width: 74, height: 74)
+                                    .rotationEffect(.degrees(-90))
 
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 36))
-                            .foregroundColor(.red.opacity(0.8))
-                            .scaleEffect(animateUrgency ? 1.05 : 0.95)
-                            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: animateUrgency)
+                                Image(systemName: "flame.fill")
+                                    .font(.system(size: 36))
+                                    .foregroundColor(.red.opacity(0.8))
+                                    .scaleEffect(animateUrgency ? 1.05 : 0.95)
+                                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: animateUrgency)
+                            }
+
+                            if !timeRemainingText.isEmpty {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 10, weight: .bold))
+                                    Text(formattedTimeOnly)
+                                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                                }
+                                .foregroundColor(.red)
+                                .opacity(animateUrgency ? 1.0 : 0.6)
+                            }
+                        }
                     } else {
                         // Default: not completed, not at risk
                         Circle()
@@ -293,37 +308,15 @@ struct StreakCard: View {
             }
         )
         .overlay(alignment: .topTrailing) {
-            // Time/check positioned at absolute top right edge
+            // Time/check positioned at absolute top right edge.
+            // At-risk state renders its time label under the flame ring instead.
             if isGoalCompleted {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.caption)
                     .foregroundColor(.green)
                     .padding(.top, 24)
                     .padding(.trailing, 24)
-            } else if isAtRisk && !timeRemainingText.isEmpty {
-                // Enhanced urgency treatment for at-risk streaks
-                HStack(spacing: 5) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.red)
-                    Text(formattedTimeOnly)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundColor(.red)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule()
-                        .fill(Color.red.opacity(0.15))
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(Color.red.opacity(0.3), lineWidth: 1)
-                )
-                .opacity(animateUrgency ? 1.0 : 0.6)
-                .padding(.top, 20)
-                .padding(.trailing, 20)
-            } else if !timeRemainingText.isEmpty {
+            } else if !isAtRisk && !timeRemainingText.isEmpty {
                 HStack(spacing: 4) {
                     Image(systemName: "clock.fill")
                         .font(.caption2)

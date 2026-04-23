@@ -209,6 +209,8 @@ struct BadgesView: View {
             return allBadges.filter { $0.id.starts(with: "pace_") }
         case .distance:
             return allBadges.filter { $0.id.starts(with: "daily_") }
+        case .challenges:
+            return allBadges.filter { $0.id.starts(with: "challenge_") }
         case .secret:
             // Show only earned secret/hidden badges
             return earnedHiddenBadges
@@ -329,6 +331,8 @@ struct PremiumBadgeCard: View {
             return "bolt.fill"
         } else if badge.id.starts(with: "daily_") {
             return "figure.run.circle.fill"
+        } else if badge.id.starts(with: "challenge_") {
+            return "trophy.fill"
         } else if badge.id.starts(with: "hidden_") || badge.id.starts(with: "secret_") || badge.id.starts(with: "special_") {
             return "sparkles"
         } else {
@@ -338,7 +342,7 @@ struct PremiumBadgeCard: View {
     
     var body: some View {
         VStack(spacing: 14) {
-            // Badge medal
+            // Badge medal — fixed 110pt frame so locked cards (which have no glow) match unlocked
             ZStack {
                 // Outer glow for unlocked
                 if !badge.isLocked {
@@ -432,14 +436,15 @@ struct PremiumBadgeCard: View {
                         .offset(x: 28, y: -28)
                 }
             }
-            
-            // Badge name
+            .frame(width: 110, height: 110)
+
+            // Badge name — reserves 2 lines of space so every card is the same height
             Text(badge.name)
                 .font(.system(size: 14, weight: .bold, design: .rounded))
                 .foregroundColor(badge.isLocked ? .white.opacity(0.4) : .white)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
+                .frame(height: 36, alignment: .top)
             
             // Rarity pill
             Text(badge.rarity.rawValue.uppercased())
@@ -601,8 +606,8 @@ struct FilterChip: View {
 // MARK: - Badge Filter
 
 enum BadgeFilter: CaseIterable {
-    case all, streak, miles, speed, distance, secret, new
-    
+    case all, streak, miles, speed, distance, challenges, secret, new
+
     var title: String {
         switch self {
         case .all: return "All"
@@ -610,11 +615,12 @@ enum BadgeFilter: CaseIterable {
         case .miles: return "Miles"
         case .speed: return "Speed"
         case .distance: return "Distance"
+        case .challenges: return "Challenges"
         case .secret: return "Secret"
         case .new: return "New"
         }
     }
-    
+
     var icon: String {
         switch self {
         case .all: return "square.grid.2x2"
@@ -622,6 +628,7 @@ enum BadgeFilter: CaseIterable {
         case .miles: return "figure.run"
         case .speed: return "bolt.fill"
         case .distance: return "road.lanes"
+        case .challenges: return "trophy.fill"
         case .secret: return "eye.slash.fill"
         case .new: return "sparkles"
         }
