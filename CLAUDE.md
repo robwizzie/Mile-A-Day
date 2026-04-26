@@ -63,12 +63,33 @@ This repo includes custom Claude Code skills and agents in `.claude/`:
 - `swift-explorer` — Fast read-only iOS codebase search (runs on Haiku)
 - `sql-reviewer` — SQL query review for correctness/performance (runs on Sonnet)
 
-### Postgres MCP (optional, recommended)
-For direct database access from Claude, each developer should set up locally:
-```bash
-claude mcp add postgres -- npx -y @modelcontextprotocol/server-postgres "$DATABASE_URL"
-```
-This lets Claude query the database directly instead of requiring copy-paste of SQL results.
+### MCP servers (`.mcp.json`, tracked)
+- **`context7`** — library/framework docs (Express 5, Next.js 16, React 19, SwiftUI, Tailwind 4). Use whenever you'd otherwise rely on training-data recall.
+- **`postgres`** — direct DB access. Reads `${DATABASE_URL}` from your shell env, so set that before launching Claude (e.g. `export DATABASE_URL=postgres://…`).
+
+## Workflow commands (cc-optimize, global)
+
+Available on top of the project skills above:
+
+- `/spec <feature>` — Spec-Driven Development entry point
+- `/ship` — final gate (Codex review + tests + UI polish + criteria check)
+- `/learn` — sweep session corrections into `.claude/references/gotchas.md`
+- `/remember "rule"` — capture a single rule mid-session
+- `/maintain` — periodic sweep (re-tune perms, regenerate INSTALLED.md, audit cost)
+- `/batch <files>` — fan-out migration orchestrator (one implementer agent per slice)
+- `/rollout N` — test-time compute scaling — runs same task N times in parallel; ~6–8x cost
+- `/loop-until <criteria>` — Ralph Wiggum auto-retry, capped at $3 / 100k tokens / 5 iters
+- `/cc-export` — bundle this setup as a single MD for sharing
+
+⚠ `/rollout` and `/loop-until` are cost-multiplier commands. Invoke deliberately, not by reflex.
+
+## References
+
+- **`.claude/rules/{backend,ios,website}.md`** — area-specific conventions (existing, kept under 60 lines each)
+- **`.claude/references/conventions.md`** — cross-cutting conventions (package manager, secrets, cross-area changes)
+- **`.claude/references/gotchas.md`** — learned mistakes (grows via `/learn` and `/remember`)
+- **`.claude/references/decisions.md`** — ADR-style architectural records
+- **`~/.claude/references/{behavior,workflow-overrides,security,skill-catalog}.md`** — workflow-wide rules from cc-optimize (loaded at SessionStart and after PostCompact)
 
 ## Self-Maintenance
 

@@ -15,8 +15,11 @@ backend/certs/
 *.xcuserdatad
 xcuserdata/
 *.xcworkspace/xcuserdata/
-# MCP config (contains database credentials)
-.mcp.json
-
 # User-specific Claude settings
 .claude/settings.local.json
+
+# Claude telemetry (per-developer, not shared)
+.claude/telemetry/
+.claude/research/
+.claude/specs/_drafts/
+.claude/.cc-optimize-discovery.json
