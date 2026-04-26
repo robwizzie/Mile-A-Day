@@ -16,6 +16,7 @@ struct UserProfileDetailView: View {
     @State private var isLoadingMoreWorkouts = false
     @State private var hasLoadedInitial = false
     @State private var selectedWorkout: FriendWorkout?
+    @State private var friendTodayChallenge: RemoteChallengeService.FriendTodayDTO?
 
     private var canLoadMore: Bool {
         hasLoadedInitial && friendWorkouts.count >= workoutLimit
@@ -36,6 +37,11 @@ struct UserProfileDetailView: View {
                         FriendStatsView(user: user, stats: userStats)
                     } else {
                         privateAccountView
+                    }
+
+                    // Today's Daily Challenge indicator
+                    if !isPrivate, let today = friendTodayChallenge {
+                        FriendTodayChallengeRow(today: today)
                     }
 
                     // Badges Section
@@ -80,6 +86,18 @@ struct UserProfileDetailView: View {
         .onAppear {
             loadUserData()
             refreshFriendshipStatus()
+        }
+        .task {
+            await loadFriendTodayChallenge()
+        }
+    }
+
+    private func loadFriendTodayChallenge() async {
+        do {
+            let today = try await RemoteChallengeService.fetchFriendToday(userId: user.user_id)
+            await MainActor.run { self.friendTodayChallenge = today }
+        } catch {
+            print("[UserProfileDetailView] loadFriendTodayChallenge failed: \(error)")
         }
     }
 
@@ -488,6 +506,54 @@ struct FriendWorkoutDetailSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Friend Today-Challenge Row
+
+/// Compact "did my friend finish today's challenge?" indicator for the profile screen.
+/// Uses the server-side completion status from `/users/:userId/challenges/today`.
+struct FriendTodayChallengeRow: View {
+    let today: RemoteChallengeService.FriendTodayDTO
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: today.completed ? [.green, .green.opacity(0.8)] : [.white.opacity(0.2), .white.opacity(0.1)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 40, height: 40)
+                Image(systemName: today.completed ? "checkmark" : "hourglass")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("TODAY'S CHALLENGE")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundColor(.white.opacity(0.5))
+                Text(today.completed ? "Completed" : "Not yet")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(today.completed ? .green : .white.opacity(0.85))
+            }
+
+            Spacer()
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.white.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(.white.opacity(0.1), lineWidth: 1)
+                )
+        )
     }
 }
 

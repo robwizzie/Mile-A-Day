@@ -415,18 +415,47 @@ class WorkoutSyncService: ObservableObject {
         let endpoint = "/workouts/\(userId)/upload"
         let requestBody = try JSONSerialization.data(withJSONObject: workoutData)
 
+        struct UploadedBadge: Codable {
+            let badgeId: String
+            let name: String
+            let rarity: String
+        }
+        struct UploadedChallengeCompletion: Codable {
+            let localDate: String
+            let challengeKey: String
+            let challengeTitle: String
+        }
         struct UploadResponse: Codable {
             let message: String?
+            let newlyEarnedBadges: [UploadedBadge]?
+            let newChallengeCompletions: [UploadedChallengeCompletion]?
         }
 
         do {
-            let _: UploadResponse = try await APIClient.fancyFetch(
+            let response: UploadResponse = try await APIClient.fancyFetch(
                 endpoint: endpoint,
                 method: .POST,
                 body: requestBody,
                 responseType: UploadResponse.self
             )
             print("[WorkoutSyncService] ✅ Uploaded batch of \(workouts.count) workouts")
+
+            let badgeCount = response.newlyEarnedBadges?.count ?? 0
+            let completionCount = response.newChallengeCompletions?.count ?? 0
+            if badgeCount > 0 || completionCount > 0 {
+                print("[WorkoutSyncService] 🎉 Rewards — \(badgeCount) badges, \(completionCount) challenge completions")
+            }
+
+            await MainActor.run {
+                NotificationCenter.default.post(
+                    name: Notification.Name("MAD_WorkoutsUploaded"),
+                    object: nil,
+                    userInfo: [
+                        "newBadgeCount": badgeCount,
+                        "newChallengeCompletionCount": completionCount
+                    ]
+                )
+            }
         } catch let error as APIError {
             // Map APIError to SyncError
             switch error {
@@ -482,7 +511,9 @@ class WorkoutSyncService: ObservableObject {
             let calories = await activeEnergyKilocalories(for: workout)
             let distance = workout.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
 
-            let workoutDict: [String: Any] = [
+            let steps = await fetchDailySteps(on: workout.startDate)
+
+            var workoutDict: [String: Any] = [
                 "workoutId": workout.uuid.uuidString,
                 "distance": distance,
                 "localDate": localDate,
@@ -495,6 +526,9 @@ class WorkoutSyncService: ObservableObject {
                 "splits": splitsData,
                 "source": "healthkit",
             ]
+            if let steps {
+                workoutDict["steps"] = steps
+            }
 
             workoutData.append(workoutDict)
         }
@@ -553,6 +587,31 @@ class WorkoutSyncService: ObservableObject {
     /// Get split data for a workout using the shared SplitCalculator.
     private func getSplitTimes(for workout: HKWorkout) async -> [WorkoutSplit] {
         return await SplitCalculator.calculateSplits(for: workout)
+    }
+
+    /// Fetch the total step count for the local day of the given date via HealthKit.
+    /// Returns `nil` if unavailable (no HealthKit auth, missing data, or query error).
+    private func fetchDailySteps(on date: Date) async -> Int? {
+        guard let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return nil }
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else { return nil }
+        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay, options: .strictStartDate)
+
+        return await withCheckedContinuation { continuation in
+            let query = HKStatisticsQuery(
+                quantityType: stepType,
+                quantitySamplePredicate: predicate,
+                options: .cumulativeSum
+            ) { _, result, _ in
+                if let sum = result?.sumQuantity() {
+                    continuation.resume(returning: Int(sum.doubleValue(for: HKUnit.count())))
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            }
+            HKHealthStore().execute(query)
+        }
     }
 
     // MARK: - Tracking Methods

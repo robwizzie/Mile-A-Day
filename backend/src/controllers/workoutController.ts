@@ -15,6 +15,12 @@ import {
 } from '../services/workoutService.js';
 import { checkRaceCompletions } from '../services/competitionService.js';
 import { notifyFriendsOfMileCompletion, checkCompetitionMilestones, checkPersonalBest, checkLeadChanges } from '../services/notificationService.js';
+import { evaluateWorkoutRewards } from '../services/badgeService.js';
+import {
+	fireBadgeEarnedPush,
+	fanOutFriendBadgePush,
+	fanOutFriendChallengePush
+} from '../services/pushNotificationService.js';
 
 export async function uploadWorkouts(req: Request, res: Response) {
 	if (!hasRequiredKeys(['userId'], req, res)) return;
@@ -33,12 +39,21 @@ export async function uploadWorkouts(req: Request, res: Response) {
 			return res.status(400).send({ error: `No user found with ID ${userId}` });
 		}
 
-		await uploadWorkoutsDb(userId, req.body);
+		const uploadedWorkoutIds = await uploadWorkoutsDb(userId, req.body);
 
 		try {
 			await checkRaceCompletions(userId);
 		} catch (raceError: any) {
 			console.error('Error checking race completions:', raceError.message);
+		}
+
+		// Evaluate badges + daily challenges AFTER the upload transaction committed.
+		// Kept inline (not fire-and-forget) so the response includes newly earned items.
+		let rewards = { newlyEarnedBadges: [] as any[], newChallengeCompletions: [] as any[] };
+		try {
+			rewards = await evaluateWorkoutRewards(userId, uploadedWorkoutIds);
+		} catch (rewardError: any) {
+			console.error('Error evaluating workout rewards:', rewardError.message);
 		}
 
 		// Check if user has now completed their mile and notify friends
@@ -62,8 +77,27 @@ export async function uploadWorkouts(req: Request, res: Response) {
 			console.error('Error checking notifications:', notifError.message);
 		}
 
+		// Fire badge + challenge push notifications (non-blocking).
+		for (const badge of rewards.newlyEarnedBadges) {
+			fireBadgeEarnedPush(userId, badge).catch(err =>
+				console.error('Error firing badge_earned push:', err.message)
+			);
+			if (badge.rarity !== 'common') {
+				fanOutFriendBadgePush(userId, badge).catch(err =>
+					console.error('Error fanning out friend_badge_earned:', err.message)
+				);
+			}
+		}
+		for (const completion of rewards.newChallengeCompletions) {
+			fanOutFriendChallengePush(userId, completion).catch(err =>
+				console.error('Error fanning out friend_challenge_completed:', err.message)
+			);
+		}
+
 		res.status(200).json({
-			message: 'Successfully uploaded workouts.'
+			message: 'Successfully uploaded workouts.',
+			newlyEarnedBadges: rewards.newlyEarnedBadges,
+			newChallengeCompletions: rewards.newChallengeCompletions
 		});
 	} catch (error: any) {
 		console.error('Error uploading workouts:', error.message);

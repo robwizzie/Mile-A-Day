@@ -43,19 +43,22 @@ struct BadgesView: View {
             // Show confetti for new badges
             if userManager.hasNewBadges {
                 showConfetti = true
-                
-                // Mark badges as viewed after displaying
+
+                // Mark badges as viewed after displaying (also syncs to server)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     userManager.markBadgesAsViewed()
                 }
             }
-            
+
             // If we were given an initial badge from the home screen,
             // immediately navigate to its detail inside the Badges nav stack.
             if let initialBadge, selectedBadge == nil {
                 selectedBadge = initialBadge
                 isShowingDetail = true
             }
+        }
+        .task {
+            await userManager.refreshBadgesFromServer()
         }
         .confetti(isShowing: $showConfetti)
         .navigationDestination(isPresented: $isShowingDetail) {

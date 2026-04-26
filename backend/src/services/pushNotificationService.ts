@@ -85,7 +85,10 @@ export type NotificationType =
 	| 'streak_broken'
 	| 'personal_best'
 	| 'lead_change'
-	| 'clash_tie';
+	| 'clash_tie'
+	| 'badge_earned'
+	| 'friend_badge_earned'
+	| 'friend_challenge_completed';
 
 interface PushPayload {
 	title: string;
@@ -499,6 +502,117 @@ export async function logFlex(senderId: string, targetId: string, competitionId:
 		`INSERT INTO flex_log (sender_id, target_id, competition_id, message) VALUES ($1, $2, $3, $4)`,
 		[senderId, targetId, competitionId, message]
 	);
+}
+
+// ─── Badges & Challenges ────────────────────────────────────────────
+
+interface BadgeEarnedPayload {
+	badgeId: string;
+	name: string;
+	description: string;
+	rarity: 'common' | 'rare' | 'legendary';
+	icon: string;
+}
+
+interface ChallengeCompletedPayload {
+	localDate: string;
+	challengeKey: string;
+	challengeTitle: string;
+}
+
+/**
+ * Push the user themselves when they earn a new badge.
+ */
+export async function fireBadgeEarnedPush(userId: string, badge: BadgeEarnedPayload): Promise<void> {
+	await sendPush(userId, {
+		title: '🏅 Medal Unlocked',
+		body: `${badge.name} — ${badge.description}`,
+		type: 'badge_earned',
+		data: {
+			badge_id: badge.badgeId,
+			rarity: badge.rarity,
+			icon: badge.icon
+		}
+	});
+}
+
+/**
+ * Fan out a rare+ badge to every accepted friend. Throttled 1/hour per (sender, recipient).
+ */
+export async function fanOutFriendBadgePush(senderId: string, badge: BadgeEarnedPayload): Promise<void> {
+	const friendIds = await getAcceptedFriendIds(senderId);
+	if (friendIds.length === 0) return;
+	const sender = await getSenderDisplayName(senderId);
+
+	for (const friendId of friendIds) {
+		const okToPush = await passesFriendBadgeThrottle(senderId, friendId);
+		if (!okToPush) continue;
+
+		sendPush(friendId, {
+			title: `${sender} earned a medal`,
+			body: `${badge.name} — ${badge.rarity}`,
+			type: 'friend_badge_earned',
+			data: {
+				sender_id: senderId,
+				badge_id: badge.badgeId,
+				rarity: badge.rarity
+			}
+		}).catch(err => console.error('[Push] friend_badge_earned send failed:', err.message));
+	}
+}
+
+/**
+ * Fan out a daily-challenge completion to every accepted friend.
+ */
+export async function fanOutFriendChallengePush(
+	senderId: string,
+	completion: ChallengeCompletedPayload
+): Promise<void> {
+	const friendIds = await getAcceptedFriendIds(senderId);
+	if (friendIds.length === 0) return;
+	const sender = await getSenderDisplayName(senderId);
+
+	for (const friendId of friendIds) {
+		sendPush(friendId, {
+			title: `${sender} finished today's challenge`,
+			body: completion.challengeTitle,
+			type: 'friend_challenge_completed',
+			data: {
+				sender_id: senderId,
+				challenge_key: completion.challengeKey,
+				local_date: completion.localDate
+			}
+		}).catch(err => console.error('[Push] friend_challenge_completed send failed:', err.message));
+	}
+}
+
+async function getAcceptedFriendIds(userId: string): Promise<string[]> {
+	const rows = await db.query<{ friend_id: string }>(
+		`SELECT friend_id FROM friendships WHERE user_id = $1 AND status = 'accepted'`,
+		[userId]
+	);
+	return rows.map(r => r.friend_id);
+}
+
+async function getSenderDisplayName(userId: string): Promise<string> {
+	const rows = await db.query<{ first_name: string | null; username: string | null }>(
+		`SELECT first_name, username FROM users WHERE user_id = $1`,
+		[userId]
+	);
+	const row = rows[0];
+	return row?.first_name || row?.username || 'A friend';
+}
+
+// Throttle friend_badge_earned to at most 1 per sender→recipient per hour to avoid multi-badge-day spam.
+async function passesFriendBadgeThrottle(senderId: string, recipientId: string): Promise<boolean> {
+	const rows = await db.query<{ count: string }>(
+		`SELECT COUNT(*)::text AS count FROM in_app_notifications
+		WHERE user_id = $1 AND type = 'friend_badge_earned'
+		  AND (data->>'sender_id') = $2
+		  AND created_at > NOW() - INTERVAL '1 hour'`,
+		[recipientId, senderId]
+	);
+	return parseInt(rows[0]?.count ?? '0', 10) === 0;
 }
 
 // ─── Cleanup ────────────────────────────────────────────────────────

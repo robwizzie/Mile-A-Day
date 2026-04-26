@@ -3,7 +3,7 @@ import { PostgresService } from './DbService.js';
 
 const db = PostgresService.getInstance();
 
-export async function uploadWorkouts(userId: string, workouts: Workout[]) {
+export async function uploadWorkouts(userId: string, workouts: Workout[]): Promise<string[]> {
 	const workoutQuery = `
       INSERT INTO workouts (
         user_id,
@@ -16,9 +16,10 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
         device_end_date,
         calories,
         total_duration,
-        source
+        source,
+        steps
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       ON CONFLICT (workout_id)
       DO UPDATE SET
         distance = EXCLUDED.distance,
@@ -29,6 +30,7 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
         device_end_date = EXCLUDED.device_end_date,
         calories = EXCLUDED.calories,
         total_duration = EXCLUDED.total_duration,
+        steps = COALESCE(EXCLUDED.steps, workouts.steps),
         source = CASE
           WHEN workouts.source IN ('manual', 'edited') THEN workouts.source
           ELSE EXCLUDED.source
@@ -62,7 +64,8 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
 						workout.deviceEndDate,
 						workout.calories,
 						workout.totalDuration,
-						workout.source || 'healthkit'
+						workout.source || 'healthkit',
+						workout.steps ?? null
 					]
 				},
 				...workout.splits.map(split => ({
@@ -72,19 +75,39 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]) {
 			];
 		})
 	);
+
+	return workouts.map(w => w.workoutId);
+}
+
+function dateStringMinus(dateStr: string, days: number): string {
+	const [y, m, d] = dateStr.split('-').map(Number);
+	const date = new Date(Date.UTC(y, m - 1, d));
+	date.setUTCDate(date.getUTCDate() - days);
+	return date.toISOString().slice(0, 10);
 }
 
 export async function getActiveStreak(userId: string) {
-	const dayDistanceQuery = `
-    SELECT 
-      local_date,
-      SUM(distance) as total_distance,
-      COUNT(*) as workout_count,
-      SUM(calories) as total_calories,
-      SUM(total_duration) as total_duration
+	const todayResult = await db.query(
+		`
+    SELECT to_char(
+      (NOW() + (COALESCE(
+        (SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
+        0
+      ) || ' minutes')::interval)::date,
+      'YYYY-MM-DD'
+    ) AS user_today
+  `,
+		[userId]
+	);
+	const userToday: string = todayResult[0].user_today;
+	const yesterday = dateStringMinus(userToday, 1);
+
+	const qualifyingDaysQuery = `
+    SELECT to_char(local_date, 'YYYY-MM-DD') AS local_date
     FROM workouts
     WHERE user_id = $1
     GROUP BY local_date
+    HAVING SUM(distance) >= 0.95
     ORDER BY local_date DESC
     LIMIT $2 OFFSET $3
   `;
@@ -92,20 +115,30 @@ export async function getActiveStreak(userId: string) {
 	const LIMIT = 100;
 	let index = 0;
 	let streak = 0;
-	let streakStartDay;
-	while (true) {
-		const results = await db.query(dayDistanceQuery, [userId, LIMIT, index * LIMIT]);
+	let streakStartDay: string | undefined;
+	let expectedDate: string | undefined;
 
-		if (results.length === 0) {
-			break;
-		}
+	while (true) {
+		const results = await db.query(qualifyingDaysQuery, [userId, LIMIT, index * LIMIT]);
+		if (results.length === 0) break;
 
 		for (const row of results) {
-			if (row.total_distance < 0.95) {
+			const date: string = row.local_date;
+
+			if (expectedDate === undefined) {
+				if (date !== userToday && date !== yesterday) {
+					return { streak: 0, start: undefined };
+				}
+				streak = 1;
+				streakStartDay = date;
+				expectedDate = dateStringMinus(date, 1);
+			} else if (date === expectedDate) {
+				streak++;
+				streakStartDay = date;
+				expectedDate = dateStringMinus(date, 1);
+			} else {
 				return { streak, start: streakStartDay };
 			}
-			streakStartDay = row.local_date;
-			streak++;
 		}
 
 		index++;

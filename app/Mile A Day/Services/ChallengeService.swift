@@ -15,11 +15,22 @@ protocol ChallengeServiceProtocol {
     func currentChallengeStreak() -> Int
 }
 
+/// Pulls server-authoritative state into the in-memory mirror. Fires `ChallengeService.changedNotification`.
+/// Call after sign-in, after workout upload, and on view appear.
+extension ChallengeService {
+    static func refresh(userId: String) async {
+        guard let remote = shared as? RemoteChallengeService else { return }
+        await remote.refreshToday(userId: userId)
+        await remote.refreshCompletions(userId: userId)
+    }
+}
+
 enum ChallengeService {
     static let changedNotification = Notification.Name("ChallengeServiceChanged")
 
-    /// Shared instance. Replace the assignment here when a remote implementation lands.
-    static let shared: ChallengeServiceProtocol = LocalChallengeService()
+    /// Shared instance — backed by the server-authoritative `RemoteChallengeService`.
+    /// `LocalChallengeService` remains in-tree for reference / offline fallback but is unused in prod.
+    static let shared: ChallengeServiceProtocol = RemoteChallengeService()
 
     /// One-time cleanup for users who earned bogus challenge data from the v1 predicate bug
     /// (pace challenges auto-completing when distance goal hit). Runs once per install; gated

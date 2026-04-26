@@ -11,6 +11,18 @@ type MessageReturn = {
 	message: string;
 };
 
+export async function areFriends(user1: string, user2: string): Promise<boolean> {
+	if (user1 === user2) return true;
+	const rows = await db.query<{ status: string }>(
+		`SELECT status FROM friendships
+		WHERE ((user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1))
+		  AND status = 'accepted'
+		LIMIT 1`,
+		[user1, user2]
+	);
+	return rows.length > 0;
+}
+
 export async function getFriendship(user1: string, user2: string): Promise<Friendship | ErrorReturn | null> {
 	try {
 		const existingFriendship = await db.query(

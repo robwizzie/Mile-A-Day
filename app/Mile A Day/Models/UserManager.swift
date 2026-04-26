@@ -56,6 +56,20 @@ class UserManager: ObservableObject {
            let decodedPrivacy = try? JSONDecoder().decode(PrivacySettings.self, from: privacyData) {
             self.currentUser.privacySettings = decodedPrivacy
         }
+
+        // Refresh server-side rewards after every successful workout upload.
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("MAD_WorkoutsUploaded"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            guard let userId = self.currentUser.backendUserId else { return }
+            Task {
+                await self.refreshBadgesFromServer()
+                await ChallengeService.refresh(userId: userId)
+            }
+        }
     }
     
     // Save user data
@@ -280,33 +294,59 @@ class UserManager: ObservableObject {
         })
     }
     
-    // Mark new badges as viewed
+    // Mark new badges as viewed — clear locally + sync to server.
     func markBadgesAsViewed() {
         for i in 0..<currentUser.badges.count {
             currentUser.badges[i].isNew = false
         }
         saveUserData()
+
+        if let userId = currentUser.backendUserId {
+            Task.detached {
+                do {
+                    _ = try await BadgeAPIService.markViewed(userId: userId)
+                } catch {
+                    print("[UserManager] markViewed failed: \(error)")
+                }
+            }
+        }
     }
-    
+
     // Check if there are any new badges
     var hasNewBadges: Bool {
         return currentUser.badges.contains { $0.isNew }
     }
-    
-    // Check for retroactive badges based on current stats
-    func checkForRetroactiveBadges() {
-        // Force a badge check with current stats
-        let newBadges = currentUser.checkForMilestoneBadges()
-        saveUserData()
 
-        // Trigger celebrations for badges earned today (not retroactive ones)
-        let today = Calendar.current.startOfDay(for: Date())
-        for badge in newBadges {
-            let badgeDate = Calendar.current.startOfDay(for: badge.dateAwarded)
-            // Only celebrate badges earned today to avoid showing celebrations for old retroactive badges
-            if badgeDate == today {
-                CelebrationManager.shared.addCelebration(.badgeUnlocked(badge: badge))
+    /// Fetch the user's earned badges from the backend. Server is authoritative.
+    /// Safe to call on every workout-upload completion and on Badges view appear.
+    func refreshBadgesFromServer() async {
+        guard let userId = currentUser.backendUserId else { return }
+        do {
+            let dtos = try await BadgeAPIService.fetchUserBadges(userId: userId)
+            let fetched = dtos.map { $0.toBadge() }
+            let existingIds = Set(currentUser.badges.map { $0.id })
+
+            await MainActor.run {
+                currentUser.badges = fetched
+                saveUserData()
+
+                // Celebrate freshly-earned badges (not previously present).
+                let today = Calendar.current.startOfDay(for: Date())
+                for badge in fetched {
+                    let earnedToday = Calendar.current.startOfDay(for: badge.dateAwarded) == today
+                    if earnedToday && !existingIds.contains(badge.id) {
+                        CelebrationManager.shared.addCelebration(.badgeUnlocked(badge: badge))
+                    }
+                }
             }
+        } catch {
+            print("[UserManager] refreshBadgesFromServer failed: \(error)")
         }
+    }
+
+    /// Legacy shim — kept so existing callers compile. Delegates to the server-side fetch.
+    /// The local `checkForMilestoneBadges()` evaluator is no longer used.
+    func checkForRetroactiveBadges() {
+        Task { await refreshBadgesFromServer() }
     }
 } 

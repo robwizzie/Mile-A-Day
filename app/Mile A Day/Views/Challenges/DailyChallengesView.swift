@@ -6,6 +6,9 @@ struct DailyChallengesView: View {
 
     @State private var completions: [ChallengeCompletion] = ChallengeService.shared.allCompletions()
     @State private var selectedHistoryCompletion: ChallengeCompletion?
+    @State private var todaysChallenge: DailyChallenge?
+    @State private var todayProgress: Double = 0
+    @State private var isTodayComplete: Bool = false
 
     private static let milestones: [(threshold: Int, id: String, name: String)] = [
         (1,   "challenge_1",   "Challenge Accepted"),
@@ -15,26 +18,6 @@ struct DailyChallengesView: View {
         (50,  "challenge_50",  "Challenge Legend"),
         (100, "challenge_100", "Challenge Immortal"),
     ]
-
-    private var todaysChallenge: DailyChallenge? {
-        DailyChallengeCatalog.todays(for: userManager.currentUser)
-    }
-
-    private var todayProgress: Double {
-        guard let challenge = todaysChallenge else { return 0 }
-        let ctx = DailyChallengeCatalog.Context(
-            distance: healthManager.todaysDistance,
-            steps: healthManager.todaysSteps,
-            goalMiles: userManager.currentUser.goalMiles,
-            lastCompletion: userManager.currentUser.lastCompletionDate,
-            todaysFastestPace: healthManager.todaysFastestPace,
-            userFastestMilePace: userManager.currentUser.fastestMilePace,
-            todaysWalkingDistance: healthManager.todaysWalkingDistance
-        )
-        return DailyChallengeCatalog.progress(for: challenge, ctx: ctx)
-    }
-
-    private var isTodayComplete: Bool { todayProgress >= 1.0 }
 
     private var totalCompletions: Int { completions.count }
 
@@ -70,7 +53,12 @@ struct DailyChallengesView: View {
         }
         .navigationTitle("Daily Challenges")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { refresh() }
+        .task {
+            if let userId = userManager.currentUser.backendUserId {
+                await ChallengeService.refresh(userId: userId)
+            }
+            refresh()
+        }
         .onReceive(NotificationCenter.default.publisher(for: ChallengeService.changedNotification)) { _ in
             refresh()
         }
@@ -82,6 +70,11 @@ struct DailyChallengesView: View {
 
     private func refresh() {
         completions = ChallengeService.shared.allCompletions()
+        if let remote = ChallengeService.shared as? RemoteChallengeService {
+            todaysChallenge = remote.todayChallenge
+            todayProgress = remote.todayProgress
+            isTodayComplete = remote.todayCompleted
+        }
     }
 
     // MARK: - Hero

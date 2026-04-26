@@ -701,50 +701,52 @@ struct DailyChallengeCard: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     @Environment(\.colorScheme) var colorScheme
+    @State private var todaysChallenge: DailyChallenge?
+    @State private var challengeProgressValue: Double = 0
+    @State private var isCompleted: Bool = false
     @State private var challengesCompletedCount: Int = ChallengeService.shared.allCompletions().count
 
-    /// Deterministic daily challenge based on current date and user stats
-    private var todaysChallenge: DailyChallenge? {
-        DailyChallengeCatalog.todays(for: userManager.currentUser)
-    }
-
     private var challengeProgress: Double? {
-        guard let challenge = todaysChallenge else { return nil }
-        let ctx = DailyChallengeCatalog.Context(
-            distance: healthManager.todaysDistance,
-            steps: healthManager.todaysSteps,
-            goalMiles: userManager.currentUser.goalMiles,
-            lastCompletion: userManager.currentUser.lastCompletionDate,
-            todaysFastestPace: healthManager.todaysFastestPace,
-            userFastestMilePace: userManager.currentUser.fastestMilePace,
-            todaysWalkingDistance: healthManager.todaysWalkingDistance
-        )
-        return DailyChallengeCatalog.progress(for: challenge, ctx: ctx)
-    }
-
-    private var isCompleted: Bool {
-        (challengeProgress ?? 0) >= 1.0
+        todaysChallenge == nil ? nil : challengeProgressValue
     }
 
     var body: some View {
-        if let challenge = todaysChallenge {
-            HStack(spacing: 14) {
-                // Challenge icon
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: isCompleted ? [.green, .green.opacity(0.8)] : challenge.gradient,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 40, height: 40)
+        Group {
+            if let challenge = todaysChallenge {
+                challengeCard(challenge)
+            } else {
+                EmptyView()
+            }
+        }
+        .task {
+            guard let userId = userManager.currentUser.backendUserId else { return }
+            await ChallengeService.refresh(userId: userId)
+            refreshFromService()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ChallengeService.changedNotification)) { _ in
+            refreshFromService()
+        }
+    }
 
-                    Image(systemName: isCompleted ? "checkmark" : challenge.icon)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(.white)
-                }
+    @ViewBuilder
+    private func challengeCard(_ challenge: DailyChallenge) -> some View {
+        HStack(spacing: 14) {
+            // Challenge icon
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: isCompleted ? [.green, .green.opacity(0.8)] : challenge.gradient,
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 40, height: 40)
+
+                Image(systemName: isCompleted ? "checkmark" : challenge.icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+            }
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
@@ -826,64 +828,17 @@ struct DailyChallengeCard: View {
                 }
             )
             .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
-            .onChange(of: isCompleted, initial: true) { _, completed in
-                recordIfNewlyComplete(completed: completed)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: ChallengeService.changedNotification)) { _ in
-                challengesCompletedCount = ChallengeService.shared.allCompletions().count
-            }
-        }
     }
 
-    private func recordIfNewlyComplete(completed: Bool) {
-        guard completed, let challenge = todaysChallenge else { return }
-        let today = Calendar.current.startOfDay(for: Date())
-        guard ChallengeService.shared.completion(on: today) == nil else { return }
-
-        let record = ChallengeCompletion(
-            date: today,
-            challengeKey: challenge.key,
-            title: challenge.title,
-            icon: challenge.icon,
-            description: challenge.description
-        )
-        ChallengeService.shared.recordCompletion(record)
+    /// Read the server-backed state from `ChallengeService.shared` (a `RemoteChallengeService`).
+    /// Server is authoritative for completion + challenge_* badges.
+    private func refreshFromService() {
+        if let remote = ChallengeService.shared as? RemoteChallengeService {
+            todaysChallenge = remote.todayChallenge
+            challengeProgressValue = remote.todayProgress
+            isCompleted = remote.todayCompleted
+        }
         challengesCompletedCount = ChallengeService.shared.allCompletions().count
-        awardChallengeBadges()
-    }
-
-    private func awardChallengeBadges() {
-        guard let challenge = todaysChallenge else { return }
-        let count = ChallengeService.shared.allCompletions().count
-
-        let milestones: [(Int, String, String, String)] = [
-            (1,   "challenge_1",   "Challenge Accepted",  "Completed your first daily challenge!"),
-            (5,   "challenge_5",   "Challenge Seeker",    "Completed 5 daily challenges!"),
-            (10,  "challenge_10",  "Challenge Pro",       "Completed 10 daily challenges!"),
-            (25,  "challenge_25",  "Challenge Master",    "Completed 25 daily challenges!"),
-            (50,  "challenge_50",  "Challenge Legend",    "Completed 50 daily challenges!"),
-            (100, "challenge_100", "Challenge Immortal",  "Completed 100 daily challenges!"),
-        ]
-
-        var newlyAwarded: [Badge] = []
-        for (threshold, id, name, description) in milestones {
-            if count >= threshold && !userManager.currentUser.badges.contains(where: { $0.id == id }) {
-                let badge = Badge(
-                    id: id,
-                    name: name,
-                    description: "\(description) Today: \(challenge.title)"
-                )
-                userManager.currentUser.badges.append(badge)
-                newlyAwarded.append(badge)
-            }
-        }
-
-        if !newlyAwarded.isEmpty {
-            userManager.saveUserData()
-            for badge in newlyAwarded {
-                CelebrationManager.shared.addCelebration(.badgeUnlocked(badge: badge))
-            }
-        }
     }
 }
 
