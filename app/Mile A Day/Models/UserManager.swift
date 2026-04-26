@@ -57,6 +57,7 @@ class UserManager: ObservableObject {
             self.currentUser.privacySettings = decodedPrivacy
         }
 
+        #if !os(watchOS)
         // Refresh server-side rewards after every successful workout upload.
         NotificationCenter.default.addObserver(
             forName: Notification.Name("MAD_WorkoutsUploaded"),
@@ -70,6 +71,7 @@ class UserManager: ObservableObject {
                 await ChallengeService.refresh(userId: userId)
             }
         }
+        #endif
     }
     
     // Save user data
@@ -301,6 +303,7 @@ class UserManager: ObservableObject {
         }
         saveUserData()
 
+        #if !os(watchOS)
         if let userId = currentUser.backendUserId {
             Task.detached {
                 do {
@@ -310,6 +313,7 @@ class UserManager: ObservableObject {
                 }
             }
         }
+        #endif
     }
 
     // Check if there are any new badges
@@ -320,6 +324,7 @@ class UserManager: ObservableObject {
     /// Fetch the user's earned badges from the backend. Server is authoritative.
     /// Safe to call on every workout-upload completion and on Badges view appear.
     func refreshBadgesFromServer() async {
+        #if !os(watchOS)
         guard let userId = currentUser.backendUserId else { return }
         do {
             let dtos = try await BadgeAPIService.fetchUserBadges(userId: userId)
@@ -342,6 +347,7 @@ class UserManager: ObservableObject {
         } catch {
             print("[UserManager] refreshBadgesFromServer failed: \(error)")
         }
+        #endif
     }
 
     /// Legacy shim — kept so existing callers compile. Delegates to the server-side fetch.
