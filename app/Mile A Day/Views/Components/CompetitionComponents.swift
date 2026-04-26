@@ -203,18 +203,6 @@ struct CompetitionCard: View {
                             if let interval = competition.options.interval {
                                 StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
                             }
-                            if competition.options.first_to > 0 {
-                                if let currentUserId = UserDefaults.standard.string(forKey: "backendUserId"),
-                                   let currentUser = competition.users.first(where: { $0.user_id == currentUserId }),
-                                   let lives = currentUser.remaining_lives {
-                                    LivesChip(remaining: lives, total: competition.options.first_to)
-                                } else {
-                                    StatChip(
-                                        icon: "heart",
-                                        text: "\(competition.options.first_to) \(competition.options.first_to == 1 ? "life" : "lives")"
-                                    )
-                                }
-                            }
                             if let durationStr = competition.options.durationFormatted {
                                 StatChip(icon: "clock", text: durationStr)
                             }
@@ -571,12 +559,6 @@ struct InviteCard: View {
                         )
                         if let interval = competition.options.interval {
                             StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
-                        }
-                        if competition.options.first_to > 0 {
-                            StatChip(
-                                icon: "heart",
-                                text: "\(competition.options.first_to) \(competition.options.first_to == 1 ? "life" : "lives")"
-                            )
                         }
                         if let durationStr = competition.options.durationFormatted {
                             StatChip(icon: "clock", text: durationStr)

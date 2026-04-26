@@ -1003,7 +1003,7 @@ struct CreateCompetitionView: View {
                     workouts: Array(selectedWorkouts),
                     goal: needsGoal ? goal : 0,
                     unit: unit,
-                    firstTo: isStreaks ? 0 : firstTo,
+                    firstTo: needsFirstTo ? firstTo : 0,
                     lives: isStreaks ? firstTo : nil,
                     history: false,
                     interval: interval,

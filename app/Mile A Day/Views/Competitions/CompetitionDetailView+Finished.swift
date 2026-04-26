@@ -435,9 +435,6 @@ extension CompetitionDetailView {
                 if let interval = competition.options.interval {
                     InfoRow(icon: "arrow.trianglehead.2.clockwise", title: "Interval", value: interval.displayName)
                 }
-                if competition.options.first_to > 0 {
-                    InfoRow(icon: "heart", title: "Lives", value: "\(competition.options.first_to)")
-                }
                 durationRow
 
             case .clash:

@@ -111,8 +111,8 @@ function checkKeys(params: CreateCompetitionParams) {
 	} else if (type === 'targets') {
 		requiredKeys.push('goal', 'unit', 'interval');
 
-		if (end_date === undefined && options.first_to === undefined && options.duration_hours === undefined) {
-			missingKeys.push('(first_to, end_date, or duration_hours)');
+		if (end_date === undefined && options.duration_hours === undefined) {
+			missingKeys.push('(end_date or duration_hours)');
 		}
 	} else if (type === 'race') {
 		requiredKeys.push('goal', 'unit');
@@ -664,9 +664,9 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 		}
 	}
 
-	// Check 3: first_to condition (clash, targets only — races use goal, apex uses duration,
+	// Check 3: first_to condition (clash only — races use goal, apex/targets use duration,
 	// streaks use first_to as "lives" via checkStreaksEliminated below).
-	if (!shouldResolve && competition.options.first_to && (competition.type === 'clash' || competition.type === 'targets')) {
+	if (!shouldResolve && competition.options.first_to && competition.type === 'clash') {
 		const scores = await getUserScores(competition, { excludeCurrentInterval: true });
 		const scoreValues = Object.values(scores);
 		if (scoreValues.length > 0) {
