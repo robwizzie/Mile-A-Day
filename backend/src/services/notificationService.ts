@@ -68,14 +68,29 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<voi
 
 // ─── Competition Milestone Notifications ────────────────────────────
 
+const MAX_MILESTONE_PUSHES_PER_RECIPIENT_PER_TRIGGER = 2;
+
+function tryReserveRecipientSlot(notifiedRecipients: Map<string, number> | undefined, recipientId: string): boolean {
+	if (!notifiedRecipients) return true;
+	const count = notifiedRecipients.get(recipientId) ?? 0;
+	if (count >= MAX_MILESTONE_PUSHES_PER_RECIPIENT_PER_TRIGGER) return false;
+	notifiedRecipients.set(recipientId, count + 1);
+	return true;
+}
+
 /**
  * Check for competition milestones after a workout upload.
  * Milestones:
  * - Race: user reaches 50% of goal
  * - Clash/Targets: user is 1 point from winning (first_to)
  * - Any type: competition ends tomorrow
+ *
+ * `notifiedRecipients` is shared with sibling checks (e.g. checkLeadChanges) for
+ * a single workout-upload trigger so the same recipient is not spammed across
+ * multiple shared competitions. Each recipient is capped at
+ * MAX_MILESTONE_PUSHES_PER_RECIPIENT_PER_TRIGGER pushes per trigger.
  */
-export async function checkCompetitionMilestones(userId: string): Promise<void> {
+export async function checkCompetitionMilestones(userId: string, notifiedRecipients?: Map<string, number>): Promise<void> {
 	try {
 		// Get all active competitions for this user
 		const activeComps = await db.query<Competition & { id: string }>(
@@ -98,7 +113,7 @@ export async function checkCompetitionMilestones(userId: string): Promise<void> 
 
 		for (const comp of activeComps) {
 			try {
-				await checkMilestonesForCompetition(comp, userId, username);
+				await checkMilestonesForCompetition(comp, userId, username, notifiedRecipients);
 			} catch (err: any) {
 				console.error(`[Milestones] Error checking comp ${comp.id}:`, err.message);
 			}
@@ -111,7 +126,8 @@ export async function checkCompetitionMilestones(userId: string): Promise<void> 
 async function checkMilestonesForCompetition(
 	comp: Competition & { id: string },
 	userId: string,
-	username: string
+	username: string,
+	notifiedRecipients?: Map<string, number>
 ): Promise<void> {
 	const fullComp = await getCompetition(comp.id);
 	if (!fullComp) return;
@@ -137,6 +153,7 @@ async function checkMilestonesForCompetition(
 					if (u.user_id === userId) continue;
 					const shouldSend = await shouldSendNotification(u.user_id, null, 'competition_milestone');
 					if (!shouldSend) continue;
+					if (!tryReserveRecipientSlot(notifiedRecipients, u.user_id)) continue;
 
 					sendPush(u.user_id, {
 						title: 'Race update!',
@@ -167,6 +184,7 @@ async function checkMilestonesForCompetition(
 					if (u.user_id === userId) continue;
 					const shouldSend = await shouldSendNotification(u.user_id, null, 'competition_milestone');
 					if (!shouldSend) continue;
+					if (!tryReserveRecipientSlot(notifiedRecipients, u.user_id)) continue;
 
 					sendPush(u.user_id, {
 						title: 'Almost there!',
@@ -314,10 +332,9 @@ export async function checkStreaksBroken(): Promise<void> {
 				if (claimed.length === 0) continue;
 
 				// Notify their friends
-				const friends = await db.query(
-					`SELECT friend_id FROM friendships WHERE user_id = $1 AND status = 'accepted'`,
-					[user_id]
-				);
+				const friends = await db.query(`SELECT friend_id FROM friendships WHERE user_id = $1 AND status = 'accepted'`, [
+					user_id
+				]);
 
 				let sentCount = 0;
 				for (const { friend_id } of friends) {
@@ -335,7 +352,9 @@ export async function checkStreaksBroken(): Promise<void> {
 				}
 
 				if (sentCount > 0) {
-					console.log(`[Notifications] Sent streak broken (${streakLength} days) for ${username} to ${sentCount} friends`);
+					console.log(
+						`[Notifications] Sent streak broken (${streakLength} days) for ${username} to ${sentCount} friends`
+					);
 				}
 			} catch (err: any) {
 				console.error(`[Notifications] Error checking streak broken for ${user_id}:`, err.message);
@@ -346,101 +365,17 @@ export async function checkStreaksBroken(): Promise<void> {
 	}
 }
 
-// ─── Personal Best in Competition ──────────────────────────────────
-
-/**
- * Check if a user just set a personal best single-day distance
- * in any of their active competitions. Called after workout upload.
- */
-export async function checkPersonalBest(userId: string): Promise<void> {
-	try {
-		const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
-		const today = formatter.format(new Date());
-
-		// Get today's total distance
-		const todayResult = await db.query(
-			`SELECT SUM(distance) as total FROM workouts WHERE user_id = $1 AND local_date = $2`,
-			[userId, today]
-		);
-		const todayDistance = parseFloat(todayResult[0]?.total ?? '0');
-		if (todayDistance <= 0) return;
-
-		// Get active competitions for user
-		const activeComps = await db.query<Competition & { id: string }>(
-			`SELECT c.*
-			FROM competitions c
-			JOIN competition_users cu ON cu.competition_id = c.id
-			WHERE cu.user_id = $1
-				AND cu.invite_status = 'accepted'
-				AND c.start_date IS NOT NULL
-				AND c.start_date <= NOW()
-				AND c.winner IS NULL
-				AND (c.end_date IS NULL OR c.end_date > NOW())`,
-			[userId]
-		);
-
-		if (activeComps.length === 0) return;
-
-		const [user] = await db.query('SELECT username FROM users WHERE user_id = $1', [userId]);
-		const username = user?.username || 'Someone';
-
-		for (const comp of activeComps) {
-			try {
-				// Get user's best single-day distance in this competition (excluding today)
-				const bestResult = await db.query(
-					`SELECT MAX(day_total) as best
-					FROM (
-						SELECT SUM(distance) as day_total
-						FROM workouts
-						WHERE user_id = $1 AND local_date >= $2 AND local_date < $3
-						GROUP BY local_date
-					) daily`,
-					[userId, comp.start_date, today]
-				);
-
-				const previousBest = parseFloat(bestResult[0]?.best ?? '0');
-				if (previousBest <= 0 || todayDistance <= previousBest) continue;
-
-				const milestoneKey = `pb_${comp.id}_${userId}_${today}`;
-				const claimed = await db.query(
-					`INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)
-					ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
-					[milestoneKey, comp.id, userId]
-				);
-				if (claimed.length === 0) continue;
-
-				const fullComp = await getCompetition(comp.id);
-				if (!fullComp) continue;
-
-				const acceptedUsers = fullComp.users.filter((u: CompetitionUser) => u.invite_status === 'accepted');
-				for (const u of acceptedUsers) {
-					if (u.user_id === userId) continue;
-					const shouldSend = await shouldSendNotification(u.user_id, userId, 'competition_milestone');
-					if (!shouldSend) continue;
-
-					sendPush(u.user_id, {
-						title: 'New personal best!',
-						body: `${username} just set a new PB of ${todayDistance.toFixed(1)} mi in ${fullComp.competition_name}!`,
-						type: 'competition_milestone',
-						data: { competition_id: fullComp.id }
-					}).catch(err => console.error('[Push] PB error:', err.message));
-				}
-			} catch (err: any) {
-				console.error(`[Notifications] PB check error for comp ${comp.id}:`, err.message);
-			}
-		}
-	} catch (err: any) {
-		console.error('[Notifications] Error in checkPersonalBest:', err.message);
-	}
-}
-
 // ─── Lead Change Notifications ─────────────────────────────────────
 
 /**
  * Check if a workout upload caused a lead change in any active competition.
  * Only for clash, apex, and race modes where there's a clear leader.
+ *
+ * `notifiedRecipients` is shared with sibling checks (e.g. checkCompetitionMilestones)
+ * for a single workout-upload trigger so the same recipient is not spammed across
+ * multiple shared competitions.
  */
-export async function checkLeadChanges(userId: string): Promise<void> {
+export async function checkLeadChanges(userId: string, notifiedRecipients?: Map<string, number>): Promise<void> {
 	try {
 		const activeComps = await db.query<Competition & { id: string }>(
 			`SELECT c.*
@@ -505,6 +440,7 @@ export async function checkLeadChanges(userId: string): Promise<void> {
 					if (u.user_id === userId) continue;
 					const shouldSend = await shouldSendNotification(u.user_id, null, 'competition_milestone');
 					if (!shouldSend) continue;
+					if (!tryReserveRecipientSlot(notifiedRecipients, u.user_id)) continue;
 
 					sendPush(u.user_id, {
 						title: 'Lead change!',
@@ -586,10 +522,7 @@ export async function checkClashTies(): Promise<void> {
 				if (claimed.length === 0) continue;
 
 				// Get usernames for the tied users
-				const tiedNames = await db.query(
-					`SELECT username FROM users WHERE user_id = ANY($1::text[])`,
-					[leaders]
-				);
+				const tiedNames = await db.query(`SELECT username FROM users WHERE user_id = ANY($1::text[])`, [leaders]);
 				const nameList = tiedNames.map((r: any) => r.username).join(' & ');
 
 				// Notify all accepted participants

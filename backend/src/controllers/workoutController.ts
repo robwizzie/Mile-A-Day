@@ -14,13 +14,9 @@ import {
 	updateWorkout as updateWorkoutDb
 } from '../services/workoutService.js';
 import { checkRaceCompletions } from '../services/competitionService.js';
-import { notifyFriendsOfMileCompletion, checkCompetitionMilestones, checkPersonalBest, checkLeadChanges } from '../services/notificationService.js';
+import { notifyFriendsOfMileCompletion, checkCompetitionMilestones, checkLeadChanges } from '../services/notificationService.js';
 import { evaluateWorkoutRewards } from '../services/badgeService.js';
-import {
-	fireBadgeEarnedPush,
-	fanOutFriendBadgePush,
-	fanOutFriendChallengePush
-} from '../services/pushNotificationService.js';
+import { fireBadgeEarnedPush, fanOutFriendBadgePush, fanOutFriendChallengePush } from '../services/pushNotificationService.js';
 
 export async function uploadWorkouts(req: Request, res: Response) {
 	if (!hasRequiredKeys(['userId'], req, res)) return;
@@ -60,28 +56,24 @@ export async function uploadWorkouts(req: Request, res: Response) {
 		try {
 			const todayMiles = await getTodayMiles(userId);
 			if (todayMiles >= 1.0) {
-				notifyFriendsOfMileCompletion(userId).catch(err =>
-					console.error('Error notifying friends:', err.message)
-				);
+				notifyFriendsOfMileCompletion(userId).catch(err => console.error('Error notifying friends:', err.message));
 			}
-			checkCompetitionMilestones(userId).catch(err =>
-				console.error('Error checking milestones:', err.message)
-			);
-			checkPersonalBest(userId).catch(err =>
-				console.error('Error checking personal best:', err.message)
-			);
-			checkLeadChanges(userId).catch(err =>
-				console.error('Error checking lead changes:', err.message)
-			);
+			(async () => {
+				const notifiedRecipients = new Map<string, number>();
+				await checkLeadChanges(userId, notifiedRecipients).catch(err =>
+					console.error('Error checking lead changes:', err.message)
+				);
+				await checkCompetitionMilestones(userId, notifiedRecipients).catch(err =>
+					console.error('Error checking milestones:', err.message)
+				);
+			})();
 		} catch (notifError: any) {
 			console.error('Error checking notifications:', notifError.message);
 		}
 
 		// Fire badge + challenge push notifications (non-blocking).
 		for (const badge of rewards.newlyEarnedBadges) {
-			fireBadgeEarnedPush(userId, badge).catch(err =>
-				console.error('Error firing badge_earned push:', err.message)
-			);
+			fireBadgeEarnedPush(userId, badge).catch(err => console.error('Error firing badge_earned push:', err.message));
 			if (badge.rarity !== 'common') {
 				fanOutFriendBadgePush(userId, badge).catch(err =>
 					console.error('Error fanning out friend_badge_earned:', err.message)
