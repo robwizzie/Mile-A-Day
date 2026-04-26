@@ -94,20 +94,26 @@ struct Competition: Codable, Identifiable {
         users.filter { $0.invite_status == .accepted }.count
     }
 
-    private static let isoDateFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withFullDate]
+    /// Parses a "YYYY-MM-DD" string from the backend as midnight in Eastern Time.
+    /// The backend treats start_date / end_date as ET calendar dates, so a competition
+    /// dated "2026-04-27" begins at 2026-04-27 00:00 America/New_York — not midnight UTC.
+    private static let etDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = TimeZone(identifier: "America/New_York")
+        f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()
 
     var startDateFormatted: Date? {
         guard let dateStr = start_date else { return nil }
-        return Self.isoDateFormatter.date(from: dateStr)
+        return Self.etDateFormatter.date(from: dateStr)
     }
 
     var endDateFormatted: Date? {
         guard let dateStr = end_date else { return nil }
-        return Self.isoDateFormatter.date(from: dateStr)
+        return Self.etDateFormatter.date(from: dateStr)
     }
 
     /// Computed competition status based on dates
@@ -118,7 +124,7 @@ struct Competition: Codable, Identifiable {
 
         let now = Date()
 
-        guard let startDate = Self.isoDateFormatter.date(from: startStr) else {
+        guard let startDate = Self.etDateFormatter.date(from: startStr) else {
             return .lobby
         }
 
@@ -126,9 +132,12 @@ struct Competition: Codable, Identifiable {
             return .scheduled
         }
 
-        // Start date is in the past - check end date
-        if let endStr = end_date, let endDate = Self.isoDateFormatter.date(from: endStr) {
-            if endDate < now {
+        // Start date is in the past — competition is finished only after the end_date day
+        // has fully elapsed in ET (matches backend `c.end_date < TODAY_ET` behavior).
+        if let endStr = end_date, let endDate = Self.etDateFormatter.date(from: endStr) {
+            var et = Calendar(identifier: .gregorian)
+            et.timeZone = TimeZone(identifier: "America/New_York")!
+            if let endOfEndDay = et.date(byAdding: .day, value: 1, to: endDate), endOfEndDay <= now {
                 return .finished
             }
         }
