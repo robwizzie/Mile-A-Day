@@ -20,8 +20,12 @@ function etDateToUtcMs(dateStr: string): number {
 	const parts = new Intl.DateTimeFormat('en-US', {
 		timeZone: 'America/New_York',
 		hourCycle: 'h23',
-		year: 'numeric', month: '2-digit', day: '2-digit',
-		hour: '2-digit', minute: '2-digit', second: '2-digit'
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+		hour: '2-digit',
+		minute: '2-digit',
+		second: '2-digit'
 	}).formatToParts(new Date(utcGuess));
 	const get = (type: string) => parseInt(parts.find(p => p.type === type)!.value, 10);
 	const etAsUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
@@ -590,9 +594,7 @@ export async function checkRaceCompletions(userId: string): Promise<void> {
 	if (activeRaces.length === 0) return;
 
 	for (const race of activeRaces) {
-		const workoutTypes = (race.workouts ?? ['running', 'walking'])
-			.map((t: string) => WORKOUT_TYPE_MAP[t])
-			.filter(Boolean);
+		const workoutTypes = (race.workouts ?? ['running', 'walking']).map((t: string) => WORKOUT_TYPE_MAP[t]).filter(Boolean);
 
 		const startDate = race.start_date!;
 		const today = getTodayET();
@@ -609,10 +611,11 @@ export async function checkRaceCompletions(userId: string): Promise<void> {
 		);
 
 		if (result.total >= race.options.goal) {
-			await db.query(
-				`UPDATE competitions SET end_date = $1, winner = $2, ended = true WHERE id = $3 AND winner IS NULL`,
-				[today, userId, race.id]
-			);
+			await db.query(`UPDATE competitions SET end_date = $1, winner = $2, ended = true WHERE id = $3 AND winner IS NULL`, [
+				today,
+				userId,
+				race.id
+			]);
 			await resolveCompetitionPlacements(race.id);
 		}
 	}
@@ -675,13 +678,18 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 		}
 	}
 
-	// Check 3b: streaks — all accepted users eliminated (remaining_lives === 0)
+	// Check 3b: streaks — end when one survivor remains (sole survivor wins) or all eliminated
 	if (!shouldResolve && competition.type === 'streaks') {
 		const scores = await getUserScores(competition, { excludeCurrentInterval: true });
 		const scoreValues = Object.values(scores);
-		if (scoreValues.length > 0 && scoreValues.every(s => (s.remaining_lives ?? 0) <= 0)) {
-			shouldResolve = true;
-			computedEndDate = todayStr;
+		if (scoreValues.length > 0) {
+			const survivors = scoreValues.filter(s => (s.remaining_lives ?? 0) > 0);
+			const allEliminated = survivors.length === 0;
+			const soleSurvivor = scoreValues.length > 1 && survivors.length === 1;
+			if (allEliminated || soleSurvivor) {
+				shouldResolve = true;
+				computedEndDate = todayStr;
+			}
 		}
 	}
 
@@ -700,10 +708,7 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 	if (!shouldResolve) return;
 
 	if (computedEndDate) {
-		await db.query(
-			`UPDATE competitions SET end_date = $1 WHERE id = $2`,
-			[computedEndDate, competition.id]
-		);
+		await db.query(`UPDATE competitions SET end_date = $1 WHERE id = $2`, [computedEndDate, competition.id]);
 		competition.end_date = computedEndDate;
 	}
 
@@ -713,10 +718,10 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 	if (sortedUsers.length === 0) return;
 
 	const winnerId = sortedUsers[0][0];
-	await db.query(
-		`UPDATE competitions SET winner = $1, ended = true WHERE id = $2 AND winner IS NULL`,
-		[winnerId, competition.id]
-	);
+	await db.query(`UPDATE competitions SET winner = $1, ended = true WHERE id = $2 AND winner IS NULL`, [
+		winnerId,
+		competition.id
+	]);
 
 	await resolveCompetitionPlacements(competition.id, finalScores);
 
@@ -748,9 +753,10 @@ async function resolveCompetitionPlacements(competitionId: string, precomputedSc
 		if (i > 0 && data.score < sorted[i - 1][1].score) {
 			currentPlacement = i + 1;
 		}
-		await db.query(
-			`UPDATE competition_users SET placement = $1 WHERE competition_id = $2 AND user_id = $3`,
-			[currentPlacement, competitionId, userId]
-		);
+		await db.query(`UPDATE competition_users SET placement = $1 WHERE competition_id = $2 AND user_id = $3`, [
+			currentPlacement,
+			competitionId,
+			userId
+		]);
 	}
 }
