@@ -26,24 +26,23 @@ export async function canHype(senderId: string): Promise<boolean> {
 }
 
 /**
- * Insert a hype_log row. Returns id and created_at so callers can roll back
- * if a post-insert recount finds the sender over the limit (race mitigation).
+ * Atomically insert a hype_log row only if the sender is still under the
+ * daily limit. Returns the new row's id, or null if the limit was reached.
+ * The single statement closes the race between concurrent senders that a
+ * pre-check + insert would leave open.
  */
-export async function logHype(senderId: string, targetId: string): Promise<{ id: string; created_at: string }> {
-	const rows = await db.query<{ id: string; created_at: string }>(
-		`INSERT INTO hype_log (sender_id, target_id) VALUES ($1, $2)
-		RETURNING id, created_at`,
+export async function logHypeIfUnderLimit(senderId: string, targetId: string): Promise<{ id: string } | null> {
+	const rows = await db.query<{ id: string }>(
+		`INSERT INTO hype_log (sender_id, target_id)
+		SELECT $1, $2
+		WHERE (
+			SELECT COUNT(*) FROM hype_log
+			WHERE sender_id = $1 AND created_at > NOW() - INTERVAL '24 hours'
+		) < ${HYPE_DAILY_LIMIT}
+		RETURNING id`,
 		[senderId, targetId]
 	);
-	return rows[0];
-}
-
-/**
- * Delete a previously-inserted hype_log row by id. Used to roll back a
- * race-induced over-limit insert.
- */
-export async function deleteHype(id: string): Promise<void> {
-	await db.query(`DELETE FROM hype_log WHERE id = $1`, [id]);
+	return rows[0] ?? null;
 }
 
 /**

@@ -446,9 +446,12 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         do {
             let response = try await HypeService.sendHype(targetUserId: targetUserId)
             let remaining = response.hypes_remaining
-            let body = remaining == 1
-                ? "Hype sent! 1 left today."
-                : "Hype sent! \(remaining) left today."
+            let body: String
+            switch remaining {
+            case 0:  body = "Hype sent! That was your last one today."
+            case 1:  body = "Hype sent! 1 left today."
+            default: body = "Hype sent! \(remaining) left today."
+            }
             await postLocalToast(title: "🔥 Hype sent", body: body)
         } catch let error as APIError where error.isRateLimited {
             await postLocalToast(title: "Out of hypes", body: "You're out of hypes for today.")

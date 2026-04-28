@@ -7,9 +7,7 @@ import { getUser } from '../services/userService.js';
 import { sendPush } from '../services/pushNotificationService.js';
 import { shouldSendNotification } from '../services/notificationSettingsService.js';
 import {
-	canHype,
-	logHype,
-	deleteHype,
+	logHypeIfUnderLimit,
 	getDailyHypeCount,
 	getHypeResetsAt,
 	HYPE_DAILY_LIMIT,
@@ -73,7 +71,9 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
 			return res.status(400).json({ error: "This user hasn't completed their mile today" });
 		}
 
-		if (!(await canHype(senderId))) {
+		// Atomic: insert iff still under the limit. Closes the concurrent-sender race.
+		const inserted = await logHypeIfUnderLimit(senderId, targetUserId);
+		if (!inserted) {
 			return res.status(429).json({
 				error: `You've used all ${HYPE_DAILY_LIMIT} hypes for the day`,
 				hypes_remaining: 0,
@@ -81,16 +81,7 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
 			});
 		}
 
-		const inserted = await logHype(senderId, targetUserId);
 		const countAfter = await getDailyHypeCount(senderId);
-		if (countAfter > HYPE_DAILY_LIMIT) {
-			await deleteHype(inserted.id);
-			return res.status(429).json({
-				error: `You've used all ${HYPE_DAILY_LIMIT} hypes for the day`,
-				hypes_remaining: 0,
-				resets_at: await getHypeResetsAt(senderId),
-			});
-		}
 
 		const shouldSend = await shouldSendNotification(targetUserId, senderId, 'hype');
 		if (shouldSend) {
