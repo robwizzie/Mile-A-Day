@@ -185,12 +185,12 @@ enum APIError: LocalizedError {
     case notAuthenticated
     case unauthorized
     case badRequest(String)
-    case notFound
     case rateLimited(String)
+    case notFound
     case serverError(Int)
     case tokenRefreshFailed
     case networkError(String)
-    
+
     var errorDescription: String? {
         switch self {
         case .invalidURL:
@@ -203,10 +203,10 @@ enum APIError: LocalizedError {
             return "Unauthorized access"
         case .badRequest(let message):
             return "Bad request: \(message)"
-        case .notFound:
-            return "Resource not found"
         case .rateLimited(let message):
             return message
+        case .notFound:
+            return "Resource not found"
         case .serverError(let code):
             return "Server error: \(code)"
         case .tokenRefreshFailed:
@@ -214,6 +214,14 @@ enum APIError: LocalizedError {
         case .networkError(let message):
             return "Network error: \(message)"
         }
+    }
+}
+
+extension APIError {
+    /// True for HTTP 429 responses.
+    var isRateLimited: Bool {
+        if case .rateLimited = self { return true }
+        return false
     }
 }
 

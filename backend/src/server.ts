@@ -11,6 +11,7 @@ import workoutRoutes from './routes/workoutRoutes.js';
 import competitionRoutes from './routes/competitionRoutes.js';
 import deviceRoutes from './routes/deviceRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import hypeRoutes from './routes/hypeRoutes.js';
 import badgesRoutes, { publicBadgesRouter } from './routes/badgesRoutes.js';
 import dailyChallengesRoutes from './routes/dailyChallengesRoutes.js';
 import { authenticateToken } from './middleware/auth.js';
@@ -69,6 +70,7 @@ app.use('/workouts', workoutRoutes);
 app.use('/competitions', competitionRoutes);
 app.use('/devices', deviceRoutes);
 app.use('/notifications', notificationRoutes);
+app.use('/hype', hypeRoutes);
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 	console.error('Error:', err.message);

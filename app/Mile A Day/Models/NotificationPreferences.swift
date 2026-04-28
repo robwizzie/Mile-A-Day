@@ -22,6 +22,9 @@ struct NotificationPreferences: Codable {
     var competitionFlexEnabled: Bool = true
     var competitionMilestonesEnabled: Bool = true
 
+    // Hype reactions (positive friend/competitor reaction to a completed mile)
+    var hypeEnabled: Bool = true
+
     // Friend nudge notifications
     var friendNudgeEnabled: Bool = true
 
