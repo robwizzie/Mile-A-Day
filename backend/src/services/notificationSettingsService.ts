@@ -7,6 +7,7 @@ const db = PostgresService.getInstance();
 export interface NotificationPreferences {
 	nudges_enabled: boolean;
 	flexes_enabled: boolean;
+	hypes_enabled: boolean;
 	friend_activity_enabled: boolean;
 	competition_invites_enabled: boolean;
 	competition_updates_enabled: boolean;
@@ -18,6 +19,7 @@ export interface NotificationPreferences {
 const DEFAULT_PREFERENCES: NotificationPreferences = {
 	nudges_enabled: true,
 	flexes_enabled: true,
+	hypes_enabled: true,
 	friend_activity_enabled: true,
 	competition_invites_enabled: true,
 	competition_updates_enabled: true,
@@ -38,6 +40,7 @@ export async function getNotificationPreferences(userId: string): Promise<Notifi
 	return {
 		nudges_enabled: row.nudges_enabled ?? true,
 		flexes_enabled: row.flexes_enabled ?? true,
+		hypes_enabled: row.hypes_enabled ?? true,
 		friend_activity_enabled: row.friend_activity_enabled ?? true,
 		competition_invites_enabled: row.competition_invites_enabled ?? true,
 		competition_updates_enabled: row.competition_updates_enabled ?? true,
@@ -60,6 +63,7 @@ export async function updateNotificationPreferences(
 	const fields: { key: keyof NotificationPreferences; value: any }[] = [
 		{ key: 'nudges_enabled', value: prefs.nudges_enabled },
 		{ key: 'flexes_enabled', value: prefs.flexes_enabled },
+		{ key: 'hypes_enabled', value: prefs.hypes_enabled },
 		{ key: 'friend_activity_enabled', value: prefs.friend_activity_enabled },
 		{ key: 'competition_invites_enabled', value: prefs.competition_invites_enabled },
 		{ key: 'competition_updates_enabled', value: prefs.competition_updates_enabled },
@@ -184,7 +188,7 @@ export async function updateFriendNotificationSettings(
 export async function shouldSendNotification(
 	targetUserId: string,
 	senderId: string | null,
-	notificationType: 'nudge' | 'flex' | 'friend_activity' | 'competition_invite' | 'competition_update' | 'competition_milestone'
+	notificationType: 'nudge' | 'flex' | 'hype' | 'friend_activity' | 'competition_invite' | 'competition_update' | 'competition_milestone'
 ): Promise<boolean> {
 	const prefs = await getNotificationPreferences(targetUserId);
 
@@ -195,6 +199,9 @@ export async function shouldSendNotification(
 			break;
 		case 'flex':
 			if (!prefs.flexes_enabled) return false;
+			break;
+		case 'hype':
+			if (!prefs.hypes_enabled) return false;
 			break;
 		case 'friend_activity':
 			if (!prefs.friend_activity_enabled) return false;
