@@ -23,3 +23,6 @@ xcuserdata/
 .claude/research/
 .claude/specs/_drafts/
 .claude/.cc-optimize-discovery.json
+
+# Git worktrees
+.worktrees/
