@@ -31,27 +31,57 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<voi
 		const [user] = await db.query('SELECT username FROM users WHERE user_id = $1', [userId]);
 		if (!user) return;
 
-		// Get friends (bidirectional accepted)
-		const friends = await db.query(
+		// Friends (bidirectional accepted)
+		const friendRows = await db.query<{ friend_id: string }>(
 			`SELECT friend_id FROM friendships
 			WHERE user_id = $1 AND status = 'accepted'`,
 			[userId]
 		);
 
-		if (friends.length === 0) return;
+		// Active-competition co-participants (other accepted users in the runner's active comps)
+		const compRows = await db.query<{ user_id: string }>(
+			`SELECT DISTINCT cu_other.user_id
+			FROM competition_users cu_self
+			JOIN competition_users cu_other ON cu_other.competition_id = cu_self.competition_id
+			JOIN competitions c ON c.id = cu_self.competition_id
+			WHERE cu_self.user_id = $1
+				AND cu_other.user_id <> $1
+				AND cu_self.invite_status = 'accepted'
+				AND cu_other.invite_status = 'accepted'
+				AND c.start_date IS NOT NULL
+				AND c.start_date <= NOW()
+				AND c.winner IS NULL
+				AND (c.end_date IS NULL OR c.end_date > NOW())`,
+			[userId]
+		);
 
-		// Send to up to 5 friends (respect notification settings)
+		const friendIds = friendRows.map(r => r.friend_id);
+		const friendSet = new Set(friendIds);
+		const coParticipantIds = compRows
+			.map(r => r.user_id)
+			.filter(id => !friendSet.has(id));
+
+		// Cap: up to 5 friends + up to 5 unique co-participants = max 10 recipients
+		const recipients = [
+			...friendIds.slice(0, 5),
+			...coParticipantIds.slice(0, 5),
+		];
+
+		if (recipients.length === 0) return;
+
+		const title = `${user.username} got their mile in!`;
+		const body = 'Your friend just completed their daily mile. Time to lace up!';
+
 		let sentCount = 0;
-		for (const { friend_id } of friends) {
-			if (sentCount >= 5) break;
-
-			const shouldSend = await shouldSendNotification(friend_id, userId, 'friend_activity');
+		for (const recipientId of recipients) {
+			const shouldSend = await shouldSendNotification(recipientId, userId, 'friend_activity');
 			if (!shouldSend) continue;
 
-			sendPush(friend_id, {
-				title: `${user.username} got their mile in!`,
-				body: 'Your friend just completed their daily mile. Time to lace up!',
+			sendPush(recipientId, {
+				title,
+				body,
 				type: 'friend_activity',
+				category: 'FRIEND_ACTIVITY',
 				data: { user_id: userId }
 			}).catch(err => console.error('[Push] Error sending friend activity:', err.message));
 
@@ -59,7 +89,7 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<voi
 		}
 
 		if (sentCount > 0) {
-			console.log(`[Notifications] Sent mile completion to ${sentCount} friends of ${user.username}`);
+			console.log(`[Notifications] Sent mile completion to ${sentCount} recipients of ${user.username}`);
 		}
 	} catch (err: any) {
 		console.error('[Notifications] Error notifying friends of mile completion:', err.message);
