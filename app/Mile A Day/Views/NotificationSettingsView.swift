@@ -100,6 +100,9 @@ struct NotificationSettingsView: View {
                         settingsDivider
                         settingsToggle("Flex notifications", isOn: $prefs.competitionFlexEnabled)
                         settingsDivider
+                        settingsToggle("Hype reactions", isOn: $prefs.hypeEnabled,
+                            description: "When a friend or competitor cheers on your completed mile")
+                        settingsDivider
                         settingsToggle("Milestones & updates", isOn: $prefs.competitionMilestonesEnabled,
                             description: "Halfway marks, one point from winning, and more")
                     }
@@ -329,6 +332,7 @@ struct NotificationSettingsView: View {
                 let backendSettings: [String: Any] = [
                     "nudges_enabled": prefs.friendNudgeEnabled && prefs.competitionNudgeEnabled,
                     "flexes_enabled": prefs.competitionFlexEnabled,
+                    "hypes_enabled": prefs.hypeEnabled,
                     "friend_activity_enabled": prefs.friendCompletedEnabled,
                     "competition_invites_enabled": prefs.competitionInviteEnabled,
                     "competition_updates_enabled": prefs.competitionAcceptedEnabled && prefs.competitionStartEnabled && prefs.competitionFinishEnabled,
