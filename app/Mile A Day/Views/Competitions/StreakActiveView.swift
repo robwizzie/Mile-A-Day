@@ -525,21 +525,32 @@ struct StreakActiveView: View {
     private func sendFlex() {
         isSendingAction = true
         Task {
-            do {
-                let targets = acceptedUsers.filter { $0.user_id != currentUserId }
-                for target in targets {
+            let targets = acceptedUsers.filter {
+                $0.user_id != currentUserId &&
+                !FlexNudgeTracker.hasSentFlexToday(targetUserId: $0.user_id)
+            }
+
+            var successes = 0
+            var lastError: Error?
+            for target in targets {
+                do {
                     try await competitionService.sendFlex(competitionId: competition.competition_id, targetUserId: target.user_id)
+                    FlexNudgeTracker.markFlexSent(targetUserId: target.user_id)
+                    successes += 1
+                } catch {
+                    lastError = error
                 }
-                await MainActor.run {
-                    isSendingAction = false
+            }
+
+            await MainActor.run {
+                isSendingAction = false
+                if successes > 0 {
                     FlexNudgeTracker.markFlexSent(competitionId: competition.competition_id)
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    showFeedback(ActionFeedback(icon: "hand.raised.fill", message: "Flex sent!", isError: false))
-                }
-            } catch {
-                await MainActor.run {
-                    isSendingAction = false
-                    let msg = (error as? CompetitionServiceError)?.errorDescription ?? "Could not send flex"
+                    let msg = successes == 1 ? "Flex sent!" : "Flex sent to \(successes)!"
+                    showFeedback(ActionFeedback(icon: "hand.raised.fill", message: msg, isError: false))
+                } else {
+                    let msg = (lastError as? CompetitionServiceError)?.errorDescription ?? "Could not send flex"
                     showFeedback(ActionFeedback(icon: "xmark.circle", message: msg, isError: true))
                 }
             }

@@ -14,9 +14,7 @@ const APNS_KEY_ID = process.env.APNS_KEY_ID;
 const APNS_TEAM_ID = process.env.APNS_TEAM_ID;
 const APNS_BUNDLE_ID = process.env.APNS_BUNDLE_ID;
 const APNS_PRODUCTION = process.env.APNS_PRODUCTION === 'true';
-const APNS_HOST = APNS_PRODUCTION
-	? 'https://api.push.apple.com'
-	: 'https://api.sandbox.push.apple.com';
+const APNS_HOST = APNS_PRODUCTION ? 'https://api.push.apple.com' : 'https://api.sandbox.push.apple.com';
 
 let apnsKey: string | null = null;
 let apnsToken: string | null = null;
@@ -40,9 +38,7 @@ function loadApnsKey(): string | null {
 		return null;
 	}
 	try {
-		const keyPath = path.isAbsolute(APNS_KEY_PATH)
-			? APNS_KEY_PATH
-			: path.join(process.cwd(), APNS_KEY_PATH);
+		const keyPath = path.isAbsolute(APNS_KEY_PATH) ? APNS_KEY_PATH : path.join(process.cwd(), APNS_KEY_PATH);
 		apnsKey = fs.readFileSync(keyPath, 'utf8');
 		return apnsKey;
 	} catch (err: any) {
@@ -99,7 +95,7 @@ interface PushPayload {
 
 // Send a push notification to a single device token via HTTP/2
 function sendToDevice(deviceToken: string, payload: PushPayload): Promise<boolean> {
-	return new Promise((resolve) => {
+	return new Promise(resolve => {
 		const token = getApnsToken();
 		if (!token || !APNS_BUNDLE_ID) {
 			console.warn('[Push] APNs not configured, skipping push');
@@ -109,8 +105,8 @@ function sendToDevice(deviceToken: string, payload: PushPayload): Promise<boolea
 
 		const apnsPayload = JSON.stringify({
 			aps: {
-				alert: { title: payload.title, body: payload.body },
-				sound: 'default',
+				'alert': { title: payload.title, body: payload.body },
+				'sound': 'default',
 				'mutable-content': 1
 			},
 			type: payload.type,
@@ -119,7 +115,7 @@ function sendToDevice(deviceToken: string, payload: PushPayload): Promise<boolea
 
 		const client = http2.connect(APNS_HOST);
 
-		client.on('error', (err) => {
+		client.on('error', err => {
 			console.error('[Push] HTTP/2 connection error:', err.message);
 			client.close();
 			resolve(false);
@@ -138,11 +134,11 @@ function sendToDevice(deviceToken: string, payload: PushPayload): Promise<boolea
 		let responseData = '';
 		let statusCode = 0;
 
-		req.on('response', (headers) => {
+		req.on('response', headers => {
 			statusCode = headers[':status'] as number;
 		});
 
-		req.on('data', (chunk) => {
+		req.on('data', chunk => {
 			responseData += chunk;
 		});
 
@@ -160,7 +156,7 @@ function sendToDevice(deviceToken: string, payload: PushPayload): Promise<boolea
 			}
 		});
 
-		req.on('error', (err) => {
+		req.on('error', err => {
 			console.error('[Push] Request error:', err.message);
 			client.close();
 			resolve(false);
@@ -186,6 +182,9 @@ const HIGH_PRIORITY_TYPES: NotificationType[] = [
 	'competition_invite',
 	'competition_started',
 	'competition_finished',
+	// Flexes are time-of-day specific (you flexed because you're winning *now*);
+	// queueing them past quiet hours / daily cap delivers stale taunts.
+	'competition_flex'
 ];
 
 async function getDailyNotificationCount(userId: string): Promise<number> {
@@ -198,10 +197,7 @@ async function getDailyNotificationCount(userId: string): Promise<number> {
 }
 
 async function logNotificationSent(userId: string, type: NotificationType): Promise<void> {
-	await db.query(
-		'INSERT INTO notification_log (user_id, type) VALUES ($1, $2)',
-		[userId, type]
-	);
+	await db.query('INSERT INTO notification_log (user_id, type) VALUES ($1, $2)', [userId, type]);
 }
 
 async function isUserInQuietHours(userId: string): Promise<boolean> {
@@ -259,10 +255,9 @@ export async function sendPush(userId: string, payload: PushPayload): Promise<vo
 		}
 	}
 
-	const tokens = await db.query<{ device_token: string }>(
-		'SELECT device_token FROM device_tokens WHERE user_id = $1',
-		[userId]
-	);
+	const tokens = await db.query<{ device_token: string }>('SELECT device_token FROM device_tokens WHERE user_id = $1', [
+		userId
+	]);
 
 	if (tokens.length === 0) {
 		console.log(`[Push] No device tokens found for user ${userId}`);
@@ -273,9 +268,7 @@ export async function sendPush(userId: string, payload: PushPayload): Promise<vo
 		return;
 	}
 
-	const results = await Promise.all(
-		tokens.map(({ device_token }) => sendToDevice(device_token, payload))
-	);
+	const results = await Promise.all(tokens.map(({ device_token }) => sendToDevice(device_token, payload)));
 
 	const sent = results.filter(Boolean).length;
 	if (sent > 0) {
@@ -284,9 +277,7 @@ export async function sendPush(userId: string, payload: PushPayload): Promise<vo
 	}
 
 	// Always store in-app notification regardless of push delivery
-	storeInAppNotification(userId, payload).catch(err =>
-		console.error('[Push] Error storing in-app notification:', err.message)
-	);
+	storeInAppNotification(userId, payload).catch(err => console.error('[Push] Error storing in-app notification:', err.message));
 }
 
 async function storeInAppNotification(userId: string, payload: PushPayload): Promise<void> {
@@ -308,10 +299,7 @@ export async function registerDeviceToken(userId: string, deviceToken: string): 
 }
 
 export async function unregisterDeviceToken(userId: string, deviceToken: string): Promise<void> {
-	await db.query(
-		'DELETE FROM device_tokens WHERE user_id = $1 AND device_token = $2',
-		[userId, deviceToken]
-	);
+	await db.query('DELETE FROM device_tokens WHERE user_id = $1 AND device_token = $2', [userId, deviceToken]);
 }
 
 // ─── Quiet Hours & Batching ──────────────────────────────────────────
@@ -339,9 +327,7 @@ export async function sendOrQueueCompetitionNotification(
 		);
 	} else {
 		const title = type === 'competition_started' ? 'Competition started' : 'Competition finished';
-		const body = type === 'competition_started'
-			? `${competitionName} has begun!`
-			: `${competitionName} has finished!`;
+		const body = type === 'competition_started' ? `${competitionName} has begun!` : `${competitionName} has finished!`;
 		await sendPush(userId, { title, body, type, data: { competition_id: competitionId } });
 	}
 }
@@ -372,12 +358,8 @@ export async function flushBatchedNotifications(): Promise<void> {
 	}
 
 	for (const [userId, notifications] of Object.entries(byUser)) {
-		const compNotifs = notifications.filter(n =>
-			n.type === 'competition_started' || n.type === 'competition_finished'
-		);
-		const otherNotifs = notifications.filter(n =>
-			n.type !== 'competition_started' && n.type !== 'competition_finished'
-		);
+		const compNotifs = notifications.filter(n => n.type === 'competition_started' || n.type === 'competition_finished');
+		const otherNotifs = notifications.filter(n => n.type !== 'competition_started' && n.type !== 'competition_finished');
 
 		// Handle competition start/finish notifications (batch into digest)
 		if (compNotifs.length > 0) {
@@ -421,14 +403,14 @@ export async function flushBatchedNotifications(): Promise<void> {
 				await sendPush(userId, {
 					title: n.competition_name || 'Notification', // competition_name stores the original title
 					body: `You have a notification you missed`,
-					type: (n.type as NotificationType) || 'competition_updates',
+					type: (n.type as NotificationType) || 'competition_updates'
 				});
 			} else {
 				// Multiple: send digest
 				await sendPush(userId, {
 					title: 'Catch up on activity',
 					body: `You have ${otherNotifs.length} notifications from while you were away`,
-					type: 'competition_updates',
+					type: 'competition_updates'
 				});
 			}
 		}
@@ -436,10 +418,7 @@ export async function flushBatchedNotifications(): Promise<void> {
 
 	// Mark all as sent
 	const ids = pending.map(n => n.id);
-	await db.query(
-		`UPDATE pending_notifications SET sent_at = NOW() WHERE id = ANY($1::uuid[])`,
-		[ids]
-	);
+	await db.query(`UPDATE pending_notifications SET sent_at = NOW() WHERE id = ANY($1::uuid[])`, [ids]);
 
 	console.log(`[Push] Flushed ${pending.length} batched notifications for ${Object.keys(byUser).length} users`);
 }
@@ -458,10 +437,11 @@ export async function canNudge(competitionId: string, senderId: string, targetId
 }
 
 export async function logNudge(competitionId: string, senderId: string, targetId: string): Promise<void> {
-	await db.query(
-		`INSERT INTO nudge_log (competition_id, sender_id, target_id) VALUES ($1, $2, $3)`,
-		[competitionId, senderId, targetId]
-	);
+	await db.query(`INSERT INTO nudge_log (competition_id, sender_id, target_id) VALUES ($1, $2, $3)`, [
+		competitionId,
+		senderId,
+		targetId
+	]);
 }
 
 // ─── Friend Nudge Rate Limiting ─────────────────────────────────────
@@ -478,10 +458,7 @@ export async function canFriendNudge(senderId: string, targetId: string): Promis
 }
 
 export async function logFriendNudge(senderId: string, targetId: string): Promise<void> {
-	await db.query(
-		`INSERT INTO friend_nudge_log (sender_id, target_id) VALUES ($1, $2)`,
-		[senderId, targetId]
-	);
+	await db.query(`INSERT INTO friend_nudge_log (sender_id, target_id) VALUES ($1, $2)`, [senderId, targetId]);
 }
 
 // ─── Flex Rate Limiting (per sender→target per day, across all competitions) ──
@@ -498,10 +475,12 @@ export async function canFlex(senderId: string, targetId: string): Promise<boole
 }
 
 export async function logFlex(senderId: string, targetId: string, competitionId: string, message: string | null): Promise<void> {
-	await db.query(
-		`INSERT INTO flex_log (sender_id, target_id, competition_id, message) VALUES ($1, $2, $3, $4)`,
-		[senderId, targetId, competitionId, message]
-	);
+	await db.query(`INSERT INTO flex_log (sender_id, target_id, competition_id, message) VALUES ($1, $2, $3, $4)`, [
+		senderId,
+		targetId,
+		competitionId,
+		message
+	]);
 }
 
 // ─── Badges & Challenges ────────────────────────────────────────────
@@ -564,10 +543,7 @@ export async function fanOutFriendBadgePush(senderId: string, badge: BadgeEarned
 /**
  * Fan out a daily-challenge completion to every accepted friend.
  */
-export async function fanOutFriendChallengePush(
-	senderId: string,
-	completion: ChallengeCompletedPayload
-): Promise<void> {
+export async function fanOutFriendChallengePush(senderId: string, completion: ChallengeCompletedPayload): Promise<void> {
 	const friendIds = await getAcceptedFriendIds(senderId);
 	if (friendIds.length === 0) return;
 	const sender = await getSenderDisplayName(senderId);
@@ -627,7 +603,7 @@ export async function cleanupNotificationLogs(): Promise<void> {
 		db.query(`DELETE FROM pending_notifications WHERE sent_at IS NOT NULL AND sent_at < NOW() - INTERVAL '7 days'`),
 		db.query(`DELETE FROM nudge_log WHERE created_at < NOW() - INTERVAL '7 days'`),
 		db.query(`DELETE FROM friend_nudge_log WHERE created_at < NOW() - INTERVAL '7 days'`),
-		db.query(`DELETE FROM flex_log WHERE created_at < NOW() - INTERVAL '30 days'`),
+		db.query(`DELETE FROM flex_log WHERE created_at < NOW() - INTERVAL '30 days'`)
 	]);
 	console.log('[Cleanup] Cleaned up old notification logs');
 }

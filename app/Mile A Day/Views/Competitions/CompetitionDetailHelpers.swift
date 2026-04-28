@@ -276,6 +276,9 @@ struct FlexNudgeTracker {
     private static let dateKeyFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
+        // Backend uses America/New_York for day boundaries; match it so the
+        // client tracker doesn't drift across midnight ET on non-ET devices.
+        f.timeZone = TimeZone(identifier: "America/New_York")
         return f
     }()
 

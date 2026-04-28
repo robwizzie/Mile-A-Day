@@ -6,16 +6,16 @@ import { sendPush, canFlex, logFlex } from '../services/pushNotificationService.
 import { shouldSendNotification } from '../services/notificationSettingsService.js';
 
 const FLEX_PRESETS = [
-	"Better luck next time",
+	'Better luck next time',
 	"Can't catch me",
-	"Feeling unstoppable",
-	"Is that all you got?",
-	"Try to keep up",
-	"Just getting started",
-	"Too easy",
-	"You should probably go run",
-	"I woke up and chose victory",
-	"Not even close"
+	'Feeling unstoppable',
+	'Is that all you got?',
+	'Try to keep up',
+	'Just getting started',
+	'Too easy',
+	'You should probably go run',
+	'I woke up and chose victory',
+	'Not even close'
 ];
 
 export function getFlexPresets(_req: AuthenticatedRequest, res: Response) {
@@ -67,12 +67,28 @@ export async function flexOnUser(req: AuthenticatedRequest, res: Response) {
 			return res.status(400).json({ error: 'Target user is not a participant in this competition' });
 		}
 
-		// Verify sender is beating target (based on competition mode)
+		// Verify sender has earned the right to flex (based on competition mode)
 		const scores = await getUserScores(competition);
-		const senderScore = scores[senderId]?.score ?? 0;
-		const targetScore = scores[targetUserId]?.score ?? 0;
+		const senderData = scores[senderId];
+		const targetData = scores[targetUserId];
+		const senderScore = senderData?.score ?? 0;
+		const targetScore = targetData?.score ?? 0;
 
-		if (senderScore <= targetScore) {
+		if (competition.type === 'streaks') {
+			// In streak comps, "winning today" means hitting today's goal while still alive.
+			// Scores tie when everyone keeps the streak, so don't require strictly-greater.
+			const senderAlive = (senderData?.remaining_lives ?? 0) > 0;
+			const targetEliminated = (targetData?.remaining_lives ?? 1) <= 0;
+			if (!senderAlive) {
+				return res.status(400).json({ error: "You can only flex when you're still alive in the streak" });
+			}
+			if (targetEliminated) {
+				return res.status(400).json({ error: "You can't flex on an eliminated competitor" });
+			}
+			if (senderScore < targetScore) {
+				return res.status(400).json({ error: "You can only flex when you're ahead of this user" });
+			}
+		} else if (senderScore <= targetScore) {
 			return res.status(400).json({ error: "You can only flex when you're ahead of this user" });
 		}
 
@@ -85,9 +101,9 @@ export async function flexOnUser(req: AuthenticatedRequest, res: Response) {
 		// Check notification preferences
 		const shouldSend = await shouldSendNotification(targetUserId, senderId, 'flex');
 
-		await logFlex(senderId, targetUserId, competitionId, message);
-
 		if (shouldSend) {
+			await logFlex(senderId, targetUserId, competitionId, message);
+
 			const sender = await getUser({ userId: senderId });
 			const senderName = sender?.username || 'Someone';
 
