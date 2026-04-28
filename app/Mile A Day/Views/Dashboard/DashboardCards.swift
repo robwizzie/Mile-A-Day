@@ -340,9 +340,13 @@ struct StreakCard: View {
             } else {
                 animateFire = false
             }
-            // Start urgency pulse if at risk
+            // Start urgency pulse if at risk.
+            // Deferred one runloop tick so the layout shift from setting
+            // `timeRemainingText` above has rendered first — otherwise the
+            // `.animation(_:value:)` on the flame Image catches the position
+            // change and oscillates the flame diagonally forever.
             if isAtRisk && !isGoalCompleted {
-                withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+                DispatchQueue.main.async {
                     animateUrgency = true
                 }
             }
