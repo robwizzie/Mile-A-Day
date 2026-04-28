@@ -88,13 +88,15 @@ export type NotificationType =
 	| 'clash_tie'
 	| 'badge_earned'
 	| 'friend_badge_earned'
-	| 'friend_challenge_completed';
+	| 'friend_challenge_completed'
+	| 'hype_received';
 
 interface PushPayload {
 	title: string;
 	body: string;
 	type: NotificationType;
 	data?: Record<string, string>;
+	category?: string;
 }
 
 // Send a push notification to a single device token via HTTP/2
@@ -107,12 +109,15 @@ function sendToDevice(deviceToken: string, payload: PushPayload): Promise<boolea
 			return;
 		}
 
+		const aps: Record<string, any> = {
+			alert: { title: payload.title, body: payload.body },
+			sound: 'default',
+			'mutable-content': 1
+		};
+		if (payload.category) aps.category = payload.category;
+
 		const apnsPayload = JSON.stringify({
-			aps: {
-				alert: { title: payload.title, body: payload.body },
-				sound: 'default',
-				'mutable-content': 1
-			},
+			aps,
 			type: payload.type,
 			data: payload.data ?? {}
 		});
