@@ -36,15 +36,33 @@ final class MADNotificationService: NSObject, ObservableObject {
     private override init() {
         super.init()
         center.delegate = self
-        
+        registerCategories()
+
         // Load last notification date
         if let lastDate = userDefaults.object(forKey: lastNotificationKey) as? Date {
             lastCompletionNotificationDate = lastDate
         }
-        
+
         Task {
             await refreshAuthorizationStatus()
         }
+    }
+
+    /// Registers UNNotificationCategories for actionable pushes.
+    /// FRIEND_ACTIVITY: a friend completed their mile — recipient can tap "🔥 Hype".
+    private func registerCategories() {
+        let hypeAction = UNNotificationAction(
+            identifier: "HYPE_ACTION",
+            title: "🔥 Hype",
+            options: []
+        )
+        let friendActivity = UNNotificationCategory(
+            identifier: "FRIEND_ACTIVITY",
+            actions: [hypeAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        center.setNotificationCategories([friendActivity])
     }
 
     // MARK: - Public API
@@ -394,6 +412,13 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let userInfo = response.notification.request.content.userInfo
+
+        // Action-button taps before generic tap routing.
+        if response.actionIdentifier == "HYPE_ACTION" {
+            await handleHypeAction(userInfo: userInfo)
+            return
+        }
+
         guard let type = userInfo["type"] as? String else { return }
         let data = userInfo["data"] as? [String: String] ?? [:]
 
@@ -407,4 +432,47 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             userInfo: ["type": type, "data": data]
         )
     }
-} 
+
+    /// Handles the 🔥 Hype action button on a friend_activity push.
+    /// Runs in the background (app may be suspended); calls /hype and shows a
+    /// brief local notification with the result.
+    private func handleHypeAction(userInfo: [AnyHashable: Any]) async {
+        let data = userInfo["data"] as? [String: String]
+        guard let targetUserId = data?["user_id"], !targetUserId.isEmpty else {
+            await postLocalToast(title: "Couldn't send hype", body: "Try opening the app.")
+            return
+        }
+
+        do {
+            let response = try await HypeService.sendHype(targetUserId: targetUserId)
+            let remaining = response.hypes_remaining
+            let body = remaining == 1
+                ? "Hype sent! 1 left today."
+                : "Hype sent! \(remaining) left today."
+            await postLocalToast(title: "🔥 Hype sent", body: body)
+        } catch let error as APIError where error.isRateLimited {
+            await postLocalToast(title: "Out of hypes", body: "You're out of hypes for today.")
+        } catch {
+            await postLocalToast(title: "Couldn't send hype", body: "Try opening the app.")
+        }
+    }
+
+    /// Schedules an immediate local notification used as a lightweight toast
+    /// from the action handler (the app may be suspended at this point).
+    private func postLocalToast(title: String, body: String) async {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = nil
+        let request = UNNotificationRequest(
+            identifier: "hype-toast-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        do {
+            try await center.add(request)
+        } catch {
+            print("[Hype] Failed to post toast: \(error.localizedDescription)")
+        }
+    }
+}
