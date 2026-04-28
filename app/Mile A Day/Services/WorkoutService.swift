@@ -99,6 +99,8 @@ class WorkoutService: ObservableObject {
                 throw WorkoutServiceError.unauthorized
             case .badRequest(let message):
                 throw WorkoutServiceError.apiError(message)
+            case .rateLimited(let message):
+                throw WorkoutServiceError.apiError(message)
             case .serverError(let code):
                 throw WorkoutServiceError.serverError(code)
             case .tokenRefreshFailed:

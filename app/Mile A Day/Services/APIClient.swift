@@ -119,6 +119,12 @@ class APIClient {
             throw APIError.badRequest("Bad request")
         case 404:
             throw APIError.notFound
+        case 429:
+            if let errorData = try? JSONDecoder().decode([String: String].self, from: data),
+               let errorMessage = errorData["error"] {
+                throw APIError.rateLimited(errorMessage)
+            }
+            throw APIError.rateLimited("Slow down — try again in a bit")
         default:
             throw APIError.serverError(httpResponse.statusCode)
         }
@@ -180,6 +186,7 @@ enum APIError: LocalizedError {
     case unauthorized
     case badRequest(String)
     case notFound
+    case rateLimited(String)
     case serverError(Int)
     case tokenRefreshFailed
     case networkError(String)
@@ -198,6 +205,8 @@ enum APIError: LocalizedError {
             return "Bad request: \(message)"
         case .notFound:
             return "Resource not found"
+        case .rateLimited(let message):
+            return message
         case .serverError(let code):
             return "Server error: \(code)"
         case .tokenRefreshFailed:
