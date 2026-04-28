@@ -60,14 +60,16 @@ One new table, used purely for rate-limit accounting and audit. No counter table
 
 ```sql
 CREATE TABLE hype_log (
-  id          BIGSERIAL PRIMARY KEY,
-  sender_id   UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-  target_id   UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sender_id   text NOT NULL,
+  target_id   text NOT NULL,
+  created_at  timestamp with time zone DEFAULT now()
 );
 
-CREATE INDEX hype_log_sender_created_idx ON hype_log (sender_id, created_at DESC);
+CREATE INDEX idx_hype_log_lookup ON hype_log (sender_id, created_at DESC);
 ```
+
+(Matches existing `flex_log` / `friend_nudge_log`: `users.user_id` is text, uuid PK, no FKs.)
 
 Schema is applied manually against PostgreSQL — this repo has no migrations system (per `.claude/rules/backend.md`).
 

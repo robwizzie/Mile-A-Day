@@ -27,14 +27,16 @@ Run against the database (use `$DATABASE_URL` or `/db-query`):
 
 ```sql
 CREATE TABLE hype_log (
-  id          BIGSERIAL PRIMARY KEY,
-  sender_id   UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-  target_id   UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sender_id   text NOT NULL,
+  target_id   text NOT NULL,
+  created_at  timestamp with time zone DEFAULT now()
 );
 
-CREATE INDEX hype_log_sender_created_idx ON hype_log (sender_id, created_at DESC);
+CREATE INDEX idx_hype_log_lookup ON hype_log (sender_id, created_at DESC);
 ```
+
+This matches the existing `flex_log` and `friend_nudge_log` shape (text user IDs, uuid PK with `gen_random_uuid()` default, no FKs — `users.user_id` is itself a text column).
 
 - [ ] **Step 2: Verify table exists**
 
@@ -44,7 +46,7 @@ Run via `/db-query`:
 SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'hype_log' ORDER BY ordinal_position;
 ```
 
-Expected output: 4 rows — `id bigint`, `sender_id uuid`, `target_id uuid`, `created_at timestamp with time zone`.
+Expected output: 4 rows — `id uuid`, `sender_id text`, `target_id text`, `created_at timestamp with time zone`.
 
 - [ ] **Step 3: No commit yet** — DB schema is applied manually, not tracked in git (per `backend.md`: "No migrations system"). Move on.
 
