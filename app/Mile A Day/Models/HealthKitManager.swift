@@ -325,15 +325,17 @@ class HealthKitManager: ObservableObject {
     @Published var dailyStepsData: [Date: Int] = [:]
     @Published var dailyMileGoals: [Date: Bool] = [:]
     
-    // Caching properties
+    // Caching properties.
+    // Only the ones actually read from views remain @Published — internal-cache
+    // values are plain `var` so mutating them doesn't trigger SwiftUI invalidations.
     @Published var cachedWorkouts: [HKWorkout] = []
-    @Published var lastWorkoutCacheUpdate: Date?
-    @Published var cachedFastestMilePace: TimeInterval = 0.0
+    var lastWorkoutCacheUpdate: Date?
+    var cachedFastestMilePace: TimeInterval = 0.0
     @Published var cachedMostMilesInOneDay: Double = 0.0
-    @Published var cachedTotalLifetimeMiles: Double = 0.0
-    @Published var cachedRetroactiveStreak: Int = 0
-    @Published var cachedLatestWorkoutDate: Date?
-    @Published var cachedWorkoutCount: Int = 0
+    var cachedTotalLifetimeMiles: Double = 0.0
+    var cachedRetroactiveStreak: Int = 0
+    var cachedLatestWorkoutDate: Date?
+    var cachedWorkoutCount: Int = 0
     @Published var fastestMileWorkouts: [HKWorkout] = []
     @Published var currentStreakFastestMileWorkouts: [HKWorkout] = []
     
@@ -384,10 +386,11 @@ class HealthKitManager: ObservableObject {
     
     func log(_ message: String) {}
     
-    // Current streak caching properties
-    @Published var cachedCurrentStreakFastestPace: TimeInterval = 0.0
+    // Current streak caching properties.
+    // cachedCurrentStreakStats is read from views; the others are internal cache.
+    var cachedCurrentStreakFastestPace: TimeInterval = 0.0
     @Published var cachedCurrentStreakStats: (totalMiles: Double, mostMiles: Double, fastestPace: TimeInterval, streakDays: Int) = (0.0, 0.0, 0.0, 0)
-    @Published var lastCurrentStreakStatsUpdate: Date?
+    var lastCurrentStreakStatsUpdate: Date?
     
     // Feature flag for location-based timezone calculation
     // When true, uses workout location to determine timezone for streak calculation
