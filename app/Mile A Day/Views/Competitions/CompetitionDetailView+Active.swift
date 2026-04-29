@@ -156,14 +156,14 @@ extension CompetitionDetailView {
             }
 
             if completed {
-                Label("Done \u{2014} \(String(format: "%.1f", todayDistance)) \(competition.options.unit.shortDisplayName)", systemImage: "checkmark.circle.fill")
+                Label("Done \u{2014} \(competition.options.formatQuantityWithUnit(todayDistance))", systemImage: "checkmark.circle.fill")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.green)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 5)
                     .background(Capsule().fill(Color.green.opacity(0.12)))
             } else {
-                Label("\(String(format: "%.1f", remaining)) \(competition.options.unit.shortDisplayName) to go", systemImage: "figure.run")
+                Label("\(competition.options.formatQuantityWithUnit(remaining)) to go", systemImage: "figure.run")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.orange)
                     .padding(.horizontal, 12)
@@ -215,21 +215,21 @@ extension CompetitionDetailView {
             if myDistance > 0 {
                 let diff = myDistance - bestOpponentDistance
                 if isLeading && diff > 0 {
-                    Label("Leading by \(String(format: "%.1f", diff)) \(competition.options.unit.shortDisplayName)", systemImage: "crown.fill")
+                    Label("Leading by \(competition.options.formatQuantityWithUnit(diff))", systemImage: "crown.fill")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundColor(.green)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
                         .background(Capsule().fill(Color.green.opacity(0.12)))
                 } else if diff < 0 {
-                    Label("Behind by \(String(format: "%.1f", abs(diff))) \(competition.options.unit.shortDisplayName)", systemImage: "arrow.up")
+                    Label("Behind by \(competition.options.formatQuantityWithUnit(abs(diff)))", systemImage: "arrow.up")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundColor(.orange)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
                         .background(Capsule().fill(Color.orange.opacity(0.12)))
                 } else {
-                    Label("Tied at \(String(format: "%.1f", myDistance)) \(competition.options.unit.shortDisplayName)", systemImage: "equal")
+                    Label("Tied at \(competition.options.formatQuantityWithUnit(myDistance))", systemImage: "equal")
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundColor(.white.opacity(0.7))
                         .padding(.horizontal, 12)
@@ -279,7 +279,7 @@ extension CompetitionDetailView {
                 }
 
                 if todayDistance > 0 {
-                    Label("+\(String(format: "%.1f", todayDistance)) today", systemImage: "figure.run")
+                    Label("+\(competition.options.formatQuantity(todayDistance)) today", systemImage: "figure.run")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundColor(.green.opacity(0.8))
                         .padding(.horizontal, 12)
@@ -334,7 +334,7 @@ extension CompetitionDetailView {
                             .font(.system(size: 12, weight: .semibold, design: .rounded))
                             .foregroundColor(.green)
                     } else {
-                        Text("\(String(format: "%.1f", todayDistance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
+                        Text("\(competition.options.formatQuantity(todayDistance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.5))
                     }
