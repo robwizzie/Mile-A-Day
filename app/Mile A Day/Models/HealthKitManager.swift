@@ -704,30 +704,35 @@ class HealthKitManager: ObservableObject {
         healthStore.execute(query)
     }
     
-    // Fetch recent running/walking workouts
+    // Fetch recent running/walking workouts (last 30 days, capped at 50).
+    // The date predicate keeps HealthKit from scanning all-time history just to
+    // pull the most recent samples — far cheaper for users with long histories.
     func fetchRecentWorkouts() {
         guard isAuthorized else { return }
-        
-        // Look for both running and walking workouts
+
         let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
         let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
-        let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
-        
+        let workoutTypePredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
+
+        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date.distantPast
+        let datePredicate = HKQuery.predicateForSamples(withStart: thirtyDaysAgo, end: nil, options: .strictEndDate)
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [workoutTypePredicate, datePredicate])
+
         let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
-        
+
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: compoundPredicate,
-            limit: 50, // Increased for testing workout uploads
+            predicate: predicate,
+            limit: 50,
             sortDescriptors: [sortDescriptor]
-        ) { [weak self] query, samples, error in
+        ) { [weak self] _, samples, _ in
             guard let self = self, let workouts = samples as? [HKWorkout] else { return }
-            
+
             DispatchQueue.main.async {
                 self.recentWorkouts = workouts
             }
         }
-        
+
         healthStore.execute(query)
     }
     

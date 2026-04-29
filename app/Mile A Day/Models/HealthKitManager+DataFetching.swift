@@ -6,7 +6,10 @@ extension HealthKitManager {
     // Function to fetch all workout data in one call
     func fetchAllWorkoutData() {
         #if !os(watchOS)
-        // PHASE 1: Check if we need to build/update workout index
+        // PHASE 1: Check if we need to build/update workout index.
+        // The HealthKit queries inside resume their continuations on HealthKit's
+        // own background queue, so the heavy post-processing (timezone grouping,
+        // streak calc) runs off the main thread. UI updates use MainActor.run.
         Task {
             if workoutIndex == nil {
                 // No index exists - build it (one-time, then cached forever)
