@@ -25,6 +25,9 @@ struct NotificationPreferences: Codable {
     // Hype reactions (positive friend/competitor reaction to a completed mile)
     var hypeEnabled: Bool = true
 
+    // Step goal achieved (local notification when daily 10k is hit)
+    var stepGoalEnabled: Bool = true
+
     // Friend nudge notifications
     var friendNudgeEnabled: Bool = true
 
