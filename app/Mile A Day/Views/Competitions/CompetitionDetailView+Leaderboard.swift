@@ -340,7 +340,7 @@ extension CompetitionDetailView {
 
                         Spacer()
 
-                        Text(String(format: "%.1f %@", distance, competition.options.unit.shortDisplayName))
+                        Text(competition.options.formatQuantityWithUnit(distance))
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundColor(isLeading ? .green : .white.opacity(0.8))
                     }
@@ -628,12 +628,12 @@ extension CompetitionDetailView {
                             Image(systemName: "checkmark.circle.fill")
                                 .font(.system(size: 10))
                                 .foregroundColor(.green)
-                            Text("\(String(format: "%.1f", distance)) \(competition.options.unit.shortDisplayName)")
+                            Text(competition.options.formatQuantityWithUnit(distance))
                                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                                 .foregroundColor(.green)
                         }
                     } else if isTodayDate && distance > 0 {
-                        Text("\(String(format: "%.1f", distance))/\(competition.options.goalFormatted)")
+                        Text("\(competition.options.formatQuantity(distance))/\(competition.options.goalFormatted)")
                             .font(.system(size: 11, weight: .medium, design: .rounded))
                             .foregroundColor(.orange)
                     } else if isTodayDate {
@@ -646,7 +646,7 @@ extension CompetitionDetailView {
                                 .font(.system(size: 10))
                                 .foregroundColor(.red.opacity(0.6))
                             if distance > 0 {
-                                Text("\(String(format: "%.1f", distance)) \(competition.options.unit.shortDisplayName)")
+                                Text(competition.options.formatQuantityWithUnit(distance))
                                     .font(.system(size: 11, weight: .medium, design: .rounded))
                                     .foregroundColor(.red.opacity(0.6))
                             } else {
@@ -714,7 +714,7 @@ extension CompetitionDetailView {
 
                         Spacer()
 
-                        Text(String(format: "%.1f %@", distance, competition.options.unit.shortDisplayName))
+                        Text(competition.options.formatQuantityWithUnit(distance))
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                     }
@@ -777,11 +777,11 @@ extension CompetitionDetailView {
                             Spacer()
 
                             VStack(alignment: .trailing, spacing: 1) {
-                                Text(String(format: "%.1f/%@ %@", distance, competition.options.goalFormatted, competition.options.unit.shortDisplayName))
+                                Text("\(competition.options.formatQuantity(distance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
                                     .font(MADTheme.Typography.callout)
                                     .foregroundColor(hitTarget ? .green : .white.opacity(0.7))
                                 if hitTarget && distance > goal {
-                                    Text("+\(String(format: "%.1f", distance - goal)) over")
+                                    Text("+\(competition.options.formatQuantity(distance - goal)) over")
                                         .font(.system(size: 10, weight: .medium, design: .rounded))
                                         .foregroundColor(.green.opacity(0.7))
                                 }
@@ -888,11 +888,11 @@ extension CompetitionDetailView {
                             Spacer()
 
                             VStack(alignment: .trailing, spacing: 1) {
-                                Text(String(format: "%.1f/%@ %@", distance, competition.options.goalFormatted, competition.options.unit.shortDisplayName))
+                                Text("\(competition.options.formatQuantity(distance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
                                     .font(.system(size: 13, weight: .medium, design: .rounded))
                                     .foregroundColor(finished ? .green : .white.opacity(0.7))
                                 if distance > goal {
-                                    Text("+\(String(format: "%.1f", distance - goal)) over")
+                                    Text("+\(competition.options.formatQuantity(distance - goal)) over")
                                         .font(.system(size: 10, weight: .medium, design: .rounded))
                                         .foregroundColor(.green.opacity(0.7))
                                 }
@@ -1078,7 +1078,7 @@ extension CompetitionDetailView {
         case .streaks:
             return "\(Int(score))d"
         case .apex, .race:
-            return String(format: "%.1f %@", score, competition.options.unit.shortDisplayName)
+            return competition.options.formatQuantityWithUnit(score)
         case .targets, .clash:
             return "\(Int(score)) pts"
         }
