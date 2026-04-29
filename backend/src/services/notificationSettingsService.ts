@@ -185,6 +185,78 @@ export async function updateFriendNotificationSettings(
 
 // ─── Helper: Check if a notification should be sent to a user ───────
 
+type NotificationType =
+	| 'nudge'
+	| 'flex'
+	| 'hype'
+	| 'friend_activity'
+	| 'competition_invite'
+	| 'competition_update'
+	| 'competition_milestone';
+
+const PREF_FIELD_BY_TYPE: Record<NotificationType, keyof NotificationPreferences> = {
+	nudge: 'nudges_enabled',
+	flex: 'flexes_enabled',
+	hype: 'hypes_enabled',
+	friend_activity: 'friend_activity_enabled',
+	competition_invite: 'competition_invites_enabled',
+	competition_update: 'competition_updates_enabled',
+	competition_milestone: 'competition_milestones_enabled'
+};
+
+/**
+ * Batched variant of shouldSendNotification — checks an array of recipients in two
+ * queries instead of 2N. Returns the subset of targetUserIds that should receive
+ * the notification given the senderId and notificationType.
+ */
+export async function filterRecipientsForNotification(
+	targetUserIds: string[],
+	senderId: string | null,
+	notificationType: NotificationType
+): Promise<string[]> {
+	if (targetUserIds.length === 0) return [];
+
+	const prefField = PREF_FIELD_BY_TYPE[notificationType];
+
+	// Pull global prefs for everyone in one shot. Missing rows = defaults (everything enabled).
+	const prefRows = await db.query<{ user_id: string } & Partial<NotificationPreferences>>(
+		`SELECT * FROM notification_settings WHERE user_id = ANY($1::text[])`,
+		[targetUserIds]
+	);
+	const prefsByUser = new Map<string, Partial<NotificationPreferences>>();
+	for (const row of prefRows) {
+		prefsByUser.set(row.user_id, row);
+	}
+
+	// Pull friend-specific muting for senderId across all recipients in one shot.
+	const friendRows = senderId
+		? await db.query<{ user_id: string; muted: boolean; nudges_muted: boolean; activity_muted: boolean }>(
+				`SELECT user_id, muted, nudges_muted, activity_muted
+				 FROM friend_notification_settings
+				 WHERE user_id = ANY($1::text[]) AND friend_id = $2`,
+				[targetUserIds, senderId]
+			)
+		: [];
+	const friendByUser = new Map<string, { muted: boolean; nudges_muted: boolean; activity_muted: boolean }>();
+	for (const row of friendRows) {
+		friendByUser.set(row.user_id, row);
+	}
+
+	return targetUserIds.filter(targetUserId => {
+		const prefs = prefsByUser.get(targetUserId);
+		// Default true when the row or field is missing (matches getNotificationPreferences fallback).
+		if (prefs && (prefs[prefField] as boolean | null | undefined) === false) return false;
+
+		const fs = friendByUser.get(targetUserId);
+		if (fs) {
+			if (fs.muted) return false;
+			if (notificationType === 'nudge' && fs.nudges_muted) return false;
+			if (notificationType === 'friend_activity' && fs.activity_muted) return false;
+		}
+		return true;
+	});
+}
+
 export async function shouldSendNotification(
 	targetUserId: string,
 	senderId: string | null,

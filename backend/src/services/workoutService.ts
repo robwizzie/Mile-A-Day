@@ -283,6 +283,71 @@ export async function getQuantityDateRange(
 	return await db.query(query, [userId, start, end, normalizedTypes]);
 }
 
+/**
+ * Batched variant of getQuantityDateRange — returns one row per (user_id, local_date)
+ * for an entire set of users in a single query. Used by competitionService to score
+ * all participants at once instead of looping per user.
+ */
+export async function getQuantityDateRangeBatch(
+	userIds: string[],
+	startDate: string,
+	endDate?: string,
+	workoutTypes?: ('running' | 'walking')[]
+): Promise<{ user_id: string; local_date: string; total_distance: number }[]> {
+	if (userIds.length === 0) return [];
+
+	const query = `
+		SELECT
+			user_id,
+			TO_CHAR(local_date, 'YYYY-MM-DD') as local_date,
+			SUM(distance) as total_distance
+		FROM workouts
+		WHERE user_id = ANY($1::text[])
+			AND local_date >= $2
+			AND local_date <= $3
+			AND workout_type = ANY($4::text[])
+		GROUP BY user_id, local_date
+		ORDER BY user_id, local_date ASC
+	`;
+
+	const todaysDate = new Date().toISOString().split('T')[0];
+	const start = new Date(startDate).toISOString().split('T')[0];
+	const end = endDate ? new Date(endDate).toISOString().split('T')[0] : todaysDate;
+
+	const typeMap: Record<string, 'running' | 'walking'> = {
+		run: 'running',
+		walk: 'walking',
+		running: 'running',
+		walking: 'walking'
+	};
+	const normalizedTypes = (workoutTypes ?? ['running', 'walking']).map(t => typeMap[t]).filter(Boolean);
+
+	return await db.query(query, [userIds, start, end, normalizedTypes]);
+}
+
+/**
+ * Batched manual-workout check for a set of users over a date range.
+ * Returns the set of user_ids that have at least one manual/edited workout in range.
+ */
+export async function getUsersWithManualWorkouts(
+	userIds: string[],
+	startDate: string,
+	endDate: string
+): Promise<Set<string>> {
+	if (userIds.length === 0) return new Set();
+
+	const result = await db.query<{ user_id: string }>(
+		`SELECT DISTINCT user_id FROM workouts
+		 WHERE user_id = ANY($1::text[])
+			AND local_date >= $2
+			AND local_date <= $3
+			AND source IN ('manual', 'edited')`,
+		[userIds, startDate, endDate]
+	);
+
+	return new Set(result.map(r => r.user_id));
+}
+
 export async function updateWorkout(
 	userId: string,
 	workoutId: string,

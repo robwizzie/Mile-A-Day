@@ -1,6 +1,6 @@
 import { PostgresService } from './DbService.js';
 import { sendPush, sendOrQueueCompetitionNotification } from './pushNotificationService.js';
-import { shouldSendNotification } from './notificationSettingsService.js';
+import { shouldSendNotification, filterRecipientsForNotification } from './notificationSettingsService.js';
 import { getCompetition, getUserScores } from './competitionService.js';
 import { Competition, CompetitionUser } from '../types/competitions.js';
 import { getActiveStreak, getTodayMiles } from './workoutService.js';
@@ -72,11 +72,10 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<voi
 		const title = `${user.username} got their mile in!`;
 		const body = 'Your friend just completed their daily mile. Time to lace up!';
 
-		let sentCount = 0;
-		for (const recipientId of recipients) {
-			const shouldSend = await shouldSendNotification(recipientId, userId, 'friend_activity');
-			if (!shouldSend) continue;
+		// Pre-filter all recipients in 2 queries instead of 2 per recipient.
+		const allowedRecipients = await filterRecipientsForNotification(recipients, userId, 'friend_activity');
 
+		for (const recipientId of allowedRecipients) {
 			sendPush(recipientId, {
 				title,
 				body,
@@ -84,12 +83,10 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<voi
 				category: 'FRIEND_ACTIVITY',
 				data: { user_id: userId }
 			}).catch(err => console.error('[Push] Error sending friend activity:', err.message));
-
-			sentCount++;
 		}
 
-		if (sentCount > 0) {
-			console.log(`[Notifications] Sent mile completion to ${sentCount} recipients of ${user.username}`);
+		if (allowedRecipients.length > 0) {
+			console.log(`[Notifications] Sent mile completion to ${allowedRecipients.length} recipients of ${user.username}`);
 		}
 	} catch (err: any) {
 		console.error('[Notifications] Error notifying friends of mile completion:', err.message);
