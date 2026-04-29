@@ -75,6 +75,9 @@ struct NotificationSettingsView: View {
                         settingsToggle("When I complete a mile", isOn: $prefs.mileCompletedEnabled)
                         settingsDivider
                         settingsToggle("When a friend completes a mile", isOn: $prefs.friendCompletedEnabled)
+                        settingsDivider
+                        settingsToggle("Step goal", isOn: $prefs.stepGoalEnabled,
+                            description: "When you reach 10,000 steps in a day")
                     }
 
                     // Social Notifications
@@ -333,6 +336,7 @@ struct NotificationSettingsView: View {
                     "nudges_enabled": prefs.friendNudgeEnabled && prefs.competitionNudgeEnabled,
                     "flexes_enabled": prefs.competitionFlexEnabled,
                     "hypes_enabled": prefs.hypeEnabled,
+                    "step_goal_enabled": prefs.stepGoalEnabled,
                     "friend_activity_enabled": prefs.friendCompletedEnabled,
                     "competition_invites_enabled": prefs.competitionInviteEnabled,
                     "competition_updates_enabled": prefs.competitionAcceptedEnabled && prefs.competitionStartEnabled && prefs.competitionFinishEnabled,

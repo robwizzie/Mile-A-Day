@@ -17,6 +17,8 @@ struct Mile_A_DayApp: App {
     init() {
         // Register background tasks when app launches
         MADBackgroundService.shared.registerBackgroundTasks()
+        // Start HealthKit-driven daily steps sync (observer + background delivery).
+        DailyStepsSyncService.shared.start()
     }
     
     var body: some Scene {
@@ -35,6 +37,7 @@ struct Mile_A_DayApp: App {
                         Task {
                             await MADNotificationService.shared.requestAuthorization()
                             MADNotificationService.shared.registerForRemoteNotifications()
+                            await DailyStepsSyncService.shared.syncNow(force: true)
                         }
                     }
                 }

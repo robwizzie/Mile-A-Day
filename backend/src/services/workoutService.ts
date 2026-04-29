@@ -16,10 +16,9 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]): Promi
         device_end_date,
         calories,
         total_duration,
-        source,
-        steps
+        source
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       ON CONFLICT (workout_id)
       DO UPDATE SET
         distance = EXCLUDED.distance,
@@ -30,7 +29,6 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]): Promi
         device_end_date = EXCLUDED.device_end_date,
         calories = EXCLUDED.calories,
         total_duration = EXCLUDED.total_duration,
-        steps = COALESCE(EXCLUDED.steps, workouts.steps),
         source = CASE
           WHEN workouts.source IN ('manual', 'edited') THEN workouts.source
           ELSE EXCLUDED.source
@@ -64,8 +62,7 @@ export async function uploadWorkouts(userId: string, workouts: Workout[]): Promi
 						workout.deviceEndDate,
 						workout.calories,
 						workout.totalDuration,
-						workout.source || 'healthkit',
-						workout.steps ?? null
+						workout.source || 'healthkit'
 					]
 				},
 				...workout.splits.map(split => ({

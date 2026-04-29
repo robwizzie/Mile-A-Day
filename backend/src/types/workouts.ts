@@ -12,7 +12,6 @@ export type Workout = {
 	totalDuration: number;
 	splits: WorkoutSplit[];
 	source?: WorkoutSource;
-	steps?: number;
 };
 
 export type WorkoutSplit = {

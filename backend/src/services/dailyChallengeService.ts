@@ -168,11 +168,11 @@ async function computeProgress(
 			return Math.min(walked / Math.max(goalMiles, 0.01), 0.99);
 		}
 		case 'ten_k_steps': {
-			const rows = await db.query<{ total: string | null }>(
-				`SELECT COALESCE(SUM(steps),0)::text AS total FROM workouts WHERE user_id = $1 AND local_date = $2`,
+			const rows = await db.query<{ steps: number | null }>(
+				`SELECT steps FROM daily_steps WHERE user_id = $1 AND local_date = $2`,
 				[userId, localDate]
 			);
-			const steps = parseInt(rows[0]?.total ?? '0', 10) || 0;
+			const steps = rows[0]?.steps ?? 0;
 			return Math.min(steps / 10000.0, 1.0);
 		}
 		case 'speed_round': {
@@ -264,13 +264,11 @@ async function evaluatePredicate(
 		}
 
 		case 'ten_k_steps': {
-			const rows = await db.query<{ total: string | null }>(
-				`SELECT COALESCE(SUM(steps),0)::text AS total
-				FROM workouts
-				WHERE user_id = $1 AND local_date = $2`,
+			const rows = await db.query<{ steps: number | null }>(
+				`SELECT steps FROM daily_steps WHERE user_id = $1 AND local_date = $2`,
 				[userId, localDate]
 			);
-			return parseInt(rows[0]?.total ?? '0', 10) >= 10000;
+			return (rows[0]?.steps ?? 0) >= 10000;
 		}
 
 		case 'early_bird': {
