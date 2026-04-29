@@ -318,6 +318,23 @@ struct CompetitionOptions: Codable {
         }
     }
 
+    /// Format a quantity (distance OR steps) using this competition's unit.
+    /// Steps render as integer with thousands separators; distance units render with one decimal.
+    func formatQuantity(_ value: Double) -> String {
+        if unit == .steps {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .decimal
+            formatter.maximumFractionDigits = 0
+            return formatter.string(from: NSNumber(value: value)) ?? "\(Int(value))"
+        }
+        return String(format: "%.1f", value)
+    }
+
+    /// "<value> <unit>" — e.g. "3.2 mi" or "42,317 steps".
+    func formatQuantityWithUnit(_ value: Double) -> String {
+        return "\(formatQuantity(value)) \(unit.shortDisplayName)"
+    }
+
     var durationFormatted: String? {
         guard let hours = duration_hours else { return nil }
         if hours < 24 {
