@@ -325,15 +325,17 @@ class HealthKitManager: ObservableObject {
     @Published var dailyStepsData: [Date: Int] = [:]
     @Published var dailyMileGoals: [Date: Bool] = [:]
     
-    // Caching properties
+    // Caching properties.
+    // Only the ones actually read from views remain @Published — internal-cache
+    // values are plain `var` so mutating them doesn't trigger SwiftUI invalidations.
     @Published var cachedWorkouts: [HKWorkout] = []
-    @Published var lastWorkoutCacheUpdate: Date?
-    @Published var cachedFastestMilePace: TimeInterval = 0.0
+    var lastWorkoutCacheUpdate: Date?
+    var cachedFastestMilePace: TimeInterval = 0.0
     @Published var cachedMostMilesInOneDay: Double = 0.0
-    @Published var cachedTotalLifetimeMiles: Double = 0.0
-    @Published var cachedRetroactiveStreak: Int = 0
-    @Published var cachedLatestWorkoutDate: Date?
-    @Published var cachedWorkoutCount: Int = 0
+    var cachedTotalLifetimeMiles: Double = 0.0
+    var cachedRetroactiveStreak: Int = 0
+    var cachedLatestWorkoutDate: Date?
+    var cachedWorkoutCount: Int = 0
     @Published var fastestMileWorkouts: [HKWorkout] = []
     @Published var currentStreakFastestMileWorkouts: [HKWorkout] = []
     
@@ -384,10 +386,11 @@ class HealthKitManager: ObservableObject {
     
     func log(_ message: String) {}
     
-    // Current streak caching properties
-    @Published var cachedCurrentStreakFastestPace: TimeInterval = 0.0
+    // Current streak caching properties.
+    // cachedCurrentStreakStats is read from views; the others are internal cache.
+    var cachedCurrentStreakFastestPace: TimeInterval = 0.0
     @Published var cachedCurrentStreakStats: (totalMiles: Double, mostMiles: Double, fastestPace: TimeInterval, streakDays: Int) = (0.0, 0.0, 0.0, 0)
-    @Published var lastCurrentStreakStatsUpdate: Date?
+    var lastCurrentStreakStatsUpdate: Date?
     
     // Feature flag for location-based timezone calculation
     // When true, uses workout location to determine timezone for streak calculation
@@ -704,30 +707,35 @@ class HealthKitManager: ObservableObject {
         healthStore.execute(query)
     }
     
-    // Fetch recent running/walking workouts
+    // Fetch recent running/walking workouts (last 30 days, capped at 50).
+    // The date predicate keeps HealthKit from scanning all-time history just to
+    // pull the most recent samples — far cheaper for users with long histories.
     func fetchRecentWorkouts() {
         guard isAuthorized else { return }
-        
-        // Look for both running and walking workouts
+
         let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
         let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
-        let compoundPredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
-        
+        let workoutTypePredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
+
+        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date.distantPast
+        let datePredicate = HKQuery.predicateForSamples(withStart: thirtyDaysAgo, end: nil, options: .strictEndDate)
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [workoutTypePredicate, datePredicate])
+
         let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
-        
+
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
-            predicate: compoundPredicate,
-            limit: 50, // Increased for testing workout uploads
+            predicate: predicate,
+            limit: 50,
             sortDescriptors: [sortDescriptor]
-        ) { [weak self] query, samples, error in
+        ) { [weak self] _, samples, _ in
             guard let self = self, let workouts = samples as? [HKWorkout] else { return }
-            
+
             DispatchQueue.main.async {
                 self.recentWorkouts = workouts
             }
         }
-        
+
         healthStore.execute(query)
     }
     

@@ -1,7 +1,7 @@
 import { BadRequestError } from '../errors/Errors.js';
 import { Competition, CompetitionActivity, CompetitionOptions, CompetitionType, CompetitionUser } from '../types/competitions.js';
 import { PostgresService } from './DbService.js';
-import { getQuantityDateRange } from './workoutService.js';
+import { getQuantityDateRangeBatch, getUsersWithManualWorkouts } from './workoutService.js';
 import { sendOrQueueCompetitionNotification } from './pushNotificationService.js';
 
 const WORKOUT_TYPE_MAP: Record<string, string> = { run: 'running', walk: 'walking', running: 'running', walking: 'walking' };
@@ -357,45 +357,36 @@ export async function getUserScores(
 	// Only called when start_date is non-null (guarded by caller)
 	if (!competition.start_date) return userData;
 
-	// Fix: use for...of loop instead of async reduce (reduce doesn't await)
-	// Only process accepted users
+	// Only process accepted users.
 	const acceptedUsers = competition.users.filter((u: CompetitionUser) => u.invite_status === 'accepted');
+	const acceptedUserIds = acceptedUsers.map(u => u.user_id);
+	const endDate = competition.end_date ?? getTodayET();
 
-	for (const { user_id } of acceptedUsers) {
-		const rawData = await getQuantityDateRange(
-			user_id,
+	// Two batched queries instead of two queries per user (was 2N round trips, now 2).
+	const [batchRows, manualUserIds] = await Promise.all([
+		getQuantityDateRangeBatch(
+			acceptedUserIds,
 			competition.start_date,
 			competition.end_date ?? undefined,
 			competition.workouts
-		);
+		),
+		getUsersWithManualWorkouts(acceptedUserIds, competition.start_date, endDate)
+	]);
 
-		const intervals: { [key: string]: number } = rawData.reduce((groupedData: any, dayData: any) => {
-			const intervalKey = getCurrentInterval(dayData.local_date, competition.options.interval);
-			if (!groupedData[intervalKey]) {
-				groupedData[intervalKey] = 0;
-			}
-			groupedData[intervalKey] += dayData.total_distance;
-			return groupedData;
-		}, {});
-
-		// Check if user has any manual or edited workouts in the competition period
-		const endDate = competition.end_date ?? getTodayET();
-		const manualCheck = await db.query(
-			`SELECT EXISTS(
-				SELECT 1 FROM workouts
-				WHERE user_id = $1
-				AND local_date >= $2
-				AND local_date <= $3
-				AND source IN ('manual', 'edited')
-			) as has_manual`,
-			[user_id, competition.start_date, endDate]
-		);
-
-		userData[user_id] = {
-			intervals,
+	// Initialize empty buckets for every accepted user so users with zero workouts still appear.
+	for (const userId of acceptedUserIds) {
+		userData[userId] = {
+			intervals: {},
 			score: 0,
-			has_manual_workouts: manualCheck[0]?.has_manual ?? false
+			has_manual_workouts: manualUserIds.has(userId)
 		};
+	}
+
+	// Bucket rows into per-user interval totals.
+	for (const row of batchRows) {
+		const intervalKey = getCurrentInterval(row.local_date, competition.options.interval);
+		const buckets = userData[row.user_id].intervals;
+		buckets[intervalKey] = (buckets[intervalKey] ?? 0) + Number(row.total_distance);
 	}
 
 	const allIntervals = getIntervalRange(competition);
