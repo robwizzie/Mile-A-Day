@@ -345,7 +345,7 @@ enum CompetitionUnit: String, Codable, CaseIterable {
         switch self {
         case .miles: return "mi"
         case .kilometers: return "km"
-        case .steps: return "k"
+        case .steps: return "steps"
         }
     }
 
