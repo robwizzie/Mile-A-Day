@@ -238,6 +238,11 @@ class WorkoutSyncService: ObservableObject {
                 // Mark as synced
                 markWorkoutsAsSynced(batch.map { $0.uuid.uuidString })
 
+                // Refresh today's daily steps now that the backend has new workout data.
+                Task {
+                    await DailyStepsSyncService.shared.syncNow(force: true)
+                }
+
                 // Update progress
                 let uploadedCount = (index + 1) * batchSize
                 progress = SyncProgress(
@@ -368,6 +373,11 @@ class WorkoutSyncService: ObservableObject {
 
             try await uploadBatchWithRetry(batch)
             markWorkoutsAsSynced(batch.map { $0.uuid.uuidString })
+
+            // Refresh today's daily steps now that the backend has new workout data.
+            Task {
+                await DailyStepsSyncService.shared.syncNow(force: true)
+            }
 
             // Small delay between batches
             if index < batches.count - 1 {
@@ -511,9 +521,7 @@ class WorkoutSyncService: ObservableObject {
             let calories = await activeEnergyKilocalories(for: workout)
             let distance = workout.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
 
-            let steps = await fetchDailySteps(on: workout.startDate)
-
-            var workoutDict: [String: Any] = [
+            let workoutDict: [String: Any] = [
                 "workoutId": workout.uuid.uuidString,
                 "distance": distance,
                 "localDate": localDate,
@@ -526,9 +534,6 @@ class WorkoutSyncService: ObservableObject {
                 "splits": splitsData,
                 "source": "healthkit",
             ]
-            if let steps {
-                workoutDict["steps"] = steps
-            }
 
             workoutData.append(workoutDict)
         }
@@ -587,31 +592,6 @@ class WorkoutSyncService: ObservableObject {
     /// Get split data for a workout using the shared SplitCalculator.
     private func getSplitTimes(for workout: HKWorkout) async -> [WorkoutSplit] {
         return await SplitCalculator.calculateSplits(for: workout)
-    }
-
-    /// Fetch the total step count for the local day of the given date via HealthKit.
-    /// Returns `nil` if unavailable (no HealthKit auth, missing data, or query error).
-    private func fetchDailySteps(on date: Date) async -> Int? {
-        guard let stepType = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return nil }
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: date)
-        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else { return nil }
-        let predicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay, options: .strictStartDate)
-
-        return await withCheckedContinuation { continuation in
-            let query = HKStatisticsQuery(
-                quantityType: stepType,
-                quantitySamplePredicate: predicate,
-                options: .cumulativeSum
-            ) { _, result, _ in
-                if let sum = result?.sumQuantity() {
-                    continuation.resume(returning: Int(sum.doubleValue(for: HKUnit.count())))
-                } else {
-                    continuation.resume(returning: nil)
-                }
-            }
-            HKHealthStore().execute(query)
-        }
     }
 
     // MARK: - Tracking Methods
