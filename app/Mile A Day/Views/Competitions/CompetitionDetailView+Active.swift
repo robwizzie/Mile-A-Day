@@ -258,7 +258,7 @@ extension CompetitionDetailView {
                     .font(.system(size: 28))
                     .foregroundStyle(LinearGradient(colors: gradientColors, startPoint: .top, endPoint: .bottom))
 
-                CountingText(value: heroAnimated ? totalScore : 0, format: "%.1f", suffix: "")
+                CountingText(value: heroAnimated ? totalScore : 0, format: "%.1f", suffix: "", formatter: competition.options.formatQuantity)
                     .font(.system(size: 40, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
 
@@ -384,7 +384,7 @@ extension CompetitionDetailView {
                 .frame(height: 8)
 
                 HStack {
-                    Text("\(String(format: "%.1f", totalDistance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
+                    Text("\(competition.options.formatQuantity(totalDistance))/\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.5))
                     Spacer()

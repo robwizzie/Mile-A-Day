@@ -299,6 +299,14 @@ struct CountingText: View, Animatable {
     var value: Double
     let format: String
     let suffix: String
+    let formatter: ((Double) -> String)?
+
+    init(value: Double, format: String, suffix: String, formatter: ((Double) -> String)? = nil) {
+        self.value = value
+        self.format = format
+        self.suffix = suffix
+        self.formatter = formatter
+    }
 
     var animatableData: Double {
         get { value }
@@ -306,7 +314,8 @@ struct CountingText: View, Animatable {
     }
 
     var body: some View {
-        Text(String(format: format, value) + suffix)
+        let rendered = formatter?(value) ?? String(format: format, value)
+        Text(rendered + suffix)
     }
 }
 
