@@ -16,5 +16,9 @@ CREATE INDEX IF NOT EXISTS idx_daily_steps_user_date
 ALTER TABLE notification_settings
     ADD COLUMN IF NOT EXISTS step_goal_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 
--- AFTER backend deploy of feature/daily-steps-tracking, run separately:
+-- ─────────────────────────────────────────────────────────────────
+-- POST-DEPLOY (run AFTER the backend with workoutService.ts cleanup
+-- has been deployed, so no code references workouts.steps anymore):
+-- ─────────────────────────────────────────────────────────────────
+--
 -- ALTER TABLE workouts DROP COLUMN steps;
