@@ -36,3 +36,38 @@ export async function upsertDailySteps(
 		updatedAt: row.updated_at,
 	};
 }
+
+/**
+ * Batched per-user, per-day step totals over a date range.
+ * Mirrors the shape of getQuantityDateRangeBatch — column aliased as
+ * `total_distance` so callers (getUserScores) can treat the value as
+ * a generic per-interval quantity.
+ *
+ * No workout_type filter — daily_steps has no per-activity breakdown.
+ */
+export async function getStepsDateRangeBatch(
+	userIds: string[],
+	startDate: string,
+	endDate?: string
+): Promise<{ user_id: string; local_date: string; total_distance: number }[]> {
+	if (userIds.length === 0) return [];
+
+	const todaysDate = new Date().toISOString().split('T')[0];
+	const start = new Date(startDate).toISOString().split('T')[0];
+	const end = endDate ? new Date(endDate).toISOString().split('T')[0] : todaysDate;
+
+	const query = `
+		SELECT
+			user_id,
+			TO_CHAR(local_date, 'YYYY-MM-DD') AS local_date,
+			SUM(steps)::int AS total_distance
+		FROM daily_steps
+		WHERE user_id = ANY($1::text[])
+			AND local_date >= $2
+			AND local_date <= $3
+		GROUP BY user_id, local_date
+		ORDER BY user_id, local_date ASC
+	`;
+
+	return await db.query(query, [userIds, start, end]);
+}
