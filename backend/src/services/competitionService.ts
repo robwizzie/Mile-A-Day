@@ -2,6 +2,7 @@ import { BadRequestError } from '../errors/Errors.js';
 import { Competition, CompetitionActivity, CompetitionOptions, CompetitionType, CompetitionUser } from '../types/competitions.js';
 import { PostgresService } from './DbService.js';
 import { getQuantityDateRangeBatch, getUsersWithManualWorkouts } from './workoutService.js';
+import { getStepsDateRangeBatch } from './dailyStepsService.js';
 import { sendOrQueueCompetitionNotification } from './pushNotificationService.js';
 
 const WORKOUT_TYPE_MAP: Record<string, string> = { run: 'running', walk: 'walking', running: 'running', walking: 'walking' };
@@ -362,15 +363,26 @@ export async function getUserScores(
 	const acceptedUserIds = acceptedUsers.map(u => u.user_id);
 	const endDate = competition.end_date ?? getTodayET();
 
-	// Two batched queries instead of two queries per user (was 2N round trips, now 2).
+	// Step competitions read from daily_steps; distance competitions from workouts.
+	// Manual-workout flag is irrelevant for steps (HealthKit-observer-fed only).
+	const isStepUnit = competition.options.unit === 'steps';
+
 	const [batchRows, manualUserIds] = await Promise.all([
-		getQuantityDateRangeBatch(
-			acceptedUserIds,
-			competition.start_date,
-			competition.end_date ?? undefined,
-			competition.workouts
-		),
-		getUsersWithManualWorkouts(acceptedUserIds, competition.start_date, endDate)
+		isStepUnit
+			? getStepsDateRangeBatch(
+					acceptedUserIds,
+					competition.start_date,
+					competition.end_date ?? undefined
+			  )
+			: getQuantityDateRangeBatch(
+					acceptedUserIds,
+					competition.start_date,
+					competition.end_date ?? undefined,
+					competition.workouts
+			  ),
+		isStepUnit
+			? Promise.resolve(new Set<string>())
+			: getUsersWithManualWorkouts(acceptedUserIds, competition.start_date, endDate)
 	]);
 
 	// Initialize empty buckets for every accepted user so users with zero workouts still appear.
