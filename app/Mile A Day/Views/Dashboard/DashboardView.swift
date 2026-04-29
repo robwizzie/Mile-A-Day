@@ -374,7 +374,7 @@ struct DashboardView: View {
                     )
 
                     // Sync widgets with correct data
-                    WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: 1.0)
+                    WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles)
                     WidgetDataStore.save(streak: userManager.currentUser.streak)
                     WidgetCenter.shared.reloadAllTimelines()
 
@@ -437,8 +437,12 @@ struct DashboardView: View {
             }
             .onChange(of: healthManager.hasLoadedInitialData) { _, isLoaded in
                 if isLoaded {
+                    applyHealthDataToUserManager()
                     checkAndShowGoalCelebration()
                 }
+            }
+            .onChange(of: healthManager.retroactiveStreak) { _, _ in
+                applyHealthDataToUserManager()
             }
             .onChange(of: currentState.isCompleted) { oldValue, newValue in
                 if newValue && !oldValue {
@@ -483,37 +487,7 @@ struct DashboardView: View {
         WidgetCenter.shared.reloadAllTimelines()
     }
 
-    private func refreshData() {
-        isRefreshing = true
-
-        healthManager.fetchAllWorkoutData()
-        fetchFastestPaceFromBackend()
-
-        // Brief delay for HealthKit data to settle, then update UI
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
-
-            userManager.updateUserWithHealthKitData(
-                retroactiveStreak: healthManager.retroactiveStreak,
-                currentMiles: healthManager.todaysDistance,
-                totalMiles: healthManager.totalLifetimeMiles,
-                fastestPace: healthManager.fastestMilePace,
-                mostMilesInDay: healthManager.mostMilesInOneDay
-            )
-
-            syncWidgetData()
-            isRefreshing = false
-        }
-    }
-
-    private func refreshDataAsync() async {
-        isRefreshing = true
-        healthManager.fetchAllWorkoutData()
-        fetchFastestPaceFromBackend()
-
-        // Brief delay for HealthKit data to settle
-        try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
-
+    private func applyHealthDataToUserManager() {
         userManager.updateUserWithHealthKitData(
             retroactiveStreak: healthManager.retroactiveStreak,
             currentMiles: healthManager.todaysDistance,
@@ -521,8 +495,24 @@ struct DashboardView: View {
             fastestPace: healthManager.fastestMilePace,
             mostMilesInDay: healthManager.mostMilesInOneDay
         )
-
         syncWidgetData()
+    }
+
+    private func refreshData() {
+        isRefreshing = true
+        healthManager.fetchAllWorkoutData()
+        fetchFastestPaceFromBackend()
+        // UI is driven by .onChange observers on healthManager — no artificial delay needed.
+        // Apply whatever is already cached immediately; observers will re-fire as fresh data lands.
+        applyHealthDataToUserManager()
+        isRefreshing = false
+    }
+
+    private func refreshDataAsync() async {
+        isRefreshing = true
+        healthManager.fetchAllWorkoutData()
+        fetchFastestPaceFromBackend()
+        applyHealthDataToUserManager()
         isRefreshing = false
     }
 

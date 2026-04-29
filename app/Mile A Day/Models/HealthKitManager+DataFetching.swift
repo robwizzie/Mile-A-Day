@@ -323,30 +323,28 @@ extension HealthKitManager {
         var dailySteps: [Date: Int] = [:]
         let group = DispatchGroup()
 
-        // Query for steps (one query per day)
-        var currentDate = startOfMonth
-        while currentDate < endOfMonth {
-            let startOfDay = calendar.startOfDay(for: currentDate)
-            let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+        // Single HKStatisticsCollectionQuery for the whole month (replaces N per-day queries).
+        let monthPredicate = HKQuery.predicateForSamples(withStart: startOfMonth, end: endOfMonth, options: .strictStartDate)
+        var dayInterval = DateComponents()
+        dayInterval.day = 1
 
-            group.enter()
-
-            let stepPredicate = HKQuery.predicateForSamples(withStart: startOfDay, end: endOfDay, options: .strictStartDate)
-
-            let stepQuery = HKStatisticsQuery(
-                quantityType: stepType,
-                quantitySamplePredicate: stepPredicate,
-                options: .cumulativeSum
-            ) { _, result, error in
-                defer { group.leave() }
-
-                let steps = result?.sumQuantity()?.doubleValue(for: HKUnit.count()) ?? 0
-                dailySteps[startOfDay] = Int(steps)
+        group.enter()
+        let collectionQuery = HKStatisticsCollectionQuery(
+            quantityType: stepType,
+            quantitySamplePredicate: monthPredicate,
+            options: .cumulativeSum,
+            anchorDate: calendar.startOfDay(for: startOfMonth),
+            intervalComponents: dayInterval
+        )
+        collectionQuery.initialResultsHandler = { _, results, _ in
+            defer { group.leave() }
+            results?.enumerateStatistics(from: startOfMonth, to: endOfMonth) { stats, _ in
+                let bucketStart = calendar.startOfDay(for: stats.startDate)
+                let steps = stats.sumQuantity()?.doubleValue(for: HKUnit.count()) ?? 0
+                dailySteps[bucketStart] = Int(steps)
             }
-
-            healthStore.execute(stepQuery)
-            currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate) ?? currentDate
         }
+        healthStore.execute(collectionQuery)
 
         // CRITICAL FIX: Fetch ALL workouts for the month and use timezone-aware grouping
         // This ensures calendar matches streak calculation exactly
