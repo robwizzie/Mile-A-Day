@@ -12,6 +12,7 @@ export interface NotificationPreferences {
 	competition_invites_enabled: boolean;
 	competition_updates_enabled: boolean;
 	competition_milestones_enabled: boolean;
+	step_goal_enabled: boolean;
 	quiet_hours_start: number | null; // hour 0-23 or null for no quiet hours
 	quiet_hours_end: number | null;
 }
@@ -24,6 +25,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
 	competition_invites_enabled: true,
 	competition_updates_enabled: true,
 	competition_milestones_enabled: true,
+	step_goal_enabled: true,
 	quiet_hours_start: null,
 	quiet_hours_end: null,
 };
@@ -45,6 +47,7 @@ export async function getNotificationPreferences(userId: string): Promise<Notifi
 		competition_invites_enabled: row.competition_invites_enabled ?? true,
 		competition_updates_enabled: row.competition_updates_enabled ?? true,
 		competition_milestones_enabled: row.competition_milestones_enabled ?? true,
+		step_goal_enabled: row.step_goal_enabled ?? true,
 		quiet_hours_start: row.quiet_hours_start ?? null,
 		quiet_hours_end: row.quiet_hours_end ?? null,
 	};
@@ -68,6 +71,7 @@ export async function updateNotificationPreferences(
 		{ key: 'competition_invites_enabled', value: prefs.competition_invites_enabled },
 		{ key: 'competition_updates_enabled', value: prefs.competition_updates_enabled },
 		{ key: 'competition_milestones_enabled', value: prefs.competition_milestones_enabled },
+		{ key: 'step_goal_enabled', value: prefs.step_goal_enabled },
 		{ key: 'quiet_hours_start', value: prefs.quiet_hours_start },
 		{ key: 'quiet_hours_end', value: prefs.quiet_hours_end },
 	];
