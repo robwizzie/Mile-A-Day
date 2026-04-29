@@ -15,7 +15,12 @@ export class PostgresService {
 
 	private constructor() {
 		this.pool = new Pool({
-			connectionString: process.env.DATABASE_URL
+			connectionString: process.env.DATABASE_URL,
+			max: 20,
+			idleTimeoutMillis: 30_000,
+			connectionTimeoutMillis: 5_000,
+			statement_timeout: 30_000,
+			query_timeout: 30_000
 		});
 
 		this.pool.on('error', (err: any) => {
@@ -32,13 +37,8 @@ export class PostgresService {
 	}
 
 	public async query<T extends QueryResultRow = any>(query: string, params?: any[]): Promise<T[]> {
-		const client = await this.pool.connect();
-		try {
-			const result = await client.query<T>(query, params);
-			return result.rows;
-		} finally {
-			client.release();
-		}
+		const result = await this.pool.query<T>(query, params);
+		return result.rows;
 	}
 
 	public async transaction(queries: QueryConfig[]): Promise<void> {

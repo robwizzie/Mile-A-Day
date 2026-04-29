@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
+import compression from 'compression';
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
@@ -25,6 +26,7 @@ import { webcrypto } from 'node:crypto';
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '3000');
 
+app.use(compression());
 app.use(express.json());
 
 // Ensure uploads directory exists
