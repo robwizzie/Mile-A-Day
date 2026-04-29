@@ -225,6 +225,34 @@ struct CreateCompetitionView: View {
                     hasEndDate = false
                 }
             }
+            .onChange(of: unit) { _, newUnit in
+                if newUnit == .steps {
+                    // Steps apply to all activity — backend ignores filter, but send both to satisfy validation.
+                    selectedWorkouts = [.run, .walk]
+                    // Sensible step defaults
+                    switch selectedType {
+                    case .streaks, .targets:
+                        goal = 10000
+                    case .race:
+                        goal = 100000
+                    case .apex, .clash:
+                        break
+                    }
+                } else {
+                    // Switching back to a distance unit: restore an activity if empty, reset goal to mile defaults.
+                    if selectedWorkouts.isEmpty {
+                        selectedWorkouts = [.run]
+                    }
+                    switch selectedType {
+                    case .streaks, .targets:
+                        goal = 1.0
+                    case .race:
+                        goal = 26.2
+                    case .apex, .clash:
+                        break
+                    }
+                }
+            }
         }
     }
 
@@ -384,18 +412,29 @@ struct CreateCompetitionView: View {
     // MARK: - Activity Selection Section
 
     var activitySelectionSection: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Allowed Activities")
-                .font(MADTheme.Typography.subheadline)
-                .foregroundColor(.white.opacity(0.6))
-                .padding(.horizontal, MADTheme.Spacing.sm)
+        let isStepsUnit = unit == .steps
+
+        return VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Allowed Activities")
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
+
+                if isStepsUnit {
+                    Text("Steps include all activity")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.sm)
 
             HStack(spacing: MADTheme.Spacing.md) {
                 ForEach(CompetitionActivity.allCases, id: \.self) { activity in
                     ActivityToggle(
                         activity: activity,
-                        isSelected: selectedWorkouts.contains(activity),
+                        isSelected: isStepsUnit ? true : selectedWorkouts.contains(activity),
                         action: {
+                            guard !isStepsUnit else { return }
                             if selectedWorkouts.contains(activity) {
                                 if selectedWorkouts.count > 1 {
                                     selectedWorkouts.remove(activity)
@@ -405,6 +444,8 @@ struct CreateCompetitionView: View {
                             }
                         }
                     )
+                    .disabled(isStepsUnit)
+                    .opacity(isStepsUnit ? 0.4 : 1.0)
                 }
             }
             .padding(.horizontal, MADTheme.Spacing.sm)
@@ -436,42 +477,30 @@ struct CreateCompetitionView: View {
     var unitSelectorButtons: some View {
         HStack(spacing: MADTheme.Spacing.sm) {
             ForEach([CompetitionUnit.miles, CompetitionUnit.kilometers, CompetitionUnit.steps], id: \.self) { unitOption in
-                let isAvailable = unitOption == .miles
                 let isSelected = unit == unitOption
 
                 Button {
-                    if isAvailable {
-                        unit = unitOption
-                    }
+                    unit = unitOption
                 } label: {
-                    VStack(spacing: 2) {
-                        Text(unitOption == .steps ? "Steps" : unitOption.rawValue.capitalized)
-                            .font(MADTheme.Typography.callout)
-                            .fontWeight(isSelected ? .semibold : .regular)
-                            .foregroundColor(isAvailable ? (isSelected ? .white : .white.opacity(0.6)) : .white.opacity(0.3))
-
-                        if !isAvailable {
-                            Text("Coming Soon")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundColor(.white.opacity(0.3))
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, MADTheme.Spacing.sm)
-                    .background(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .fill(isSelected ? MADTheme.Colors.primary.opacity(0.3) : Color.white.opacity(0.05))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .stroke(
-                                isSelected ? MADTheme.Colors.primary : Color.white.opacity(0.1),
-                                lineWidth: isSelected ? 2 : 1
-                            )
-                    )
+                    Text(unitOption == .steps ? "Steps" : unitOption.rawValue.capitalized)
+                        .font(MADTheme.Typography.callout)
+                        .fontWeight(isSelected ? .semibold : .regular)
+                        .foregroundColor(isSelected ? .white : .white.opacity(0.6))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, MADTheme.Spacing.sm)
+                        .background(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                .fill(isSelected ? MADTheme.Colors.primary.opacity(0.3) : Color.white.opacity(0.05))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                .stroke(
+                                    isSelected ? MADTheme.Colors.primary : Color.white.opacity(0.1),
+                                    lineWidth: isSelected ? 2 : 1
+                                )
+                        )
                 }
                 .buttonStyle(ScaleButtonStyle())
-                .disabled(!isAvailable)
             }
         }
     }
@@ -500,8 +529,9 @@ struct CreateCompetitionView: View {
                 HStack(spacing: MADTheme.Spacing.xl) {
                     // Minus button
                     Button {
-                        if goal > 1 {
-                            goal -= 1
+                        let stepValue: Double = unit == .steps ? 1000 : 1
+                        if goal > stepValue {
+                            goal -= stepValue
                         }
                     } label: {
                         Image(systemName: "minus")
@@ -524,16 +554,16 @@ struct CreateCompetitionView: View {
                     // Goal display with text input
                     VStack(spacing: 8) {
                         TextField("", value: $goal, format: .number)
-                            .keyboardType(.decimalPad)
+                            .keyboardType(unit == .steps ? .numberPad : .decimalPad)
                             .multilineTextAlignment(.center)
                             .font(.system(size: 56, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                             .frame(minWidth: 100)
                             .fixedSize(horizontal: true, vertical: false)
                             .onChange(of: goal) { oldValue, newValue in
-                                // Ensure minimum value of 0.1
-                                if newValue < 0.1 {
-                                    goal = 0.1
+                                let minimum: Double = unit == .steps ? 1 : 0.1
+                                if newValue < minimum {
+                                    goal = minimum
                                 }
                             }
 
@@ -546,7 +576,7 @@ struct CreateCompetitionView: View {
 
                     // Plus button
                     Button {
-                        goal += 1
+                        goal += unit == .steps ? 1000 : 1
                     } label: {
                         Image(systemName: "plus")
                             .font(.title2)
