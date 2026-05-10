@@ -258,6 +258,8 @@ enum CelebrationType: Identifiable, Equatable {
     case postGoalWorkout(stats: GoalCompletionStats)
     case badgeUnlocked(badge: Badge)
     case milestone(title: String, description: String, icon: String)
+    /// Headline yearly streak celebration — fired at every multiple of 365 days.
+    case yearMilestone(info: YearlyMilestoneInfo)
 
     var id: String {
         switch self {
@@ -269,6 +271,8 @@ enum CelebrationType: Identifiable, Equatable {
             return "badge-\(badge.id)"
         case .milestone(let title, _, _):
             return "milestone-\(title)"
+        case .yearMilestone(let info):
+            return "year-milestone-\(info.years)"
         }
     }
 
@@ -282,6 +286,8 @@ enum CelebrationType: Identifiable, Equatable {
             return b1.id == b2.id
         case (.milestone(let t1, _, _), .milestone(let t2, _, _)):
             return t1 == t2
+        case (.yearMilestone(let i1), .yearMilestone(let i2)):
+            return i1.years == i2.years
         default:
             return false
         }
@@ -402,6 +408,7 @@ class CelebrationManager: ObservableObject {
     /// Priority for ordering celebrations: lower = shown first
     private func priority(of celebration: CelebrationType) -> Int {
         switch celebration {
+        case .yearMilestone: return -1 // Headline moment — always first
         case .goalCompleted: return 0
         case .postGoalWorkout: return 1
         case .badgeUnlocked: return 2

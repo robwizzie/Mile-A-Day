@@ -91,6 +91,20 @@ struct DashboardView: View {
         )
     }
 
+    /// Build a yearly milestone test payload using realistic-ish stats from the user.
+    private func triggerYearlyTest(years: Int) {
+        celebrationManager.clearAll()
+        let totalDays = years * 365
+        let lifetimeMiles = max(userManager.currentUser.totalMiles, Double(totalDays) * 1.15)
+        let info = YearlyMilestoneInfo(
+            years: years,
+            totalMiles: lifetimeMiles,
+            totalStreakDays: max(userManager.currentUser.streak, totalDays),
+            streakStartDate: Calendar.current.date(byAdding: .day, value: -totalDays, to: Date())
+        )
+        celebrationManager.addCelebration(.yearMilestone(info: info))
+    }
+
     /// Group today's workouts by activity type into breakdowns
     private func buildWorkoutBreakdowns() -> [WorkoutBreakdown] {
         var byType: [HKWorkoutActivityType: (distance: Double, duration: TimeInterval)] = [:]
@@ -276,6 +290,20 @@ struct DashboardView: View {
                             }
                         } label: {
                             Label("Test Badge Unlock", systemImage: "trophy.fill")
+                        }
+
+                        Divider()
+
+                        Menu {
+                            Button("Year 1 (Gold)")          { triggerYearlyTest(years: 1) }
+                            Button("Year 2 (Rose Gold)")     { triggerYearlyTest(years: 2) }
+                            Button("Year 3 (Platinum)")      { triggerYearlyTest(years: 3) }
+                            Button("Year 4 (Sapphire)")      { triggerYearlyTest(years: 4) }
+                            Button("Year 5 (Diamond)")       { triggerYearlyTest(years: 5) }
+                            Button("Year 10 (Holographic)")  { triggerYearlyTest(years: 10) }
+                            Button("Year 25 (Holographic)")  { triggerYearlyTest(years: 25) }
+                        } label: {
+                            Label("Test Year Milestone", systemImage: "calendar.badge.plus")
                         }
 
                         Divider()

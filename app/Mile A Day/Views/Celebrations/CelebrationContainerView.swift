@@ -40,6 +40,9 @@ struct CelebrationContainerView: View {
                 description: description,
                 icon: icon
             )
+
+        case .yearMilestone(let info):
+            YearlyMilestoneCelebrationView(info: info)
         }
     }
 }
