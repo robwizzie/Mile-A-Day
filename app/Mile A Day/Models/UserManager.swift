@@ -335,11 +335,17 @@ class UserManager: ObservableObject {
                 currentUser.badges = fetched
                 saveUserData()
 
+                // Decide whether a yearly headline celebration is owed BEFORE we
+                // queue any badge celebrations. If yes, suppress the matching
+                // 365/730/etc. badge popups so they don't pile on top.
+                let yearlyOwed = checkAndQueueYearlyCelebration()
+                let suppressedBadgeIDs: Set<String> = yearlyOwed ? suppressedBadgeIDsForYearly() : []
+
                 // Celebrate freshly-earned badges (not previously present).
                 let today = Calendar.current.startOfDay(for: Date())
                 for badge in fetched {
                     let earnedToday = Calendar.current.startOfDay(for: badge.dateAwarded) == today
-                    if earnedToday && !existingIds.contains(badge.id) {
+                    if earnedToday && !existingIds.contains(badge.id) && !suppressedBadgeIDs.contains(badge.id) {
                         CelebrationManager.shared.addCelebration(.badgeUnlocked(badge: badge))
                     }
                 }
@@ -348,6 +354,50 @@ class UserManager: ObservableObject {
             print("[UserManager] refreshBadgesFromServer failed: \(error)")
         }
         #endif
+    }
+
+    // MARK: - Yearly milestone
+
+    /// Persists the highest year-boundary streak we've already celebrated (e.g. 365, 730, 1095…).
+    /// `-1` is the uninitialized sentinel so existing users with mid-year streaks aren't
+    /// retroactively flooded with year-1/2/3 animations on first launch with this feature.
+    @AppStorage("lastCelebratedYearMilestoneStreak") private var lastCelebratedYearMilestoneStreak: Int = -1
+
+    /// Returns true if a yearly celebration was queued.
+    @discardableResult
+    private func checkAndQueueYearlyCelebration() -> Bool {
+        let streak = currentUser.streak
+        let currentYearBoundary = (streak / 365) * 365
+
+        // First-run init: skip retroactively firing for users whose streak already
+        // crossed year boundaries before this feature shipped.
+        if lastCelebratedYearMilestoneStreak == -1 {
+            lastCelebratedYearMilestoneStreak = currentYearBoundary
+            return false
+        }
+
+        guard currentYearBoundary >= 365,
+              currentYearBoundary > lastCelebratedYearMilestoneStreak
+        else { return false }
+
+        let years = currentYearBoundary / 365
+        let startDate = Calendar.current.date(byAdding: .day, value: -streak, to: Date())
+        let info = YearlyMilestoneInfo(
+            years: years,
+            totalMiles: currentUser.totalMiles,
+            totalStreakDays: streak,
+            streakStartDate: startDate
+        )
+
+        CelebrationManager.shared.addCelebration(.yearMilestone(info: info))
+        lastCelebratedYearMilestoneStreak = currentYearBoundary
+        return true
+    }
+
+    /// Streak-badge IDs that should be silenced when a yearly celebration is firing
+    /// for the same milestone day.
+    private func suppressedBadgeIDsForYearly() -> Set<String> {
+        ["streak_365", "streak_730"]
     }
 
     /// Legacy shim — kept so existing callers compile. Delegates to the server-side fetch.
