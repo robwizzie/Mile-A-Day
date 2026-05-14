@@ -123,7 +123,7 @@ struct RecentWorkoutsView: View {
                         Button {
                             selectedWorkout = IdentifiableWorkout(workout: workout)
                         } label: {
-                            WorkoutRow(workout: workout)
+                            WorkoutRow(workout: workout, showDate: true)
                                 .padding(MADTheme.Spacing.md)
                                 .madLiquidGlass()
                         }

@@ -235,6 +235,7 @@ struct StatBox: View {
 // Workout row component
 struct WorkoutRow: View {
     let workout: HKWorkout
+    var showDate: Bool = false
     @EnvironmentObject var healthManager: HealthKitManager
 
     private var correctedStartTime: Date {
@@ -300,10 +301,29 @@ struct WorkoutRow: View {
                 }
             }
             Spacer()
-            Text(DateFormatter.shortTime.string(from: correctedStartTime))
-                .font(MADTheme.Typography.caption)
-                .foregroundColor(MADTheme.Colors.secondaryText)
+            VStack(alignment: .trailing, spacing: 2) {
+                if showDate {
+                    Text(workoutDateString)
+                        .font(MADTheme.Typography.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(MADTheme.Colors.primaryText)
+                }
+                Text(DateFormatter.shortTime.string(from: correctedStartTime))
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(MADTheme.Colors.secondaryText)
+            }
         }
+    }
+
+    private var workoutDateString: String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(correctedStartTime) {
+            return "Today"
+        }
+        if calendar.isDateInYesterday(correctedStartTime) {
+            return "Yesterday"
+        }
+        return DateFormatter.workoutRowDate.string(from: correctedStartTime)
     }
 
     private var workoutTypeString: String {
@@ -330,6 +350,12 @@ extension DateFormatter {
     static let shortTime: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
+        return formatter
+    }()
+
+    static let workoutRowDate: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("MMMd")
         return formatter
     }()
 }
