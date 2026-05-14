@@ -11,6 +11,27 @@ const db = PostgresService.getInstance();
 
 const ET_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
 
+/**
+ * Maximum length, in characters, of a user-supplied competition name.
+ * Keep in sync with CompetitionLimits.nameMaxLength in
+ * app/Mile A Day/Models/CompetitionLimits.swift
+ */
+export const COMPETITION_NAME_MAX_LENGTH = 50;
+
+function validateCompetitionName(name: unknown): string {
+	if (typeof name !== 'string') {
+		throw new BadRequestError('competition_name must be a string');
+	}
+	const trimmed = name.trim();
+	if (trimmed.length === 0) {
+		throw new BadRequestError('competition_name cannot be empty');
+	}
+	if (trimmed.length > COMPETITION_NAME_MAX_LENGTH) {
+		throw new BadRequestError(`competition_name cannot exceed ${COMPETITION_NAME_MAX_LENGTH} characters`);
+	}
+	return trimmed;
+}
+
 export function getTodayET(): string {
 	return ET_DATE_FORMATTER.format(new Date());
 }
@@ -369,17 +390,13 @@ export async function getUserScores(
 
 	const [batchRows, manualUserIds] = await Promise.all([
 		isStepUnit
-			? getStepsDateRangeBatch(
-					acceptedUserIds,
-					competition.start_date,
-					competition.end_date ?? undefined
-			  )
+			? getStepsDateRangeBatch(acceptedUserIds, competition.start_date, competition.end_date ?? undefined)
 			: getQuantityDateRangeBatch(
 					acceptedUserIds,
 					competition.start_date,
 					competition.end_date ?? undefined,
 					competition.workouts
-			  ),
+				),
 		isStepUnit
 			? Promise.resolve(new Set<string>())
 			: getUsersWithManualWorkouts(acceptedUserIds, competition.start_date, endDate)
