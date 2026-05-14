@@ -4,12 +4,19 @@ struct BadgesView: View {
     @ObservedObject var userManager: UserManager
     /// Optional badge to immediately drill into when this screen first appears.
     let initialBadge: Badge?
-    
+    /// Filter to apply when the screen first appears (e.g. `.new` from the trophy nav).
+    var initialFilter: BadgeFilter = .all
+
     @State private var showConfetti = false
     @State private var selectedFilter: BadgeFilter = .all
     @State private var selectedBadge: Badge?
     @State private var isShowingDetail = false
-    
+    /// Snapshot of badge IDs that were `isNew` when this screen first appeared.
+    /// We keep them visible under the "New" filter even after `markBadgesAsViewed()` flips
+    /// the local flag, so the filter doesn't empty out as soon as the user lands here.
+    @State private var newBadgeIdsAtOpen: Set<String> = []
+    @State private var didFirstAppear = false
+
     var body: some View {
         ZStack {
             // Gradient background
@@ -40,6 +47,16 @@ struct BadgesView: View {
         .navigationTitle("Medals")
         .navigationBarTitleDisplayMode(.large)
         .onAppear {
+            // Snapshot "new" badge IDs BEFORE we mark them viewed so the New filter
+            // and any badges that were unread keep their visual treatment on this visit.
+            if !didFirstAppear {
+                didFirstAppear = true
+                newBadgeIdsAtOpen = Set(
+                    userManager.currentUser.badges.filter { $0.isNew }.map { $0.id }
+                )
+                selectedFilter = initialFilter
+            }
+
             // Show confetti for new badges
             if userManager.hasNewBadges {
                 showConfetti = true
@@ -218,7 +235,10 @@ struct BadgesView: View {
             // Show only earned secret/hidden badges
             return earnedHiddenBadges
         case .new:
-            return allBadges.filter { $0.isNew && !$0.isLocked }
+            // Use the on-open snapshot so the list survives mark-as-viewed.
+            let pool = allBadges + earnedHiddenBadges
+            let snapshot = newBadgeIdsAtOpen
+            return pool.filter { ($0.isNew || snapshot.contains($0.id)) && !$0.isLocked }
         }
     }
     

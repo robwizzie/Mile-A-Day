@@ -40,6 +40,16 @@ CREATE INDEX IF NOT EXISTS idx_user_badges_user     ON user_badges(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_badges_user_new ON user_badges(user_id) WHERE is_new = TRUE;
 CREATE INDEX IF NOT EXISTS idx_user_badges_workout  ON user_badges(triggering_workout_id);
 
+-- 3a. user pinned badges (showcase). pin_slot in [0,2], unique per user.
+ALTER TABLE user_badges
+    ADD COLUMN IF NOT EXISTS pin_slot INTEGER;
+DO $$ BEGIN
+    ALTER TABLE user_badges
+        ADD CONSTRAINT user_badges_pin_slot_range CHECK (pin_slot IS NULL OR (pin_slot >= 0 AND pin_slot <= 2));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_badges_user_pin_slot
+    ON user_badges(user_id, pin_slot) WHERE pin_slot IS NOT NULL;
+
 -- 4. challenge catalog
 CREATE TABLE IF NOT EXISTS daily_challenges (
     challenge_key         TEXT PRIMARY KEY,
