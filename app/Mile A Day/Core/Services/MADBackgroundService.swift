@@ -125,19 +125,15 @@ final class MADBackgroundService: NSObject, ObservableObject {
 
         // Perform the background work
         Task { [weak self] in
-            await self?.performBackgroundWork()
+            await self?.performBackgroundSync(reason: .bgAppRefreshTask)
             task.setTaskCompleted(success: true)
         }
     }
-    
+
     @MainActor
     private func handleNewWorkoutData() async {
-        // Check authorization first
-        guard await requestHealthKitAuthorizationIfNeeded() else {
-            return
-        }
-        
-        await performBackgroundWork()
+        guard await requestHealthKitAuthorizationIfNeeded() else { return }
+        await performBackgroundSync(reason: .healthKitObserver)
     }
     
     @MainActor
@@ -155,6 +151,28 @@ final class MADBackgroundService: NSObject, ObservableObject {
             // Sync workouts to backend (background mode)
             await syncWorkoutsInBackground()
         }
+    }
+
+    /// Unified entry point for background sync triggered by HealthKit, BGTask, silent push, or background launch.
+    /// Caller is responsible for any iOS completion handler (BGTask, fetchCompletionHandler, etc.).
+    @MainActor
+    func performBackgroundSync(reason: BackgroundSyncReason) async {
+        print("[MADBackgroundService] performBackgroundSync(reason: \(reason))")
+
+        // Only run if user has authenticated.
+        guard UserDefaults.standard.bool(forKey: "MAD_IsAuthenticated") else {
+            print("[MADBackgroundService] Skipping sync — user not authenticated")
+            return
+        }
+
+        await performBackgroundWork()
+    }
+
+    enum BackgroundSyncReason: String {
+        case healthKitObserver
+        case bgAppRefreshTask
+        case silentPush
+        case backgroundLaunch
     }
 
     /// Sync workouts to backend in background (limited batch size)
