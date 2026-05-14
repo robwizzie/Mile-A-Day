@@ -272,7 +272,12 @@ struct NotificationInboxView: View {
                     notifications[idx] = InAppNotification(
                         id: n.id, title: n.title, body: n.body,
                         type: n.type, data: n.data, is_read: true,
-                        created_at: n.created_at
+                        created_at: n.created_at,
+                        hype_target_user_id: n.hype_target_user_id,
+                        hype_context_type: n.hype_context_type,
+                        hype_context_id: n.hype_context_id,
+                        hype_context_label: n.hype_context_label,
+                        is_hyped: n.is_hyped
                     )
                     unreadCount = max(0, unreadCount - 1)
                 }
@@ -288,7 +293,12 @@ struct NotificationInboxView: View {
                     InAppNotification(
                         id: n.id, title: n.title, body: n.body,
                         type: n.type, data: n.data, is_read: true,
-                        created_at: n.created_at
+                        created_at: n.created_at,
+                        hype_target_user_id: n.hype_target_user_id,
+                        hype_context_type: n.hype_context_type,
+                        hype_context_id: n.hype_context_id,
+                        hype_context_label: n.hype_context_label,
+                        is_hyped: n.is_hyped
                     )
                 }
                 unreadCount = 0
