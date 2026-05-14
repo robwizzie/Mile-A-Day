@@ -138,3 +138,23 @@ CREATE INDEX IF NOT EXISTS idx_in_app_notifications_user
 
 CREATE INDEX IF NOT EXISTS idx_in_app_notifications_unread
     ON in_app_notifications (user_id, is_read) WHERE is_read = FALSE;
+
+-- ─── Hype context (2026-05-14) ───────────────────────────────────────
+-- Optional context describing what was hyped (mile / badge / pr).
+-- Legacy push-action hypes keep these columns NULL and skip dedupe.
+ALTER TABLE hype_log ADD COLUMN IF NOT EXISTS context_type TEXT;
+ALTER TABLE hype_log ADD COLUMN IF NOT EXISTS context_id TEXT;
+ALTER TABLE hype_log ADD COLUMN IF NOT EXISTS context_label TEXT;
+
+-- Partial unique index: one hype per (sender, target, context_type, context_id)
+-- when context is present. Legacy NULL-context hypes can repeat (matches today).
+CREATE UNIQUE INDEX IF NOT EXISTS hype_log_context_dedupe_idx
+    ON hype_log (sender_id, target_id, context_type, context_id)
+    WHERE context_id IS NOT NULL;
+
+-- ─── Friend personal-best notifications (2026-05-14) ─────────────────
+ALTER TABLE notification_settings
+    ADD COLUMN IF NOT EXISTS friend_personal_best_enabled BOOLEAN DEFAULT TRUE;
+
+UPDATE notification_settings
+    SET friend_personal_best_enabled = COALESCE(friend_personal_best_enabled, TRUE);

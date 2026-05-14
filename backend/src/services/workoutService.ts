@@ -326,11 +326,7 @@ export async function getQuantityDateRangeBatch(
  * Batched manual-workout check for a set of users over a date range.
  * Returns the set of user_ids that have at least one manual/edited workout in range.
  */
-export async function getUsersWithManualWorkouts(
-	userIds: string[],
-	startDate: string,
-	endDate: string
-): Promise<Set<string>> {
+export async function getUsersWithManualWorkouts(userIds: string[], startDate: string, endDate: string): Promise<Set<string>> {
 	if (userIds.length === 0) return new Set();
 
 	const result = await db.query<{ user_id: string }>(
@@ -383,4 +379,55 @@ export async function updateWorkout(
 	);
 
 	return result[0];
+}
+
+/**
+ * Returns the user's two tracked personal records computed from workouts,
+ * optionally excluding a set of workout IDs (used to compute the "pre-upload"
+ * baseline so the caller can detect a PR set by this upload).
+ *
+ * - fastestSplitPaceSecMi: MIN(split_pace) across qualifying splits (>=0.95mi, >0 pace).
+ *   0 if the user has no qualifying splits.
+ * - mostMilesInOneDay: MAX(SUM(distance) GROUP BY local_date). 0 if no workouts.
+ */
+export async function computePersonalRecords(
+	userId: string,
+	excludeWorkoutIds: string[] = []
+): Promise<{ fastestSplitPaceSecMi: number; mostMilesInOneDay: number }> {
+	const exclude = excludeWorkoutIds.length > 0;
+
+	const paceQuery = exclude
+		? `SELECT MIN(s.split_pace)::text AS min_pace
+		   FROM workout_splits s
+		   JOIN workouts w ON w.workout_id = s.workout_id
+		   WHERE w.user_id = $1
+		       AND s.split_pace > 0
+		       AND s.split_distance >= 0.95
+		       AND NOT (w.workout_id = ANY($2::text[]))`
+		: `SELECT MIN(s.split_pace)::text AS min_pace
+		   FROM workout_splits s
+		   JOIN workouts w ON w.workout_id = s.workout_id
+		   WHERE w.user_id = $1 AND s.split_pace > 0 AND s.split_distance >= 0.95`;
+
+	const dayQuery = exclude
+		? `SELECT COALESCE(MAX(day_total), 0)::text AS best_day FROM (
+				SELECT SUM(distance) AS day_total FROM workouts
+				WHERE user_id = $1 AND NOT (workout_id = ANY($2::text[]))
+				GROUP BY local_date
+			) t`
+		: `SELECT COALESCE(MAX(day_total), 0)::text AS best_day FROM (
+				SELECT SUM(distance) AS day_total FROM workouts
+				WHERE user_id = $1 GROUP BY local_date
+			) t`;
+
+	const params: any[] = exclude ? [userId, excludeWorkoutIds] : [userId];
+
+	const [paceRow, bestDayRow] = await Promise.all([
+		db.query<{ min_pace: string | null }>(paceQuery, params),
+		db.query<{ best_day: string | null }>(dayQuery, params)
+	]);
+
+	const fastestSplitPaceSecMi = paceRow[0]?.min_pace ? parseFloat(paceRow[0].min_pace) : 0;
+	const mostMilesInOneDay = parseFloat(bestDayRow[0]?.best_day ?? '0') || 0;
+	return { fastestSplitPaceSecMi, mostMilesInOneDay };
 }

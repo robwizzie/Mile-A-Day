@@ -25,13 +25,39 @@ export async function canHype(senderId: string): Promise<boolean> {
 	return count < HYPE_DAILY_LIMIT;
 }
 
+export interface HypeContext {
+	contextType: 'mile' | 'badge' | 'pr';
+	contextId: string;
+	contextLabel: string;
+}
+
 /**
  * Atomically insert a hype_log row only if the sender is still under the
- * daily limit. Returns the new row's id, or null if the limit was reached.
- * The single statement closes the race between concurrent senders that a
- * pre-check + insert would leave open.
+ * daily limit. Optional context describes what was hyped (mile/badge/pr) and
+ * enables dedupe via the partial unique index on (sender, target, ctx_type, ctx_id).
+ * Returns the new row's id, or null if the limit was reached.
+ *
+ * Caller is responsible for the dedupe pre-check via `hasHypedContext`; this
+ * function will surface a PG unique violation otherwise.
  */
-export async function logHypeIfUnderLimit(senderId: string, targetId: string): Promise<{ id: string } | null> {
+export async function logHypeIfUnderLimit(
+	senderId: string,
+	targetId: string,
+	context?: HypeContext
+): Promise<{ id: string } | null> {
+	if (context) {
+		const rows = await db.query<{ id: string }>(
+			`INSERT INTO hype_log (sender_id, target_id, context_type, context_id, context_label)
+			SELECT $1, $2, $3, $4, $5
+			WHERE (
+				SELECT COUNT(*) FROM hype_log
+				WHERE sender_id = $1 AND created_at > NOW() - INTERVAL '24 hours'
+			) < ${HYPE_DAILY_LIMIT}
+			RETURNING id`,
+			[senderId, targetId, context.contextType, context.contextId, context.contextLabel]
+		);
+		return rows[0] ?? null;
+	}
 	const rows = await db.query<{ id: string }>(
 		`INSERT INTO hype_log (sender_id, target_id)
 		SELECT $1, $2
@@ -43,6 +69,27 @@ export async function logHypeIfUnderLimit(senderId: string, targetId: string): P
 		[senderId, targetId]
 	);
 	return rows[0] ?? null;
+}
+
+/**
+ * Returns true if the sender has already hyped this exact context.
+ * Only meaningful when context is provided; legacy NULL-context hypes are not deduped.
+ */
+export async function hasHypedContext(
+	senderId: string,
+	targetId: string,
+	contextType: string,
+	contextId: string
+): Promise<boolean> {
+	const rows = await db.query<{ exists: boolean }>(
+		`SELECT EXISTS (
+			SELECT 1 FROM hype_log
+			WHERE sender_id = $1 AND target_id = $2
+				AND context_type = $3 AND context_id = $4
+		) AS exists`,
+		[senderId, targetId, contextType, contextId]
+	);
+	return rows[0]?.exists === true;
 }
 
 /**

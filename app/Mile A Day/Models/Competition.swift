@@ -593,6 +593,14 @@ struct InAppNotification: Codable, Identifiable {
     let data: [String: String]?
     let is_read: Bool
     let created_at: String
+
+    // Server-computed hype affordance fields. Null/absent when the row isn't hype-able
+    // or when responding from an older backend that doesn't yet populate them.
+    let hype_target_user_id: String?
+    let hype_context_type: String?
+    let hype_context_id: String?
+    let hype_context_label: String?
+    let is_hyped: Bool?
 }
 
 struct InAppNotificationResponse: Codable {

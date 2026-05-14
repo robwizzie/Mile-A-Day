@@ -11,12 +11,18 @@ import {
 	getBestMilesDay,
 	getBestSplit,
 	getTodayMiles,
-	updateWorkout as updateWorkoutDb
+	updateWorkout as updateWorkoutDb,
+	computePersonalRecords
 } from '../services/workoutService.js';
 import { checkRaceCompletions } from '../services/competitionService.js';
 import { notifyFriendsOfMileCompletion, checkCompetitionMilestones, checkLeadChanges } from '../services/notificationService.js';
 import { evaluateWorkoutRewards } from '../services/badgeService.js';
-import { fireBadgeEarnedPush, fanOutFriendBadgePush, fanOutFriendChallengePush } from '../services/pushNotificationService.js';
+import {
+	fireBadgeEarnedPush,
+	fanOutFriendBadgePush,
+	fanOutFriendChallengePush,
+	fanOutFriendPersonalBestPush
+} from '../services/pushNotificationService.js';
 
 export async function uploadWorkouts(req: Request, res: Response) {
 	if (!hasRequiredKeys(['userId'], req, res)) return;
@@ -85,6 +91,34 @@ export async function uploadWorkouts(req: Request, res: Response) {
 				console.error('Error fanning out friend_challenge_completed:', err.message)
 			);
 		}
+
+		// PR detection: compare pre-upload PRs (excluding this batch) to post-upload PRs.
+		// Fan out one notification per dimension that improved. Fire-and-forget.
+		(async () => {
+			try {
+				const [pre, post] = await Promise.all([
+					computePersonalRecords(userId, uploadedWorkoutIds),
+					computePersonalRecords(userId)
+				]);
+				const lastWorkoutId = uploadedWorkoutIds[uploadedWorkoutIds.length - 1] ?? '';
+
+				if (
+					post.fastestSplitPaceSecMi > 0 &&
+					(pre.fastestSplitPaceSecMi === 0 || post.fastestSplitPaceSecMi < pre.fastestSplitPaceSecMi)
+				) {
+					fanOutFriendPersonalBestPush(userId, 'fastest_mile', post.fastestSplitPaceSecMi, lastWorkoutId).catch(err =>
+						console.error('Error fanning out friend_personal_best (fastest_mile):', err.message)
+					);
+				}
+				if (post.mostMilesInOneDay > pre.mostMilesInOneDay) {
+					fanOutFriendPersonalBestPush(userId, 'most_miles_day', post.mostMilesInOneDay, lastWorkoutId).catch(err =>
+						console.error('Error fanning out friend_personal_best (most_miles_day):', err.message)
+					);
+				}
+			} catch (err: any) {
+				console.error('Error detecting personal bests:', err.message);
+			}
+		})();
 
 		res.status(200).json({
 			message: 'Successfully uploaded workouts.',
