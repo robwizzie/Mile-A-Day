@@ -46,5 +46,26 @@ class AppDelegate: NSObject, UIApplicationDelegate {
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
         print("[AppDelegate] Failed to register for remote notifications: \(error.localizedDescription)")
     }
+
+    func application(_ application: UIApplication,
+                     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+                     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        // Only handle our background_sync silent pushes here. Other push types
+        // are visible alerts and are handled by UNUserNotificationCenterDelegate.
+        let aps = userInfo["aps"] as? [String: Any]
+        let contentAvailable = (aps?["content-available"] as? Int) ?? 0
+        let type = userInfo["type"] as? String
+
+        guard contentAvailable == 1, type == "background_sync" else {
+            completionHandler(.noData)
+            return
+        }
+
+        print("[AppDelegate] Received background_sync silent push")
+        Task {
+            await MADBackgroundService.shared.performBackgroundSync(reason: .silentPush)
+            completionHandler(.newData)
+        }
+    }
 }
 
