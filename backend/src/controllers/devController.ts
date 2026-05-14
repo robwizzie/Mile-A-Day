@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
 import { SignJWT } from 'jose';
 import { resolveExpiredCompetitions } from '../services/competitionService.js';
-import { sendPush } from '../services/pushNotificationService.js';
+import { sendPush, sendSilentPushToUser } from '../services/pushNotificationService.js';
+import { runSilentSyncPushFanout } from '../cron/silentSyncCron.js';
 
 export async function generateTestToken(req: Request, res: Response) {
 	const env = process.env.NODE_ENV;
@@ -86,5 +87,36 @@ export async function triggerCompetitionCron(_req: Request, res: Response) {
 		return res.json({ success: true });
 	} catch (err: any) {
 		return res.status(500).json({ error: err.message });
+	}
+}
+
+export async function triggerSilentSyncFanout(req: Request, res: Response): Promise<void> {
+	if (process.env.NODE_ENV === 'production') {
+		res.status(403).json({ error: 'Not available in production' });
+		return;
+	}
+	try {
+		const result = await runSilentSyncPushFanout();
+		res.json({ success: true, ...result });
+	} catch (err: any) {
+		res.status(500).json({ success: false, error: err.message });
+	}
+}
+
+export async function triggerSilentSyncForUser(req: Request, res: Response): Promise<void> {
+	if (process.env.NODE_ENV === 'production') {
+		res.status(403).json({ error: 'Not available in production' });
+		return;
+	}
+	const userId = req.params.userId;
+	if (!userId) {
+		res.status(400).json({ success: false, error: 'userId required' });
+		return;
+	}
+	try {
+		const pushes = await sendSilentPushToUser(userId, 'background_sync');
+		res.json({ success: true, userId, pushes });
+	} catch (err: any) {
+		res.status(500).json({ success: false, error: err.message });
 	}
 }

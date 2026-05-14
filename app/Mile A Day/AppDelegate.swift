@@ -14,6 +14,16 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // Ensure the notification delegate is set before the system delivers
         // a pending notification response on cold launch.
         _ = MADNotificationService.shared
+
+        // If iOS launched us in the background (no UI scene), kick off a sync immediately.
+        // For UI launches, the scene lifecycle in Mile_A_DayApp handles the sync.
+        if application.applicationState == .background {
+            print("[AppDelegate] Launched in background — triggering performBackgroundSync")
+            Task {
+                await MADBackgroundService.shared.performBackgroundSync(reason: .backgroundLaunch)
+            }
+        }
+
         return true
     }
 
@@ -35,6 +45,27 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      didFailToRegisterForRemoteNotificationsWithError error: Error) {
         print("[AppDelegate] Failed to register for remote notifications: \(error.localizedDescription)")
+    }
+
+    func application(_ application: UIApplication,
+                     didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+                     fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+        // Only handle our background_sync silent pushes here. Other push types
+        // are visible alerts and are handled by UNUserNotificationCenterDelegate.
+        let aps = userInfo["aps"] as? [String: Any]
+        let contentAvailable = (aps?["content-available"] as? Int) ?? 0
+        let type = userInfo["type"] as? String
+
+        guard contentAvailable == 1, type == "background_sync" else {
+            completionHandler(.noData)
+            return
+        }
+
+        print("[AppDelegate] Received background_sync silent push")
+        Task {
+            let didWork = await MADBackgroundService.shared.performBackgroundSync(reason: .silentPush)
+            completionHandler(didWork ? .newData : .noData)
+        }
     }
 }
 
