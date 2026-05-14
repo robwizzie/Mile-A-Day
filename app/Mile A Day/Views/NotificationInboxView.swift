@@ -10,6 +10,8 @@ struct NotificationInboxView: View {
     @State private var isLoading = true
     @State private var hasMore = true
     @State private var selectedCompetition: Competition?
+    @State private var hypedRowIds: Set<String> = []
+    @State private var hypeToast: String?
 
     var body: some View {
         ZStack {
@@ -88,6 +90,68 @@ struct NotificationInboxView: View {
                 CompetitionDetailView(competition: competition, competitionService: competitionService)
             }
         }
+        .overlay(alignment: .top) {
+            if let msg = hypeToast {
+                Text(msg)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(Color.black.opacity(0.85)))
+                    .padding(.top, MADTheme.Spacing.md)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.3), value: hypeToast)
+    }
+
+    private func showHypeToast(_ message: String) {
+        hypeToast = message
+        Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            await MainActor.run { hypeToast = nil }
+        }
+    }
+
+    private func canShowHypeButton(_ notification: InAppNotification) -> Bool {
+        guard notification.hype_target_user_id != nil else { return false }
+        if notification.is_hyped == true { return false }
+        if hypedRowIds.contains(notification.id) { return false }
+        return true
+    }
+
+    private func performHype(_ notification: InAppNotification) {
+        guard
+            let targetId = notification.hype_target_user_id,
+            let ctxType = notification.hype_context_type,
+            let ctxId = notification.hype_context_id,
+            let ctxLabel = notification.hype_context_label
+        else { return }
+
+        // Optimistic hide.
+        hypedRowIds.insert(notification.id)
+
+        Task {
+            do {
+                _ = try await HypeService.sendHype(
+                    targetUserId: targetId,
+                    context: HypeContext(contextType: ctxType, contextId: ctxId, contextLabel: ctxLabel)
+                )
+                // Success — keep hidden.
+            } catch APIError.conflict {
+                // Already hyped server-side; keep hidden, no toast.
+            } catch APIError.rateLimited(let msg) {
+                await MainActor.run {
+                    hypedRowIds.remove(notification.id)
+                    showHypeToast(msg.isEmpty ? "You're out of hypes today" : msg)
+                }
+            } catch {
+                await MainActor.run {
+                    hypedRowIds.remove(notification.id)
+                    showHypeToast("Couldn't send hype")
+                }
+            }
+        }
     }
 
     // MARK: - Notification Row
@@ -160,6 +224,24 @@ struct NotificationInboxView: View {
                 }
 
                 Spacer()
+
+                if canShowHypeButton(notification) {
+                    Button {
+                        performHype(notification)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("🔥")
+                                .font(.system(size: 13))
+                            Text("Hype")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundColor(.orange)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color.orange.opacity(0.18)))
+                    }
+                    .buttonStyle(.borderless)
+                }
 
                 if !notification.is_read {
                     Circle()
