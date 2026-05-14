@@ -63,8 +63,8 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
         print("[AppDelegate] Received background_sync silent push")
         Task {
-            await MADBackgroundService.shared.performBackgroundSync(reason: .silentPush)
-            completionHandler(.newData)
+            let didWork = await MADBackgroundService.shared.performBackgroundSync(reason: .silentPush)
+            completionHandler(didWork ? .newData : .noData)
         }
     }
 }

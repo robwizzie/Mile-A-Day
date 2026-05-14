@@ -155,17 +155,22 @@ final class MADBackgroundService: NSObject, ObservableObject {
 
     /// Unified entry point for background sync triggered by HealthKit, BGTask, silent push, or background launch.
     /// Caller is responsible for any iOS completion handler (BGTask, fetchCompletionHandler, etc.).
+    /// Returns `true` if sync work was attempted, `false` if the call was skipped (e.g., user not authenticated).
+    /// Callers reporting to iOS (`fetchCompletionHandler`) should map this to `.newData` / `.noData`
+    /// so the system can tune future background wake-up frequency.
     @MainActor
-    func performBackgroundSync(reason: BackgroundSyncReason) async {
+    @discardableResult
+    func performBackgroundSync(reason: BackgroundSyncReason) async -> Bool {
         print("[MADBackgroundService] performBackgroundSync(reason: \(reason))")
 
         // Only run if user has authenticated.
         guard UserDefaults.standard.bool(forKey: "MAD_IsAuthenticated") else {
             print("[MADBackgroundService] Skipping sync — user not authenticated")
-            return
+            return false
         }
 
         await performBackgroundWork()
+        return true
     }
 
     enum BackgroundSyncReason: String {
