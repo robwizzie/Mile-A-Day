@@ -25,6 +25,7 @@ export interface UserBadge {
 	isHidden: boolean;
 	earnedAt: string;
 	isNew: boolean;
+	pinSlot: number | null;
 	triggeringWorkoutId: string | null;
 	progressSnapshot: Record<string, unknown> | null;
 }

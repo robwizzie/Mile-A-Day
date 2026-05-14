@@ -257,7 +257,7 @@ struct DashboardView: View {
 
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if userManager.hasNewBadges {
-                    NavigationLink(destination: BadgesView(userManager: userManager, initialBadge: nil)) {
+                    NavigationLink(destination: BadgesView(userManager: userManager, initialBadge: nil, initialFilter: .new)) {
                         Image(systemName: "trophy.fill")
                             .foregroundStyle(.yellow)
                     }

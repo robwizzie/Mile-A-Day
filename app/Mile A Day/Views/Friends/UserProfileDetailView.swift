@@ -4,10 +4,13 @@ import SwiftUI
 struct UserProfileDetailView: View {
     let user: BackendUser
     let friendService: FriendService
+    @ObservedObject private var userManager = UserManager.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var userStats: UserStats?
     @State private var userBadges: [Badge] = []
+    @State private var catalogBadges: [Badge] = []
+    @State private var hasLoadedBadges = false
     @State private var friendWorkouts: [FriendWorkout] = []
     @State private var isLoadingStats = false
     @State private var isPrivate = false
@@ -44,9 +47,14 @@ struct UserProfileDetailView: View {
                         FriendTodayChallengeRow(today: today)
                     }
 
-                    // Badges Section
-                    if !isPrivate && !userBadges.isEmpty {
-                        FriendBadgesView(badges: userBadges)
+                    // Badges Section — pinned showcase + owned/not-owned compare grid.
+                    if !isPrivate && hasLoadedBadges && !isCurrentUser() && !catalogBadges.isEmpty {
+                        FriendBadgeCompareView(
+                            ownerDisplayName: user.username ?? user.displayName,
+                            earnedBadges: userBadges,
+                            catalogBadges: catalogBadges,
+                            viewerEarnedBadgeIds: Set(userManager.currentUser.badges.filter { !$0.isLocked }.map { $0.id })
+                        )
                     }
 
                     // Recent Workouts Section
@@ -89,6 +97,27 @@ struct UserProfileDetailView: View {
         }
         .task {
             await loadFriendTodayChallenge()
+        }
+        .task {
+            await loadBadges()
+        }
+    }
+
+    private func loadBadges() async {
+        guard !isCurrentUser() else { return }
+        async let earnedTask = BadgeAPIService.fetchUserBadges(userId: user.user_id)
+        async let catalogTask = BadgeAPIService.fetchCatalog()
+        do {
+            let earnedDtos = try await earnedTask
+            let catalogDtos = try await catalogTask
+            await MainActor.run {
+                self.userBadges = earnedDtos.map { $0.toBadge() }
+                self.catalogBadges = catalogDtos.map { $0.toLockedBadge() }
+                self.hasLoadedBadges = true
+            }
+        } catch {
+            print("[UserProfileDetailView] loadBadges failed: \(error)")
+            await MainActor.run { self.hasLoadedBadges = true }
         }
     }
 
@@ -267,7 +296,6 @@ struct UserProfileDetailView: View {
 
                     friendWorkouts = workouts
                     hasLoadedInitial = true
-                    userBadges = []
                     isLoadingStats = false
                 }
 

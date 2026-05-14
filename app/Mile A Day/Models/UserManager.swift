@@ -321,6 +321,45 @@ class UserManager: ObservableObject {
         return currentUser.badges.contains { $0.isNew }
     }
 
+    /// Pinned badges for the local user's profile showcase, sorted by pin slot ascending.
+    var pinnedBadges: [Badge] {
+        currentUser.badges
+            .filter { $0.pinSlot != nil }
+            .sorted { ($0.pinSlot ?? 0) < ($1.pinSlot ?? 0) }
+    }
+
+    /// Replace the user's pinned badges. `badgeIds` order becomes pin slot 0..2 (max 3).
+    /// Optimistically updates local state, then pushes to the server.
+    @MainActor
+    func setPinnedBadges(_ badgeIds: [String]) async {
+        #if !os(watchOS)
+        guard let userId = currentUser.backendUserId else { return }
+        let clamped = Array(badgeIds.prefix(3))
+
+        let originalBadges = currentUser.badges
+        applyPinSlots(clamped)
+        saveUserData()
+
+        do {
+            let dtos = try await BadgeAPIService.setPinnedBadges(userId: userId, badgeIds: clamped)
+            let fresh = dtos.map { $0.toBadge() }
+            currentUser.badges = fresh
+            saveUserData()
+        } catch {
+            print("[UserManager] setPinnedBadges failed: \(error)")
+            currentUser.badges = originalBadges
+            saveUserData()
+        }
+        #endif
+    }
+
+    private func applyPinSlots(_ badgeIds: [String]) {
+        let slotByBadgeId = Dictionary(uniqueKeysWithValues: badgeIds.enumerated().map { ($1, $0) })
+        for i in 0..<currentUser.badges.count {
+            currentUser.badges[i].pinSlot = slotByBadgeId[currentUser.badges[i].id]
+        }
+    }
+
     /// Fetch the user's earned badges from the backend. Server is authoritative.
     /// Safe to call on every workout-upload completion and on Badges view appear.
     func refreshBadgesFromServer() async {

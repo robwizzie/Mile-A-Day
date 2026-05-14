@@ -624,6 +624,8 @@ struct Badge: Identifiable, Codable {
     var dateAwarded: Date = Date()
     var isNew: Bool = true
     var isLocked: Bool = false
+    var pinSlot: Int? = nil // 0..2 when pinned to profile showcase, nil otherwise
+
 
     /// Extracts the numeric requirement from the badge ID (e.g. "miles_500" → 500)
     var numericValue: Int {

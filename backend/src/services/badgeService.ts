@@ -20,7 +20,7 @@ export async function getCatalog(): Promise<Badge[]> {
 export async function getUserBadges(userId: string): Promise<UserBadge[]> {
 	const rows = await db.query<any>(
 		`SELECT
-			ub.badge_id, ub.earned_at, ub.is_new, ub.triggering_workout_id, ub.progress_snapshot,
+			ub.badge_id, ub.earned_at, ub.is_new, ub.pin_slot, ub.triggering_workout_id, ub.progress_snapshot,
 			b.category, b.name, b.description, b.icon, b.rarity, b.requirement, b.is_hidden
 		FROM user_badges ub
 		JOIN badges b ON b.badge_id = ub.badge_id
@@ -29,6 +29,45 @@ export async function getUserBadges(userId: string): Promise<UserBadge[]> {
 		[userId]
 	);
 	return rows.map(rowToUserBadge);
+}
+
+const MAX_PINNED_BADGES = 3;
+
+export async function setPinnedBadges(userId: string, badgeIds: string[]): Promise<UserBadge[]> {
+	const ids = badgeIds.slice(0, MAX_PINNED_BADGES);
+
+	if (ids.length > 0) {
+		const earnedRows = await db.query<{ badge_id: string }>(
+			`SELECT badge_id FROM user_badges WHERE user_id = $1 AND badge_id = ANY($2::text[])`,
+			[userId, ids]
+		);
+		const earnedSet = new Set(earnedRows.map(r => r.badge_id));
+		const missing = ids.filter(id => !earnedSet.has(id));
+		if (missing.length > 0) {
+			throw new BadgePinError(`Cannot pin un-earned badge(s): ${missing.join(', ')}`);
+		}
+	}
+
+	const queries = [
+		{
+			query: `UPDATE user_badges SET pin_slot = NULL WHERE user_id = $1 AND pin_slot IS NOT NULL`,
+			params: [userId]
+		},
+		...ids.map((badgeId, slot) => ({
+			query: `UPDATE user_badges SET pin_slot = $3 WHERE user_id = $1 AND badge_id = $2`,
+			params: [userId, badgeId, slot]
+		}))
+	];
+	await db.transaction(queries);
+
+	return getUserBadges(userId);
+}
+
+export class BadgePinError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'BadgePinError';
+	}
 }
 
 export async function markBadgesViewed(userId: string): Promise<number> {
@@ -131,7 +170,10 @@ export async function evaluateForUser(userId: string, newWorkoutIds: string[]): 
 		if (earned.has(badge.badgeId)) continue;
 		const result = evaluatePredicate(badge, aggregates);
 		if (result.earned) {
-			toInsert.push({ badgeId: badge.badgeId, aggregateOnly: result.aggregateOnly });
+			toInsert.push({
+				badgeId: badge.badgeId,
+				aggregateOnly: result.aggregateOnly
+			});
 		}
 	}
 
@@ -150,7 +192,7 @@ export async function evaluateForUser(userId: string, newWorkoutIds: string[]): 
 	const insertedIds = toInsert.map(t => t.badgeId);
 	const newlyEarnedBadges = await db.query<any>(
 		`SELECT
-			ub.badge_id, ub.earned_at, ub.is_new, ub.triggering_workout_id, ub.progress_snapshot,
+			ub.badge_id, ub.earned_at, ub.is_new, ub.pin_slot, ub.triggering_workout_id, ub.progress_snapshot,
 			b.category, b.name, b.description, b.icon, b.rarity, b.requirement, b.is_hidden
 		FROM user_badges ub
 		JOIN badges b ON b.badge_id = ub.badge_id
@@ -235,6 +277,7 @@ function rowToUserBadge(row: any): UserBadge {
 		isHidden: row.is_hidden,
 		earnedAt: row.earned_at instanceof Date ? row.earned_at.toISOString() : String(row.earned_at),
 		isNew: row.is_new,
+		pinSlot: row.pin_slot ?? null,
 		triggeringWorkoutId: row.triggering_workout_id,
 		progressSnapshot: row.progress_snapshot
 	};
