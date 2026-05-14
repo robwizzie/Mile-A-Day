@@ -540,6 +540,7 @@ export async function fanOutFriendBadgePush(senderId: string, badge: BadgeEarned
 			data: {
 				sender_id: senderId,
 				badge_id: badge.badgeId,
+				badge_name: badge.name,
 				rarity: badge.rarity
 			}
 		}).catch(err => console.error('[Push] friend_badge_earned send failed:', err.message));
