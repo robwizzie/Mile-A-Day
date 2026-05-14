@@ -44,7 +44,7 @@ struct HelpAndSupportView: View {
 
                         faqItem(
                             question: "What are badges and how do I earn them?",
-                            answer: "Badges are achievements you earn by hitting milestones — streak counts, total miles, pace records, and more. Some badges are hidden and unlock when you discover them! Check your profile to see all your earned badges."
+                            answer: "Badges are achievements you earn by hitting milestones — streak counts, total miles, pace records, and more. Check your profile to see all your earned badges."
                         )
 
                         faqItem(

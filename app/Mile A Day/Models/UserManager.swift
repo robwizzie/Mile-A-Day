@@ -397,6 +397,7 @@ class UserManager: ObservableObject {
 
     // MARK: - Yearly milestone
 
+    #if !os(watchOS)
     /// Persists the highest year-boundary streak we've already celebrated (e.g. 365, 730, 1095…).
     /// `-1` is the uninitialized sentinel so existing users with mid-year streaks aren't
     /// retroactively flooded with year-1/2/3 animations on first launch with this feature.
@@ -438,6 +439,7 @@ class UserManager: ObservableObject {
     private func suppressedBadgeIDsForYearly() -> Set<String> {
         ["streak_365", "streak_730"]
     }
+    #endif
 
     /// Legacy shim — kept so existing callers compile. Delegates to the server-side fetch.
     /// The local `checkForMilestoneBadges()` evaluator is no longer used.

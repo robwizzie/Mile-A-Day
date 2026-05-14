@@ -1,5 +1,5 @@
 import { PostgresService } from './DbService.js';
-import { getNotificationPreferences } from './notificationSettingsService.js';
+import { getNotificationPreferences, shouldSendNotification } from './notificationSettingsService.js';
 import fs from 'fs';
 import path from 'path';
 import http2 from 'http2';
@@ -80,6 +80,7 @@ export type NotificationType =
 	| 'competition_milestone'
 	| 'streak_broken'
 	| 'personal_best'
+	| 'friend_personal_best'
 	| 'lead_change'
 	| 'clash_tie'
 	| 'badge_earned'
@@ -305,6 +306,95 @@ export async function registerDeviceToken(userId: string, deviceToken: string): 
 
 export async function unregisterDeviceToken(userId: string, deviceToken: string): Promise<void> {
 	await db.query('DELETE FROM device_tokens WHERE user_id = $1 AND device_token = $2', [userId, deviceToken]);
+}
+
+// ─── Silent (background) pushes ─────────────────────────────────────
+
+/**
+ * APNs silent push. Wakes the app to do background work; renders nothing.
+ * Do not call directly — use sendSilentPushToUser.
+ */
+function sendSilentPushToDevice(deviceToken: string, type: string, data: Record<string, string> = {}): Promise<boolean> {
+	return new Promise(resolve => {
+		const token = getApnsToken();
+		if (!token || !APNS_BUNDLE_ID) {
+			console.warn('[Push] APNs not configured, skipping silent push');
+			resolve(false);
+			return;
+		}
+
+		const apnsPayload = JSON.stringify({
+			aps: { 'content-available': 1 },
+			type,
+			data
+		});
+
+		const client = http2.connect(APNS_HOST);
+
+		client.on('error', err => {
+			console.error('[Push] Silent HTTP/2 connection error:', err.message);
+			client.close();
+			resolve(false);
+		});
+
+		const req = client.request({
+			':method': 'POST',
+			':path': `/3/device/${deviceToken}`,
+			'authorization': `bearer ${token}`,
+			'apns-topic': APNS_BUNDLE_ID,
+			'apns-push-type': 'background',
+			'apns-priority': '5',
+			'content-type': 'application/json'
+		});
+
+		let responseData = '';
+		let statusCode = 0;
+
+		req.on('response', headers => {
+			statusCode = headers[':status'] as number;
+		});
+
+		req.on('data', chunk => {
+			responseData += chunk;
+		});
+
+		req.on('end', () => {
+			client.close();
+			if (statusCode === 200) {
+				resolve(true);
+			} else {
+				console.error(`[Push] Silent APNs error ${statusCode}: ${responseData}`);
+				if (statusCode === 410 || (statusCode === 400 && responseData.includes('BadDeviceToken'))) {
+					removeInvalidToken(deviceToken).catch(() => {});
+				}
+				resolve(false);
+			}
+		});
+
+		req.on('error', err => {
+			console.error('[Push] Silent request error:', err.message);
+			client.close();
+			resolve(false);
+		});
+
+		req.write(apnsPayload);
+		req.end();
+	});
+}
+
+/**
+ * Send a silent (content-available) push to every registered device of a user.
+ * Skips throttling, quiet hours, in-app inbox storage, and notification_log writes.
+ * These pushes are invisible to the user and have no per-day cap concern.
+ */
+export async function sendSilentPushToUser(userId: string, type: string, data: Record<string, string> = {}): Promise<number> {
+	const tokens = await db.query<{ device_token: string }>('SELECT device_token FROM device_tokens WHERE user_id = $1', [
+		userId
+	]);
+	if (tokens.length === 0) return 0;
+
+	const results = await Promise.all(tokens.map(({ device_token }) => sendSilentPushToDevice(device_token, type, data)));
+	return results.filter(Boolean).length;
 }
 
 // ─── Quiet Hours & Batching ──────────────────────────────────────────
@@ -539,9 +629,71 @@ export async function fanOutFriendBadgePush(senderId: string, badge: BadgeEarned
 			data: {
 				sender_id: senderId,
 				badge_id: badge.badgeId,
+				badge_name: badge.name,
 				rarity: badge.rarity
 			}
 		}).catch(err => console.error('[Push] friend_badge_earned send failed:', err.message));
+	}
+}
+
+function formatPersonalBestBody(prType: 'fastest_mile' | 'most_miles_day', newValue: number): string {
+	if (prType === 'fastest_mile') {
+		const totalSeconds = Math.round(newValue);
+		const minutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+		const paceStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+		return `Fastest mile — ${paceStr} pace`;
+	}
+	const milesStr = newValue >= 10 ? newValue.toFixed(1) : newValue.toFixed(2);
+	return `Most miles in a day — ${milesStr} mi`;
+}
+
+function personalBestLabel(prType: 'fastest_mile' | 'most_miles_day', newValue: number): string {
+	if (prType === 'fastest_mile') {
+		const totalSeconds = Math.round(newValue);
+		const minutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+		return `fastest mile (${minutes}:${seconds.toString().padStart(2, '0')})`;
+	}
+	const milesStr = newValue >= 10 ? newValue.toFixed(1) : newValue.toFixed(2);
+	return `most miles in a day (${milesStr} mi)`;
+}
+
+/**
+ * Fan out a personal-best to every accepted friend. No throttle — each PR
+ * dimension is its own event, and a single workout breaking both PRs should
+ * produce two distinct inbox rows so the viewer can hype each independently.
+ */
+export async function fanOutFriendPersonalBestPush(
+	senderId: string,
+	prType: 'fastest_mile' | 'most_miles_day',
+	newValue: number,
+	workoutId: string
+): Promise<void> {
+	const friendIds = await getAcceptedFriendIds(senderId);
+	if (friendIds.length === 0) return;
+	const sender = await getSenderDisplayName(senderId);
+
+	const title = `${sender} set a new personal best`;
+	const body = formatPersonalBestBody(prType, newValue);
+	const label = personalBestLabel(prType, newValue);
+
+	for (const friendId of friendIds) {
+		const allowed = await shouldSendNotification(friendId, senderId, 'friend_personal_best');
+		if (!allowed) continue;
+
+		sendPush(friendId, {
+			title,
+			body,
+			type: 'friend_personal_best',
+			data: {
+				sender_id: senderId,
+				pr_type: prType,
+				pr_label: label,
+				new_value: String(newValue),
+				workout_id: workoutId
+			}
+		}).catch(err => console.error('[Push] friend_personal_best send failed:', err.message));
 	}
 }
 

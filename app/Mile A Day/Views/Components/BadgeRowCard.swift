@@ -17,7 +17,7 @@ struct BadgeRowCard: View {
             return "bolt.fill"
         } else if badge.id.starts(with: "daily_") {
             return "figure.run.circle.fill"
-        } else if badge.id.starts(with: "hidden_") || badge.id.starts(with: "secret_") || badge.id.starts(with: "special_") {
+        } else if badge.id.starts(with: "special_") {
             return "sparkles"
         } else {
             return "star.fill"

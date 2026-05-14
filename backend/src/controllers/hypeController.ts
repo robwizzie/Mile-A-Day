@@ -10,7 +10,9 @@ import {
 	logHypeIfUnderLimit,
 	getDailyHypeCount,
 	getHypeResetsAt,
+	hasHypedContext,
 	HYPE_DAILY_LIMIT,
+	HypeContext
 } from '../services/hypeService.js';
 
 const db = PostgresService.getInstance();
@@ -47,9 +49,26 @@ async function isFriendOrCoParticipant(senderId: string, targetId: string): Prom
 	return shareActiveCompetition(senderId, targetId);
 }
 
+function buildHypeBackBody(senderName: string, context: HypeContext | undefined): string {
+	if (!context) {
+		return `@${senderName} just hyped up your recent workout!`;
+	}
+	switch (context.contextType) {
+		case 'mile':
+			return `${senderName} hyped your daily mile 🔥`;
+		case 'badge':
+			return `${senderName} hyped you earning '${context.contextLabel}' 🔥`;
+		case 'pr':
+			return `${senderName} hyped your new ${context.contextLabel} 🔥`;
+	}
+}
+
 export async function sendHype(req: AuthenticatedRequest, res: Response) {
 	const senderId = req.userId!;
 	const targetUserId = req.body?.target_user_id;
+	const rawContextType = req.body?.context_type;
+	const rawContextId = req.body?.context_id;
+	const rawContextLabel = req.body?.context_label;
 
 	try {
 		if (!targetUserId || typeof targetUserId !== 'string') {
@@ -59,10 +78,32 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
 			return res.status(400).json({ error: "You can't hype yourself" });
 		}
 
+		// Parse optional context. All three must be present together, or all absent.
+		let context: HypeContext | undefined;
+		const anyCtx = rawContextType || rawContextId || rawContextLabel;
+		const allCtx = rawContextType && rawContextId && rawContextLabel;
+		if (anyCtx && !allCtx) {
+			return res.status(400).json({
+				error: 'context_type, context_id, and context_label must be provided together'
+			});
+		}
+		if (allCtx) {
+			if (!['mile', 'badge', 'pr'].includes(rawContextType)) {
+				return res.status(400).json({
+					error: "context_type must be one of 'mile' | 'badge' | 'pr'"
+				});
+			}
+			context = {
+				contextType: rawContextType,
+				contextId: String(rawContextId),
+				contextLabel: String(rawContextLabel)
+			};
+		}
+
 		const allowed = await isFriendOrCoParticipant(senderId, targetUserId);
 		if (!allowed) {
 			return res.status(403).json({
-				error: 'You can only hype friends or people in your active competitions',
+				error: 'You can only hype friends or people in your active competitions'
 			});
 		}
 
@@ -71,13 +112,21 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
 			return res.status(400).json({ error: "This user hasn't completed their mile today" });
 		}
 
+		// Context-aware dedupe pre-check (legacy no-context hypes skip this).
+		if (context) {
+			const alreadyHyped = await hasHypedContext(senderId, targetUserId, context.contextType, context.contextId);
+			if (alreadyHyped) {
+				return res.status(409).json({ error: 'already_hyped' });
+			}
+		}
+
 		// Atomic: insert iff still under the limit. Closes the concurrent-sender race.
-		const inserted = await logHypeIfUnderLimit(senderId, targetUserId);
+		const inserted = await logHypeIfUnderLimit(senderId, targetUserId, context);
 		if (!inserted) {
 			return res.status(429).json({
 				error: `You've used all ${HYPE_DAILY_LIMIT} hypes for the day`,
 				hypes_remaining: 0,
-				resets_at: await getHypeResetsAt(senderId),
+				resets_at: await getHypeResetsAt(senderId)
 			});
 		}
 
@@ -87,17 +136,23 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
 		if (shouldSend) {
 			const sender = await getUser({ userId: senderId });
 			const senderName = sender?.username ?? 'Someone';
+			const body = buildHypeBackBody(senderName, context);
+			const pushData: Record<string, string> = { user_id: senderId };
+			if (context) {
+				pushData.context_type = context.contextType;
+				pushData.context_label = context.contextLabel;
+			}
 			await sendPush(targetUserId, {
 				title: '🔥 You got hyped!',
-				body: `@${senderName} just hyped up your recent workout!`,
+				body,
 				type: 'hype_received',
-				data: { user_id: senderId },
+				data: pushData
 			});
 		}
 
 		res.status(200).json({
 			message: 'Hype sent',
-			hypes_remaining: Math.max(0, HYPE_DAILY_LIMIT - countAfter),
+			hypes_remaining: Math.max(0, HYPE_DAILY_LIMIT - countAfter)
 		});
 	} catch (error: any) {
 		console.error('Error sending hype:', error.message);
@@ -108,13 +163,10 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
 export async function getHypeStatus(req: AuthenticatedRequest, res: Response) {
 	const senderId = req.userId!;
 	try {
-		const [count, resetsAt] = await Promise.all([
-			getDailyHypeCount(senderId),
-			getHypeResetsAt(senderId),
-		]);
+		const [count, resetsAt] = await Promise.all([getDailyHypeCount(senderId), getHypeResetsAt(senderId)]);
 		res.status(200).json({
 			hypes_remaining: Math.max(0, HYPE_DAILY_LIMIT - count),
-			resets_at: resetsAt,
+			resets_at: resetsAt
 		});
 	} catch (error: any) {
 		console.error('Error getting hype status:', error.message);

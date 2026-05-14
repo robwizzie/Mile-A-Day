@@ -208,19 +208,10 @@ struct BadgesView: View {
     
     private var filteredBadges: [Badge] {
         let allBadges = userManager.currentUser.getAllBadges()
-        // Also get earned hidden badges (they won't be in getAllBadges locked list)
-        let earnedHiddenBadges = userManager.currentUser.badges.filter { $0.isHidden }
-        
+
         switch selectedFilter {
         case .all:
-            // Include earned hidden badges in all view
-            var badges = allBadges
-            for hidden in earnedHiddenBadges {
-                if !badges.contains(where: { $0.id == hidden.id }) {
-                    badges.append(hidden)
-                }
-            }
-            return badges
+            return allBadges
         case .streak:
             return allBadges.filter { $0.id.starts(with: "streak_") || $0.id.starts(with: "consistency_") }
         case .miles:
@@ -231,9 +222,6 @@ struct BadgesView: View {
             return allBadges.filter { $0.id.starts(with: "daily_") }
         case .challenges:
             return allBadges.filter { $0.id.starts(with: "challenge_") }
-        case .secret:
-            // Show only earned secret/hidden badges
-            return earnedHiddenBadges
         case .new:
             // Use the on-open snapshot so the list survives mark-as-viewed.
             let pool = allBadges + earnedHiddenBadges
@@ -267,76 +255,23 @@ struct BadgesView: View {
     
     private var emptyStateView: some View {
         VStack(spacing: 20) {
-            if selectedFilter == .secret {
-                // Special empty state for secret badges
-                Image(systemName: "eye.slash.fill")
-                    .font(.system(size: 60))
-                    .foregroundColor(.purple.opacity(0.5))
-                
-                Text("No Secret Medals Yet")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                
-                Text("Secret medals are hidden achievements that you discover through special accomplishments. Keep running and exploring - you never know when you'll unlock one!")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-                    .multilineTextAlignment(.center)
-                
-                // Mystery hint cards
-                VStack(spacing: 12) {
-                    MysteryBadgeHint(hint: "Some secrets involve perfect numbers...")
-                    MysteryBadgeHint(hint: "Combining achievements may reveal surprises...")
-                    MysteryBadgeHint(hint: "Lucky streaks have special rewards...")
-                }
-                .padding(.top, 16)
-            } else {
-                Image(systemName: "trophy")
-                    .font(.system(size: 60))
-                    .foregroundColor(.white.opacity(0.3))
-                
-                Text(selectedFilter == .all ? "No Medals Yet" : "No \(selectedFilter.title) Medals")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                
-                Text(selectedFilter == .all 
-                     ? "Complete running goals and milestones to earn medals!"
-                     : "Keep running to unlock medals in this category!")
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
-                    .multilineTextAlignment(.center)
-            }
+            Image(systemName: "trophy")
+                .font(.system(size: 60))
+                .foregroundColor(.white.opacity(0.3))
+
+            Text(selectedFilter == .all ? "No Medals Yet" : "No \(selectedFilter.title) Medals")
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+
+            Text(selectedFilter == .all
+                 ? "Complete running goals and milestones to earn medals!"
+                 : "Keep running to unlock medals in this category!")
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.6))
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(40)
-    }
-}
-
-// MARK: - Mystery Badge Hint
-
-struct MysteryBadgeHint: View {
-    let hint: String
-    
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "questionmark.circle.fill")
-                .font(.system(size: 16))
-                .foregroundColor(.purple.opacity(0.7))
-            
-            Text(hint)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
-            
-            Spacer()
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.purple.opacity(0.1))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.purple.opacity(0.2), lineWidth: 1)
-                )
-        )
     }
 }
 
@@ -356,7 +291,7 @@ struct PremiumBadgeCard: View {
             return "figure.run.circle.fill"
         } else if badge.id.starts(with: "challenge_") {
             return "trophy.fill"
-        } else if badge.id.starts(with: "hidden_") || badge.id.starts(with: "secret_") || badge.id.starts(with: "special_") {
+        } else if badge.id.starts(with: "special_") {
             return "sparkles"
         } else {
             return "star.fill"
@@ -451,10 +386,7 @@ struct PremiumBadgeCard: View {
                 }
                 
                 // Tags
-                if badge.isHidden && !badge.isLocked {
-                    secretTag
-                        .offset(x: 28, y: -28)
-                } else if badge.isNew && !badge.isLocked {
+                if badge.isNew && !badge.isLocked {
                     newTag
                         .offset(x: 28, y: -28)
                 }
@@ -553,26 +485,6 @@ struct PremiumBadgeCard: View {
         }
     }
     
-    private var secretTag: some View {
-        HStack(spacing: 2) {
-            Image(systemName: "eye.slash.fill")
-                .font(.system(size: 7, weight: .bold))
-        }
-        .foregroundColor(.white)
-        .padding(5)
-        .background(
-            Circle()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.purple, Color.purple.opacity(0.8)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        )
-        .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
-    }
-    
     private var newTag: some View {
         Text("NEW")
             .font(.system(size: 8, weight: .black, design: .rounded))
@@ -629,7 +541,7 @@ struct FilterChip: View {
 // MARK: - Badge Filter
 
 enum BadgeFilter: CaseIterable {
-    case all, streak, miles, speed, distance, challenges, secret, new
+    case all, streak, miles, speed, distance, challenges, new
 
     var title: String {
         switch self {
@@ -639,7 +551,6 @@ enum BadgeFilter: CaseIterable {
         case .speed: return "Speed"
         case .distance: return "Distance"
         case .challenges: return "Challenges"
-        case .secret: return "Secret"
         case .new: return "New"
         }
     }
@@ -652,7 +563,6 @@ enum BadgeFilter: CaseIterable {
         case .speed: return "bolt.fill"
         case .distance: return "road.lanes"
         case .challenges: return "trophy.fill"
-        case .secret: return "eye.slash.fill"
         case .new: return "sparkles"
         }
     }

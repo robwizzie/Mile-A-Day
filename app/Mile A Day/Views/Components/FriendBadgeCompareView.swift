@@ -44,16 +44,10 @@ struct FriendBadgeCompareView: View {
             .sorted { ($0.pinSlot ?? 0) < ($1.pinSlot ?? 0) }
     }
 
-    private var ownedCount: Int { earnedBadges.filter { !$0.isHidden }.count }
+    private var ownedCount: Int { earnedBadges.count }
     private var totalVisibleCount: Int { catalogBadges.count }
 
-    /// Friend's earned hidden badges that aren't in the public catalog. Appended so the friend
-    /// gets credit for them, without leaking the existence of unearned hidden badges.
-    private var earnedHidden: [Badge] {
-        earnedBadges.filter { earned in earned.isHidden && !catalogBadges.contains(where: { $0.id == earned.id }) }
-    }
-
-    /// Merged display list for the grid: catalog entries (resolved as owned or locked) + any earned-only hidden.
+    /// Merged display list for the grid: catalog entries resolved as owned or locked.
     private var allDisplayBadges: [Badge] {
         var list: [Badge] = []
         for cat in catalogBadges {
@@ -66,7 +60,6 @@ struct FriendBadgeCompareView: View {
                 list.append(locked)
             }
         }
-        list.append(contentsOf: earnedHidden)
         return list
     }
 

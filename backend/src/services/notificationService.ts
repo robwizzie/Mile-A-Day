@@ -57,15 +57,10 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<voi
 
 		const friendIds = friendRows.map(r => r.friend_id);
 		const friendSet = new Set(friendIds);
-		const coParticipantIds = compRows
-			.map(r => r.user_id)
-			.filter(id => !friendSet.has(id));
+		const coParticipantIds = compRows.map(r => r.user_id).filter(id => !friendSet.has(id));
 
 		// Cap: up to 5 friends + up to 5 unique co-participants = max 10 recipients
-		const recipients = [
-			...friendIds.slice(0, 5),
-			...coParticipantIds.slice(0, 5),
-		];
+		const recipients = [...friendIds.slice(0, 5), ...coParticipantIds.slice(0, 5)];
 
 		if (recipients.length === 0) return;
 
@@ -81,7 +76,7 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<voi
 				body,
 				type: 'friend_activity',
 				category: 'FRIEND_ACTIVITY',
-				data: { user_id: userId }
+				data: { user_id: userId, kind: 'mile_completed' }
 			}).catch(err => console.error('[Push] Error sending friend activity:', err.message));
 		}
 
@@ -373,7 +368,7 @@ export async function checkStreaksBroken(): Promise<void> {
 						title: 'Streak broken!',
 						body: `${username}'s ${streakLength}-day streak just ended. Send them some encouragement!`,
 						type: 'friend_activity',
-						data: { user_id }
+						data: { user_id, kind: 'streak_broken' }
 					}).catch(err => console.error('[Push] streak broken error:', err.message));
 					sentCount++;
 				}
