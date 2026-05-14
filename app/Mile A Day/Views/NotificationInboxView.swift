@@ -113,9 +113,71 @@ struct NotificationInboxView: View {
         }
     }
 
-    /// Row shows a hype button when the server marked it hype-able.
+    /// Derive hype affordance directly from the notification's type + data payload.
+    /// Independent of server enrichment so the button works against any backend version.
+    /// Returns nil for non-celebratory rows (streak broken, friend requests, competition
+    /// notifications, etc.).
+    private func hypeAffordance(for notification: InAppNotification) -> HypeContext? {
+        let data = notification.data ?? [:]
+
+        switch notification.type {
+        case "friend_activity":
+            // Skip the streak-broken variant — that's sympathetic, not celebratory.
+            if data["kind"] == "streak_broken" { return nil }
+            if notification.title.hasPrefix("Streak broken") { return nil }
+            guard let targetId = data["user_id"] else { return nil }
+            // user_id:YYYY-MM-DD as the dedupe key (one mile per day per user).
+            let dateKey = String(notification.created_at.prefix(10))
+            return HypeContext(
+                contextType: "mile",
+                contextId: "\(targetId):\(dateKey)",
+                contextLabel: "today's mile"
+            )
+
+        case "friend_badge_earned":
+            guard let targetId = data["sender_id"], let badgeId = data["badge_id"] else { return nil }
+            _ = targetId
+            return HypeContext(
+                contextType: "badge",
+                contextId: badgeId,
+                contextLabel: data["badge_name"] ?? "a medal"
+            )
+
+        case "friend_personal_best":
+            guard
+                let targetId = data["sender_id"],
+                let prType = data["pr_type"],
+                let workoutId = data["workout_id"]
+            else { return nil }
+            _ = targetId
+            return HypeContext(
+                contextType: "pr",
+                contextId: "\(prType):\(workoutId)",
+                contextLabel: data["pr_label"] ?? "personal best"
+            )
+
+        default:
+            return nil
+        }
+    }
+
+    /// The user_id of the friend we'd hype for this notification (or nil if not hype-able).
+    private func hypeTargetUserId(for notification: InAppNotification) -> String? {
+        let data = notification.data ?? [:]
+        switch notification.type {
+        case "friend_activity":
+            if data["kind"] == "streak_broken" { return nil }
+            if notification.title.hasPrefix("Streak broken") { return nil }
+            return data["user_id"]
+        case "friend_badge_earned", "friend_personal_best":
+            return data["sender_id"]
+        default:
+            return nil
+        }
+    }
+
     private func canShowHypeButton(_ notification: InAppNotification) -> Bool {
-        notification.hype_target_user_id != nil
+        hypeAffordance(for: notification) != nil
     }
 
     /// True when this row has already been hyped (server-side flag or local optimistic).
@@ -125,34 +187,58 @@ struct NotificationInboxView: View {
 
     private func performHype(_ notification: InAppNotification) {
         guard
-            let targetId = notification.hype_target_user_id,
-            let ctxType = notification.hype_context_type,
-            let ctxId = notification.hype_context_id,
-            let ctxLabel = notification.hype_context_label
+            let targetId = hypeTargetUserId(for: notification),
+            let context = hypeAffordance(for: notification)
         else { return }
 
-        // Optimistic hide.
+        // Optimistic grey-out.
         hypedRowIds.insert(notification.id)
 
         Task {
             do {
-                _ = try await HypeService.sendHype(
-                    targetUserId: targetId,
-                    context: HypeContext(contextType: ctxType, contextId: ctxId, contextLabel: ctxLabel)
-                )
-                // Success — keep hidden.
+                _ = try await HypeService.sendHype(targetUserId: targetId, context: context)
+                // Success — stay greyed out.
             } catch APIError.conflict {
-                // Already hyped server-side; keep hidden, no toast.
+                // Already hyped server-side; stay greyed out, no toast.
             } catch APIError.rateLimited(let msg) {
                 await MainActor.run {
                     hypedRowIds.remove(notification.id)
                     showHypeToast(msg.isEmpty ? "You're out of hypes today" : msg)
+                }
+            } catch APIError.badRequest(let msg) {
+                // Older backend that doesn't accept context fields will reject — fall back
+                // to context-less hype call so the feature still works pre-deploy.
+                if msg.contains("context_type") || msg.contains("context_id") {
+                    await fallbackHype(notification, targetId: targetId)
+                } else {
+                    await MainActor.run {
+                        hypedRowIds.remove(notification.id)
+                        showHypeToast(msg)
+                    }
                 }
             } catch {
                 await MainActor.run {
                     hypedRowIds.remove(notification.id)
                     showHypeToast("Couldn't send hype")
                 }
+            }
+        }
+    }
+
+    /// Retry against an older backend that hasn't deployed the context-aware hype yet.
+    private func fallbackHype(_ notification: InAppNotification, targetId: String) async {
+        do {
+            _ = try await HypeService.sendHype(targetUserId: targetId)
+            // Stay greyed out.
+        } catch APIError.rateLimited(let msg) {
+            await MainActor.run {
+                hypedRowIds.remove(notification.id)
+                showHypeToast(msg.isEmpty ? "You're out of hypes today" : msg)
+            }
+        } catch {
+            await MainActor.run {
+                hypedRowIds.remove(notification.id)
+                showHypeToast("Couldn't send hype")
             }
         }
     }
