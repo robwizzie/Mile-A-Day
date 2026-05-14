@@ -113,11 +113,14 @@ struct NotificationInboxView: View {
         }
     }
 
+    /// Row shows a hype button when the server marked it hype-able.
     private func canShowHypeButton(_ notification: InAppNotification) -> Bool {
-        guard notification.hype_target_user_id != nil else { return false }
-        if notification.is_hyped == true { return false }
-        if hypedRowIds.contains(notification.id) { return false }
-        return true
+        notification.hype_target_user_id != nil
+    }
+
+    /// True when this row has already been hyped (server-side flag or local optimistic).
+    private func isAlreadyHyped(_ notification: InAppNotification) -> Bool {
+        notification.is_hyped == true || hypedRowIds.contains(notification.id)
     }
 
     private func performHype(_ notification: InAppNotification) {
@@ -226,21 +229,28 @@ struct NotificationInboxView: View {
                 Spacer()
 
                 if canShowHypeButton(notification) {
+                    let hyped = isAlreadyHyped(notification)
                     Button {
-                        performHype(notification)
+                        if !hyped { performHype(notification) }
                     } label: {
                         HStack(spacing: 4) {
                             Text("🔥")
                                 .font(.system(size: 13))
-                            Text("Hype")
+                                .opacity(hyped ? 0.4 : 1)
+                            Text(hyped ? "Hyped" : "Hype")
                                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                                .foregroundColor(.orange)
+                                .foregroundColor(hyped ? .white.opacity(0.35) : .orange)
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Capsule().fill(Color.orange.opacity(0.18)))
+                        .background(
+                            Capsule().fill(
+                                hyped ? Color.white.opacity(0.06) : Color.orange.opacity(0.18)
+                            )
+                        )
                     }
                     .buttonStyle(.borderless)
+                    .disabled(hyped)
                 }
 
                 if !notification.is_read {
