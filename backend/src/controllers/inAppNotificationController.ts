@@ -14,7 +14,12 @@ interface HypeDerivation {
  * Derive hype context from a notification row's type + data. Returns null fields
  * for notification types that aren't hype-able.
  */
-function deriveHypeContext(row: { type: string; data: Record<string, any> | null; created_at: Date | string }): HypeDerivation {
+function deriveHypeContext(row: {
+	type: string;
+	title: string;
+	data: Record<string, any> | null;
+	created_at: Date | string;
+}): HypeDerivation {
 	const data = row.data ?? {};
 	const empty: HypeDerivation = {
 		hype_target_user_id: null,
@@ -24,8 +29,12 @@ function deriveHypeContext(row: { type: string; data: Record<string, any> | null
 	};
 
 	if (row.type === 'friend_activity') {
-		// Only celebrate the mile-completion variant. Streak-broken is sympathetic.
-		if (data.kind !== 'mile_completed') return empty;
+		// New pushes carry an explicit kind discriminator. Legacy rows (pre-kind)
+		// fall back to the title: "Streak broken!" is sympathetic and not hype-able;
+		// anything else for friend_activity is the celebratory mile-completion variant.
+		const isStreakBroken =
+			data.kind === 'streak_broken' || (data.kind === undefined && row.title?.startsWith('Streak broken'));
+		if (isStreakBroken) return empty;
 		const targetId = data.user_id;
 		if (!targetId) return empty;
 		// Use user_id:YYYY-MM-DD as the context id since the push payload doesn't
