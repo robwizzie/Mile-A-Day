@@ -123,6 +123,9 @@ struct CreateCompetitionView: View {
 
                 ScrollView {
                     VStack(spacing: MADTheme.Spacing.xl) {
+                        // Name Section
+                        nameSection
+
                         // Challengers Section
                         challengersSection
 
@@ -260,6 +263,43 @@ struct CreateCompetitionView: View {
                     case .apex, .clash:
                         break
                     }
+                }
+            }
+        }
+    }
+
+    // MARK: - Name Section
+
+    var nameSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            Text("Competition Name")
+                .font(MADTheme.Typography.subheadline)
+                .foregroundColor(.white.opacity(0.6))
+                .padding(.horizontal, MADTheme.Spacing.sm)
+
+            TextField(
+                "",
+                text: $competitionName,
+                prompt: Text(autoCompetitionName)
+                    .foregroundColor(.white.opacity(0.4))
+            )
+            .font(MADTheme.Typography.headline)
+            .foregroundColor(.white)
+            .textInputAutocapitalization(.words)
+            .submitLabel(.done)
+            .padding(MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    )
+            )
+            .padding(.horizontal, MADTheme.Spacing.sm)
+            .onChange(of: competitionName) { _, newValue in
+                if newValue.count > CompetitionLimits.nameMaxLength {
+                    competitionName = String(newValue.prefix(CompetitionLimits.nameMaxLength))
                 }
             }
         }
@@ -1036,7 +1076,10 @@ struct CreateCompetitionView: View {
             do {
                 let isStreaks = selectedType == .streaks
                 let competitionId = try await competitionService.createCompetition(
-                    name: competitionName.isEmpty ? autoName : competitionName,
+                    name: {
+                        let trimmed = competitionName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return trimmed.isEmpty ? autoName : trimmed
+                    }(),
                     type: selectedType,
                     workouts: Array(selectedWorkouts),
                     goal: needsGoal ? goal : 0,
