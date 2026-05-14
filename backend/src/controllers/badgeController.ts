@@ -6,7 +6,7 @@ import hasRequiredKeys from '../utils/hasRequiredKeys.js';
 
 export async function getPublicCatalog(_req: Request, res: Response) {
 	try {
-		const badges = await getCatalog(false);
+		const badges = await getCatalog();
 		return res.status(200).json({ badges });
 	} catch (err: any) {
 		console.error('Error getting badge catalog:', err.message);

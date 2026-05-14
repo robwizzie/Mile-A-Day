@@ -1,10 +1,5 @@
 import { PostgresService } from './DbService.js';
-import type {
-	Badge,
-	UserBadge,
-	UserAggregates,
-	RewardEvaluationResult
-} from '../types/badge.js';
+import type { Badge, UserBadge, UserAggregates, RewardEvaluationResult } from '../types/badge.js';
 import { evaluateChallengesForBatch } from './dailyChallengeService.js';
 
 const db = PostgresService.getInstance();
@@ -13,11 +8,10 @@ const STREAK_QUALIFYING_DISTANCE = 0.95;
 
 // ─── Catalog reads ──────────────────────────────────────────────────
 
-export async function getCatalog(includeHidden: boolean): Promise<Badge[]> {
+export async function getCatalog(): Promise<Badge[]> {
 	const rows = await db.query<any>(
 		`SELECT badge_id, category, name, description, icon, rarity, requirement, is_hidden, sort_order
 		FROM badges
-		${includeHidden ? '' : 'WHERE is_hidden = FALSE'}
 		ORDER BY sort_order ASC`
 	);
 	return rows.map(rowToBadge);
@@ -66,10 +60,7 @@ export async function computeAggregates(userId: string): Promise<UserAggregates>
 			) t`,
 			[userId]
 		),
-		db.query<{ count: string }>(
-			`SELECT COUNT(*)::text AS count FROM user_challenge_completions WHERE user_id = $1`,
-			[userId]
-		)
+		db.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM user_challenge_completions WHERE user_id = $1`, [userId])
 	]);
 
 	const minPaceSeconds = paceRow[0]?.min_pace ? parseFloat(paceRow[0].min_pace) : 0;
@@ -122,15 +113,8 @@ function isPreviousDay(earlierYmd: string, laterYmd: string): boolean {
 
 // ─── Evaluator ──────────────────────────────────────────────────────
 
-export async function evaluateForUser(
-	userId: string,
-	newWorkoutIds: string[]
-): Promise<{ newlyEarnedBadges: UserBadge[] }> {
-	const [aggregates, catalog, earned] = await Promise.all([
-		computeAggregates(userId),
-		getCatalog(true),
-		getEarnedBadgeIds(userId)
-	]);
+export async function evaluateForUser(userId: string, newWorkoutIds: string[]): Promise<{ newlyEarnedBadges: UserBadge[] }> {
+	const [aggregates, catalog, earned] = await Promise.all([computeAggregates(userId), getCatalog(), getEarnedBadgeIds(userId)]);
 
 	const triggeringWorkoutId = newWorkoutIds[newWorkoutIds.length - 1] ?? null;
 	const snapshot = {
@@ -159,12 +143,7 @@ export async function evaluateForUser(
 		query: `INSERT INTO user_badges (user_id, badge_id, triggering_workout_id, progress_snapshot)
 			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (user_id, badge_id) DO NOTHING`,
-		params: [
-			userId,
-			badgeId,
-			aggregateOnly ? null : triggeringWorkoutId,
-			JSON.stringify(snapshot)
-		]
+		params: [userId, badgeId, aggregateOnly ? null : triggeringWorkoutId, JSON.stringify(snapshot)]
 	}));
 	await db.transaction(queries);
 
@@ -184,10 +163,7 @@ export async function evaluateForUser(
 }
 
 async function getEarnedBadgeIds(userId: string): Promise<Set<string>> {
-	const rows = await db.query<{ badge_id: string }>(
-		`SELECT badge_id FROM user_badges WHERE user_id = $1`,
-		[userId]
-	);
+	const rows = await db.query<{ badge_id: string }>(`SELECT badge_id FROM user_badges WHERE user_id = $1`, [userId]);
 	return new Set(rows.map(r => r.badge_id));
 }
 
@@ -218,49 +194,14 @@ function evaluatePredicate(badge: Badge, agg: UserAggregates): { earned: boolean
 				return { earned: agg.currentStreak >= 7 && agg.totalMiles >= 7.0, aggregateOnly: true };
 			}
 			return { earned: false, aggregateOnly: true };
-		case 'hidden':
-			return { earned: evaluateHidden(badge.badgeId, agg), aggregateOnly: true };
 		default:
 			return { earned: false, aggregateOnly: true };
 	}
 }
 
-function evaluateHidden(badgeId: string, agg: UserAggregates): boolean {
-	const pace = agg.fastestSplitPaceMinMi;
-	switch (badgeId) {
-		case 'hidden_perfect_10':
-			return agg.mostMilesInOneDay >= 10.0 && agg.mostMilesInOneDay < 10.1;
-		case 'hidden_lucky_7':
-			return agg.currentStreak === 7 && agg.mostMilesInOneDay >= 7.0;
-		case 'hidden_double_trouble':
-			return agg.totalMiles >= 22.0 && agg.totalMiles < 23.0;
-		case 'hidden_century_double':
-			return agg.currentStreak >= 100 && agg.totalMiles >= 100;
-		case 'hidden_speed_endurance':
-			return pace > 0 && pace <= 8.0 && agg.mostMilesInOneDay >= 5.0;
-		case 'hidden_marathon_pace':
-			return pace > 0 && pace <= 10.0 && agg.mostMilesInOneDay >= 26.2;
-		case 'hidden_triple_threat':
-			return agg.currentStreak >= 30 && agg.totalMiles >= 30 && agg.mostMilesInOneDay >= 3.0;
-		case 'hidden_50_50':
-			return agg.currentStreak >= 50 && agg.totalMiles >= 50;
-		case 'hidden_year_miles':
-			return agg.totalMiles >= 365;
-		case 'hidden_thousand_club':
-			return agg.currentStreak >= 1000 || agg.totalMiles >= 1000;
-		case 'hidden_pace_perfect':
-			return pace > 0 && pace <= 7.0 && agg.mostMilesInOneDay >= 10.0;
-		default:
-			return false;
-	}
-}
-
 // ─── Orchestrator called from workout upload ────────────────────────
 
-export async function evaluateWorkoutRewards(
-	userId: string,
-	newWorkoutIds: string[]
-): Promise<RewardEvaluationResult> {
+export async function evaluateWorkoutRewards(userId: string, newWorkoutIds: string[]): Promise<RewardEvaluationResult> {
 	const newChallengeCompletions = await evaluateChallengesForBatch(userId, newWorkoutIds);
 	const { newlyEarnedBadges } = await evaluateForUser(userId, newWorkoutIds);
 	return { newlyEarnedBadges, newChallengeCompletions };

@@ -527,26 +527,6 @@ struct HomeBadgeItem: View {
                     .offset(x: (shimmerPhase - 0.25) * 100)
                     .clipShape(Circle())
                 
-                // Secret indicator
-                if badge.isHidden {
-                    Image(systemName: "eye.slash.fill")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(5)
-                        .background(
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color.purple, Color.purple.opacity(0.8)],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                        )
-                        .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
-                        .offset(x: 20, y: -20)
-                }
-                
                 // Rarity indicator dot
                 Circle()
                     .fill(badge.rarity.color)
@@ -576,7 +556,7 @@ struct HomeBadgeItem: View {
             return "figure.run.circle.fill"
         } else if badge.id.starts(with: "challenge_") {
             return "star.circle.fill"
-        } else if badge.id.starts(with: "hidden_") || badge.id.starts(with: "secret_") || badge.id.starts(with: "special_") {
+        } else if badge.id.starts(with: "special_") {
             return "sparkles"
         } else {
             return "star.fill"

@@ -294,86 +294,6 @@ struct User: Identifiable, Codable {
             newBadges.append(badge)
         }
         
-        // MARK: - Hidden/Secret Badges
-        // These don't show in the locked badges list - they're surprises!
-        
-        // Perfect 10 - Exactly 10.00 miles in a day
-        if mostMilesInOneDay >= 10.0 && mostMilesInOneDay < 10.1 && !hasBadge(id: "hidden_perfect_10") {
-            let badge = Badge(id: "hidden_perfect_10", name: "Perfect 10", description: "Ran exactly 10.00 miles in one day!", isHidden: true)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        
-        // Lucky Number - 7 miles on day 7 of streak
-        if streak == 7 && mostMilesInOneDay >= 7.0 && !hasBadge(id: "hidden_lucky_7") {
-            let badge = Badge(id: "hidden_lucky_7", name: "Lucky Seven", description: "Ran 7+ miles on day 7 of your streak!", isHidden: true)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        
-        // Double Trouble - 22 miles total (2x11)
-        if totalMiles >= 22.0 && totalMiles < 23.0 && !hasBadge(id: "hidden_double_trouble") {
-            let badge = Badge(id: "hidden_double_trouble", name: "Double Trouble", description: "Hit exactly 22 total miles!", isHidden: true)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        
-        // Century Double - 100 days AND 100 miles
-        if streak >= 100 && totalMiles >= 100 && !hasBadge(id: "hidden_century_double") {
-            let badge = Badge(id: "hidden_century_double", name: "Century Double", description: "100 day streak AND 100+ total miles!", isHidden: true)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        
-        // Speed + Distance combo - Sub 8 pace AND 5+ miles in a day
-        if fastestMilePace > 0 && fastestMilePace <= 8.0 && mostMilesInOneDay >= 5.0 && !hasBadge(id: "hidden_speed_endurance") {
-            let badge = Badge(id: "hidden_speed_endurance", name: "Speed & Endurance", description: "Sub-8 min pace AND 5+ mile day!", isHidden: true)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        
-        // Marathon Pace - Sub 10 min pace on a marathon distance
-        if fastestMilePace > 0 && fastestMilePace <= 10.0 && mostMilesInOneDay >= 26.2 && !hasBadge(id: "hidden_marathon_pace") {
-            let badge = Badge(id: "hidden_marathon_pace", name: "Marathon Master", description: "Marathon distance with sub-10 min pace!", isHidden: true)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        
-        // Triple Threat - 30 day streak, 30+ miles total, 3+ mile best day
-        if streak >= 30 && totalMiles >= 30 && mostMilesInOneDay >= 3.0 && !hasBadge(id: "hidden_triple_threat") {
-            let badge = Badge(id: "hidden_triple_threat", name: "Triple Threat", description: "30 day streak, 30+ miles, 3+ mile day!", isHidden: true)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        
-        // 50/50 Club - 50 day streak AND 50 miles
-        if streak >= 50 && totalMiles >= 50 && !hasBadge(id: "hidden_50_50") {
-            let badge = Badge(id: "hidden_50_50", name: "50/50 Club", description: "50 day streak AND 50+ total miles!", isHidden: true)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        
-        // Year of Running - 365 miles total
-        if totalMiles >= 365 && !hasBadge(id: "hidden_year_miles") {
-            let badge = Badge(id: "hidden_year_miles", name: "Year in Miles", description: "Ran 365 total miles - a mile for every day of the year!", isHidden: true)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        
-        // Thousand Club - 1000 days OR 1000 miles (either one)
-        if (streak >= 1000 || totalMiles >= 1000) && !hasBadge(id: "hidden_thousand_club") {
-            let badge = Badge(id: "hidden_thousand_club", name: "Thousand Club", description: "Reached 1000 in days OR miles!", isHidden: true)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-        
-        // Pace Perfectionist - Sub 7 pace on a 10+ mile day
-        if fastestMilePace > 0 && fastestMilePace <= 7.0 && mostMilesInOneDay >= 10.0 && !hasBadge(id: "hidden_pace_perfect") {
-            let badge = Badge(id: "hidden_pace_perfect", name: "Pace Perfectionist", description: "Sub-7 pace AND 10+ mile day!", isHidden: true)
-            badges.append(badge)
-            newBadges.append(badge)
-        }
-
         return newBadges
     }
     
@@ -681,8 +601,6 @@ struct User: Identifiable, Codable {
             return .special
         } else if id.starts(with: "special_") {
             return .special
-        } else if id.starts(with: "hidden_") || id.starts(with: "secret_") {
-            return .hidden
         }
         return .other
     }
@@ -694,7 +612,7 @@ struct User: Identifiable, Codable {
     }
     
     private enum BadgeCategory: Int {
-        case streak = 0, miles = 1, speed = 2, distance = 3, special = 4, hidden = 5, other = 6
+        case streak = 0, miles = 1, speed = 2, distance = 3, special = 4, other = 5
     }
 }
 
@@ -706,39 +624,56 @@ struct Badge: Identifiable, Codable {
     var dateAwarded: Date = Date()
     var isNew: Bool = true
     var isLocked: Bool = false
-    var isHidden: Bool = false // Secret badges that don't show requirements until earned
-    
+
     /// Extracts the numeric requirement from the badge ID (e.g. "miles_500" → 500)
     var numericValue: Int {
         let components = id.components(separatedBy: CharacterSet.decimalDigits.inverted)
         return components.compactMap { Int($0) }.first ?? 0
     }
 
-    // Badge rarity (can be used for visual styling)
+    // Badge rarity — monotonic with difficulty within each category.
+    // Mirrors backend/scripts/badges-seed.sql tiers.
     var rarity: BadgeRarity {
-        // Legendary badges
-        if id.starts(with: "streak_365") || id.starts(with: "streak_500") || id.starts(with: "streak_1000") ||
-           id.starts(with: "miles_1000") || id.starts(with: "miles_2500") ||
-           id.starts(with: "daily_marathon") || id.starts(with: "daily_ultra") ||
-           id.starts(with: "pace_5min") || id.starts(with: "pace_6min") ||
-           id.starts(with: "hidden_") || id.starts(with: "secret_") ||
-           id == "challenge_100" {
-            return .legendary
-        }
-        // Rare badges
-        else if id.starts(with: "streak_100") || id.starts(with: "streak_150") || id.starts(with: "streak_200") ||
-                id.starts(with: "streak_50") || id.starts(with: "streak_75") ||
-                id.starts(with: "miles_500") || id.starts(with: "miles_750") ||
-                id.starts(with: "daily_half") || id.starts(with: "daily_15") || id.starts(with: "daily_20") ||
-                id.starts(with: "pace_7min") || id.starts(with: "pace_8min") ||
-                id.starts(with: "special_") ||
-                id == "challenge_25" || id == "challenge_50" {
-            return .rare
-        }
-        // Common badges
-        else {
+        let n = numericValue
+
+        if id.starts(with: "consistency_") {
             return .common
         }
+        if id.starts(with: "streak_") {
+            if n >= 365 { return .legendary }
+            if n >= 50 { return .rare }
+            return .common
+        }
+        if id.starts(with: "miles_") {
+            if n >= 1000 { return .legendary }
+            if n >= 500 { return .rare }
+            return .common
+        }
+        if id.starts(with: "pace_") {
+            // Lower min/mi = harder.
+            if n <= 6 { return .legendary }
+            if n <= 8 { return .rare }
+            return .common
+        }
+        if id.starts(with: "daily_") {
+            switch id {
+            case "daily_marathon", "daily_50k", "daily_ultra":
+                return .legendary
+            case "daily_half", "daily_15", "daily_20":
+                return .rare
+            default:
+                return .common
+            }
+        }
+        if id.starts(with: "challenge_") {
+            if n >= 100 { return .legendary }
+            if n >= 25 { return .rare }
+            return .common
+        }
+        if id.starts(with: "special_") {
+            return .rare
+        }
+        return .common
     }
 }
 

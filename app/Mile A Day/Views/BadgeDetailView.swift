@@ -292,7 +292,7 @@ struct BadgeDetailView: View {
         if badge.id.hasPrefix("miles_") { return "figure.run" }
         if badge.id.hasPrefix("pace_") { return "bolt.fill" }
         if badge.id.hasPrefix("daily_") { return "figure.run.circle.fill" }
-        if badge.id.hasPrefix("hidden_") || badge.id.hasPrefix("secret_") || badge.id.hasPrefix("special_") { return "sparkles" }
+        if badge.id.hasPrefix("special_") { return "sparkles" }
         return "star.fill"
     }
     
@@ -311,9 +311,7 @@ struct BadgeDetailView: View {
                 .padding(.horizontal, 24)
             
             // Content based on state
-            if badge.isLocked && badge.isHidden {
-                mysteryContent
-            } else if badge.isLocked {
+            if badge.isLocked {
                 lockedContent
             } else {
                 unlockedContent
@@ -329,10 +327,6 @@ struct BadgeDetailView: View {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 11))
                 Text("LOCKED")
-            } else if badge.isHidden {
-                Image(systemName: "eye.slash.fill")
-                    .font(.system(size: 11))
-                Text("SECRET UNLOCKED")
             } else {
                 Circle()
                     .fill(badge.rarity.color)
@@ -342,54 +336,19 @@ struct BadgeDetailView: View {
         }
         .font(.system(size: 12, weight: .bold, design: .rounded))
         .tracking(1.5)
-        .foregroundColor(badge.isLocked ? .gray : (badge.isHidden ? .purple : badge.rarity.color))
+        .foregroundColor(badge.isLocked ? .gray : badge.rarity.color)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(
             Capsule()
-                .fill(
-                    (badge.isLocked ? Color.gray : (badge.isHidden ? Color.purple : badge.rarity.color))
-                        .opacity(0.15)
-                )
+                .fill((badge.isLocked ? Color.gray : badge.rarity.color).opacity(0.15))
                 .overlay(
                     Capsule()
-                        .stroke(
-                            (badge.isLocked ? Color.gray : (badge.isHidden ? Color.purple : badge.rarity.color))
-                                .opacity(0.3),
-                            lineWidth: 1
-                        )
+                        .stroke((badge.isLocked ? Color.gray : badge.rarity.color).opacity(0.3), lineWidth: 1)
                 )
         )
     }
-    
-    private var mysteryContent: some View {
-        VStack(spacing: 16) {
-            HStack(spacing: 6) {
-                Image(systemName: "questionmark.diamond.fill")
-                    .font(.system(size: 14))
-                Text("Mystery Medal")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-            }
-            .foregroundColor(.purple)
-            
-            Text("This medal is shrouded in mystery.\nKeep running to discover its secret!")
-                .font(.system(size: 15, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
-                .multilineTextAlignment(.center)
-                .lineSpacing(4)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(Color.purple.opacity(0.1))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.purple.opacity(0.2), lineWidth: 1)
-                )
-        )
-    }
-    
+
     private var lockedContent: some View {
         VStack(spacing: 20) {
             Text(badge.description)
@@ -399,30 +358,28 @@ struct BadgeDetailView: View {
                 .lineSpacing(4)
 
             // Track button
-            if !badge.isHidden {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        toggleTracked()
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: isTracked ? "pin.fill" : "pin")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text(isTracked ? "Tracking" : "Track this Medal")
-                            .font(.system(size: 14, weight: .bold, design: .rounded))
-                    }
-                    .foregroundColor(isTracked ? .white : .cyan)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 10)
-                    .background(
-                        Capsule()
-                            .fill(isTracked ? Color.cyan : Color.cyan.opacity(0.15))
-                    )
-                    .overlay(
-                        Capsule()
-                            .stroke(Color.cyan.opacity(0.3), lineWidth: isTracked ? 0 : 1)
-                    )
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    toggleTracked()
                 }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: isTracked ? "pin.fill" : "pin")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text(isTracked ? "Tracking" : "Track this Medal")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                }
+                .foregroundColor(isTracked ? .white : .cyan)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(
+                    Capsule()
+                        .fill(isTracked ? Color.cyan : Color.cyan.opacity(0.15))
+                )
+                .overlay(
+                    Capsule()
+                        .stroke(Color.cyan.opacity(0.3), lineWidth: isTracked ? 0 : 1)
+                )
             }
 
             // Your progress (when we have user stats)
@@ -464,9 +421,7 @@ struct BadgeDetailView: View {
     @ViewBuilder
     private func lockedProgressCard(user: User) -> some View {
         let id = badge.id
-        if badge.isHidden {
-            EmptyView()
-        } else if (id.hasPrefix("streak_") || id.hasPrefix("consistency_")), let target = getNumber(from: id) {
+        if (id.hasPrefix("streak_") || id.hasPrefix("consistency_")), let target = getNumber(from: id) {
             let current = user.streak
             let progress = target > 0 ? min(Double(current) / Double(target), 1.0) : 0
             let need = max(0, target - current)
@@ -793,6 +748,3 @@ struct RibbonTail: View {
     BadgeDetailView(badge: Badge(id: "streak_100", name: "Century Club", description: "100 day streak!", isLocked: true))
 }
 
-#Preview("Mystery") {
-    BadgeDetailView(badge: Badge(id: "hidden_perfect", name: "???", description: "Secret!", isLocked: true, isHidden: true))
-}

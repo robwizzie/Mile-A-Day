@@ -1,4 +1,4 @@
-export type BadgeCategory = 'streak' | 'miles' | 'pace' | 'daily_distance' | 'challenge' | 'special' | 'hidden';
+export type BadgeCategory = 'streak' | 'miles' | 'pace' | 'daily_distance' | 'challenge' | 'special';
 export type BadgeRarity = 'common' | 'rare' | 'legendary';
 export type DailyChallengeType = 'pace' | 'distance' | 'time' | 'activity' | 'steps';
 

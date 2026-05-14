@@ -15,7 +15,6 @@ enum BadgeAPIService {
         let icon: String
         let rarity: String
         let requirement: Double?
-        let isHidden: Bool
         let sortOrder: Int
     }
 
@@ -27,7 +26,6 @@ enum BadgeAPIService {
         let icon: String
         let rarity: String
         let requirement: Double?
-        let isHidden: Bool
         let earnedAt: Date
         let isNew: Bool
         let triggeringWorkoutId: String?
@@ -40,7 +38,7 @@ enum BadgeAPIService {
     // MARK: - API
 
     /// Public endpoint — no auth required, but APIClient still attaches Bearer since this endpoint
-    /// also works authenticated. Returns catalog minus hidden badges.
+    /// also works authenticated.
     static func fetchCatalog() async throws -> [CatalogBadgeDTO] {
         let response: CatalogResponse = try await APIClient.fancyFetch(
             endpoint: "/badges/catalog",
@@ -79,8 +77,7 @@ extension BadgeAPIService.UserBadgeDTO {
             description: description,
             dateAwarded: earnedAt,
             isNew: isNew,
-            isLocked: false,
-            isHidden: isHidden
+            isLocked: false
         )
     }
 }
@@ -94,8 +91,7 @@ extension BadgeAPIService.CatalogBadgeDTO {
             description: description,
             dateAwarded: Date.distantFuture,
             isNew: false,
-            isLocked: true,
-            isHidden: isHidden
+            isLocked: true
         )
     }
 }
