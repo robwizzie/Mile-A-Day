@@ -30,12 +30,14 @@ enum BadgeAPIService {
         let isHidden: Bool
         let earnedAt: Date
         let isNew: Bool
+        let pinSlot: Int?
         let triggeringWorkoutId: String?
     }
 
     private struct CatalogResponse: Codable { let badges: [CatalogBadgeDTO] }
     private struct UserBadgesResponse: Codable { let userId: String; let badges: [UserBadgeDTO] }
     private struct MarkViewedResponse: Codable { let updated: Int }
+    private struct SetPinsRequest: Codable { let pinnedBadgeIds: [String] }
 
     // MARK: - API
 
@@ -66,6 +68,18 @@ enum BadgeAPIService {
         )
         return response.updated
     }
+
+    /// Replace the user's pinned badges. Order in `badgeIds` becomes pin slot 0..2.
+    static func setPinnedBadges(userId: String, badgeIds: [String]) async throws -> [UserBadgeDTO] {
+        let bodyData = try JSONEncoder().encode(SetPinsRequest(pinnedBadgeIds: badgeIds))
+        let response: UserBadgesResponse = try await APIClient.fancyFetch(
+            endpoint: "/users/\(userId)/badges/pins",
+            method: .PUT,
+            body: bodyData,
+            responseType: UserBadgesResponse.self
+        )
+        return response.badges
+    }
 }
 
 // MARK: - DTO → client-model conversion
@@ -80,7 +94,8 @@ extension BadgeAPIService.UserBadgeDTO {
             dateAwarded: earnedAt,
             isNew: isNew,
             isLocked: false,
-            isHidden: isHidden
+            isHidden: isHidden,
+            pinSlot: pinSlot
         )
     }
 }

@@ -8,6 +8,8 @@ struct ProfileView: View {
     @State private var activeSheet: ProfileSheetType?
     @State private var showingLogoutConfirmation = false
     @State private var currentProfileImage: UIImage?
+    @State private var showingManagePins = false
+    @State private var pinnedBadgeForDetail: Badge?
 
     enum ProfileSheetType: String, Identifiable {
         case totalMiles, fastestPace, mostMiles
@@ -20,6 +22,14 @@ struct ProfileView: View {
             VStack(spacing: MADTheme.Spacing.lg) {
                 // Profile Header (matches friend profile style)
                 profileHeader
+
+                // Pinned medals showcase
+                PinnedBadgesShowcase(
+                    pinnedBadges: userManager.pinnedBadges,
+                    onManageTapped: { showingManagePins = true },
+                    onBadgeTapped: { badge in pinnedBadgeForDetail = badge },
+                    ownerDisplayName: nil
+                )
 
                 // Streak & Goal Row
                 streakAndGoalRow
@@ -63,6 +73,17 @@ struct ProfileView: View {
             case .privacySettings:
                 PrivacySettingsView()
             }
+        }
+        .sheet(isPresented: $showingManagePins) {
+            ManagePinnedBadgesSheet(userManager: userManager)
+        }
+        .sheet(item: $pinnedBadgeForDetail) { badge in
+            NavigationStack {
+                BadgeDetailView(badge: badge, userManager: userManager)
+            }
+        }
+        .task {
+            await userManager.refreshBadgesFromServer()
         }
         .alert("Sign Out", isPresented: $showingLogoutConfirmation) {
             Button("Cancel", role: .cancel) { }
