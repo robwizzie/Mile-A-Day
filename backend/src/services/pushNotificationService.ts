@@ -307,6 +307,95 @@ export async function unregisterDeviceToken(userId: string, deviceToken: string)
 	await db.query('DELETE FROM device_tokens WHERE user_id = $1 AND device_token = $2', [userId, deviceToken]);
 }
 
+// ─── Silent (background) pushes ─────────────────────────────────────
+
+/**
+ * APNs silent push. Wakes the app to do background work; renders nothing.
+ * Do not call directly — use sendSilentPushToUser.
+ */
+function sendSilentPushToDevice(deviceToken: string, type: string, data: Record<string, string> = {}): Promise<boolean> {
+	return new Promise(resolve => {
+		const token = getApnsToken();
+		if (!token || !APNS_BUNDLE_ID) {
+			console.warn('[Push] APNs not configured, skipping silent push');
+			resolve(false);
+			return;
+		}
+
+		const apnsPayload = JSON.stringify({
+			aps: { 'content-available': 1 },
+			type,
+			data
+		});
+
+		const client = http2.connect(APNS_HOST);
+
+		client.on('error', err => {
+			console.error('[Push] Silent HTTP/2 connection error:', err.message);
+			client.close();
+			resolve(false);
+		});
+
+		const req = client.request({
+			':method': 'POST',
+			':path': `/3/device/${deviceToken}`,
+			'authorization': `bearer ${token}`,
+			'apns-topic': APNS_BUNDLE_ID,
+			'apns-push-type': 'background',
+			'apns-priority': '5',
+			'content-type': 'application/json'
+		});
+
+		let responseData = '';
+		let statusCode = 0;
+
+		req.on('response', headers => {
+			statusCode = headers[':status'] as number;
+		});
+
+		req.on('data', chunk => {
+			responseData += chunk;
+		});
+
+		req.on('end', () => {
+			client.close();
+			if (statusCode === 200) {
+				resolve(true);
+			} else {
+				console.error(`[Push] Silent APNs error ${statusCode}: ${responseData}`);
+				if (statusCode === 410 || (statusCode === 400 && responseData.includes('BadDeviceToken'))) {
+					removeInvalidToken(deviceToken).catch(() => {});
+				}
+				resolve(false);
+			}
+		});
+
+		req.on('error', err => {
+			console.error('[Push] Silent request error:', err.message);
+			client.close();
+			resolve(false);
+		});
+
+		req.write(apnsPayload);
+		req.end();
+	});
+}
+
+/**
+ * Send a silent (content-available) push to every registered device of a user.
+ * Skips throttling, quiet hours, in-app inbox storage, and notification_log writes.
+ * These pushes are invisible to the user and have no per-day cap concern.
+ */
+export async function sendSilentPushToUser(userId: string, type: string, data: Record<string, string> = {}): Promise<number> {
+	const tokens = await db.query<{ device_token: string }>('SELECT device_token FROM device_tokens WHERE user_id = $1', [
+		userId
+	]);
+	if (tokens.length === 0) return 0;
+
+	const results = await Promise.all(tokens.map(({ device_token }) => sendSilentPushToDevice(device_token, type, data)));
+	return results.filter(Boolean).length;
+}
+
 // ─── Quiet Hours & Batching ──────────────────────────────────────────
 
 function isQuietHours(): boolean {
