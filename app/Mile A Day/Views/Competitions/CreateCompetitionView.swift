@@ -42,7 +42,16 @@ struct CreateCompetitionView: View {
         selectedFriends.first
     }
 
-
+    /// Auto-generated competition name used as the placeholder in the name
+    /// field and as the submit-time fallback when the user leaves the field
+    /// blank.
+    var autoCompetitionName: String {
+        if selectedFriends.isEmpty {
+            return "\(selectedType.displayName) Competition"
+        }
+        let friendNames = selectedFriends.prefix(2).map { $0.displayName }.joined(separator: " & ")
+        return "\(selectedType.displayName) with \(friendNames)"
+    }
 
     // Contextual labels based on competition type
     var goalLabel: String {
@@ -1007,9 +1016,8 @@ struct CreateCompetitionView: View {
 
         isCreating = true
 
-        // Generate competition name based on type and participants
-        let friendNames = selectedFriends.prefix(2).map { $0.displayName }.joined(separator: " & ")
-        let autoName = "\(selectedType.displayName) with \(friendNames)"
+        // Use auto-generated fallback name when the user leaves the name field blank
+        let autoName = autoCompetitionName
 
         // Calculate duration_hours from the UI selection
         // Only Apex and Targets have fixed durations; others end by condition
