@@ -119,6 +119,12 @@ class APIClient {
             throw APIError.badRequest("Bad request")
         case 404:
             throw APIError.notFound
+        case 409:
+            if let errorData = try? JSONDecoder().decode([String: String].self, from: data),
+               let errorMessage = errorData["error"] {
+                throw APIError.conflict(errorMessage)
+            }
+            throw APIError.conflict("Conflict")
         case 429:
             if let errorData = try? JSONDecoder().decode([String: String].self, from: data),
                let errorMessage = errorData["error"] {
@@ -185,6 +191,7 @@ enum APIError: LocalizedError {
     case notAuthenticated
     case unauthorized
     case badRequest(String)
+    case conflict(String)
     case rateLimited(String)
     case notFound
     case serverError(Int)
@@ -203,6 +210,8 @@ enum APIError: LocalizedError {
             return "Unauthorized access"
         case .badRequest(let message):
             return "Bad request: \(message)"
+        case .conflict(let message):
+            return message
         case .rateLimited(let message):
             return message
         case .notFound:
