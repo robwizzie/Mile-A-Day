@@ -1056,7 +1056,8 @@ struct CreateCompetitionView: View {
 
         isCreating = true
 
-        // Use auto-generated fallback name when the user leaves the name field blank
+        // Use auto-generated fallback name when the user leaves the name field blank or whitespace-only
+        let trimmedName = competitionName.trimmingCharacters(in: .whitespacesAndNewlines)
         let autoName = autoCompetitionName
 
         // Calculate duration_hours from the UI selection
@@ -1076,10 +1077,7 @@ struct CreateCompetitionView: View {
             do {
                 let isStreaks = selectedType == .streaks
                 let competitionId = try await competitionService.createCompetition(
-                    name: {
-                        let trimmed = competitionName.trimmingCharacters(in: .whitespacesAndNewlines)
-                        return trimmed.isEmpty ? autoName : trimmed
-                    }(),
+                    name: trimmedName.isEmpty ? autoName : trimmedName,
                     type: selectedType,
                     workouts: Array(selectedWorkouts),
                     goal: needsGoal ? goal : 0,
