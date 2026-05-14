@@ -462,47 +462,42 @@ struct CalendarFlipCard: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            palette.accent.opacity(0.20),
-                            palette.primary.opacity(0.10),
-                            palette.secondary.opacity(0.05)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(Color.black.opacity(0.32))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [palette.primary.opacity(0.7), palette.secondary.opacity(0.3)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            ),
-                            lineWidth: 1.5
-                        )
+                        .strokeBorder(palette.primary.opacity(0.55), lineWidth: 1.5)
                 )
                 .shadow(color: palette.primary.opacity(0.45), radius: 22, x: 0, y: 0)
 
             VStack(spacing: 4) {
                 Text("DAY")
-                    .font(.system(size: 16, weight: .heavy, design: .rounded))
-                    .tracking(6)
-                    .foregroundColor(palette.accent.opacity(0.9))
+                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                    .tracking(4)
+                    .foregroundColor(.white.opacity(0.95))
+                    .lineLimit(1)
 
                 Text("\(dayNumber)")
-                    .font(.system(size: 92, weight: .black, design: .rounded))
+                    .font(.system(size: 82, weight: .black, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.4)
                     .foregroundStyle(
                         LinearGradient(colors: palette.textGradient, startPoint: .top, endPoint: .bottom)
                     )
+                    .shadow(color: .black.opacity(0.45), radius: 4, x: 0, y: 2)
                     .contentTransition(.numericText())
                     .animation(.easeOut(duration: 0.05), value: dayNumber)
+                    .padding(.horizontal, 6)
 
-                Text("of \(totalDays)")
+                Text("of \(totalDays.formatted())")
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundColor(palette.accent.opacity(0.65))
+                    .foregroundColor(.white.opacity(0.85))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 6)
             }
             .padding(20)
         }

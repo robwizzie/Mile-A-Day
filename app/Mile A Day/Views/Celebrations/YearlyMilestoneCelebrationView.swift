@@ -8,17 +8,6 @@
 
 import SwiftUI
 
-// MARK: - Info struct
-
-/// Snapshot of the user's state at the moment they crossed a year boundary.
-struct YearlyMilestoneInfo: Equatable {
-    let years: Int
-    let totalMiles: Double
-    let totalStreakDays: Int
-    /// Approximate date the current streak began (today minus streak days).
-    let streakStartDate: Date?
-}
-
 // MARK: - View
 
 struct YearlyMilestoneCelebrationView: View {
@@ -49,6 +38,11 @@ struct YearlyMilestoneCelebrationView: View {
     @State private var hasStarted = false
     @State private var skipVisible = false
 
+    // Share — use Identifiable wrapper with `.sheet(item:)` so the first tap
+    // always presents (the two-state-update + `isPresented` pattern can drop
+    // the first tap because the sheet content captures stale state).
+    @State private var shareItem: ShareableImage? = nil
+
     // Haptics
     private let tapHaptic = UIImpactFeedbackGenerator(style: .light)
     private let mediumHaptic = UIImpactFeedbackGenerator(style: .medium)
@@ -64,24 +58,40 @@ struct YearlyMilestoneCelebrationView: View {
 
     private var subtitle: String {
         switch info.years {
-        case 1:  return "365 days. One full year. Legendary."
-        case 2:  return "Two full years. You're built different."
-        case 3:  return "Three years strong. Pure dedication."
-        case 4:  return "Four years and counting. Unstoppable."
+        case 1:  return "365 days. A full year. Legendary."
+        case 2:  return "2 full years. You're built different."
+        case 3:  return "3 years strong. Pure dedication."
+        case 4:  return "4 years and counting. Unstoppable."
         case 5:  return "Half a decade of showing up."
         case 10: return "A full decade of miles. You are a legend."
-        case 25: return "Twenty-five years. A lifetime of dedication."
+        case 25: return "25 years. A lifetime of dedication."
         default: return "\(info.years) full years of showing up."
         }
     }
 
     private var headline: String {
-        info.years == 1 ? "ONE YEAR" : "\(info.years) YEARS"
+        info.years == 1 ? "1 YEAR" : "\(info.years) YEARS"
     }
 
     private var shareText: String {
         let miles = Int(info.totalMiles.rounded())
-        return "I just hit \(info.years == 1 ? "1 YEAR" : "\(info.years) YEARS") of running a mile every day on Mile A Day. \(miles) miles and counting. 🏃"
+        let yearLabel = info.years == 1 ? "1 YEAR" : "\(info.years) YEARS"
+        let yearLine: String
+        switch info.years {
+        case 1:  yearLine = "🏆 1 YEAR of running a mile every single day."
+        case 2:  yearLine = "🏆 2 YEARS strong. Every. Single. Day."
+        case 3:  yearLine = "🏆 3 YEARS. 1,095 days of showing up."
+        case 5:  yearLine = "🏆 5 YEARS. Half a decade of mile-a-day."
+        case 10: yearLine = "🏆 10 YEARS. A full decade of miles."
+        default: yearLine = "🏆 \(yearLabel) of running a mile every single day."
+        }
+        return """
+        \(yearLine)
+        🏃 \(info.totalStreakDays.formatted()) day streak
+        📏 \(miles.formatted()) miles and counting
+
+        Mile A Day · mileaday.run
+        """
     }
 
     // MARK: - Body
@@ -185,14 +195,28 @@ struct YearlyMilestoneCelebrationView: View {
 
     @ViewBuilder
     private var yearNumeralBlock: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 12) {
             Text(eyebrowLabel)
-                .font(.system(size: 16, weight: .heavy, design: .rounded))
-                .tracking(8)
-                .foregroundColor(palette.accent.opacity(0.85))
+                .font(.system(size: 13, weight: .black, design: .rounded))
+                .tracking(4)
+                .foregroundColor(palette.accent.opacity(0.95))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(palette.primary.opacity(0.45), lineWidth: 1)
+                        )
+                )
 
             Text(headline)
-                .font(.system(size: info.years > 9 ? 96 : 120, weight: .black, design: .rounded))
+                .font(.system(size: info.years > 9 ? 88 : 120, weight: .black, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.35)
                 .foregroundStyle(
                     LinearGradient(colors: palette.textGradient, startPoint: .top, endPoint: .bottom)
                 )
@@ -203,15 +227,30 @@ struct YearlyMilestoneCelebrationView: View {
                     perspective: 0.7
                 )
                 .opacity(yearNumberOpacity)
+                .shadow(color: .black.opacity(0.55), radius: 8, x: 0, y: 4)
                 .shadow(color: palette.primary.opacity(0.55), radius: 30, x: 0, y: 0)
+                .padding(.horizontal, MADTheme.Spacing.md)
                 .modifier(YearNumberShimmer(active: sustainedShimmer, color: palette.accent))
 
             Text(subtitle)
-                .font(.system(size: 19, weight: .bold, design: .rounded))
-                .foregroundColor(palette.accent)
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
                 .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .minimumScaleFactor(0.85)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(palette.primary.opacity(0.35), lineWidth: 1)
+                        )
+                )
                 .padding(.horizontal, MADTheme.Spacing.lg)
-                .padding(.top, 6)
+                .padding(.top, 4)
                 .opacity(yearNumberOpacity)
         }
     }
@@ -247,7 +286,11 @@ struct YearlyMilestoneCelebrationView: View {
                 .fill(.ultraThinMaterial)
                 .overlay(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                        .strokeBorder(palette.primary.opacity(0.4), lineWidth: 1)
+                        .fill(Color.black.opacity(0.25))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                        .strokeBorder(palette.primary.opacity(0.55), lineWidth: 1.2)
                 )
         )
     }
@@ -260,25 +303,29 @@ struct YearlyMilestoneCelebrationView: View {
                     LinearGradient(colors: palette.textGradient, startPoint: .top, endPoint: .bottom)
                 )
                 .lineLimit(1)
-                .minimumScaleFactor(0.6)
+                .minimumScaleFactor(0.45)
+                .shadow(color: .black.opacity(0.4), radius: 3, x: 0, y: 2)
             Text(label.uppercased())
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
-                .tracking(1.2)
-                .foregroundColor(palette.accent.opacity(0.75))
+                .tracking(1.0)
+                .foregroundColor(.white.opacity(0.95))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
+        .padding(.horizontal, 4)
     }
 
     private var statDivider: some View {
         Rectangle()
-            .fill(palette.primary.opacity(0.25))
+            .fill(Color.white.opacity(0.25))
             .frame(width: 1, height: 32)
     }
 
     private var streakStartLabel: String {
         guard let start = info.streakStartDate else { return "—" }
         let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, yyyy"
+        formatter.dateFormat = "M/d/yy"
         return formatter.string(from: start)
     }
 
@@ -287,7 +334,12 @@ struct YearlyMilestoneCelebrationView: View {
     @ViewBuilder
     private var buttonRow: some View {
         VStack(spacing: 12) {
-            ShareLink(item: shareText) {
+            Button {
+                mediumHaptic.impactOccurred()
+                if let image = generateShareCardImage() {
+                    shareItem = ShareableImage(image: image)
+                }
+            } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "square.and.arrow.up.fill")
                     Text("Share This Win")
@@ -308,6 +360,13 @@ struct YearlyMilestoneCelebrationView: View {
                         .shadow(color: palette.primary.opacity(0.6), radius: 16, x: 0, y: 6)
                 )
             }
+            .sheet(item: $shareItem) { item in
+                YearlyMilestoneSharePreviewSheet(
+                    image: item.image,
+                    shareText: shareText,
+                    palette: palette
+                )
+            }
 
             Button {
                 manager.dismissCurrentCelebration()
@@ -323,6 +382,15 @@ struct YearlyMilestoneCelebrationView: View {
                     )
             }
         }
+    }
+
+    /// Render the milestone as a 600x900 image suitable for posting to social media.
+    private func generateShareCardImage() -> UIImage? {
+        let card = YearlyMilestoneShareCardView(info: info, palette: palette)
+        let renderer = ImageRenderer(content: card)
+        renderer.scale = 3.0
+        renderer.isOpaque = false
+        return renderer.uiImage
     }
 
     // MARK: - Skip
@@ -466,6 +534,317 @@ struct YearlyMilestoneCelebrationView: View {
         return clamped < 0.5
             ? 2 * clamped * clamped
             : 1 - pow(-2 * clamped + 2, 2) / 2
+    }
+}
+
+// MARK: - Yearly Milestone Share Card
+// Rendered to UIImage via ImageRenderer for sharing/saving to social media.
+
+struct YearlyMilestoneShareCardView: View {
+    let info: YearlyMilestoneInfo
+    let palette: YearPalette
+
+    private let cardWidth: CGFloat = 600
+    private let cardHeight: CGFloat = 900
+
+    private var headline: String {
+        info.years == 1 ? "1 YEAR" : "\(info.years) YEARS"
+    }
+
+    private var subtitle: String {
+        switch info.years {
+        case 1:  return "365 days. A full year. Legendary."
+        case 2:  return "2 full years. Built different."
+        case 3:  return "3 years strong. Pure dedication."
+        case 4:  return "4 years and counting."
+        case 5:  return "Half a decade of showing up."
+        case 10: return "A decade of miles. A legend."
+        case 25: return "25 years. A lifetime."
+        default: return "\(info.years) full years of showing up."
+        }
+    }
+
+    private var startedString: String {
+        guard let start = info.streakStartDate else { return "—" }
+        let f = DateFormatter()
+        f.dateFormat = "M/d/yy"
+        return f.string(from: start)
+    }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: palette.backgroundGradient,
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            RadialGradient(
+                colors: [palette.primary.opacity(0.45), palette.primary.opacity(0.10), .clear],
+                center: UnitPoint(x: 0.5, y: 0.32),
+                startRadius: 30,
+                endRadius: 420
+            )
+
+            VStack(spacing: 0) {
+                Spacer(minLength: 70)
+
+                Text("STREAK MILESTONE")
+                    .font(.system(size: 14, weight: .black, design: .rounded))
+                    .tracking(5)
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 9)
+                    .background(
+                        Capsule()
+                            .fill(Color.black.opacity(0.35))
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(palette.primary.opacity(0.6), lineWidth: 1.2)
+                            )
+                    )
+
+                Spacer(minLength: 22)
+
+                Text(headline)
+                    .font(.system(size: info.years > 9 ? 110 : 132, weight: .black, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.35)
+                    .foregroundStyle(
+                        LinearGradient(colors: palette.textGradient, startPoint: .top, endPoint: .bottom)
+                    )
+                    .shadow(color: .black.opacity(0.55), radius: 10, x: 0, y: 6)
+                    .shadow(color: palette.primary.opacity(0.5), radius: 24, x: 0, y: 6)
+                    .padding(.horizontal, 36)
+
+                Spacer(minLength: 18)
+
+                Text(subtitle)
+                    .font(.system(size: 21, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.85)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color.black.opacity(0.32))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .strokeBorder(palette.primary.opacity(0.5), lineWidth: 1.2)
+                            )
+                    )
+                    .padding(.horizontal, 40)
+
+                Spacer(minLength: 36)
+
+                statsRow
+
+                Spacer(minLength: 32)
+
+                brandingFooter
+                    .padding(.horizontal, 36)
+                    .padding(.bottom, 32)
+            }
+        }
+        .frame(width: cardWidth, height: cardHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 32, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [palette.primary.opacity(0.8), palette.secondary.opacity(0.4)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 3
+                )
+        )
+    }
+
+    private var statsRow: some View {
+        HStack(spacing: 0) {
+            shareStatColumn(
+                value: info.totalStreakDays.formatted(),
+                label: "Day Streak"
+            )
+            shareDivider
+            shareStatColumn(
+                value: Int(info.totalMiles.rounded()).formatted(),
+                label: info.totalMiles == 1 ? "Mile" : "Miles"
+            )
+            shareDivider
+            shareStatColumn(
+                value: startedString,
+                label: "Began"
+            )
+        }
+        .padding(.vertical, 22)
+        .padding(.horizontal, 24)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.black.opacity(0.35))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .strokeBorder(palette.primary.opacity(0.55), lineWidth: 1.5)
+                )
+        )
+        .padding(.horizontal, 36)
+    }
+
+    private func shareStatColumn(value: String, label: String) -> some View {
+        VStack(spacing: 6) {
+            Text(value)
+                .font(.system(size: 26, weight: .black, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.4)
+                .foregroundStyle(
+                    LinearGradient(colors: palette.textGradient, startPoint: .top, endPoint: .bottom)
+                )
+                .shadow(color: .black.opacity(0.4), radius: 4, x: 0, y: 2)
+            Text(label.uppercased())
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .tracking(1.2)
+                .foregroundColor(.white.opacity(0.95))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 6)
+    }
+
+    private var shareDivider: some View {
+        Rectangle()
+            .fill(Color.white.opacity(0.25))
+            .frame(width: 1, height: 40)
+    }
+
+    private var brandingFooter: some View {
+        HStack(spacing: 12) {
+            Image("mad-logo")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 36, height: 36)
+            Text("Mile A Day")
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.95))
+            Spacer()
+            Text("mileaday.run")
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.7))
+        }
+    }
+}
+
+// MARK: - Share Preview Sheet
+// Mirrors the dashboard streak-share preview UX: shows the rendered image first,
+// then lets the user Copy (to clipboard) or Share via the system sheet.
+
+struct YearlyMilestoneSharePreviewSheet: View {
+    let image: UIImage
+    let shareText: String
+    let palette: YearPalette
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var shareSheetItem: ShareableImage? = nil
+    @State private var showingCopiedFeedback = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
+
+                VStack(spacing: 18) {
+                    // Image preview
+                    Image(uiImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .shadow(color: .black.opacity(0.35), radius: 18, x: 0, y: 10)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+
+                    // Action buttons
+                    HStack(spacing: 12) {
+                        Button {
+                            UIPasteboard.general.image = image
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            showingCopiedFeedback = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: showingCopiedFeedback ? "checkmark.circle.fill" : "doc.on.doc")
+                                Text(showingCopiedFeedback ? "Copied!" : "Copy")
+                            }
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(showingCopiedFeedback ? Color.green.opacity(0.85) : Color.white.opacity(0.12))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                                    )
+                            )
+                            .animation(.easeInOut(duration: 0.2), value: showingCopiedFeedback)
+                        }
+
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            shareSheetItem = ShareableImage(image: image)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "square.and.arrow.up")
+                                Text("Share")
+                            }
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [palette.primary, palette.secondary],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                    .shadow(color: palette.primary.opacity(0.5), radius: 12, x: 0, y: 4)
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 12)
+                }
+            }
+            .navigationTitle("Share This Win")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                        .foregroundColor(MADTheme.Colors.madRed)
+                        .fontWeight(.semibold)
+                }
+            }
+            .onChange(of: showingCopiedFeedback) { _, isShowing in
+                guard isShowing else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    showingCopiedFeedback = false
+                }
+            }
+            .sheet(item: $shareSheetItem) { item in
+                ShareSheet(items: [item.image, shareText])
+            }
+        }
     }
 }
 

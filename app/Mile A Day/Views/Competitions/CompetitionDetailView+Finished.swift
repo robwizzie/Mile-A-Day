@@ -67,6 +67,22 @@ extension CompetitionDetailView {
                 podiumView(rankedUsers: rankedUsers, currentUserId: currentUserId)
             }
 
+            // Full standings — rank 4+ — sits directly below the podium so users
+            // see the complete leaderboard before anything else.
+            fullStandings(rankedUsers: rankedUsers, currentUserId: currentUserId)
+
+            // Comp-wide activity calendar — every player's data in one view.
+            // Tap a podium medalist or a leaderboard row to focus on them, tap
+            // "Show all" on the calendar to return.
+            if !rankedUsers.isEmpty {
+                DailyActivityCalendar(
+                    allUsers: rankedUsers,
+                    competition: competition,
+                    accent: MADTheme.Colors.madRed,
+                    focusedUserId: $expandedLeaderboardUserId
+                )
+            }
+
             // Your result banner (if below top 3)
             if let placement = myPlacement, placement > 3 {
                 yourResultBanner(placement: placement, totalParticipants: rankedUsers.count)
@@ -74,19 +90,6 @@ extension CompetitionDetailView {
 
             // Competition recap
             competitionRecap(rankedUsers: rankedUsers)
-
-            // Full standings — all participants
-            fullStandings(rankedUsers: rankedUsers, currentUserId: currentUserId)
-
-            // Competition settings
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                Text("Settings")
-                    .font(MADTheme.Typography.title3)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, MADTheme.Spacing.sm)
-
-                infoSection
-            }
         }
     }
 
@@ -97,20 +100,33 @@ extension CompetitionDetailView {
         let third = rankedUsers.count > 2 ? rankedUsers[2] : nil
 
         return HStack(alignment: .bottom, spacing: MADTheme.Spacing.sm) {
-            // 2nd place
             if let user = second {
-                podiumColumn(user: user, rank: 2, pedestalHeight: 80, isCurrentUser: user.user_id == currentUserId)
+                tappablePodiumColumn(user: user, rank: 2, pedestalHeight: 80, isCurrentUser: user.user_id == currentUserId)
             }
-
-            // 1st place
-            podiumColumn(user: first, rank: 1, pedestalHeight: 120, isCurrentUser: first.user_id == currentUserId)
-
-            // 3rd place
+            tappablePodiumColumn(user: first, rank: 1, pedestalHeight: 120, isCurrentUser: first.user_id == currentUserId)
             if let user = third {
-                podiumColumn(user: user, rank: 3, pedestalHeight: 50, isCurrentUser: user.user_id == currentUserId)
+                tappablePodiumColumn(user: user, rank: 3, pedestalHeight: 50, isCurrentUser: user.user_id == currentUserId)
             }
         }
         .padding(.horizontal, MADTheme.Spacing.md)
+    }
+
+    /// Wraps `podiumColumn` in a tap target that focuses the calendar on that
+    /// medalist. Tap again on the same medalist to clear focus.
+    @ViewBuilder
+    func tappablePodiumColumn(user: CompetitionUser, rank: Int, pedestalHeight: CGFloat, isCurrentUser: Bool) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                if expandedLeaderboardUserId == user.user_id {
+                    expandedLeaderboardUserId = nil
+                } else {
+                    expandedLeaderboardUserId = user.user_id
+                }
+            }
+        } label: {
+            podiumColumn(user: user, rank: rank, pedestalHeight: pedestalHeight, isCurrentUser: isCurrentUser)
+        }
+        .buttonStyle(.plain)
     }
 
     func podiumColumn(user: CompetitionUser, rank: Int, pedestalHeight: CGFloat, isCurrentUser: Bool) -> some View {
@@ -362,34 +378,42 @@ extension CompetitionDetailView {
     }
 
     // MARK: - Full Standings
+    @ViewBuilder
     func fullStandings(rankedUsers: [CompetitionUser], currentUserId: String?) -> some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Standings")
-                .font(MADTheme.Typography.title3)
-                .foregroundColor(.white)
-                .padding(.horizontal, MADTheme.Spacing.sm)
+        let rank4Plus = Array(rankedUsers.dropFirst(3))
+        if rank4Plus.isEmpty {
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                Text("Standings")
+                    .font(MADTheme.Typography.title3)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, MADTheme.Spacing.sm)
 
-            VStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(Array(rankedUsers.dropFirst(3).enumerated()), id: \.element.id) { index, user in
-                    CompetitionLeaderboardRow(
-                        rank: index + 4,
-                        user: user,
-                        competitionType: competition.type,
-                        unit: competition.options.unit,
-                        isCurrentUser: user.user_id == currentUserId,
-                        totalLives: competition.type == .streaks ? competition.streakLives : 0
-                    )
+                VStack(spacing: 6) {
+                    ForEach(Array(rank4Plus.enumerated()), id: \.element.id) { index, user in
+                        let rank = index + 4
+                        let isMe = user.user_id == currentUserId
+                        let isExpanded = expandedLeaderboardUserId == user.user_id
+
+                        leaderboardEntry(
+                            rank: rank,
+                            user: user,
+                            isMe: isMe,
+                            isExpanded: isExpanded
+                        )
+                    }
                 }
+                .padding(MADTheme.Spacing.md)
+                .background(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                        )
+                )
             }
-            .padding(MADTheme.Spacing.lg)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.1), lineWidth: 1)
-                    )
-            )
         }
     }
 

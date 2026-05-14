@@ -8,17 +8,46 @@ struct ManagePinnedBadgesSheet: View {
 
     @State private var selected: [String] = []
     @State private var isSaving = false
+    @State private var sortOption: SortOption = .dateNewest
+
+    enum SortOption: String, CaseIterable, Hashable {
+        case dateNewest = "Newest"
+        case dateOldest = "Oldest"
+        case rarity = "Rarity"
+
+        var icon: String {
+            switch self {
+            case .dateNewest: return "clock.arrow.circlepath"
+            case .dateOldest: return "clock"
+            case .rarity: return "sparkles"
+            }
+        }
+    }
+
+    /// Rarity weight for sort: higher = rarer, listed first.
+    private func rarityWeight(_ rarity: BadgeRarity) -> Int {
+        switch rarity {
+        case .legendary: return 3
+        case .rare: return 2
+        case .common: return 1
+        }
+    }
 
     private var earnedBadges: [Badge] {
-        userManager.currentUser.badges
-            .filter { !$0.isLocked }
-            .sorted { lhs, rhs in
-                // Pinned badges first (preserve current order), then most recently earned.
-                let lp = lhs.pinSlot ?? Int.max
-                let rp = rhs.pinSlot ?? Int.max
-                if lp != rp { return lp < rp }
+        let pool = userManager.currentUser.badges.filter { !$0.isLocked }
+        return pool.sorted { lhs, rhs in
+            switch sortOption {
+            case .dateNewest:
+                return lhs.dateAwarded > rhs.dateAwarded
+            case .dateOldest:
+                return lhs.dateAwarded < rhs.dateAwarded
+            case .rarity:
+                let lw = rarityWeight(lhs.rarity)
+                let rw = rarityWeight(rhs.rarity)
+                if lw != rw { return lw > rw }
                 return lhs.dateAwarded > rhs.dateAwarded
             }
+        }
     }
 
     private let maxPins = 3
@@ -30,6 +59,10 @@ struct ManagePinnedBadgesSheet: View {
 
                 VStack(spacing: 0) {
                     headerBanner
+
+                    if !earnedBadges.isEmpty {
+                        sortBar
+                    }
 
                     ScrollView {
                         if earnedBadges.isEmpty {
@@ -52,6 +85,7 @@ struct ManagePinnedBadgesSheet: View {
                                 }
                             }
                             .padding(MADTheme.Spacing.md)
+                            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: sortOption)
                         }
                     }
                 }
@@ -99,6 +133,52 @@ struct ManagePinnedBadgesSheet: View {
         .padding(.vertical, MADTheme.Spacing.md)
         .frame(maxWidth: .infinity)
         .background(Color.white.opacity(0.04))
+    }
+
+    private var sortBar: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 10, weight: .heavy))
+                Text("SORT")
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .tracking(1.4)
+            }
+            .foregroundColor(.white.opacity(0.45))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(SortOption.allCases, id: \.self) { option in
+                        SortChip(
+                            title: option.rawValue,
+                            icon: option.icon,
+                            isSelected: sortOption == option
+                        ) {
+                            withAnimation(.spring(response: 0.3)) {
+                                sortOption = option
+                            }
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 2)
+            }
+        }
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background(
+            LinearGradient(
+                colors: [Color.white.opacity(0.04), Color.white.opacity(0)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.06))
+                .frame(height: 0.5)
+        }
     }
 
     private var emptyState: some View {
@@ -213,6 +293,24 @@ private struct BadgePickerCard: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
                     .background(Capsule().fill(badge.rarity.color.opacity(0.15)))
+
+                Text(badge.description)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44, alignment: .top)
+                    .padding(.horizontal, 2)
+
+                HStack(spacing: 4) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text(badge.dateAwarded.formattedShortDate)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                }
+                .foregroundColor(.white.opacity(0.55))
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, MADTheme.Spacing.md)
@@ -232,5 +330,57 @@ private struct BadgePickerCard: View {
         }
         .buttonStyle(BadgeCardButtonStyle())
         .disabled(atCapacity)
+    }
+}
+
+private struct SortChip: View {
+    let title: String
+    let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .bold))
+                Text(title)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+            }
+            .foregroundColor(isSelected ? .white : .white.opacity(0.72))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(chipBackground)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var chipBackground: some View {
+        if isSelected {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            MADTheme.Colors.madRed,
+                            MADTheme.Colors.madRed.opacity(0.82)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.white.opacity(0.28), lineWidth: 1)
+                )
+                .shadow(color: MADTheme.Colors.madRed.opacity(0.45), radius: 8, x: 0, y: 4)
+        } else {
+            Capsule()
+                .fill(Color.white.opacity(0.06))
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        }
     }
 }

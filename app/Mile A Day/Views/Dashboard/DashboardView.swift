@@ -91,6 +91,28 @@ struct DashboardView: View {
         )
     }
 
+    /// Re-play today's celebration so the user can re-watch and re-share at any time.
+    /// Picks the right animation for the day: yearly milestone if the streak crossed a
+    /// year boundary, otherwise the standard goal-completed celebration (which itself
+    /// surfaces the matching streak milestone visuals).
+    private func replayTodaysCelebration() {
+        let streak = userManager.currentUser.streak
+        if streak > 0 && streak % 365 == 0 {
+            let years = streak / 365
+            let startDate = Calendar.current.date(byAdding: .day, value: -streak, to: Date())
+            let info = YearlyMilestoneInfo(
+                years: years,
+                totalMiles: healthManager.totalLifetimeMiles,
+                totalStreakDays: streak,
+                streakStartDate: startDate
+            )
+            celebrationManager.replayCelebration(.yearMilestone(info: info))
+        } else {
+            let stats = buildGoalCompletionStats()
+            celebrationManager.replayCelebration(.goalCompleted(stats: stats))
+        }
+    }
+
     /// Build a yearly milestone test payload using realistic-ish stats from the user.
     private func triggerYearlyTest(years: Int) {
         celebrationManager.clearAll()
@@ -261,6 +283,21 @@ struct DashboardView: View {
                         Image(systemName: "trophy.fill")
                             .foregroundStyle(.yellow)
                     }
+                }
+
+                // Replay today's celebration (so the user can re-watch and re-share).
+                // Shown once the goal has been completed today and the celebration is
+                // not currently on screen.
+                if currentState.isCompleted
+                    && celebrationManager.hasShownGoalCelebrationToday
+                    && !celebrationManager.isShowingCelebration {
+                    Button {
+                        replayTodaysCelebration()
+                    } label: {
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(MADTheme.Colors.madRed)
+                    }
+                    .accessibilityLabel("Replay today's celebration")
                 }
 
                 // Admin celebration test menu

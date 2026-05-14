@@ -15,7 +15,7 @@ struct PinnedBadgesShowcase: View {
     private static let slotCount = 3
 
     var body: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+        VStack(alignment: .leading, spacing: pinnedBadges.isEmpty ? 10 : MADTheme.Spacing.md) {
             HStack(spacing: MADTheme.Spacing.sm) {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 14, weight: .semibold))
@@ -53,7 +53,10 @@ struct PinnedBadgesShowcase: View {
                         .buttonStyle(BadgeCardButtonStyle())
                         .disabled(onBadgeTapped == nil)
                     } else {
-                        PinnedBadgeSlotEmpty(isInteractive: onManageTapped != nil) {
+                        PinnedBadgeSlotEmpty(
+                            isInteractive: onManageTapped != nil,
+                            reserveNameSpace: !pinnedBadges.isEmpty
+                        ) {
                             onManageTapped?()
                         }
                     }
@@ -148,6 +151,10 @@ private struct PinnedBadgeSlotFilled: View {
 
 private struct PinnedBadgeSlotEmpty: View {
     let isInteractive: Bool
+    /// Reserve vertical space matching a filled slot's name label so empty + filled
+    /// slots align on the same baseline. Skip the reservation when all slots are
+    /// empty — there's nothing to align with and the spacer makes the row look loose.
+    let reserveNameSpace: Bool
     let onTap: () -> Void
 
     var body: some View {
@@ -167,9 +174,11 @@ private struct PinnedBadgeSlotEmpty: View {
                 }
                 .frame(width: 90, height: 90)
 
-                Text(" ")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .frame(height: 28)
+                if reserveNameSpace {
+                    Text(" ")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .frame(height: 28)
+                }
             }
             .frame(maxWidth: .infinity)
         }

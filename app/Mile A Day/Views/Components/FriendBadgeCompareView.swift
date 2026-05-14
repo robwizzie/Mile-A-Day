@@ -16,6 +16,9 @@ struct FriendBadgeCompareView: View {
     @State private var selectedFilter: CompareFilter = .all
     @State private var selectedBadge: Badge?
     @State private var isShowingDetail = false
+    @State private var visibleLimit: Int = 8
+
+    private let pageSize: Int = 8
 
     enum CompareFilter: String, CaseIterable, Hashable {
         case all = "All"
@@ -47,7 +50,7 @@ struct FriendBadgeCompareView: View {
     /// Friend's earned hidden badges that aren't in the public catalog. Appended so the friend
     /// gets credit for them, without leaking the existence of unearned hidden badges.
     private var earnedHidden: [Badge] {
-        earnedBadges.filter { $0.isHidden && !catalogBadges.contains(where: { c in c.id == $0.id }) }
+        earnedBadges.filter { earned in earned.isHidden && !catalogBadges.contains(where: { $0.id == earned.id }) }
     }
 
     /// Merged display list for the grid: catalog entries (resolved as owned or locked) + any earned-only hidden.
@@ -79,6 +82,21 @@ struct FriendBadgeCompareView: View {
         }
     }
 
+    private var visibleBadges: [Badge] {
+        Array(filteredBadges.prefix(visibleLimit))
+    }
+
+    private var hasMoreBadges: Bool {
+        filteredBadges.count > visibleLimit
+    }
+
+    private func selectFilter(_ filter: CompareFilter) {
+        withAnimation(.spring(response: 0.3)) {
+            selectedFilter = filter
+            visibleLimit = pageSize
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
             PinnedBadgesShowcase(
@@ -100,9 +118,17 @@ struct FriendBadgeCompareView: View {
                         .font(MADTheme.Typography.headline)
                         .foregroundColor(.primary)
                     Spacer()
-                    Text("\(ownedCount) / \(totalVisibleCount)")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(.secondary)
+                    HStack(spacing: 4) {
+                        Text("\(ownedCount)")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .foregroundColor(.primary)
+                        Text("/ \(totalVisibleCount)")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.white.opacity(0.06)))
                 }
 
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -113,37 +139,13 @@ struct FriendBadgeCompareView: View {
                                 icon: filter.icon,
                                 isSelected: selectedFilter == filter
                             ) {
-                                withAnimation(.spring(response: 0.3)) {
-                                    selectedFilter = filter
-                                }
+                                selectFilter(filter)
                             }
                         }
                     }
                 }
 
-                if filteredBadges.isEmpty {
-                    emptyState
-                } else {
-                    LazyVGrid(
-                        columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)],
-                        spacing: 16
-                    ) {
-                        ForEach(filteredBadges, id: \.id) { badge in
-                            Button {
-                                selectedBadge = badge
-                                isShowingDetail = true
-                            } label: {
-                                ZStack(alignment: .topLeading) {
-                                    PremiumBadgeCard(badge: badge)
-                                    if !badge.isLocked && !viewerEarnedBadgeIds.contains(badge.id) {
-                                        youDontHaveTag
-                                    }
-                                }
-                            }
-                            .buttonStyle(BadgeCardButtonStyle())
-                        }
-                    }
-                }
+                badgeGrid
             }
             .padding(MADTheme.Spacing.md)
             .madLiquidGlass()
@@ -153,6 +155,98 @@ struct FriendBadgeCompareView: View {
                 FriendBadgeDetailView(badge: badge, ownerDisplayName: ownerDisplayName)
             }
         }
+    }
+
+    @ViewBuilder
+    private var badgeGrid: some View {
+        VStack(spacing: MADTheme.Spacing.md) {
+            if filteredBadges.isEmpty {
+                emptyState
+            } else {
+                LazyVGrid(
+                    columns: [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)],
+                    spacing: 16
+                ) {
+                    ForEach(visibleBadges, id: \.id) { badge in
+                        Button {
+                            selectedBadge = badge
+                            isShowingDetail = true
+                        } label: {
+                            ZStack(alignment: .topLeading) {
+                                PremiumBadgeCard(badge: badge)
+                                if !badge.isLocked && !viewerEarnedBadgeIds.contains(badge.id) {
+                                    youDontHaveTag
+                                }
+                            }
+                        }
+                        .buttonStyle(BadgeCardButtonStyle())
+                    }
+                }
+
+                if hasMoreBadges {
+                    loadMoreButton
+                } else if filteredBadges.count > pageSize {
+                    showLessButton
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 160, alignment: .top)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: visibleLimit)
+        .animation(.easeInOut(duration: 0.2), value: selectedFilter)
+    }
+
+    private var loadMoreButton: some View {
+        let remaining = filteredBadges.count - visibleLimit
+        let nextChunk = min(pageSize, remaining)
+        return Button {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                visibleLimit = min(visibleLimit + pageSize, filteredBadges.count)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "chevron.down.circle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Show \(nextChunk) more")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                Text("· \(remaining) left")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.08))
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 4)
+    }
+
+    private var showLessButton: some View {
+        Button {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                visibleLimit = pageSize
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Show less")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+            }
+            .foregroundColor(.white.opacity(0.5))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
     }
 
     private var emptyState: some View {
