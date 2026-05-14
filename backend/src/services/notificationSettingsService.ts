@@ -9,6 +9,7 @@ export interface NotificationPreferences {
 	flexes_enabled: boolean;
 	hypes_enabled: boolean;
 	friend_activity_enabled: boolean;
+	friend_personal_best_enabled: boolean;
 	competition_invites_enabled: boolean;
 	competition_updates_enabled: boolean;
 	competition_milestones_enabled: boolean;
@@ -22,19 +23,17 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
 	flexes_enabled: true,
 	hypes_enabled: true,
 	friend_activity_enabled: true,
+	friend_personal_best_enabled: true,
 	competition_invites_enabled: true,
 	competition_updates_enabled: true,
 	competition_milestones_enabled: true,
 	step_goal_enabled: true,
 	quiet_hours_start: null,
-	quiet_hours_end: null,
+	quiet_hours_end: null
 };
 
 export async function getNotificationPreferences(userId: string): Promise<NotificationPreferences> {
-	const rows = await db.query(
-		'SELECT * FROM notification_settings WHERE user_id = $1',
-		[userId]
-	);
+	const rows = await db.query('SELECT * FROM notification_settings WHERE user_id = $1', [userId]);
 
 	if (rows.length === 0) return { ...DEFAULT_PREFERENCES };
 
@@ -44,12 +43,13 @@ export async function getNotificationPreferences(userId: string): Promise<Notifi
 		flexes_enabled: row.flexes_enabled ?? true,
 		hypes_enabled: row.hypes_enabled ?? true,
 		friend_activity_enabled: row.friend_activity_enabled ?? true,
+		friend_personal_best_enabled: row.friend_personal_best_enabled ?? true,
 		competition_invites_enabled: row.competition_invites_enabled ?? true,
 		competition_updates_enabled: row.competition_updates_enabled ?? true,
 		competition_milestones_enabled: row.competition_milestones_enabled ?? true,
 		step_goal_enabled: row.step_goal_enabled ?? true,
 		quiet_hours_start: row.quiet_hours_start ?? null,
-		quiet_hours_end: row.quiet_hours_end ?? null,
+		quiet_hours_end: row.quiet_hours_end ?? null
 	};
 }
 
@@ -68,12 +68,13 @@ export async function updateNotificationPreferences(
 		{ key: 'flexes_enabled', value: prefs.flexes_enabled },
 		{ key: 'hypes_enabled', value: prefs.hypes_enabled },
 		{ key: 'friend_activity_enabled', value: prefs.friend_activity_enabled },
+		{ key: 'friend_personal_best_enabled', value: prefs.friend_personal_best_enabled },
 		{ key: 'competition_invites_enabled', value: prefs.competition_invites_enabled },
 		{ key: 'competition_updates_enabled', value: prefs.competition_updates_enabled },
 		{ key: 'competition_milestones_enabled', value: prefs.competition_milestones_enabled },
 		{ key: 'step_goal_enabled', value: prefs.step_goal_enabled },
 		{ key: 'quiet_hours_start', value: prefs.quiet_hours_start },
-		{ key: 'quiet_hours_end', value: prefs.quiet_hours_end },
+		{ key: 'quiet_hours_end', value: prefs.quiet_hours_end }
 	];
 
 	for (const field of fields) {
@@ -86,10 +87,7 @@ export async function updateNotificationPreferences(
 
 	if (setClauses.length > 0) {
 		// Ensure row exists with defaults, then update only the provided fields
-		await db.query(
-			`INSERT INTO notification_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
-			[userId]
-		);
+		await db.query(`INSERT INTO notification_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`, [userId]);
 		await db.query(
 			`UPDATE notification_settings SET ${setClauses.join(', ')}, updated_at = NOW() WHERE user_id = $1`,
 			values
@@ -123,7 +121,7 @@ export async function getFriendNotificationSettings(userId: string): Promise<Fri
 		username: row.username,
 		muted: row.muted,
 		nudges_muted: row.nudges_muted,
-		activity_muted: row.activity_muted,
+		activity_muted: row.activity_muted
 	}));
 }
 
@@ -183,7 +181,7 @@ export async function updateFriendNotificationSettings(
 		username: rows[0].username,
 		muted: rows[0].muted,
 		nudges_muted: rows[0].nudges_muted,
-		activity_muted: rows[0].activity_muted,
+		activity_muted: rows[0].activity_muted
 	};
 }
 
@@ -194,6 +192,7 @@ type NotificationType =
 	| 'flex'
 	| 'hype'
 	| 'friend_activity'
+	| 'friend_personal_best'
 	| 'competition_invite'
 	| 'competition_update'
 	| 'competition_milestone';
@@ -203,6 +202,7 @@ const PREF_FIELD_BY_TYPE: Record<NotificationType, keyof NotificationPreferences
 	flex: 'flexes_enabled',
 	hype: 'hypes_enabled',
 	friend_activity: 'friend_activity_enabled',
+	friend_personal_best: 'friend_personal_best_enabled',
 	competition_invite: 'competition_invites_enabled',
 	competition_update: 'competition_updates_enabled',
 	competition_milestone: 'competition_milestones_enabled'
@@ -255,7 +255,8 @@ export async function filterRecipientsForNotification(
 		if (fs) {
 			if (fs.muted) return false;
 			if (notificationType === 'nudge' && fs.nudges_muted) return false;
-			if (notificationType === 'friend_activity' && fs.activity_muted) return false;
+			if ((notificationType === 'friend_activity' || notificationType === 'friend_personal_best') && fs.activity_muted)
+				return false;
 		}
 		return true;
 	});
@@ -264,7 +265,15 @@ export async function filterRecipientsForNotification(
 export async function shouldSendNotification(
 	targetUserId: string,
 	senderId: string | null,
-	notificationType: 'nudge' | 'flex' | 'hype' | 'friend_activity' | 'competition_invite' | 'competition_update' | 'competition_milestone'
+	notificationType:
+		| 'nudge'
+		| 'flex'
+		| 'hype'
+		| 'friend_activity'
+		| 'friend_personal_best'
+		| 'competition_invite'
+		| 'competition_update'
+		| 'competition_milestone'
 ): Promise<boolean> {
 	const prefs = await getNotificationPreferences(targetUserId);
 
@@ -281,6 +290,9 @@ export async function shouldSendNotification(
 			break;
 		case 'friend_activity':
 			if (!prefs.friend_activity_enabled) return false;
+			break;
+		case 'friend_personal_best':
+			if (!prefs.friend_personal_best_enabled) return false;
 			break;
 		case 'competition_invite':
 			if (!prefs.competition_invites_enabled) return false;
@@ -304,7 +316,8 @@ export async function shouldSendNotification(
 			const fs = friendSettings[0];
 			if (fs.muted) return false;
 			if (notificationType === 'nudge' && fs.nudges_muted) return false;
-			if (notificationType === 'friend_activity' && fs.activity_muted) return false;
+			if ((notificationType === 'friend_activity' || notificationType === 'friend_personal_best') && fs.activity_muted)
+				return false;
 		}
 	}
 
