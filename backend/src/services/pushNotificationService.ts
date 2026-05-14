@@ -1,5 +1,5 @@
 import { PostgresService } from './DbService.js';
-import { getNotificationPreferences } from './notificationSettingsService.js';
+import { getNotificationPreferences, shouldSendNotification } from './notificationSettingsService.js';
 import fs from 'fs';
 import path from 'path';
 import http2 from 'http2';
@@ -543,6 +543,67 @@ export async function fanOutFriendBadgePush(senderId: string, badge: BadgeEarned
 				rarity: badge.rarity
 			}
 		}).catch(err => console.error('[Push] friend_badge_earned send failed:', err.message));
+	}
+}
+
+function formatPersonalBestBody(prType: 'fastest_mile' | 'most_miles_day', newValue: number): string {
+	if (prType === 'fastest_mile') {
+		const totalSeconds = Math.round(newValue);
+		const minutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+		const paceStr = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+		return `Fastest mile — ${paceStr} pace`;
+	}
+	const milesStr = newValue >= 10 ? newValue.toFixed(1) : newValue.toFixed(2);
+	return `Most miles in a day — ${milesStr} mi`;
+}
+
+function personalBestLabel(prType: 'fastest_mile' | 'most_miles_day', newValue: number): string {
+	if (prType === 'fastest_mile') {
+		const totalSeconds = Math.round(newValue);
+		const minutes = Math.floor(totalSeconds / 60);
+		const seconds = totalSeconds % 60;
+		return `fastest mile (${minutes}:${seconds.toString().padStart(2, '0')})`;
+	}
+	const milesStr = newValue >= 10 ? newValue.toFixed(1) : newValue.toFixed(2);
+	return `most miles in a day (${milesStr} mi)`;
+}
+
+/**
+ * Fan out a personal-best to every accepted friend. No throttle — each PR
+ * dimension is its own event, and a single workout breaking both PRs should
+ * produce two distinct inbox rows so the viewer can hype each independently.
+ */
+export async function fanOutFriendPersonalBestPush(
+	senderId: string,
+	prType: 'fastest_mile' | 'most_miles_day',
+	newValue: number,
+	workoutId: string
+): Promise<void> {
+	const friendIds = await getAcceptedFriendIds(senderId);
+	if (friendIds.length === 0) return;
+	const sender = await getSenderDisplayName(senderId);
+
+	const title = `${sender} set a new personal best`;
+	const body = formatPersonalBestBody(prType, newValue);
+	const label = personalBestLabel(prType, newValue);
+
+	for (const friendId of friendIds) {
+		const allowed = await shouldSendNotification(friendId, senderId, 'friend_personal_best');
+		if (!allowed) continue;
+
+		sendPush(friendId, {
+			title,
+			body,
+			type: 'friend_personal_best',
+			data: {
+				sender_id: senderId,
+				pr_type: prType,
+				pr_label: label,
+				new_value: String(newValue),
+				workout_id: workoutId
+			}
+		}).catch(err => console.error('[Push] friend_personal_best send failed:', err.message));
 	}
 }
 
