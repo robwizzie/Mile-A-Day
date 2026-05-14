@@ -80,6 +80,7 @@ export type NotificationType =
 	| 'competition_milestone'
 	| 'streak_broken'
 	| 'personal_best'
+	| 'friend_personal_best'
 	| 'lead_change'
 	| 'clash_tie'
 	| 'badge_earned'
