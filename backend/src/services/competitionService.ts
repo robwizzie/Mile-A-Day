@@ -11,6 +11,27 @@ const db = PostgresService.getInstance();
 
 const ET_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
 
+/**
+ * Maximum length, in characters, of a user-supplied competition name.
+ * Keep in sync with CompetitionLimits.nameMaxLength in
+ * app/Mile A Day/Models/CompetitionLimits.swift
+ */
+export const COMPETITION_NAME_MAX_LENGTH = 50;
+
+function validateCompetitionName(name: unknown): string {
+	if (typeof name !== 'string') {
+		throw new BadRequestError('competition_name must be a string');
+	}
+	const trimmed = name.trim();
+	if (trimmed.length === 0) {
+		throw new BadRequestError('competition_name cannot be empty');
+	}
+	if (trimmed.length > COMPETITION_NAME_MAX_LENGTH) {
+		throw new BadRequestError(`competition_name cannot exceed ${COMPETITION_NAME_MAX_LENGTH} characters`);
+	}
+	return trimmed;
+}
+
 export function getTodayET(): string {
 	return ET_DATE_FORMATTER.format(new Date());
 }
@@ -48,6 +69,7 @@ export async function createCompetition(params: CreateCompetitionParams) {
 	checkKeys(params);
 
 	const { competition_name, start_date, end_date, workouts = ['run', 'walk'], type, options, owner } = params;
+	const validatedName = validateCompetitionName(competition_name);
 
 	const [competition] = await db.query(
 		`INSERT INTO competitions (
@@ -56,7 +78,7 @@ export async function createCompetition(params: CreateCompetitionParams) {
         ) VALUES (
 			$1, $2, $3, $4, $5, $6, $7
 		) RETURNING *;`,
-		[competition_name, start_date || null, end_date || null, JSON.stringify(workouts), type, JSON.stringify(options), owner]
+		[validatedName, start_date || null, end_date || null, JSON.stringify(workouts), type, JSON.stringify(options), owner]
 	);
 
 	await db.query(
@@ -277,6 +299,10 @@ export async function updateCompetition(params: UpdateCompetitionParams): Promis
 		throw new BadRequestError(`Competition with id ${competitionId} not found`);
 	}
 
+	if (updateFields.competition_name !== undefined) {
+		updateFields.competition_name = validateCompetitionName(updateFields.competition_name);
+	}
+
 	const updates: string[] = [];
 	const values: any[] = [];
 	let paramIndex = 1;
@@ -369,17 +395,13 @@ export async function getUserScores(
 
 	const [batchRows, manualUserIds] = await Promise.all([
 		isStepUnit
-			? getStepsDateRangeBatch(
-					acceptedUserIds,
-					competition.start_date,
-					competition.end_date ?? undefined
-			  )
+			? getStepsDateRangeBatch(acceptedUserIds, competition.start_date, competition.end_date ?? undefined)
 			: getQuantityDateRangeBatch(
 					acceptedUserIds,
 					competition.start_date,
 					competition.end_date ?? undefined,
 					competition.workouts
-			  ),
+				),
 		isStepUnit
 			? Promise.resolve(new Set<string>())
 			: getUsersWithManualWorkouts(acceptedUserIds, competition.start_date, endDate)
