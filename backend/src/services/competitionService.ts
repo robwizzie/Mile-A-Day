@@ -69,6 +69,7 @@ export async function createCompetition(params: CreateCompetitionParams) {
 	checkKeys(params);
 
 	const { competition_name, start_date, end_date, workouts = ['run', 'walk'], type, options, owner } = params;
+	const validatedName = validateCompetitionName(competition_name);
 
 	const [competition] = await db.query(
 		`INSERT INTO competitions (
@@ -77,7 +78,7 @@ export async function createCompetition(params: CreateCompetitionParams) {
         ) VALUES (
 			$1, $2, $3, $4, $5, $6, $7
 		) RETURNING *;`,
-		[competition_name, start_date || null, end_date || null, JSON.stringify(workouts), type, JSON.stringify(options), owner]
+		[validatedName, start_date || null, end_date || null, JSON.stringify(workouts), type, JSON.stringify(options), owner]
 	);
 
 	await db.query(
