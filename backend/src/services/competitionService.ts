@@ -299,6 +299,10 @@ export async function updateCompetition(params: UpdateCompetitionParams): Promis
 		throw new BadRequestError(`Competition with id ${competitionId} not found`);
 	}
 
+	if (updateFields.competition_name !== undefined) {
+		updateFields.competition_name = validateCompetitionName(updateFields.competition_name);
+	}
+
 	const updates: string[] = [];
 	const values: any[] = [];
 	let paramIndex = 1;
