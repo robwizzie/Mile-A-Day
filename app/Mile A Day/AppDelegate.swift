@@ -14,6 +14,16 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         // Ensure the notification delegate is set before the system delivers
         // a pending notification response on cold launch.
         _ = MADNotificationService.shared
+
+        // If iOS launched us in the background (no UI scene), kick off a sync immediately.
+        // For UI launches, the scene lifecycle in Mile_A_DayApp handles the sync.
+        if application.applicationState == .background {
+            print("[AppDelegate] Launched in background — triggering performBackgroundSync")
+            Task {
+                await MADBackgroundService.shared.performBackgroundSync(reason: .backgroundLaunch)
+            }
+        }
+
         return true
     }
 
