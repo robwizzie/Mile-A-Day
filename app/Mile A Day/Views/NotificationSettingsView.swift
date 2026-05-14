@@ -76,6 +76,9 @@ struct NotificationSettingsView: View {
                         settingsDivider
                         settingsToggle("When a friend completes a mile", isOn: $prefs.friendCompletedEnabled)
                         settingsDivider
+                        settingsToggle("When a friend hits a personal best", isOn: $prefs.friendPersonalBestEnabled,
+                            description: "Fastest mile or most miles in a day")
+                        settingsDivider
                         settingsToggle("Step goal", isOn: $prefs.stepGoalEnabled,
                             description: "When you reach 10,000 steps in a day")
                     }
@@ -338,6 +341,7 @@ struct NotificationSettingsView: View {
                     "hypes_enabled": prefs.hypeEnabled,
                     "step_goal_enabled": prefs.stepGoalEnabled,
                     "friend_activity_enabled": prefs.friendCompletedEnabled,
+                    "friend_personal_best_enabled": prefs.friendPersonalBestEnabled,
                     "competition_invites_enabled": prefs.competitionInviteEnabled,
                     "competition_updates_enabled": prefs.competitionAcceptedEnabled && prefs.competitionStartEnabled && prefs.competitionFinishEnabled,
                     "competition_milestones_enabled": prefs.competitionMilestonesEnabled,
