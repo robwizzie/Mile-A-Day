@@ -91,6 +91,10 @@ export async function triggerCompetitionCron(_req: Request, res: Response) {
 }
 
 export async function triggerSilentSyncFanout(req: Request, res: Response): Promise<void> {
+	if (process.env.NODE_ENV === 'production') {
+		res.status(403).json({ error: 'Not available in production' });
+		return;
+	}
 	try {
 		const result = await runSilentSyncPushFanout();
 		res.json({ success: true, ...result });
@@ -100,6 +104,10 @@ export async function triggerSilentSyncFanout(req: Request, res: Response): Prom
 }
 
 export async function triggerSilentSyncForUser(req: Request, res: Response): Promise<void> {
+	if (process.env.NODE_ENV === 'production') {
+		res.status(403).json({ error: 'Not available in production' });
+		return;
+	}
 	const userId = req.params.userId;
 	if (!userId) {
 		res.status(400).json({ success: false, error: 'userId required' });
