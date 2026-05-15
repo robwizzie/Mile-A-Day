@@ -3,7 +3,7 @@ import { sendPush, sendOrQueueCompetitionNotification } from './pushNotification
 import { shouldSendNotification, filterRecipientsForNotification } from './notificationSettingsService.js';
 import { getCompetition, getUserScores } from './competitionService.js';
 import { Competition, CompetitionUser } from '../types/competitions.js';
-import { getActiveStreak, getTodayMiles } from './workoutService.js';
+import { getActiveStreak, getTodayMiles, getTodayStats } from './workoutService.js';
 
 const db = PostgresService.getInstance();
 
@@ -88,7 +88,23 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<voi
 		if (recipients.length === 0) return;
 
 		const title = `${user.username} got their mile in!`;
-		const body = 'Your friend just completed their daily mile. Time to lace up!';
+
+		// Build a stat-line body. If stats fail or are degenerate, fall back to
+		// the generic body so the notification still goes out.
+		const FALLBACK_BODY = 'Your friend just completed their daily mile. Time to lace up!';
+		let body = FALLBACK_BODY;
+		try {
+			const stats = await getTodayStats(userId);
+			if (stats.miles > 0) {
+				const parts = [formatMiles(stats.miles), formatDuration(stats.durationSeconds)];
+				if (stats.bestSplitPaceSecMi != null && stats.bestSplitPaceSecMi > 0) {
+					parts.push(`best pace ${formatPace(stats.bestSplitPaceSecMi)}`);
+				}
+				body = parts.join(' · ');
+			}
+		} catch (err: any) {
+			console.error('[Notifications] Error building mile completion stats body, using fallback:', err.message);
+		}
 
 		// Pre-filter all recipients in 2 queries instead of 2 per recipient.
 		const allowedRecipients = await filterRecipientsForNotification(recipients, userId, 'friend_activity');
