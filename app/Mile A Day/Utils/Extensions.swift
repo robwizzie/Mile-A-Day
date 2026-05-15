@@ -280,4 +280,10 @@ private func getHealthKitManagerInstance() -> HealthKitManager? {
     // For now, return nil to use fallback behavior
     // TODO: Implement proper dependency injection to access HealthKitManager
     return nil
-} 
+}
+
+// MARK: - URL Identifiable Conformance
+
+extension URL: Identifiable {
+    public var id: String { absoluteString }
+}

@@ -232,10 +232,6 @@ struct AuthenticationView: View {
     }
 }
 
-extension URL: Identifiable {
-    public var id: String { absoluteString }
-}
-
 #Preview("Dark") {
     AuthenticationView()
         .environmentObject(AppStateManager())
