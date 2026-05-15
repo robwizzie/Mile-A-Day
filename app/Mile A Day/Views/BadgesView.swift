@@ -224,9 +224,8 @@ struct BadgesView: View {
             return allBadges.filter { $0.id.starts(with: "challenge_") }
         case .new:
             // Use the on-open snapshot so the list survives mark-as-viewed.
-            let pool = allBadges + earnedHiddenBadges
             let snapshot = newBadgeIdsAtOpen
-            return pool.filter { ($0.isNew || snapshot.contains($0.id)) && !$0.isLocked }
+            return allBadges.filter { ($0.isNew || snapshot.contains($0.id)) && !$0.isLocked }
         }
     }
     

@@ -60,6 +60,8 @@ class FriendService: ObservableObject {
                 throw FriendServiceError.unauthorized
             case .badRequest(let message):
                 throw FriendServiceError.apiError(message)
+            case .conflict(let message):
+                throw FriendServiceError.apiError(message)
             case .rateLimited(let message):
                 throw FriendServiceError.apiError(message)
             case .serverError(let code):

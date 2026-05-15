@@ -6,6 +6,10 @@ import HealthKit
 extension CompetitionDetailView {
 
     // MARK: - Enhanced Leaderboard
+    /// Unified leaderboard list — no separate podium block. The top three rows get
+    /// a medal-colored rank badge and accent stripe inline so they still stand out
+    /// without being disconnected from the rest of the rankings. Tap any row to
+    /// expand a daily activity strip showing per-day progress.
     var enhancedLeaderboard: some View {
         let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
         let rankedUsers = competition.users
@@ -40,35 +44,39 @@ extension CompetitionDetailView {
                     .padding(MADTheme.Spacing.lg)
             } else {
                 VStack(spacing: MADTheme.Spacing.md) {
-                    // Podium for top 3
-                    if rankedUsers.count >= 2 {
-                        enhancedPodium(rankedUsers: Array(rankedUsers.prefix(3)), gradientColors: gradientColors, currentUserId: currentUserId)
-                    }
-
-                    // Ranked rows
-                    VStack(spacing: MADTheme.Spacing.sm) {
+                    // Unified rows — every competitor in one connected list
+                    VStack(spacing: 6) {
                         ForEach(Array(rankedUsers.enumerated()), id: \.element.id) { index, user in
                             let isMe = user.user_id == currentUserId
+                            let rank = index + 1
 
-                            CompetitionLeaderboardRow(
-                                rank: index + 1,
+                            leaderboardEntry(
+                                rank: rank,
                                 user: user,
-                                competitionType: competition.type,
-                                unit: competition.options.unit,
-                                isCurrentUser: isMe,
-                                totalLives: competition.type == .streaks ? competition.streakLives : 0
+                                isMe: isMe,
+                                isExpanded: false
                             )
                             .opacity(leaderboardAnimated ? 1 : 0)
                             .offset(y: leaderboardAnimated ? 0 : 15)
                             .animation(
                                 .spring(response: 0.5, dampingFraction: 0.8)
-                                    .delay(0.15 + Double(index) * 0.06),
+                                    .delay(0.1 + Double(index) * 0.05),
                                 value: leaderboardAnimated
                             )
                         }
                     }
+
+                    // Comp-wide activity calendar — defaults to "viewing all", tap
+                    // any leaderboard row to focus on that competitor, "Show all"
+                    // pill on the calendar returns to aggregate.
+                    DailyActivityCalendar(
+                        allUsers: rankedUsers,
+                        competition: competition,
+                        accent: gradientColors.first ?? MADTheme.Colors.madRed,
+                        focusedUserId: $expandedLeaderboardUserId
+                    )
                 }
-                .padding(MADTheme.Spacing.lg)
+                .padding(MADTheme.Spacing.md)
                 .background(
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                         .fill(.ultraThinMaterial)
@@ -88,17 +96,67 @@ extension CompetitionDetailView {
         }
         .onAppear {
             leaderboardAnimated = false
-            podiumAnimated = false
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
                     leaderboardAnimated = true
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                withAnimation(.spring(response: 0.7, dampingFraction: 0.65)) {
-                    podiumAnimated = true
+        }
+    }
+
+    /// One leaderboard row. Tapping it focuses the shared calendar on that
+    /// competitor. Tapping the same row again clears focus (back to "all"). A
+    /// medal-colored left rail runs through every row — wider when the row is
+    /// the focused one, so the active selection is unmistakable.
+    @ViewBuilder
+    func leaderboardEntry(rank: Int, user: CompetitionUser, isMe: Bool, isExpanded: Bool) -> some View {
+        let isFocused = expandedLeaderboardUserId == user.user_id
+
+        Button {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                if isFocused {
+                    expandedLeaderboardUserId = nil
+                } else {
+                    expandedLeaderboardUserId = user.user_id
                 }
             }
+        } label: {
+            HStack(spacing: 0) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(
+                        LinearGradient(
+                            colors: medalRankGradient(rank),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: isFocused ? 5 : 3)
+                    .padding(.vertical, 8)
+                    .shadow(color: isFocused ? (medalRankGradient(rank).first ?? .white).opacity(0.5) : .clear, radius: 4)
+
+                CompetitionLeaderboardRow(
+                    rank: rank,
+                    user: user,
+                    competitionType: competition.type,
+                    unit: competition.options.unit,
+                    isCurrentUser: isMe,
+                    totalLives: competition.type == .streaks ? competition.streakLives : 0
+                )
+            }
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                    .fill(isFocused ? Color.white.opacity(0.05) : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    func medalRankGradient(_ rank: Int) -> [Color] {
+        switch rank {
+        case 1: return [.yellow, .orange]
+        case 2: return [Color(white: 0.85), Color(white: 0.6)]
+        case 3: return [Color(red: 0.85, green: 0.55, blue: 0.25), Color(red: 0.6, green: 0.35, blue: 0.15)]
+        default: return [Color.white.opacity(0.22), Color.white.opacity(0.08)]
         }
     }
 
@@ -1082,5 +1140,677 @@ extension CompetitionDetailView {
         case .targets, .clash:
             return "\(Int(score)) pts"
         }
+    }
+}
+
+// MARK: - Daily Activity Calendar
+// Per-user, per-day activity breakdown shown inline below a tapped leaderboard
+// row. Reads `user.intervals` (keyed by ISO date) and renders a real monthly
+// calendar grid — much more glanceable than a horizontal scroll for multi-week
+// competitions. Includes summary stats, month navigation for multi-month comps,
+// a legend, and the comp's allowed-activity chips so users know which workout
+// types feed each day's distance.
+
+struct DailyActivityCalendar: View {
+    /// Every accepted competitor — drives both the aggregate cell coloring
+    /// (how many hit goal each day) and the per-day breakdown when a cell is tapped.
+    let allUsers: [CompetitionUser]
+    let competition: Competition
+    let accent: Color
+    /// When non-nil, the calendar renders that single user's data instead of the
+    /// aggregate. Parent owns the binding so leaderboard rows can flip it.
+    @Binding var focusedUserId: String?
+
+    @State private var monthOffset: Int = 0
+    @State private var selectedDay: Date?
+
+    /// Convenience: the focused user object (if any).
+    private var focusedUser: CompetitionUser? {
+        guard let id = focusedUserId else { return nil }
+        return allUsers.first(where: { $0.user_id == id })
+    }
+
+    /// True when the calendar is showing one competitor instead of the whole comp.
+    private var isFocused: Bool { focusedUser != nil }
+
+    /// Accent that adapts to the focused user's medal placement — gold/silver/
+    /// bronze for ranks 1/2/3, otherwise the comp's default accent. `allUsers`
+    /// is already sorted by score descending by both call sites.
+    private var effectiveAccent: Color {
+        guard let user = focusedUser,
+              let rank = allUsers.firstIndex(where: { $0.user_id == user.user_id }) else {
+            return accent
+        }
+        switch rank {
+        case 0: return Color(red: 1.0, green: 0.78, blue: 0.0)        // gold
+        case 1: return Color(white: 0.82)                              // silver
+        case 2: return Color(red: 0.85, green: 0.55, blue: 0.25)       // bronze
+        default: return accent
+        }
+    }
+
+    private let weekdayLabels = ["S", "M", "T", "W", "T", "F", "S"]
+    private let isoDateFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate]
+        return f
+    }()
+
+    private var goal: Double {
+        switch competition.type {
+        case .streaks, .targets, .race: return competition.options.goal
+        default: return 0
+        }
+    }
+
+    /// Per-day fill ratio in [0, 1]. In aggregate mode this is the share of
+    /// competitors who hit goal that day; in focused mode it's just whether the
+    /// focused user hit goal — scaled by progress for partial days.
+    private func hitRatio(for date: Date) -> Double {
+        let k = key(for: date)
+
+        if let user = focusedUser {
+            let d = user.intervals?[k] ?? 0
+            if goal > 0 { return min(1.0, d / goal) }
+            return d > 0 ? 1.0 : 0
+        }
+
+        guard !allUsers.isEmpty else { return 0 }
+        let hits = allUsers.reduce(0) { count, u in
+            let d = u.intervals?[k] ?? 0
+            if goal > 0 { return count + (d >= goal ? 1 : 0) }
+            return count + (d > 0 ? 1 : 0)
+        }
+        return Double(hits) / Double(allUsers.count)
+    }
+
+    /// Total summed distance — focused user's only when focused, otherwise comp-wide.
+    private var aggregateTotalDistance: Double {
+        if let user = focusedUser {
+            return user.intervals?.values.reduce(0, +) ?? 0
+        }
+        return allUsers.reduce(0) { sum, u in
+            sum + (u.intervals?.values.reduce(0, +) ?? 0)
+        }
+    }
+
+    /// Days hit — focused user's goal-hit count when focused, otherwise comp-wide
+    /// "days where someone was active".
+    private var aggregateHitDays: Int {
+        if let user = focusedUser {
+            let vals: [Double] = user.intervals.map { Array($0.values) } ?? []
+            if goal > 0 {
+                return vals.filter { $0 >= goal }.count
+            }
+            return vals.filter { $0 > 0 }.count
+        }
+        let cal = Calendar.current
+        guard let start = competition.startDateFormatted else { return 0 }
+        let end = min(competition.endDateFormatted ?? Date(), Date())
+        var count = 0
+        var day = cal.startOfDay(for: start)
+        let last = cal.startOfDay(for: end)
+        while day <= last {
+            if hitRatio(for: day) > 0 { count += 1 }
+            guard let next = cal.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
+        return count
+    }
+
+    private var startDate: Date {
+        competition.startDateFormatted ?? Date()
+    }
+
+    private var endDate: Date {
+        min(competition.endDateFormatted ?? Date(), Date())
+    }
+
+    /// All month starts that overlap the comp's date range. Used to drive the
+    /// month navigator — single-month comps show one page, multi-month comps
+    /// get prev/next chevrons.
+    private var months: [Date] {
+        let cal = Calendar.current
+        guard let firstMonth = cal.dateInterval(of: .month, for: startDate)?.start,
+              let lastMonth = cal.dateInterval(of: .month, for: endDate)?.start else {
+            return [startDate]
+        }
+        var result: [Date] = []
+        var current = firstMonth
+        while current <= lastMonth {
+            result.append(current)
+            guard let next = cal.date(byAdding: .month, value: 1, to: current) else { break }
+            current = next
+        }
+        // Default to the most-recent month so users land on "now" first.
+        return result.isEmpty ? [firstMonth] : result
+    }
+
+    private var visibleMonth: Date {
+        let idx = max(0, min(monthOffset, months.count - 1))
+        return months[idx]
+    }
+
+    /// Cells for the visible month — padded with nils so the first day lands
+    /// on its true weekday column and the trailing row is filled out.
+    private var monthCells: [Date?] {
+        let cal = Calendar.current
+        let monthStart = visibleMonth
+        guard let range = cal.range(of: .day, in: .month, for: monthStart) else { return [] }
+        let firstWeekday = cal.component(.weekday, from: monthStart) // 1 = Sunday
+        var cells: [Date?] = Array(repeating: nil, count: firstWeekday - 1)
+        for day in range {
+            if let date = cal.date(byAdding: .day, value: day - 1, to: monthStart) {
+                cells.append(date)
+            }
+        }
+        while cells.count % 7 != 0 { cells.append(nil) }
+        return cells
+    }
+
+    private func key(for date: Date) -> String {
+        isoDateFormatter.string(from: Calendar.current.startOfDay(for: date))
+    }
+
+    private func isInRange(_ date: Date) -> Bool {
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: date)
+        let start = cal.startOfDay(for: startDate)
+        let end = cal.startOfDay(for: endDate)
+        return day >= start && day <= end
+    }
+
+    private var monthName: String {
+        let f = DateFormatter()
+        f.dateFormat = "MMMM yyyy"
+        return f.string(from: visibleMonth)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            focusBar
+            summaryHeader
+
+            if months.count > 1 {
+                monthNavigator
+            } else {
+                Text(monthName)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.85))
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+
+            weekdayHeader
+            calendarGrid
+            legendRow
+
+            if let selected = selectedDay {
+                dayDetailPanel(for: selected)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .move(edge: .top)),
+                        removal: .opacity
+                    ))
+            }
+        }
+        .onAppear {
+            // Land on the latest month so users see current activity first.
+            monthOffset = max(0, months.count - 1)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.03))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
+    }
+
+    /// Sits at the top of the calendar so users always know what they're viewing,
+    /// and how to switch back to the comp-wide view when they're focused on one
+    /// player. When focused, the avatar + name leads and a "Show all" pill on the
+    /// right is the one-tap escape hatch.
+    @ViewBuilder
+    private var focusBar: some View {
+        if let user = focusedUser {
+            HStack(spacing: 10) {
+                AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 28)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(effectiveAccent.opacity(0.6), lineWidth: 1.5)
+                    )
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("VIEWING")
+                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .tracking(1.0)
+                        .foregroundColor(.white.opacity(0.5))
+                    Text(user.displayName)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                        focusedUserId = nil
+                    }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("Show all")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 7)
+                    .background(
+                        Capsule().fill(effectiveAccent)
+                            .shadow(color: effectiveAccent.opacity(0.4), radius: 6, x: 0, y: 3)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.bottom, 2)
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: "person.3.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white.opacity(0.5))
+                Text("VIEWING ALL PLAYERS")
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.55))
+                Spacer()
+                Text("Tap a player to focus")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+        }
+    }
+
+    private var summaryHeader: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(isFocused ? "1" : "\(allUsers.count)")
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+                Text(isFocused ? "PLAYER" : "PLAYERS")
+                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .tracking(1.0)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+
+            Rectangle()
+                .fill(Color.white.opacity(0.1))
+                .frame(width: 1, height: 28)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(aggregateHitDays)")
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+                Text(isFocused ? (goal > 0 ? "GOALS HIT" : "DAYS ACTIVE") : "ACTIVE DAYS")
+                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .tracking(1.0)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+
+            Rectangle()
+                .fill(Color.white.opacity(0.1))
+                .frame(width: 1, height: 28)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(formattedTotalDistance)
+                    .font(.system(size: 18, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+                Text("\(competition.options.unit.shortDisplayName.uppercased()) TOTAL")
+                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .tracking(1.0)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+
+            Spacer()
+
+            HStack(spacing: 4) {
+                ForEach(competition.workouts, id: \.self) { activity in
+                    Image(systemName: activity.icon)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(activity.color)
+                        .frame(width: 22, height: 22)
+                        .background(Circle().fill(activity.backgroundColor))
+                }
+            }
+        }
+    }
+
+    private var formattedTotalDistance: String {
+        if aggregateTotalDistance >= 100 {
+            return String(format: "%.0f", aggregateTotalDistance)
+        }
+        return String(format: "%.1f", aggregateTotalDistance)
+    }
+
+    private var monthNavigator: some View {
+        HStack {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    monthOffset = max(0, monthOffset - 1)
+                }
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(monthOffset > 0 ? 0.7 : 0.2))
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(Color.white.opacity(0.06)))
+            }
+            .disabled(monthOffset == 0)
+            .buttonStyle(.plain)
+
+            Spacer()
+
+            Text(monthName)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+
+            Spacer()
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    monthOffset = min(months.count - 1, monthOffset + 1)
+                }
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(monthOffset < months.count - 1 ? 0.7 : 0.2))
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(Color.white.opacity(0.06)))
+            }
+            .disabled(monthOffset >= months.count - 1)
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var weekdayHeader: some View {
+        HStack(spacing: 4) {
+            ForEach(0..<7, id: \.self) { i in
+                Text(weekdayLabels[i])
+                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .tracking(0.8)
+                    .foregroundColor(.white.opacity(0.4))
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private var calendarGrid: some View {
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+        return LazyVGrid(columns: columns, spacing: 4) {
+            ForEach(Array(monthCells.enumerated()), id: \.offset) { _, date in
+                if let date = date {
+                    Button {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+                            if let current = selectedDay,
+                               Calendar.current.isDate(current, inSameDayAs: date) {
+                                selectedDay = nil
+                            } else {
+                                selectedDay = date
+                            }
+                        }
+                    } label: {
+                        DailyCalendarCell(
+                            date: date,
+                            hitRatio: hitRatio(for: date),
+                            isInRange: isInRange(date),
+                            isSelected: selectedDay.map { Calendar.current.isDate($0, inSameDayAs: date) } ?? false,
+                            accent: effectiveAccent
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!isInRange(date))
+                } else {
+                    Color.clear
+                        .frame(height: 36)
+                }
+            }
+        }
+    }
+
+    /// Per-user activity for a specific day. Ranked by distance — hit-goal users
+    /// surface to the top, then partial activity, then off-days.
+    private func dayDetailPanel(for date: Date) -> some View {
+        let formatter: DateFormatter = {
+            let f = DateFormatter()
+            f.dateFormat = "EEEE, MMM d"
+            return f
+        }()
+        let breakdown = allUsers
+            .map { (u: CompetitionUser) -> (user: CompetitionUser, distance: Double) in
+                let key = self.key(for: date)
+                let d = u.intervals?[key] ?? 0
+                return (u, d)
+            }
+            .sorted { $0.distance > $1.distance }
+        let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(effectiveAccent)
+                Text(formatter.string(from: date).uppercased())
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .tracking(1.0)
+                    .foregroundColor(.white.opacity(0.75))
+
+                Spacer()
+
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) { selectedDay = nil }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .heavy))
+                        .foregroundColor(.white.opacity(0.55))
+                        .frame(width: 20, height: 20)
+                        .background(Circle().fill(Color.white.opacity(0.08)))
+                }
+                .buttonStyle(.plain)
+            }
+
+            VStack(spacing: 5) {
+                ForEach(breakdown, id: \.user.id) { entry in
+                    DayDetailRow(
+                        user: entry.user,
+                        distance: entry.distance,
+                        goal: goal,
+                        unit: competition.options.unit,
+                        accent: effectiveAccent,
+                        isCurrentUser: entry.user.user_id == currentUserId
+                    )
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private var legendRow: some View {
+        HStack(spacing: 14) {
+            if isFocused {
+                legendItem(state: .hit, label: goal > 0 ? "Goal hit" : "Active")
+                if goal > 0 {
+                    legendItem(state: .partial, label: "Partial")
+                }
+                legendItem(state: .off, label: "Off")
+            } else {
+                legendItem(state: .hit, label: "All hit")
+                legendItem(state: .partial, label: "Some")
+                legendItem(state: .off, label: "None")
+            }
+            Spacer()
+            Text("Counts \(competition.workouts.map { $0.displayName.lowercased() }.joined(separator: " + "))")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.45))
+        }
+    }
+
+    private enum LegendState { case hit, partial, off }
+
+    private func legendItem(state: LegendState, label: String) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(
+                    state == .hit ? effectiveAccent :
+                    state == .partial ? effectiveAccent.opacity(0.4) :
+                    Color.white.opacity(0.08)
+                )
+                .frame(width: 10, height: 10)
+                .overlay(
+                    Circle()
+                        .strokeBorder(state == .off ? Color.white.opacity(0.18) : Color.clear, lineWidth: 1)
+                )
+            Text(label)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+        }
+    }
+}
+
+private struct DailyCalendarCell: View {
+    let date: Date
+    /// 0...1 — fraction of competitors who hit goal (or had activity) on this day.
+    let hitRatio: Double
+    let isInRange: Bool
+    let isSelected: Bool
+    let accent: Color
+
+    private var hasAnyHits: Bool { hitRatio > 0 }
+    private var isAllHit: Bool { hitRatio >= 0.999 }
+    private var isToday: Bool { Calendar.current.isDateInToday(date) }
+    private var dayNumber: Int { Calendar.current.component(.day, from: date) }
+
+    /// Floor for visible fills — even 1/5 should be clearly visible.
+    private var displayFill: Double {
+        hitRatio > 0 ? max(0.3, hitRatio) : 0
+    }
+
+    var body: some View {
+        ZStack {
+            // Base
+            Circle()
+                .fill(Color.white.opacity(isInRange ? 0.04 : 0.01))
+
+            // Aggregate fill — opacity scales with how many users hit goal
+            if hasAnyHits && isInRange {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                accent.opacity(displayFill),
+                                accent.opacity(displayFill * 0.7)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
+
+            // Today ring (only when not selected)
+            if isToday && !isSelected {
+                Circle()
+                    .strokeBorder(Color.white.opacity(0.7), lineWidth: 1.5)
+            }
+
+            // Selected ring trumps everything for unmistakable focus.
+            if isSelected {
+                Circle()
+                    .strokeBorder(Color.white, lineWidth: 2)
+                    .shadow(color: accent.opacity(0.6), radius: 4)
+            }
+
+            // Day number
+            Text("\(dayNumber)")
+                .font(.system(size: 11, weight: isAllHit || isSelected ? .black : .bold, design: .rounded))
+                .foregroundColor(
+                    !isInRange ? .white.opacity(0.18) :
+                    isSelected ? .white :
+                    hitRatio >= 0.5 ? .white :
+                    hasAnyHits ? .white.opacity(0.9) :
+                    .white.opacity(0.55)
+                )
+        }
+        .frame(height: 36)
+        .aspectRatio(1, contentMode: .fit)
+    }
+}
+
+/// Single row in the per-day breakdown panel. Shows avatar + name + distance,
+/// with a "YOU" badge for the current user and a checkmark seal when goal is hit.
+private struct DayDetailRow: View {
+    let user: CompetitionUser
+    let distance: Double
+    let goal: Double
+    let unit: CompetitionUnit
+    let accent: Color
+    let isCurrentUser: Bool
+
+    private var hitGoal: Bool { goal > 0 && distance >= goal }
+    private var hasActivity: Bool { distance > 0 }
+
+    private var distanceText: String {
+        let formatted = distance >= 10
+            ? String(format: "%.1f", distance)
+            : String(format: "%.2f", distance)
+        return "\(formatted) \(unit.shortDisplayName)"
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 28)
+
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 4) {
+                    Text(user.displayName)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(hasActivity ? 1.0 : 0.55))
+                        .lineLimit(1)
+                    if isCurrentUser {
+                        Text("YOU")
+                            .font(.system(size: 8, weight: .black))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(MADTheme.Colors.madRed))
+                    }
+                }
+                Text(hasActivity ? distanceText : "Off day")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(hasActivity ? accent : .white.opacity(0.35))
+            }
+
+            Spacer()
+
+            if hitGoal {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(accent)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(
+                    isCurrentUser
+                        ? MADTheme.Colors.madRed.opacity(0.08)
+                        : (hasActivity ? Color.white.opacity(0.04) : Color.clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(
+                            hitGoal ? accent.opacity(0.4) : Color.white.opacity(0.06),
+                            lineWidth: 1
+                        )
+                )
+        )
     }
 }

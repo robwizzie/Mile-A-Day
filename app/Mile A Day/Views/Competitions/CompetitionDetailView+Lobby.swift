@@ -5,18 +5,11 @@ import SwiftUI
 extension CompetitionDetailView {
 
     // MARK: - Lobby Content
+    // The countdown/waiting banner + competition settings are now rendered by the
+    // unified Timeline / Quick Rules cards at the top of CompetitionDetailView,
+    // so this only owns the lobby-specific actions and participant management.
     var lobbyContent: some View {
         VStack(spacing: MADTheme.Spacing.xl) {
-            // Status banner - countdown if scheduled, waiting banner if lobby
-            if competition.status == .scheduled {
-                scheduledCountdownBanner
-            } else {
-                lobbyWaitingBanner
-            }
-
-            // Competition settings summary
-            infoSection
-
             // Edit settings button (owner only, lobby only)
             if competition.isOwner && competition.status == .lobby {
                 Button {

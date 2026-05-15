@@ -8,9 +8,15 @@ struct CompetitionsListView: View {
     @State private var showingCreateCompetition = false
     @State private var selectedCompetition: Competition?
     @State private var showingTrophyCase = false
-    @State private var activeExpanded = true
-    @State private var waitingExpanded = true
-    @State private var finishedExpanded = false
+
+    // Filter chip selection (replaces stacked collapsible sections)
+    @State private var selectedFilter: CompetitionFilter = .active
+
+    // Inline confirm + swipe action state (no detached popups)
+    @State private var pendingDeleteId: String?
+    @State private var pendingLeaveId: String?
+    @State private var competitionToEdit: Competition?
+    @State private var actionError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -51,6 +57,17 @@ struct CompetitionsListView: View {
                 TrophyCaseView(trophyService: trophyService, competitionService: competitionService)
             }
         }
+        .sheet(item: $competitionToEdit) { competition in
+            EditCompetitionWrapper(initial: competition, service: competitionService)
+        }
+        .alert("Couldn't complete action", isPresented: Binding(
+            get: { actionError != nil },
+            set: { if !$0 { actionError = nil } }
+        )) {
+            Button("OK", role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "")
+        }
         .task {
             if competitionService.competitions.isEmpty && competitionService.invites.isEmpty {
                 await competitionService.refreshAllData()
@@ -61,10 +78,6 @@ struct CompetitionsListView: View {
                 selectedTab = 1
                 MADNotificationService.shared.pendingNotificationType = nil
             }
-        }
-        .refreshable {
-            await competitionService.refreshAllData()
-            trophyService.updateTrophies(from: competitionService.competitions)
         }
         .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
             guard let type = notification.userInfo?["type"] as? String else { return }
@@ -156,64 +169,297 @@ struct CompetitionsListView: View {
                     action: { showingCreateCompetition = true }
                 )
             } else {
-                ScrollView {
-                    LazyVStack(spacing: MADTheme.Spacing.sm) {
-                        // Active section (priority)
-                        let activeComps = competitionService.competitions.filter { $0.status == .active }
-                        if !activeComps.isEmpty {
-                            CollapsibleSection(
-                                title: "Active",
-                                icon: "bolt.fill",
-                                count: activeComps.count,
-                                iconColor: .green,
-                                isExpanded: $activeExpanded
-                            ) {
-                                ForEach(activeComps, id: \.competition_id) { competition in
-                                    CompetitionCard(competition: competition, action: {
-                                        selectedCompetition = competition
-                                    })
-                                }
-                            }
-                        }
+                competitionsList
+            }
+        }
+    }
 
-                        // Waiting to start section
-                        let lobbyComps = competitionService.competitions.filter { $0.status == .lobby || $0.status == .scheduled }
-                        if !lobbyComps.isEmpty {
-                            CollapsibleSection(
-                                title: "Waiting to Start",
-                                icon: "hourglass",
-                                count: lobbyComps.count,
-                                iconColor: .orange,
-                                isExpanded: $waitingExpanded
-                            ) {
-                                ForEach(lobbyComps, id: \.competition_id) { competition in
-                                    CompetitionCard(competition: competition, action: {
-                                        selectedCompetition = competition
-                                    })
-                                }
-                            }
-                        }
+    private var competitionsList: some View {
+        let filtered = filteredCompetitions
+        return VStack(spacing: 0) {
+            filterChipsBar
 
-                        // Finished section
-                        let finishedComps = competitionService.competitions.filter { $0.status == .finished }
-                        if !finishedComps.isEmpty {
-                            CollapsibleSection(
-                                title: "Finished",
-                                icon: "checkmark.circle",
-                                count: finishedComps.count,
-                                iconColor: .gray,
-                                isExpanded: $finishedExpanded
-                            ) {
-                                ForEach(finishedComps, id: \.competition_id) { competition in
-                                    CompetitionCard(competition: competition, action: {
-                                        selectedCompetition = competition
-                                    })
-                                }
-                            }
+            if filtered.isEmpty {
+                emptyFilterState
+                    .transition(.opacity)
+            } else {
+                List {
+                    if selectedFilter == .all {
+                        allGroupedRows
+                    } else {
+                        ForEach(filtered, id: \.competition_id) { competition in
+                            competitionRow(competition)
                         }
                     }
-                    .padding(.horizontal, MADTheme.Spacing.md)
-                    .padding(.vertical, MADTheme.Spacing.md)
+
+                    Color.clear
+                        .frame(height: 24)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets())
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .scrollBounceBehavior(.basedOnSize)
+                .environment(\.defaultMinListRowHeight, 0)
+                .animation(.spring(response: 0.32, dampingFraction: 0.85), value: selectedFilter)
+                .refreshable {
+                    await competitionService.refreshAllData()
+                    trophyService.updateTrophies(from: competitionService.competitions)
+                }
+            }
+        }
+    }
+
+    /// When viewing "All", split the list into Active / Waiting / Finished blocks
+    /// with subtle, inline group labels so users see structure at a glance without
+    /// the heavy collapsible-section feel from before.
+    @ViewBuilder
+    private var allGroupedRows: some View {
+        let comps = competitionService.competitions
+        let active = comps.filter { $0.status == .active }
+        let waiting = comps.filter { $0.status == .lobby || $0.status == .scheduled }
+        let finished = comps.filter { $0.status == .finished }
+
+        if !active.isEmpty {
+            allGroupDivider(title: "Active", count: active.count, accent: .green, icon: "bolt.fill")
+            ForEach(active, id: \.competition_id) { competitionRow($0) }
+        }
+        if !waiting.isEmpty {
+            allGroupDivider(title: "Waiting", count: waiting.count, accent: .orange, icon: "hourglass")
+            ForEach(waiting, id: \.competition_id) { competitionRow($0) }
+        }
+        if !finished.isEmpty {
+            allGroupDivider(title: "Finished", count: finished.count, accent: .gray, icon: "flag.checkered")
+            ForEach(finished, id: \.competition_id) { competitionRow($0) }
+        }
+    }
+
+    private func allGroupDivider(title: String, count: Int, accent: Color, icon: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(accent)
+
+            Text(title.uppercased())
+                .font(.system(size: 11, weight: .black, design: .rounded))
+                .tracking(1.4)
+                .foregroundColor(.white.opacity(0.85))
+
+            Text("\(count)")
+                .font(.system(size: 10, weight: .black, design: .rounded))
+                .foregroundColor(accent)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 1)
+                .background(Capsule().fill(accent.opacity(0.2)))
+
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [accent.opacity(0.4), accent.opacity(0)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(height: 1)
+        }
+        .padding(.top, 4)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 18, leading: 14, bottom: 4, trailing: 14))
+    }
+
+    /// Horizontal pill-style filter chips that replace the stacked sections.
+    /// Empty filters are hidden so the bar never offers a chip you can't use.
+    private var filterChipsBar: some View {
+        let counts = filterCounts
+        let visible = visibleFilters
+
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(visible, id: \.self) { filter in
+                    CompetitionFilterChip(
+                        filter: filter,
+                        count: counts[filter] ?? 0,
+                        isSelected: selectedFilter == filter
+                    ) {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                            selectedFilter = filter
+                            pendingDeleteId = nil
+                            pendingLeaveId = nil
+                        }
+                    }
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.85).combined(with: .opacity),
+                        removal: .scale(scale: 0.85).combined(with: .opacity)
+                    ))
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .animation(.spring(response: 0.35, dampingFraction: 0.82), value: visible)
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .background(
+            LinearGradient(
+                colors: [Color.white.opacity(0.04), Color.white.opacity(0)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.white.opacity(0.06))
+                .frame(height: 0.5)
+        }
+        .onAppear { reconcileSelectedFilter(with: visible) }
+        .onChange(of: visible) { _, newVisible in
+            reconcileSelectedFilter(with: newVisible)
+        }
+    }
+
+    /// Live count per filter, used both for chip badges and visibility decisions.
+    private var filterCounts: [CompetitionFilter: Int] {
+        let comps = competitionService.competitions
+        return [
+            .all: comps.count,
+            .active: comps.filter { $0.status == .active }.count,
+            .waiting: comps.filter { $0.status == .lobby || $0.status == .scheduled }.count,
+            .finished: comps.filter { $0.status == .finished }.count
+        ]
+    }
+
+    /// `.all` is always shown when there's at least one comp; other filters only
+    /// appear when they have entries — no dead chips that select an empty tab.
+    private var visibleFilters: [CompetitionFilter] {
+        let counts = filterCounts
+        return CompetitionFilter.allCases.filter { filter in
+            filter == .all || (counts[filter] ?? 0) > 0
+        }
+    }
+
+    /// If the currently selected filter disappears (e.g., last Active comp ends),
+    /// pick the next sensible non-empty filter. Preference: active → waiting → finished → all.
+    private func reconcileSelectedFilter(with visible: [CompetitionFilter]) {
+        guard !visible.contains(selectedFilter) else { return }
+        let priority: [CompetitionFilter] = [.active, .waiting, .finished, .all]
+        let target = priority.first(where: { visible.contains($0) }) ?? .all
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+            selectedFilter = target
+        }
+    }
+
+    private var filteredCompetitions: [Competition] {
+        let comps = competitionService.competitions
+        switch selectedFilter {
+        case .all:
+            // Active first, then waiting, then finished — visual priority.
+            return comps.sorted { lhs, rhs in
+                statusOrder(lhs.status) < statusOrder(rhs.status)
+            }
+        case .active:
+            return comps.filter { $0.status == .active }
+        case .waiting:
+            return comps.filter { $0.status == .lobby || $0.status == .scheduled }
+        case .finished:
+            return comps.filter { $0.status == .finished }
+        }
+    }
+
+    private func statusOrder(_ status: CompetitionStatus) -> Int {
+        switch status {
+        case .active: return 0
+        case .lobby: return 1
+        case .scheduled: return 2
+        case .finished: return 3
+        }
+    }
+
+    /// Filter-empty state — shows up when a tab has no matching comps but others do.
+    private var emptyFilterState: some View {
+        VStack(spacing: 14) {
+            Image(systemName: selectedFilter.icon)
+                .font(.system(size: 38, weight: .medium))
+                .foregroundColor(selectedFilter.accent.opacity(0.5))
+
+            Text(selectedFilter.emptyTitle)
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+
+            Text(selectedFilter.emptyMessage)
+                .font(.system(size: 13))
+                .foregroundColor(.white.opacity(0.55))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, 40)
+    }
+
+    /// A competition row: card normally, in-line confirm banner when a swipe action is pending.
+    @ViewBuilder
+    private func competitionRow(_ competition: Competition) -> some View {
+        Group {
+            if pendingDeleteId == competition.competition_id {
+                InlineConfirmBanner(
+                    title: "Delete \"\(competition.competition_name)\"?",
+                    subtitle: "Removes for everyone. Can't be undone.",
+                    icon: "trash.fill",
+                    confirmLabel: "Delete",
+                    accent: .red,
+                    onCancel: {
+                        withAnimation(.easeOut(duration: 0.2)) { pendingDeleteId = nil }
+                    },
+                    onConfirm: { performDelete(competition) }
+                )
+            } else if pendingLeaveId == competition.competition_id {
+                InlineConfirmBanner(
+                    title: "Leave \"\(competition.competition_name)\"?",
+                    subtitle: "You'll be removed from the standings.",
+                    icon: "rectangle.portrait.and.arrow.right",
+                    confirmLabel: "Leave",
+                    accent: .orange,
+                    onCancel: {
+                        withAnimation(.easeOut(duration: 0.2)) { pendingLeaveId = nil }
+                    },
+                    onConfirm: { performLeave(competition) }
+                )
+            } else {
+                CompetitionCard(competition: competition, action: {
+                    selectedCompetition = competition
+                })
+            }
+        }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14))
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if competition.isOwner {
+                Button(role: .destructive) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                        pendingLeaveId = nil
+                        pendingDeleteId = competition.competition_id
+                    }
+                } label: {
+                    Label("Delete", systemImage: "trash.fill")
+                }
+
+                if competition.status != .finished {
+                    Button {
+                        competitionToEdit = competition
+                    } label: {
+                        Label("Edit", systemImage: "slider.horizontal.3")
+                    }
+                    .tint(.blue)
+                }
+            } else if competition.status != .finished {
+                Button(role: .destructive) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                        pendingDeleteId = nil
+                        pendingLeaveId = competition.competition_id
+                    }
+                } label: {
+                    Label("Leave", systemImage: "rectangle.portrait.and.arrow.right")
                 }
             }
         }
@@ -247,6 +493,11 @@ struct CompetitionsListView: View {
                     }
                     .padding(.horizontal, MADTheme.Spacing.md)
                     .padding(.vertical, MADTheme.Spacing.lg)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .refreshable {
+                    await competitionService.refreshAllData()
+                    trophyService.updateTrophies(from: competitionService.competitions)
                 }
             }
         }
@@ -286,64 +537,256 @@ struct CompetitionsListView: View {
             }
         }
     }
+
+    // MARK: - Swipe Action Handlers
+
+    private func performDelete(_ competition: Competition) {
+        let id = competition.competition_id
+        withAnimation(.easeOut(duration: 0.2)) { pendingDeleteId = nil }
+        Task { @MainActor in
+            do {
+                try await competitionService.deleteCompetition(id: id)
+            } catch {
+                actionError = "Couldn't delete this competition. \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func performLeave(_ competition: Competition) {
+        guard let userId = UserDefaults.standard.string(forKey: "backendUserId") else {
+            withAnimation(.easeOut(duration: 0.2)) { pendingLeaveId = nil }
+            actionError = "You need to be signed in to leave a competition."
+            return
+        }
+        let competitionId = competition.competition_id
+        withAnimation(.easeOut(duration: 0.2)) { pendingLeaveId = nil }
+        Task { @MainActor in
+            do {
+                try await competitionService.removeUser(competitionId: competitionId, userId: userId)
+            } catch {
+                actionError = "Couldn't leave this competition. \(error.localizedDescription)"
+            }
+        }
+    }
 }
 
-// MARK: - Collapsible Section
+// MARK: - Competition Filter
 
-struct CollapsibleSection<Content: View>: View {
-    let title: String
-    let icon: String
+enum CompetitionFilter: String, CaseIterable, Hashable {
+    case all = "All"
+    case active = "Active"
+    case waiting = "Waiting"
+    case finished = "Finished"
+
+    var icon: String {
+        switch self {
+        case .all: return "square.stack.3d.up.fill"
+        case .active: return "bolt.fill"
+        case .waiting: return "hourglass"
+        case .finished: return "flag.checkered"
+        }
+    }
+
+    var accent: Color {
+        switch self {
+        case .all: return MADTheme.Colors.madRed
+        case .active: return .green
+        case .waiting: return .orange
+        case .finished: return .gray
+        }
+    }
+
+    var emptyTitle: String {
+        switch self {
+        case .all: return "No competitions yet"
+        case .active: return "Nothing active"
+        case .waiting: return "Nothing waiting"
+        case .finished: return "No history yet"
+        }
+    }
+
+    var emptyMessage: String {
+        switch self {
+        case .all: return "Create one to challenge your friends."
+        case .active: return "No comps are currently running. Check Waiting or create a new one."
+        case .waiting: return "Anything not yet started will show up here."
+        case .finished: return "Past competitions will land here when they wrap up."
+        }
+    }
+}
+
+// MARK: - Filter Chip
+
+struct CompetitionFilterChip: View {
+    let filter: CompetitionFilter
     let count: Int
-    let iconColor: Color
-    @Binding var isExpanded: Bool
-    @ViewBuilder let content: () -> Content
+    let isSelected: Bool
+    let action: () -> Void
 
     var body: some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            // Tappable header
-            Button {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    Image(systemName: icon)
-                        .font(.caption)
-                        .foregroundColor(iconColor)
+        Button(action: action) {
+            HStack(spacing: 7) {
+                Image(systemName: filter.icon)
+                    .font(.system(size: 11, weight: .bold))
 
-                    Text(title)
-                        .font(MADTheme.Typography.headline)
-                        .foregroundColor(.white.opacity(0.85))
+                Text(filter.rawValue)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
 
-                    Text("\(count)")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(.white.opacity(0.4))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(Color.white.opacity(0.08))
-                        )
+                Text("\(count)")
+                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .foregroundColor(isSelected ? .white : filter.accent)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(isSelected ? Color.white.opacity(0.28) : filter.accent.opacity(0.22))
+                    )
+            }
+            .foregroundColor(isSelected ? .white : .white.opacity(0.72))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(chipBackground)
+        }
+        .buttonStyle(.plain)
+    }
 
-                    Spacer()
+    @ViewBuilder
+    private var chipBackground: some View {
+        if isSelected {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [filter.accent, filter.accent.opacity(0.78)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
+                )
+                .shadow(color: filter.accent.opacity(0.5), radius: 6, x: 0, y: 3)
+        } else {
+            Capsule()
+                .fill(Color.white.opacity(0.06))
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        }
+    }
+}
 
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.3))
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                }
-                .padding(.horizontal, MADTheme.Spacing.sm)
-                .padding(.vertical, MADTheme.Spacing.sm)
+// MARK: - Inline Confirm Banner
+
+/// Replaces the row's card with an inline confirmation prompt when a destructive
+/// swipe action fires. No detached popup — the confirmation lives in the row.
+struct InlineConfirmBanner: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let confirmLabel: String
+    let accent: Color
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(accent)
+                .frame(width: 36, height: 36)
+                .background(
+                    Circle()
+                        .fill(accent.opacity(0.18))
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(subtitle)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.62))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 6)
+
+            Button(action: onCancel) {
+                Text("Cancel")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.75))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule().fill(Color.white.opacity(0.1))
+                    )
             }
             .buttonStyle(.plain)
 
-            // Collapsible content
-            if isExpanded {
-                content()
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+            Button(action: onConfirm) {
+                Text(confirmLabel)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [accent, accent.opacity(0.82)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .shadow(color: accent.opacity(0.45), radius: 6, x: 0, y: 3)
+                    )
             }
+            .buttonStyle(.plain)
         }
-        .padding(.top, MADTheme.Spacing.xs)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .fill(Color.black.opacity(0.2))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .strokeBorder(accent.opacity(0.45), lineWidth: 1.5)
+                )
+                .shadow(color: accent.opacity(0.25), radius: 10, x: 0, y: 6)
+        )
+        .transition(.asymmetric(
+            insertion: .scale(scale: 0.96).combined(with: .opacity),
+            removal: .opacity
+        ))
+    }
+}
+
+// MARK: - Edit Competition Wrapper
+// `EditCompetitionSettingsView` needs a `Binding<Competition>`; this wrapper owns
+// the mutable state so we can present the edit sheet inline from a swipe action.
+
+struct EditCompetitionWrapper: View {
+    @State private var competition: Competition
+    let service: CompetitionService
+
+    init(initial: Competition, service: CompetitionService) {
+        _competition = State(initialValue: initial)
+        self.service = service
+    }
+
+    var body: some View {
+        EditCompetitionSettingsView(
+            competition: $competition,
+            competitionService: service
+        )
     }
 }
 

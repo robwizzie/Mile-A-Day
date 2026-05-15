@@ -6,9 +6,12 @@ import HealthKit
 extension CompetitionDetailView {
 
     // MARK: - Active Content
+    // Activities + time-remaining + rules are now in the unified Timeline / Quick
+    // Rules cards above this section, so the dropdown is gone and the hero focuses
+    // exclusively on the *user's* personal status.
     var activeContent: some View {
         VStack(spacing: MADTheme.Spacing.xl) {
-            // 1. Compact hero status
+            // 1. Personal status hero
             heroStatusSection
 
             // 2. Flex section (always visible)
@@ -26,9 +29,6 @@ extension CompetitionDetailView {
             } else {
                 raceProgressView
             }
-
-            // 5. Collapsible settings dropdown
-            settingsDropdown
         }
         .overlay(alignment: .top) {
             if let feedback = actionFeedback {
@@ -63,45 +63,8 @@ extension CompetitionDetailView {
                 raceHeroContent(user: currentUser, goal: goal, gradientColors: gradientColors)
             }
 
-            // Compact tracked activities + time remaining
-            HStack(spacing: MADTheme.Spacing.sm) {
-                if competition.endDateFormatted == nil {
-                    Spacer()
-                }
-
-                ForEach(competition.workouts, id: \.self) { activity in
-                    HStack(spacing: 4) {
-                        Image(systemName: activity.icon)
-                            .font(.system(size: 10))
-                        Text(activity.displayName)
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                    }
-                    .foregroundColor(activity.color)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(activity.backgroundColor))
-                }
-
-                if let endDate = competition.endDateFormatted {
-                    Spacer()
-
-                    let remaining = endDate.timeIntervalSince(Date())
-                    let days = Int(remaining / 86400)
-                    let hours = Int(remaining.truncatingRemainder(dividingBy: 86400) / 3600)
-                    HStack(spacing: 4) {
-                        Image(systemName: "timer")
-                            .font(.system(size: 10))
-                        Text(days > 0 ? "\(days)d \(hours)h" : "\(hours)h left")
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                    }
-                    .foregroundColor(.green.opacity(0.8))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.green.opacity(0.1)))
-                } else {
-                    Spacer()
-                }
-            }
+            // Activities + time-remaining are surfaced by the unified Quick Rules
+            // and Timeline cards above. The hero stays focused on personal status.
         }
         .frame(maxWidth: .infinity)
         .padding(MADTheme.Spacing.lg)
