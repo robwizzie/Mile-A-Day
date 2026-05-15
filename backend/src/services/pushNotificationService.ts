@@ -1,6 +1,7 @@
 import { PostgresService } from './DbService.js';
 import { getNotificationPreferences, shouldSendNotification } from './notificationSettingsService.js';
 import { hasUnlimitedActions } from './privilegedUsers.js';
+import { START_OF_TODAY_ET_SQL } from './dailyResetTime.js';
 import fs from 'fs';
 import path from 'path';
 import http2 from 'http2';
@@ -526,7 +527,7 @@ export async function canNudge(competitionId: string, senderId: string, targetId
 	const result = await db.query(
 		`SELECT id FROM nudge_log
 		WHERE competition_id = $1 AND sender_id = $2 AND target_id = $3
-			AND created_at > NOW() - INTERVAL '24 hours'
+			AND created_at >= ${START_OF_TODAY_ET_SQL}
 		LIMIT 1`,
 		[competitionId, senderId, targetId]
 	);
@@ -548,7 +549,7 @@ export async function canFriendNudge(senderId: string, targetId: string): Promis
 	const result = await db.query(
 		`SELECT id FROM friend_nudge_log
 		WHERE sender_id = $1 AND target_id = $2
-			AND created_at > NOW() - INTERVAL '24 hours'
+			AND created_at >= ${START_OF_TODAY_ET_SQL}
 		LIMIT 1`,
 		[senderId, targetId]
 	);
@@ -566,7 +567,7 @@ export async function canFlex(senderId: string, targetId: string): Promise<boole
 	const result = await db.query(
 		`SELECT id FROM flex_log
 		WHERE sender_id = $1 AND target_id = $2
-			AND created_at > NOW() - INTERVAL '24 hours'
+			AND created_at >= ${START_OF_TODAY_ET_SQL}
 		LIMIT 1`,
 		[senderId, targetId]
 	);
