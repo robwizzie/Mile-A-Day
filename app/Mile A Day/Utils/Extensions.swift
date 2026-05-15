@@ -284,6 +284,6 @@ private func getHealthKitManagerInstance() -> HealthKitManager? {
 
 // MARK: - URL Identifiable Conformance
 
-extension URL: Identifiable {
+extension URL: @retroactive Identifiable {
     public var id: String { absoluteString }
 }
