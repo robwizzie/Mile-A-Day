@@ -20,13 +20,9 @@
 	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>background-processing</string>
-		<string>background-fetch</string>
-		<string>background-app-refresh</string>
 		<string>fetch</string>
 		<string>processing</string>
 		<string>location</string>
-		<string>workout</string>
 	</array>
 </dict>
 </plist>
