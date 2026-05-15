@@ -250,18 +250,6 @@ enum StreakMilestone: CaseIterable {
     }
 }
 
-// MARK: - Yearly Milestone Info
-
-/// Snapshot of the user's state at the moment they crossed a year boundary.
-/// Defined here (rather than in the iOS-only view file) so the Watch target can compile `CelebrationType`.
-struct YearlyMilestoneInfo: Equatable {
-    let years: Int
-    let totalMiles: Double
-    let totalStreakDays: Int
-    /// Approximate date the current streak began (today minus streak days).
-    let streakStartDate: Date?
-}
-
 // MARK: - Celebration Types
 
 /// Types of celebrations that can be shown

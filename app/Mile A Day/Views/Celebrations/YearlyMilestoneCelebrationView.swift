@@ -8,6 +8,9 @@
 
 import SwiftUI
 
+// `YearlyMilestoneInfo` lives in `Models/YearlyMilestoneInfo.swift` so it
+// can be a member of both the iOS and Watch targets.
+
 // MARK: - View
 
 struct YearlyMilestoneCelebrationView: View {
