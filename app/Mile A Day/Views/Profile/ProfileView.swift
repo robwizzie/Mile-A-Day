@@ -7,6 +7,9 @@ struct ProfileView: View {
 
     @State private var activeSheet: ProfileSheetType?
     @State private var showingLogoutConfirmation = false
+    @State private var showingDeleteAccountConfirmation = false
+    @State private var isDeletingAccount = false
+    @State private var deleteAccountErrorMessage: String?
     @State private var currentProfileImage: UIImage?
     @State private var showingManagePins = false
     @State private var pinnedBadgeForDetail: Badge?
@@ -102,6 +105,25 @@ struct ProfileView: View {
             }
         } message: {
             Text("Are you sure you want to sign out?")
+        }
+        .alert("Delete Account?", isPresented: $showingDeleteAccountConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                Task { await performDeleteAccount() }
+            }
+        } message: {
+            Text("This permanently deletes your account, workouts, streak history, friendships, and competition data. This cannot be undone.")
+        }
+        .alert(
+            "Couldn't Delete Account",
+            isPresented: Binding(
+                get: { deleteAccountErrorMessage != nil },
+                set: { if !$0 { deleteAccountErrorMessage = nil } }
+            )
+        ) {
+            Button("OK") { deleteAccountErrorMessage = nil }
+        } message: {
+            Text(deleteAccountErrorMessage ?? "")
         }
     }
 
@@ -500,6 +522,21 @@ struct ProfileView: View {
                     )
                 }
                 .buttonStyle(.plain)
+
+                settingsDivider
+
+                Button {
+                    showingDeleteAccountConfirmation = true
+                } label: {
+                    MADSettingsRow(
+                        icon: "trash.fill",
+                        title: "Delete Account",
+                        subtitle: "Permanently remove your account and data",
+                        iconColor: .red
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isDeletingAccount)
             }
         }
         .padding(MADTheme.Spacing.md)
@@ -571,6 +608,19 @@ struct ProfileView: View {
     }
 
     // MARK: - Helpers
+
+    @MainActor
+    private func performDeleteAccount() async {
+        isDeletingAccount = true
+        defer { isDeletingAccount = false }
+
+        do {
+            try await userManager.deleteAccount()
+            appStateManager.signOut()
+        } catch {
+            deleteAccountErrorMessage = error.localizedDescription
+        }
+    }
 
     private var bestFastestMilePace: TimeInterval {
         let hkPace = healthManager.fastestMilePace
