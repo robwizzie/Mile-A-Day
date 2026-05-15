@@ -284,7 +284,7 @@ export async function getTodayStats(userId: string): Promise<TodayStats> {
 		SELECT MIN(ws.split_pace) AS pace
 		FROM today_workouts tw
 		JOIN workout_splits ws ON ws.workout_id = tw.workout_id
-		WHERE ws.split_distance >= 0.95
+		WHERE ws.split_distance >= 0.95 AND ws.split_pace > 0
 	),
 	workout_best AS (
 		SELECT MIN(total_duration / NULLIF(distance, 0)) AS pace
