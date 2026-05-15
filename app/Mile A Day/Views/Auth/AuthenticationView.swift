@@ -10,6 +10,7 @@ struct AuthenticationView: View {
     @State private var contentOpacity: Double = 0
     @State private var buttonsOffset: CGFloat = 40
     @State private var showError = false
+    @State private var legalSheetURL: URL?
 
     private var backgroundColor: LinearGradient {
         colorScheme == .dark
@@ -155,7 +156,7 @@ struct AuthenticationView: View {
 
                     HStack(spacing: MADTheme.Spacing.xs) {
                         Button("Terms of Service") {
-                            // TODO: Show terms
+                            legalSheetURL = URL(string: "https://mileaday.run/terms")
                         }
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(subtitleColor)
@@ -166,7 +167,7 @@ struct AuthenticationView: View {
                             .foregroundColor(tertiaryTextColor)
 
                         Button("Privacy Policy") {
-                            // TODO: Show privacy policy
+                            legalSheetURL = URL(string: "https://mileaday.run/privacy")
                         }
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(subtitleColor)
@@ -184,6 +185,10 @@ struct AuthenticationView: View {
             Button("OK") { }
         } message: {
             Text(appleSignInManager.errorMessage ?? "An unknown error occurred")
+        }
+        .sheet(item: $legalSheetURL) { url in
+            SafariWebView(url: url)
+                .ignoresSafeArea()
         }
         .onChange(of: appleSignInManager.errorMessage) { oldValue, newValue in
             showError = newValue != nil
@@ -225,6 +230,10 @@ struct AuthenticationView: View {
             }
         }
     }
+}
+
+extension URL: Identifiable {
+    public var id: String { absoluteString }
 }
 
 #Preview("Dark") {
