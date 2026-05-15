@@ -112,25 +112,13 @@ class APIClient {
             print("[APIClient] ❌ Unauthorized (401)")
             throw APIError.unauthorized
         case 400:
-            if let errorData = try? JSONDecoder().decode([String: String].self, from: data),
-               let errorMessage = errorData["error"] {
-                throw APIError.badRequest(errorMessage)
-            }
-            throw APIError.badRequest("Bad request")
+            throw APIError.badRequest(extractErrorMessage(from: data) ?? "Bad request")
         case 404:
             throw APIError.notFound
         case 409:
-            if let errorData = try? JSONDecoder().decode([String: String].self, from: data),
-               let errorMessage = errorData["error"] {
-                throw APIError.conflict(errorMessage)
-            }
-            throw APIError.conflict("Conflict")
+            throw APIError.conflict(extractErrorMessage(from: data) ?? "Conflict")
         case 429:
-            if let errorData = try? JSONDecoder().decode([String: String].self, from: data),
-               let errorMessage = errorData["error"] {
-                throw APIError.rateLimited(errorMessage)
-            }
-            throw APIError.rateLimited("Slow down — try again in a bit")
+            throw APIError.rateLimited(extractErrorMessage(from: data) ?? "Slow down — try again in a bit")
         default:
             throw APIError.serverError(httpResponse.statusCode)
         }
@@ -232,5 +220,19 @@ extension APIError {
         if case .rateLimited = self { return true }
         return false
     }
+}
+
+/// Extracts the human-readable `error` string from a JSON error response.
+/// Tolerant of mixed-type bodies (e.g. {"error": "...", "hypes_remaining": 0})
+/// where the older `[String: String]` decode would silently fail.
+private struct ErrorEnvelope: Decodable {
+    let error: String?
+}
+
+private func extractErrorMessage(from data: Data) -> String? {
+    if let envelope = try? JSONDecoder().decode(ErrorEnvelope.self, from: data) {
+        return envelope.error
+    }
+    return nil
 }
 
