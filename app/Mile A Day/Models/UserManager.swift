@@ -330,10 +330,14 @@ class UserManager: ObservableObject {
 
     /// Replace the user's pinned badges. `badgeIds` order becomes pin slot 0..2 (max 3).
     /// Optimistically updates local state, then pushes to the server.
+    /// Returns `nil` on success, an error message on failure (so the UI can show it).
     @MainActor
-    func setPinnedBadges(_ badgeIds: [String]) async {
+    @discardableResult
+    func setPinnedBadges(_ badgeIds: [String]) async -> String? {
         #if !os(watchOS)
-        guard let userId = currentUser.backendUserId else { return }
+        guard let userId = currentUser.backendUserId else {
+            return "Not signed in — try restarting the app."
+        }
         let clamped = Array(badgeIds.prefix(3))
 
         let originalBadges = currentUser.badges
@@ -345,11 +349,15 @@ class UserManager: ObservableObject {
             let fresh = dtos.map { $0.toBadge() }
             currentUser.badges = fresh
             saveUserData()
+            return nil
         } catch {
             print("[UserManager] setPinnedBadges failed: \(error)")
             currentUser.badges = originalBadges
             saveUserData()
+            return "Couldn't save pins: \(error.localizedDescription)"
         }
+        #else
+        return nil
         #endif
     }
 

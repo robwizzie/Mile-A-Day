@@ -91,11 +91,15 @@ class APIClient {
         request.httpMethod = method.rawValue
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        
+        // Hard timeouts so calls can never hang the UI forever (a save sheet
+        // stuck on "Saving…" is worse than a clear error). 15s is enough for a
+        // slow network but short enough to feel responsive.
+        request.timeoutInterval = 15
+
         if let body = body {
             request.httpBody = body
         }
-        
+
         let (data, response) = try await URLSession.shared.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -132,6 +136,17 @@ class APIClient {
             }
             throw APIError.rateLimited("Slow down — try again in a bit")
         default:
+            // Pull the server's `{ error: "..." }` body when present so callers
+            // (and the user-facing alert) see the real reason instead of a bare
+            // status code.
+            if let errorData = try? JSONDecoder().decode([String: String].self, from: data),
+               let errorMessage = errorData["error"] {
+                print("[APIClient] ❌ \(httpResponse.statusCode) \(endpoint): \(errorMessage)")
+                throw APIError.apiError(errorMessage)
+            }
+            if let body = String(data: data, encoding: .utf8), !body.isEmpty {
+                print("[APIClient] ❌ \(httpResponse.statusCode) \(endpoint) body: \(body)")
+            }
             throw APIError.serverError(httpResponse.statusCode)
         }
         
@@ -195,6 +210,10 @@ enum APIError: LocalizedError {
     case rateLimited(String)
     case notFound
     case serverError(Int)
+    /// Server returned a non-2xx with a parseable `{ error: "..." }` body —
+    /// preferred over `.serverError(Int)` so the user-facing message is the
+    /// actual reason, not just a status code.
+    case apiError(String)
     case tokenRefreshFailed
     case networkError(String)
 
@@ -218,6 +237,8 @@ enum APIError: LocalizedError {
             return "Resource not found"
         case .serverError(let code):
             return "Server error: \(code)"
+        case .apiError(let message):
+            return message
         case .tokenRefreshFailed:
             return "Failed to refresh access token"
         case .networkError(let message):

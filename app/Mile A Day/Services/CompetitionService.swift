@@ -65,6 +65,8 @@ class CompetitionService: ObservableObject {
                 throw CompetitionServiceError.apiError(message)
             case .serverError(let code):
                 throw CompetitionServiceError.serverError(code)
+            case .apiError(let message):
+                throw CompetitionServiceError.apiError(message)
             case .tokenRefreshFailed:
                 throw CompetitionServiceError.notAuthenticated
             case .networkError(let message):

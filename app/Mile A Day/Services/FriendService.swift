@@ -66,6 +66,8 @@ class FriendService: ObservableObject {
                 throw FriendServiceError.apiError(message)
             case .serverError(let code):
                 throw FriendServiceError.serverError(code)
+            case .apiError(let message):
+                throw FriendServiceError.apiError(message)
             case .tokenRefreshFailed:
                 throw FriendServiceError.notAuthenticated
             case .networkError(let message):

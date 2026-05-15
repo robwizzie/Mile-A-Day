@@ -105,6 +105,8 @@ class WorkoutService: ObservableObject {
                 throw WorkoutServiceError.apiError(message)
             case .serverError(let code):
                 throw WorkoutServiceError.serverError(code)
+            case .apiError(let message):
+                throw WorkoutServiceError.apiError(message)
             case .tokenRefreshFailed:
                 throw WorkoutServiceError.notAuthenticated
             case .networkError(let message):

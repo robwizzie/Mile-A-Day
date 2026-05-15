@@ -9,6 +9,7 @@ struct ManagePinnedBadgesSheet: View {
     @State private var selected: [String] = []
     @State private var isSaving = false
     @State private var sortOption: SortOption = .dateNewest
+    @State private var saveError: String?
 
     enum SortOption: String, CaseIterable, Hashable {
         case dateNewest = "Newest"
@@ -110,6 +111,14 @@ struct ManagePinnedBadgesSheet: View {
         }
         .onAppear {
             selected = userManager.pinnedBadges.map { $0.id }
+        }
+        .alert("Couldn't save pins", isPresented: Binding(
+            get: { saveError != nil },
+            set: { if !$0 { saveError = nil } }
+        )) {
+            Button("OK", role: .cancel) { saveError = nil }
+        } message: {
+            Text(saveError ?? "")
         }
     }
 
@@ -218,11 +227,17 @@ struct ManagePinnedBadgesSheet: View {
     private func save() {
         guard !isSaving else { return }
         isSaving = true
+        saveError = nil
         let toSave = selected
         Task { @MainActor in
-            await userManager.setPinnedBadges(toSave)
+            let error = await userManager.setPinnedBadges(toSave)
             isSaving = false
-            dismiss()
+            if let error {
+                saveError = error
+                // Keep the sheet open so the user sees the error and can retry.
+            } else {
+                dismiss()
+            }
         }
     }
 }

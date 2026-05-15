@@ -11,6 +11,26 @@ struct PinnedBadgesShowcase: View {
     let onBadgeTapped: ((Badge) -> Void)?
     /// Display name for empty-state copy. Pass `nil` for the local user (we'll say "you").
     let ownerDisplayName: String?
+    /// When non-nil, filled slots become drag-to-reorder. Receives source and
+    /// destination indices into the current `pinnedBadges` array. Nil on friend
+    /// profiles so visitors can't rearrange.
+    let onReorder: ((Int, Int) -> Void)?
+
+    @State private var draggingSlot: Int? = nil
+
+    init(
+        pinnedBadges: [Badge],
+        onManageTapped: (() -> Void)? = nil,
+        onBadgeTapped: ((Badge) -> Void)? = nil,
+        ownerDisplayName: String? = nil,
+        onReorder: ((Int, Int) -> Void)? = nil
+    ) {
+        self.pinnedBadges = pinnedBadges
+        self.onManageTapped = onManageTapped
+        self.onBadgeTapped = onBadgeTapped
+        self.ownerDisplayName = ownerDisplayName
+        self.onReorder = onReorder
+    }
 
     private static let slotCount = 3
 
@@ -44,14 +64,7 @@ struct PinnedBadgesShowcase: View {
             HStack(spacing: MADTheme.Spacing.sm) {
                 ForEach(0..<Self.slotCount, id: \.self) { slot in
                     if slot < pinnedBadges.count {
-                        let badge = pinnedBadges[slot]
-                        Button {
-                            onBadgeTapped?(badge)
-                        } label: {
-                            PinnedBadgeSlotFilled(badge: badge)
-                        }
-                        .buttonStyle(BadgeCardButtonStyle())
-                        .disabled(onBadgeTapped == nil)
+                        filledSlot(at: slot, badge: pinnedBadges[slot])
                     } else {
                         PinnedBadgeSlotEmpty(
                             isInteractive: onManageTapped != nil,
@@ -69,10 +82,47 @@ struct PinnedBadgesShowcase: View {
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
+            } else if onReorder != nil && pinnedBadges.count > 1 {
+                // Subtle hint so users discover the drag gesture without clutter.
+                HStack(spacing: 5) {
+                    Image(systemName: "hand.point.up.left.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("Hold and drag to reorder")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                }
+                .foregroundColor(.white.opacity(0.4))
+                .frame(maxWidth: .infinity)
             }
         }
         .padding(MADTheme.Spacing.md)
         .madLiquidGlass()
+    }
+
+    /// A single filled slot. Tappable for detail; long-press-and-drag for reorder
+    /// when `onReorder` is provided (i.e., on the local user's own profile).
+    @ViewBuilder
+    private func filledSlot(at slot: Int, badge: Badge) -> some View {
+        let canReorder = onReorder != nil && pinnedBadges.count > 1
+        let isDragging = draggingSlot == slot
+
+        Button {
+            onBadgeTapped?(badge)
+        } label: {
+            PinnedBadgeSlotFilled(badge: badge)
+        }
+        .buttonStyle(BadgeCardButtonStyle())
+        .disabled(onBadgeTapped == nil)
+        .opacity(isDragging ? 0.4 : 1.0)
+        .scaleEffect(isDragging ? 0.95 : 1.0)
+        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isDragging)
+        .modifier(
+            ReorderableSlotModifier(
+                slot: slot,
+                isEnabled: canReorder,
+                draggingSlot: $draggingSlot,
+                onReorder: onReorder
+            )
+        )
     }
 
     private var emptyStateText: String {
@@ -214,5 +264,45 @@ func medalGradientColors(for badge: Badge) -> [Color] {
         return [Color(red: 0.7, green: 0.4, blue: 1.0), Color(red: 0.5, green: 0.15, blue: 0.85)]
     case .common:
         return [Color(red: 0.4, green: 0.7, blue: 1.0), Color(red: 0.15, green: 0.45, blue: 0.85)]
+    }
+}
+
+// MARK: - Reorderable slot modifier
+// Wraps a pinned-slot view with `.draggable` + `.dropDestination`. The dragged
+// payload is the source slot index encoded as a String; the drop handler decodes
+// it and invokes `onReorder(from:to:)`. Conditional on `isEnabled` so friend
+// profiles (read-only) get no drag affordance.
+
+private struct ReorderableSlotModifier: ViewModifier {
+    let slot: Int
+    let isEnabled: Bool
+    @Binding var draggingSlot: Int?
+    let onReorder: ((Int, Int) -> Void)?
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content
+                .draggable(String(slot)) {
+                    // Drag preview — slight scale + tint so it feels lifted.
+                    content
+                        .scaleEffect(1.05)
+                        .shadow(color: .black.opacity(0.4), radius: 10, x: 0, y: 6)
+                        .onAppear { draggingSlot = slot }
+                        .onDisappear { draggingSlot = nil }
+                }
+                .dropDestination(for: String.self) { items, _ in
+                    guard let first = items.first,
+                          let from = Int(first),
+                          from != slot else {
+                        draggingSlot = nil
+                        return false
+                    }
+                    onReorder?(from, slot)
+                    draggingSlot = nil
+                    return true
+                }
+        } else {
+            content
+        }
     }
 }

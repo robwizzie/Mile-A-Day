@@ -10,6 +10,7 @@ struct ProfileView: View {
     @State private var currentProfileImage: UIImage?
     @State private var showingManagePins = false
     @State private var pinnedBadgeForDetail: Badge?
+    @State private var isShowingBadgeDetail = false
 
     enum ProfileSheetType: String, Identifiable {
         case totalMiles, fastestPace, mostMiles
@@ -27,8 +28,14 @@ struct ProfileView: View {
                 PinnedBadgesShowcase(
                     pinnedBadges: userManager.pinnedBadges,
                     onManageTapped: { showingManagePins = true },
-                    onBadgeTapped: { badge in pinnedBadgeForDetail = badge },
-                    ownerDisplayName: nil
+                    onBadgeTapped: { badge in
+                        pinnedBadgeForDetail = badge
+                        isShowingBadgeDetail = true
+                    },
+                    ownerDisplayName: nil,
+                    onReorder: { from, to in
+                        reorderPinnedBadges(from: from, to: to)
+                    }
                 )
 
                 // Streak & Goal Row
@@ -77,8 +84,10 @@ struct ProfileView: View {
         .sheet(isPresented: $showingManagePins) {
             ManagePinnedBadgesSheet(userManager: userManager)
         }
-        .sheet(item: $pinnedBadgeForDetail) { badge in
-            NavigationStack {
+        .navigationDestination(isPresented: $isShowingBadgeDetail) {
+            // Match the BadgesView navigation-push presentation so tapping a
+            // pinned badge feels identical to tapping one from the grid.
+            if let badge = pinnedBadgeForDetail {
                 BadgeDetailView(badge: badge, userManager: userManager)
             }
         }
@@ -567,6 +576,18 @@ struct ProfileView: View {
         let hkPace = healthManager.fastestMilePace
         if hkPace > 0 { return hkPace }
         return userManager.currentUser.fastestMilePace
+    }
+
+    /// Drag-to-reorder handler: moves the badge at `from` to position `to` in the
+    /// current pinned list and persists by re-calling `setPinnedBadges`.
+    private func reorderPinnedBadges(from: Int, to: Int) {
+        var ids = userManager.pinnedBadges.map { $0.id }
+        guard from >= 0, from < ids.count, to >= 0, to < ids.count, from != to else { return }
+        let moved = ids.remove(at: from)
+        ids.insert(moved, at: to)
+        Task { @MainActor in
+            await userManager.setPinnedBadges(ids)
+        }
     }
 
     private func formatPace(_ pace: TimeInterval) -> String {

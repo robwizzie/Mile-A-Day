@@ -105,19 +105,33 @@ struct UserProfileDetailView: View {
 
     private func loadBadges() async {
         guard !isCurrentUser() else { return }
+        // Fetch in parallel but handle each independently — if one endpoint
+        // fails the other can still populate, and the section stays visible
+        // as long as the catalog loads (the grid needs it to render at all).
         async let earnedTask = BadgeAPIService.fetchUserBadges(userId: user.user_id)
         async let catalogTask = BadgeAPIService.fetchCatalog()
+
+        var fetchedEarned: [Badge] = []
+        var fetchedCatalog: [Badge] = []
+
         do {
-            let earnedDtos = try await earnedTask
-            let catalogDtos = try await catalogTask
-            await MainActor.run {
-                self.userBadges = earnedDtos.map { $0.toBadge() }
-                self.catalogBadges = catalogDtos.map { $0.toLockedBadge() }
-                self.hasLoadedBadges = true
-            }
+            let dtos = try await earnedTask
+            fetchedEarned = dtos.map { $0.toBadge() }
         } catch {
-            print("[UserProfileDetailView] loadBadges failed: \(error)")
-            await MainActor.run { self.hasLoadedBadges = true }
+            print("[UserProfileDetailView] fetchUserBadges failed: \(error)")
+        }
+
+        do {
+            let dtos = try await catalogTask
+            fetchedCatalog = dtos.map { $0.toLockedBadge() }
+        } catch {
+            print("[UserProfileDetailView] fetchCatalog failed: \(error)")
+        }
+
+        await MainActor.run {
+            self.userBadges = fetchedEarned
+            self.catalogBadges = fetchedCatalog
+            self.hasLoadedBadges = true
         }
     }
 
