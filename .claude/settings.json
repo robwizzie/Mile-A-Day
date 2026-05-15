@@ -21,7 +21,10 @@
       "Bash(gitleaks *)",
       "Bash(gh *)",
       "Bash(npx *)",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(pnpm test:run *)",
+      "Bash(pnpm check *)",
+      "Bash(pnpm test:e2e *)"
     ]
   },
   "enabledPlugins": {

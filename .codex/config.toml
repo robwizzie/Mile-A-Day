@@ -1,36 +1,30 @@
-# Codex routing config for Mile A Day.
-# Codex is invoked for cross-model review on critical paths and large PRs.
-# Triggered manually via /ship or per-PR via the security-review workflow (when added).
+[mcp_servers.context7]
+args = [
+    "-y",
+    "@upstash/context7-mcp",
+]
+command = "npx"
 
 [model]
-# Pin model + reasoning effort. Verify model name is current before editing.
 name = "gpt-5-codex"
 reasoning_effort = "high"
 
 [routing]
-# Auto-route to Codex when:
-#   - PR/branch touches 5 or more files, OR
-#   - any changed path matches a critical-path glob below
-files_changed_threshold = 5
-
 critical_paths = [
-  # Backend auth + token handling
-  "backend/src/middleware/**",
-  "backend/src/routes/auth*.ts",
-  "backend/src/controllers/auth*.ts",
-  "backend/src/services/auth*.ts",
-  "backend/src/services/jwt*.ts",
-  "backend/src/services/postgres*.ts",
-  # Backend cron and notifications (race conditions hit here historically)
-  "backend/src/cron/**",
-  "backend/src/services/notification*.ts",
-  "backend/src/routes/notification*.ts",
-  # iOS auth + sync (HealthKit + workout sync)
-  "app/Mile A Day/Services/APIClient.swift",
-  "app/Mile A Day/Services/TokenRefreshService.swift",
-  "app/Mile A Day/Services/WorkoutSyncService.swift",
-  "app/Mile A Day/Models/HealthKitManager*.swift",
-  # Database schema (manual migrations — no rollback safety net)
-  "backend/scripts/**.sql",
-  "backend/docs/**.sql",
+    "backend/src/middleware/**",
+    "backend/src/routes/auth*.ts",
+    "backend/src/controllers/auth*.ts",
+    "backend/src/services/auth*.ts",
+    "backend/src/services/jwt*.ts",
+    "backend/src/services/postgres*.ts",
+    "backend/src/cron/**",
+    "backend/src/services/notification*.ts",
+    "backend/src/routes/notification*.ts",
+    "app/Mile A Day/Services/APIClient.swift",
+    "app/Mile A Day/Services/TokenRefreshService.swift",
+    "app/Mile A Day/Services/WorkoutSyncService.swift",
+    "app/Mile A Day/Models/HealthKitManager*.swift",
+    "backend/scripts/**.sql",
+    "backend/docs/**.sql",
 ]
+files_changed_threshold = 5

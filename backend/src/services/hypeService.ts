@@ -1,17 +1,20 @@
 import { PostgresService } from './DbService.js';
+import { hasUnlimitedActions } from './privilegedUsers.js';
+import { START_OF_TODAY_ET_SQL, START_OF_TOMORROW_ET_SQL } from './dailyResetTime.js';
 
 const db = PostgresService.getInstance();
 
 export const HYPE_DAILY_LIMIT = 3;
 
 /**
- * Count of hypes the sender has sent in the last 24 hours (rolling window).
+ * Count of hypes the sender has sent since midnight ET today.
+ * The window resets at midnight America/New_York, not rolling 24h.
  */
 export async function getDailyHypeCount(senderId: string): Promise<number> {
 	const rows = await db.query<{ count: string }>(
 		`SELECT COUNT(*)::text AS count FROM hype_log
 		WHERE sender_id = $1
-			AND created_at > NOW() - INTERVAL '24 hours'`,
+			AND created_at >= ${START_OF_TODAY_ET_SQL}`,
 		[senderId]
 	);
 	return parseInt(rows[0]?.count ?? '0', 10);
@@ -19,8 +22,10 @@ export async function getDailyHypeCount(senderId: string): Promise<number> {
 
 /**
  * True if the sender has fewer than HYPE_DAILY_LIMIT hypes in the last 24h.
+ * Privileged users bypass the cap.
  */
 export async function canHype(senderId: string): Promise<boolean> {
+	if (hasUnlimitedActions(senderId)) return true;
 	const count = await getDailyHypeCount(senderId);
 	return count < HYPE_DAILY_LIMIT;
 }
@@ -45,29 +50,40 @@ export async function logHypeIfUnderLimit(
 	targetId: string,
 	context?: HypeContext
 ): Promise<{ id: string } | null> {
+	const unlimited = hasUnlimitedActions(senderId);
+
 	if (context) {
-		const rows = await db.query<{ id: string }>(
-			`INSERT INTO hype_log (sender_id, target_id, context_type, context_id, context_label)
-			SELECT $1, $2, $3, $4, $5
-			WHERE (
-				SELECT COUNT(*) FROM hype_log
-				WHERE sender_id = $1 AND created_at > NOW() - INTERVAL '24 hours'
-			) < ${HYPE_DAILY_LIMIT}
-			RETURNING id`,
-			[senderId, targetId, context.contextType, context.contextId, context.contextLabel]
-		);
+		const sql = unlimited
+			? `INSERT INTO hype_log (sender_id, target_id, context_type, context_id, context_label)
+				VALUES ($1, $2, $3, $4, $5)
+				RETURNING id`
+			: `INSERT INTO hype_log (sender_id, target_id, context_type, context_id, context_label)
+				SELECT $1, $2, $3, $4, $5
+				WHERE (
+					SELECT COUNT(*) FROM hype_log
+					WHERE sender_id = $1 AND created_at >= ${START_OF_TODAY_ET_SQL}
+				) < ${HYPE_DAILY_LIMIT}
+				RETURNING id`;
+		const rows = await db.query<{ id: string }>(sql, [
+			senderId,
+			targetId,
+			context.contextType,
+			context.contextId,
+			context.contextLabel
+		]);
 		return rows[0] ?? null;
 	}
-	const rows = await db.query<{ id: string }>(
-		`INSERT INTO hype_log (sender_id, target_id)
-		SELECT $1, $2
-		WHERE (
-			SELECT COUNT(*) FROM hype_log
-			WHERE sender_id = $1 AND created_at > NOW() - INTERVAL '24 hours'
-		) < ${HYPE_DAILY_LIMIT}
-		RETURNING id`,
-		[senderId, targetId]
-	);
+
+	const sql = unlimited
+		? `INSERT INTO hype_log (sender_id, target_id) VALUES ($1, $2) RETURNING id`
+		: `INSERT INTO hype_log (sender_id, target_id)
+			SELECT $1, $2
+			WHERE (
+				SELECT COUNT(*) FROM hype_log
+				WHERE sender_id = $1 AND created_at >= ${START_OF_TODAY_ET_SQL}
+			) < ${HYPE_DAILY_LIMIT}
+			RETURNING id`;
+	const rows = await db.query<{ id: string }>(sql, [senderId, targetId]);
 	return rows[0] ?? null;
 }
 
@@ -93,21 +109,14 @@ export async function hasHypedContext(
 }
 
 /**
- * ISO timestamp when the sender's oldest in-window hype rolls off,
- * unlocking their next slot. Returns null if they have spare capacity.
+ * ISO timestamp when the sender's daily cap resets — midnight ET tomorrow.
+ * Returns null if they have spare capacity right now.
  */
 export async function getHypeResetsAt(senderId: string): Promise<string | null> {
+	if (hasUnlimitedActions(senderId)) return null;
 	const count = await getDailyHypeCount(senderId);
 	if (count < HYPE_DAILY_LIMIT) return null;
 
-	const rows = await db.query<{ rolls_off: string }>(
-		`SELECT (created_at + INTERVAL '24 hours')::text AS rolls_off
-		FROM hype_log
-		WHERE sender_id = $1
-			AND created_at > NOW() - INTERVAL '24 hours'
-		ORDER BY created_at ASC
-		LIMIT 1`,
-		[senderId]
-	);
-	return rows[0]?.rolls_off ?? null;
+	const rows = await db.query<{ resets_at: string }>(`SELECT ${START_OF_TOMORROW_ET_SQL}::text AS resets_at`);
+	return rows[0]?.resets_at ?? null;
 }

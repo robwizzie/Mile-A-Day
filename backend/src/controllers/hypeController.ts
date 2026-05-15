@@ -49,6 +49,24 @@ async function isFriendOrCoParticipant(senderId: string, targetId: string): Prom
 	return shareActiveCompetition(senderId, targetId);
 }
 
+/**
+ * Formats an ISO timestamp as a human-readable "in X" string (e.g. "in 2 hours",
+ * "in 45 minutes"). Returns null if the timestamp is missing or already past.
+ */
+function formatTimeUntil(isoTimestamp: string | null): string | null {
+	if (!isoTimestamp) return null;
+	const target = new Date(isoTimestamp).getTime();
+	if (Number.isNaN(target)) return null;
+	const deltaMs = target - Date.now();
+	if (deltaMs <= 0) return null;
+	const minutes = Math.round(deltaMs / 60_000);
+	if (minutes < 60) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+	const hours = Math.round(minutes / 60);
+	if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+	const days = Math.round(hours / 24);
+	return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
 function buildHypeBackBody(senderName: string, context: HypeContext | undefined): string {
 	if (!context) {
 		return `@${senderName} just hyped up your recent workout!`;
@@ -123,10 +141,15 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
 		// Atomic: insert iff still under the limit. Closes the concurrent-sender race.
 		const inserted = await logHypeIfUnderLimit(senderId, targetUserId, context);
 		if (!inserted) {
+			const resetsAt = await getHypeResetsAt(senderId);
+			const resetIn = formatTimeUntil(resetsAt);
+			const error = resetIn
+				? `You're out of hypes — you've used all ${HYPE_DAILY_LIMIT} today. Try again in ${resetIn}.`
+				: `You're out of hypes — you've used all ${HYPE_DAILY_LIMIT} today. Come back tomorrow.`;
 			return res.status(429).json({
-				error: `You've used all ${HYPE_DAILY_LIMIT} hypes for the day`,
+				error,
 				hypes_remaining: 0,
-				resets_at: await getHypeResetsAt(senderId)
+				resets_at: resetsAt
 			});
 		}
 
