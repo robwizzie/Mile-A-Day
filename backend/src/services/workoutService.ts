@@ -246,6 +246,22 @@ export async function getTodayMiles(userId: string) {
 	return result[0]?.total_distance || 0;
 }
 
+/**
+ * Total miles a user logged on a specific local date (their timezone).
+ * Used to validate "did they complete their mile that day?" for historical
+ * events like an old mile-completion notification being hyped.
+ */
+export async function getMilesOnLocalDate(userId: string, localDate: string): Promise<number> {
+	const result = await db.query<{ total_distance: string | number | null }>(
+		`SELECT COALESCE(SUM(distance), 0) AS total_distance
+		FROM workouts
+		WHERE user_id = $1 AND local_date = $2::date`,
+		[userId, localDate]
+	);
+	const value = result[0]?.total_distance;
+	return value == null ? 0 : Number(value);
+}
+
 export interface TodayStats {
 	miles: number;
 	durationSeconds: number;
