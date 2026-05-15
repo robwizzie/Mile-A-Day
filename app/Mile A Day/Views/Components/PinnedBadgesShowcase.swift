@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Profile showcase that displays up to 3 pinned badges side-by-side.
 /// Used on both the local user's profile (with manage affordance) and friend profiles (read-only).
@@ -17,6 +18,7 @@ struct PinnedBadgesShowcase: View {
     let onReorder: ((Int, Int) -> Void)?
 
     @State private var draggingSlot: Int? = nil
+    @State private var hoveredSlot: Int? = nil
 
     init(
         pinnedBadges: [Badge],
@@ -75,6 +77,8 @@ struct PinnedBadgesShowcase: View {
                     }
                 }
             }
+            // Smoothly swap badges when the pinned list reorders.
+            .animation(.spring(response: 0.4, dampingFraction: 0.82), value: pinnedBadges.map(\.id))
 
             if pinnedBadges.isEmpty {
                 Text(emptyStateText)
@@ -104,22 +108,40 @@ struct PinnedBadgesShowcase: View {
     private func filledSlot(at slot: Int, badge: Badge) -> some View {
         let canReorder = onReorder != nil && pinnedBadges.count > 1
         let isDragging = draggingSlot == slot
+        let isDropTarget = canReorder && hoveredSlot == slot && draggingSlot != nil && draggingSlot != slot
 
-        Button {
-            onBadgeTapped?(badge)
-        } label: {
-            PinnedBadgeSlotFilled(badge: badge)
+        Group {
+            if isDragging {
+                // Skeleton placeholder where the dragged badge came from —
+                // dashed outline tinted with the badge's rarity color, ghost
+                // icon in the center, faded name underneath.
+                PinnedBadgeSlotSkeleton(badge: badge)
+            } else {
+                Button {
+                    onBadgeTapped?(badge)
+                } label: {
+                    PinnedBadgeSlotFilled(badge: badge)
+                }
+                .buttonStyle(BadgeCardButtonStyle())
+                .disabled(onBadgeTapped == nil)
+            }
         }
-        .buttonStyle(BadgeCardButtonStyle())
-        .disabled(onBadgeTapped == nil)
-        .opacity(isDragging ? 0.4 : 1.0)
-        .scaleEffect(isDragging ? 0.95 : 1.0)
-        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isDragging)
+        .scaleEffect(isDropTarget ? 1.08 : 1.0)
+        .shadow(
+            color: isDropTarget ? badge.rarity.color.opacity(0.55) : .clear,
+            radius: 14,
+            x: 0,
+            y: 0
+        )
+        .animation(.spring(response: 0.28, dampingFraction: 0.78), value: isDragging)
+        .animation(.spring(response: 0.28, dampingFraction: 0.78), value: isDropTarget)
         .modifier(
             ReorderableSlotModifier(
                 slot: slot,
                 isEnabled: canReorder,
+                badge: badge,
                 draggingSlot: $draggingSlot,
+                hoveredSlot: $hoveredSlot,
                 onReorder: onReorder
             )
         )
@@ -193,6 +215,65 @@ private struct PinnedBadgeSlotFilled: View {
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
+                .frame(height: 28, alignment: .top)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// Placeholder shown in a filled slot while its badge is being dragged. Matches
+/// the empty-slot dimensions exactly so the rest of the row doesn't reflow.
+/// Heavy dashed outline in the badge's rarity color + soft inner glow + a
+/// pulsing scale animation so the "this slot is in motion" signal is loud.
+private struct PinnedBadgeSlotSkeleton: View {
+    let badge: Badge
+    @State private var pulse: Bool = false
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ZStack {
+                // Soft tinted disc behind the outline so the slot reads as
+                // "occupied but lifted" rather than empty.
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [badge.rarity.color.opacity(0.22), .clear],
+                            center: .center,
+                            startRadius: 6,
+                            endRadius: 42
+                        )
+                    )
+                    .frame(width: 90, height: 90)
+
+                // Dashed outline — animates by pulsing its scale so it's
+                // visibly "alive" even when the user's finger covers part of
+                // the screen.
+                Circle()
+                    .strokeBorder(
+                        badge.rarity.color.opacity(0.95),
+                        style: StrokeStyle(lineWidth: 2, dash: [5, 4])
+                    )
+                    .frame(width: 64, height: 64)
+                    .scaleEffect(pulse ? 1.08 : 0.96)
+                    .opacity(pulse ? 1.0 : 0.7)
+
+                // Arrows-out-of-rectangle reads as "moving" rather than the
+                // badge's normal icon which would look like a static dim copy.
+                Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                    .font(.system(size: 16, weight: .black))
+                    .foregroundColor(badge.rarity.color.opacity(0.85))
+            }
+            .frame(width: 90, height: 90)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+                    pulse = true
+                }
+            }
+
+            Text("MOVING")
+                .font(.system(size: 10, weight: .black, design: .rounded))
+                .tracking(1.4)
+                .foregroundColor(badge.rarity.color.opacity(0.9))
                 .frame(height: 28, alignment: .top)
         }
         .frame(maxWidth: .infinity)
@@ -276,33 +357,118 @@ func medalGradientColors(for badge: Badge) -> [Color] {
 private struct ReorderableSlotModifier: ViewModifier {
     let slot: Int
     let isEnabled: Bool
+    /// The badge that lives in this slot — used to render an unambiguous drag
+    /// preview (the actual medal) regardless of the source slot's current
+    /// rendering. Without this we'd accidentally snapshot the skeleton view.
+    let badge: Badge
     @Binding var draggingSlot: Int?
+    @Binding var hoveredSlot: Int?
     let onReorder: ((Int, Int) -> Void)?
 
     func body(content: Content) -> some View {
         if isEnabled {
+            // Drag side: `.draggable` with the @autoclosure form so the
+            // payload-producing call fires at drag start (sets `draggingSlot`).
+            // The preview renders the medal explicitly — *not* `content`, because
+            // by the time iOS snapshots the preview, the source slot has already
+            // flipped to its `PinnedBadgeSlotSkeleton` (`isDragging` is true).
+            //
+            // Drop side: `.onDrop(of:delegate:)` instead of `.dropDestination`.
+            // The custom `DropDelegate` returns `DropProposal(operation: .move)`
+            // which tells the system to render a "move" cursor instead of the
+            // green-plus "copy" badge.
             content
-                .draggable(String(slot)) {
-                    // Drag preview — slight scale + tint so it feels lifted.
-                    content
+                .draggable(beginDrag()) {
+                    PinnedBadgeSlotFilled(badge: badge)
                         .scaleEffect(1.05)
                         .shadow(color: .black.opacity(0.4), radius: 10, x: 0, y: 6)
-                        .onAppear { draggingSlot = slot }
-                        .onDisappear { draggingSlot = nil }
                 }
-                .dropDestination(for: String.self) { items, _ in
-                    guard let first = items.first,
-                          let from = Int(first),
-                          from != slot else {
-                        draggingSlot = nil
-                        return false
+                .onDrop(
+                    of: [.text],
+                    delegate: ReorderDropDelegate(
+                        slot: slot,
+                        onReorder: onReorder,
+                        draggingSlot: $draggingSlot,
+                        hoveredSlot: $hoveredSlot
+                    )
+                )
+                // Safety: if the user picks up a badge and drops outside any
+                // valid destination, the drop handler never fires. Reset the
+                // source-skeleton state after a short idle window.
+                .onChange(of: draggingSlot) { _, newValue in
+                    guard newValue == slot else { return }
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(8))
+                        if draggingSlot == slot && hoveredSlot == nil {
+                            draggingSlot = nil
+                        }
                     }
-                    onReorder?(from, slot)
-                    draggingSlot = nil
-                    return true
                 }
         } else {
             content
         }
+    }
+
+    /// Side-effect payload: marks this slot as the active drag source the
+    /// moment iOS asks for the drag payload, so the row immediately replaces
+    /// this slot's view with the `PinnedBadgeSlotSkeleton`.
+    private func beginDrag() -> String {
+        Task { @MainActor in
+            draggingSlot = slot
+        }
+        return String(slot)
+    }
+}
+
+/// Drop delegate for the reorder slots. Exists primarily so we can override
+/// `dropUpdated` to return `DropProposal(operation: .move)` — without it the
+/// system shows the green "+" copy badge over the drag preview.
+private struct ReorderDropDelegate: DropDelegate {
+    let slot: Int
+    let onReorder: ((Int, Int) -> Void)?
+    @Binding var draggingSlot: Int?
+    @Binding var hoveredSlot: Int?
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [.text])
+    }
+
+    /// Tell the system this is a move (no green "+"). Returning .move here
+    /// causes UIKit to render the standard reorder-style cursor instead.
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func dropEntered(info: DropInfo) {
+        hoveredSlot = slot
+    }
+
+    func dropExited(info: DropInfo) {
+        if hoveredSlot == slot {
+            hoveredSlot = nil
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let providers = info.itemProviders(for: [.text])
+        guard let provider = providers.first else {
+            Task { @MainActor in
+                draggingSlot = nil
+                hoveredSlot = nil
+            }
+            return false
+        }
+        provider.loadObject(ofClass: NSString.self) { object, _ in
+            Task { @MainActor in
+                if let str = (object as? NSString) as String?,
+                   let from = Int(str),
+                   from != slot {
+                    onReorder?(from, slot)
+                }
+                draggingSlot = nil
+                hoveredSlot = nil
+            }
+        }
+        return true
     }
 }
