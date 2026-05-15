@@ -246,6 +246,77 @@ export async function getTodayMiles(userId: string) {
 	return result[0]?.total_distance || 0;
 }
 
+export interface TodayStats {
+	miles: number;
+	durationSeconds: number;
+	bestSplitPaceSecMi: number | null;
+}
+
+/**
+ * Aggregate today's workout stats for a user, using the user's local-date
+ * predicate (same as getTodayMiles).
+ *
+ * bestSplitPaceSecMi: MIN split pace (sec/mi) across today's splits where
+ * split_distance >= 0.95. Falls back to MIN(total_duration / distance) over
+ * today's workouts with distance >= 0.95. NULL if neither is available.
+ */
+export async function getTodayStats(userId: string): Promise<TodayStats> {
+	const query = `
+	WITH user_tz AS (
+		SELECT COALESCE(
+			(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
+			0
+		) AS tz_offset
+	),
+	today_workouts AS (
+		SELECT w.workout_id, w.distance, w.total_duration
+		FROM workouts w, user_tz
+		WHERE w.user_id = $1
+			AND w.local_date = (NOW() + (user_tz.tz_offset || ' minutes')::interval)::date
+	),
+	totals AS (
+		SELECT
+			COALESCE(SUM(distance), 0) AS miles,
+			COALESCE(SUM(total_duration), 0) AS duration_seconds
+		FROM today_workouts
+	),
+	split_best AS (
+		SELECT MIN(ws.split_pace) AS pace
+		FROM today_workouts tw
+		JOIN workout_splits ws ON ws.workout_id = tw.workout_id
+		WHERE ws.split_distance >= 0.95
+	),
+	workout_best AS (
+		SELECT MIN(total_duration / NULLIF(distance, 0)) AS pace
+		FROM today_workouts
+		WHERE distance >= 0.95
+	)
+	SELECT
+		t.miles::float8 AS miles,
+		t.duration_seconds::float8 AS duration_seconds,
+		COALESCE(sb.pace, wb.pace) AS best_split_pace_sec_mi
+	FROM totals t
+	LEFT JOIN split_best sb ON TRUE
+	LEFT JOIN workout_best wb ON TRUE
+	`;
+
+	const rows = await db.query<{
+		miles: number | string;
+		duration_seconds: number | string;
+		best_split_pace_sec_mi: number | string | null;
+	}>(query, [userId]);
+
+	const row = rows[0];
+	const toNum = (v: number | string | null | undefined): number => (v == null ? 0 : typeof v === 'string' ? Number(v) : v);
+	const pace = row?.best_split_pace_sec_mi;
+
+	return {
+		miles: toNum(row?.miles),
+		durationSeconds: toNum(row?.duration_seconds),
+		bestSplitPaceSecMi: pace == null ? null : Number(pace)
+	};
+}
+
 export async function getQuantityDateRange(
 	userId: string,
 	startDate: string,
