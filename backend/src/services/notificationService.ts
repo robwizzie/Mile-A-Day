@@ -3,9 +3,32 @@ import { sendPush, sendOrQueueCompetitionNotification } from './pushNotification
 import { shouldSendNotification, filterRecipientsForNotification } from './notificationSettingsService.js';
 import { getCompetition, getUserScores } from './competitionService.js';
 import { Competition, CompetitionUser } from '../types/competitions.js';
-import { getActiveStreak, getTodayMiles } from './workoutService.js';
+import { getActiveStreak, getTodayMiles, getTodayStats } from './workoutService.js';
 
 const db = PostgresService.getInstance();
+
+// ─── Format helpers (file-local) ───────────────────────────────────
+
+function formatMiles(miles: number): string {
+	return `${miles.toFixed(2)} mi`;
+}
+
+function formatDuration(seconds: number): string {
+	const s = Math.max(0, Math.round(seconds));
+	const h = Math.floor(s / 3600);
+	const m = Math.floor((s % 3600) / 60);
+	const sec = s % 60;
+	const pad = (n: number) => n.toString().padStart(2, '0');
+	if (h > 0) return `${h}:${pad(m)}:${pad(sec)}`;
+	return `${m}:${pad(sec)}`;
+}
+
+function formatPace(secondsPerMile: number): string {
+	const s = Math.max(0, Math.round(secondsPerMile));
+	const m = Math.floor(s / 60);
+	const sec = s % 60;
+	return `${m}:${sec.toString().padStart(2, '0')}/mi`;
+}
 
 // ─── Workout Completion Notifications ──────────────────────────────
 
@@ -65,7 +88,23 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<voi
 		if (recipients.length === 0) return;
 
 		const title = `${user.username} got their mile in!`;
-		const body = 'Your friend just completed their daily mile. Time to lace up!';
+
+		// Build a stat-line body. If stats fail or are degenerate, fall back to
+		// the generic body so the notification still goes out.
+		const FALLBACK_BODY = 'Your friend just completed their daily mile. Time to lace up!';
+		let body = FALLBACK_BODY;
+		try {
+			const stats = await getTodayStats(userId);
+			if (stats.miles > 0) {
+				const parts = [formatMiles(stats.miles), formatDuration(stats.durationSeconds)];
+				if (stats.bestSplitPaceSecMi != null && stats.bestSplitPaceSecMi > 0) {
+					parts.push(`best pace ${formatPace(stats.bestSplitPaceSecMi)}`);
+				}
+				body = parts.join(' · ');
+			}
+		} catch (err: any) {
+			console.error('[Notifications] Error building mile completion stats body, using fallback:', err.message);
+		}
 
 		// Pre-filter all recipients in 2 queries instead of 2 per recipient.
 		const allowedRecipients = await filterRecipientsForNotification(recipients, userId, 'friend_activity');
