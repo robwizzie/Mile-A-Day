@@ -1,4 +1,5 @@
 import { PostgresService } from './DbService.js';
+import { hasUnlimitedActions } from './privilegedUsers.js';
 
 const db = PostgresService.getInstance();
 
@@ -19,8 +20,10 @@ export async function getDailyHypeCount(senderId: string): Promise<number> {
 
 /**
  * True if the sender has fewer than HYPE_DAILY_LIMIT hypes in the last 24h.
+ * Privileged users bypass the cap.
  */
 export async function canHype(senderId: string): Promise<boolean> {
+	if (hasUnlimitedActions(senderId)) return true;
 	const count = await getDailyHypeCount(senderId);
 	return count < HYPE_DAILY_LIMIT;
 }
@@ -45,29 +48,40 @@ export async function logHypeIfUnderLimit(
 	targetId: string,
 	context?: HypeContext
 ): Promise<{ id: string } | null> {
+	const unlimited = hasUnlimitedActions(senderId);
+
 	if (context) {
-		const rows = await db.query<{ id: string }>(
-			`INSERT INTO hype_log (sender_id, target_id, context_type, context_id, context_label)
-			SELECT $1, $2, $3, $4, $5
+		const sql = unlimited
+			? `INSERT INTO hype_log (sender_id, target_id, context_type, context_id, context_label)
+				VALUES ($1, $2, $3, $4, $5)
+				RETURNING id`
+			: `INSERT INTO hype_log (sender_id, target_id, context_type, context_id, context_label)
+				SELECT $1, $2, $3, $4, $5
+				WHERE (
+					SELECT COUNT(*) FROM hype_log
+					WHERE sender_id = $1 AND created_at > NOW() - INTERVAL '24 hours'
+				) < ${HYPE_DAILY_LIMIT}
+				RETURNING id`;
+		const rows = await db.query<{ id: string }>(sql, [
+			senderId,
+			targetId,
+			context.contextType,
+			context.contextId,
+			context.contextLabel
+		]);
+		return rows[0] ?? null;
+	}
+
+	const sql = unlimited
+		? `INSERT INTO hype_log (sender_id, target_id) VALUES ($1, $2) RETURNING id`
+		: `INSERT INTO hype_log (sender_id, target_id)
+			SELECT $1, $2
 			WHERE (
 				SELECT COUNT(*) FROM hype_log
 				WHERE sender_id = $1 AND created_at > NOW() - INTERVAL '24 hours'
 			) < ${HYPE_DAILY_LIMIT}
-			RETURNING id`,
-			[senderId, targetId, context.contextType, context.contextId, context.contextLabel]
-		);
-		return rows[0] ?? null;
-	}
-	const rows = await db.query<{ id: string }>(
-		`INSERT INTO hype_log (sender_id, target_id)
-		SELECT $1, $2
-		WHERE (
-			SELECT COUNT(*) FROM hype_log
-			WHERE sender_id = $1 AND created_at > NOW() - INTERVAL '24 hours'
-		) < ${HYPE_DAILY_LIMIT}
-		RETURNING id`,
-		[senderId, targetId]
-	);
+			RETURNING id`;
+	const rows = await db.query<{ id: string }>(sql, [senderId, targetId]);
 	return rows[0] ?? null;
 }
 
@@ -97,6 +111,7 @@ export async function hasHypedContext(
  * unlocking their next slot. Returns null if they have spare capacity.
  */
 export async function getHypeResetsAt(senderId: string): Promise<string | null> {
+	if (hasUnlimitedActions(senderId)) return null;
 	const count = await getDailyHypeCount(senderId);
 	if (count < HYPE_DAILY_LIMIT) return null;
 

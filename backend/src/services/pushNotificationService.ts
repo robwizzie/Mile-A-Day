@@ -1,5 +1,6 @@
 import { PostgresService } from './DbService.js';
 import { getNotificationPreferences, shouldSendNotification } from './notificationSettingsService.js';
+import { hasUnlimitedActions } from './privilegedUsers.js';
 import fs from 'fs';
 import path from 'path';
 import http2 from 'http2';
@@ -521,6 +522,7 @@ export async function flushBatchedNotifications(): Promise<void> {
 // ─── Nudge Rate Limiting ─────────────────────────────────────────────
 
 export async function canNudge(competitionId: string, senderId: string, targetId: string): Promise<boolean> {
+	if (hasUnlimitedActions(senderId)) return true;
 	const result = await db.query(
 		`SELECT id FROM nudge_log
 		WHERE competition_id = $1 AND sender_id = $2 AND target_id = $3
@@ -542,6 +544,7 @@ export async function logNudge(competitionId: string, senderId: string, targetId
 // ─── Friend Nudge Rate Limiting ─────────────────────────────────────
 
 export async function canFriendNudge(senderId: string, targetId: string): Promise<boolean> {
+	if (hasUnlimitedActions(senderId)) return true;
 	const result = await db.query(
 		`SELECT id FROM friend_nudge_log
 		WHERE sender_id = $1 AND target_id = $2
@@ -559,6 +562,7 @@ export async function logFriendNudge(senderId: string, targetId: string): Promis
 // ─── Flex Rate Limiting (per sender→target per day, across all competitions) ──
 
 export async function canFlex(senderId: string, targetId: string): Promise<boolean> {
+	if (hasUnlimitedActions(senderId)) return true;
 	const result = await db.query(
 		`SELECT id FROM flex_log
 		WHERE sender_id = $1 AND target_id = $2
