@@ -68,15 +68,16 @@ that user, in the user's local day boundary as already enforced by
 `getTodayMiles`.
 
 - **Distance (`miles`)** — sum of `workouts.distance` for today.
-- **Time (`durationSeconds`)** — sum of `workouts.duration_seconds` for
+- **Time (`durationSeconds`)** — sum of `workouts.total_duration` for
   today.
-- **Best pace (`bestSplitPaceSecMi`)** — `min(workout_splits.pace)` across
-  today's workouts, restricted to splits whose `distance >= 0.95` mi. The
-  0.95 floor avoids reporting a 7-second 0.1-mi sprint as a "mile pace."
-  If no qualifying split exists, fall back to the overall best avg pace
-  across today's workouts (`min(duration_seconds / distance)` where
-  `distance >= 0.95`). If neither is available (degenerate case: many
-  tiny workouts), omit the pace segment from the body.
+- **Best pace (`bestSplitPaceSecMi`)** — `MIN(workout_splits.split_pace)`
+  across today's workouts, restricted to splits whose `split_distance >=
+  0.95` mi. The 0.95 floor avoids reporting a 7-second 0.1-mi sprint as
+  a "mile pace." If no qualifying split exists, fall back to the best
+  avg pace across today's workouts (`MIN(total_duration /
+  NULLIF(distance,0))` where `distance >= 0.95`). If neither is
+  available (degenerate case: many tiny workouts), omit the pace
+  segment from the body.
 
 ## Formatting
 
@@ -111,12 +112,12 @@ truncation point on lock screens.
 
    Single SQL query joining `workouts` (filtered to today in user's
    timezone, same predicate as `getTodayMiles`) and `workout_splits`. One
-   row per user; `bestSplitPaceSecMi` is `MIN(ws.pace)` filtered to
-   `ws.distance >= 0.95`, or `NULL` if no qualifying split.
+   row per user; `bestSplitPaceSecMi` is `MIN(ws.split_pace)` filtered to
+   `ws.split_distance >= 0.95`, or `NULL` if no qualifying split.
 
    The fallback (avg-pace across qualifying workouts when no split-level
    data exists) is computed in the same query as a `COALESCE` of the
-   split-min and `MIN(w.duration_seconds / NULLIF(w.distance,0))` over
+   split-min and `MIN(w.total_duration / NULLIF(w.distance,0))` over
    workouts with `distance >= 0.95`.
 
 2. **Format helpers in `notificationService.ts`** (file-local):
