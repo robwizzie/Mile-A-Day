@@ -901,21 +901,9 @@ struct DailyChallengeCard: View {
 
     @ViewBuilder
     private func footerRow(_ challenge: DailyChallenge) -> some View {
-        if isCompleted {
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.yellow)
-                Text("Nice work — \(challengesCompletedCount) total completion\(challengesCompletedCount == 1 ? "" : "s")")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.primary.opacity(0.8))
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.secondary)
-            }
-            .padding(.top, 2)
-        } else if let tomorrow = tomorrowsChallenge {
+        // Tomorrow preview is shown in every state — completed or not — so users always
+        // know what's coming and can plan ahead.
+        if let tomorrow = tomorrowsChallenge {
             HStack(spacing: 8) {
                 Image(systemName: "calendar")
                     .font(.system(size: 10, weight: .bold))
@@ -937,6 +925,25 @@ struct DailyChallengeCard: View {
                     Capsule().fill((tomorrow.gradient.first ?? .gray).opacity(0.12))
                 )
                 Spacer(minLength: 0)
+                if isCompleted {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.yellow)
+                }
+            }
+            .padding(.top, 2)
+        } else if isCompleted {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.yellow)
+                Text("Nice work — \(challengesCompletedCount) total completion\(challengesCompletedCount == 1 ? "" : "s")")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.primary.opacity(0.8))
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.secondary)
             }
             .padding(.top, 2)
         }

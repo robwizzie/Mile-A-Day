@@ -341,7 +341,7 @@ struct DailyChallengesView: View {
             }
 
             NavigationLink {
-                CompletedChallengesListView()
+                CompletedChallengesListView(healthManager: healthManager)
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "list.bullet.rectangle")
