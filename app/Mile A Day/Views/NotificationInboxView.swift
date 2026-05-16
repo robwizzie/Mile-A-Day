@@ -159,6 +159,8 @@ struct NotificationInboxView: View {
         case "friend_challenge_completed":
             guard let targetId = data["sender_id"] else { return nil }
             // local_date is in the payload; fall back to the row's creation date.
+            // The fallback uses the UTC created_at and can be off-by-one for
+            // legacy rows completed near local midnight — new pushes carry local_date.
             let localDate = data["local_date"] ?? String(notification.created_at.prefix(10))
             return HypeContext(
                 contextType: "challenge",

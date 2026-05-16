@@ -34,7 +34,7 @@ enum HypeService {
         )
     }
 
-    /// Send a contextual hype tied to a specific event (mile / badge / pr).
+    /// Send a contextual hype tied to a specific event (mile / badge / pr / challenge).
     /// Maps APIError.conflict → silent "already hyped" state (caller should keep
     /// the button hidden). APIError.rateLimited propagates so the caller can
     /// surface "out of hypes for today".

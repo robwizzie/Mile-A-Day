@@ -507,7 +507,7 @@ async function getCompletionRow(
 export async function hasChallengeCompletion(userId: string, localDate: string): Promise<boolean> {
 	const rows = await db.query<{ exists: boolean }>(
 		`SELECT EXISTS (
-      SELECT 1 FROM user_challenge_completions WHERE user_id = $1 AND local_date = $2
+      SELECT 1 FROM user_challenge_completions WHERE user_id = $1 AND local_date = $2::date
     ) AS exists`,
 		[userId, localDate]
 	);
