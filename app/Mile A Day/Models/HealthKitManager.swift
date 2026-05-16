@@ -1395,7 +1395,7 @@ final class MADWatchBridge: NSObject {
         let hk = HealthKitManager.shared
         let user = UserManager.shared.currentUser
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "streak": hk.retroactiveStreak,
             "todayMiles": hk.todaysDistance,
             "goalMiles": user.goalMiles > 0 ? user.goalMiles : 1.0,
@@ -1404,9 +1404,18 @@ final class MADWatchBridge: NSObject {
             "ts": Date().timeIntervalSince1970
         ]
 
+        // Carry the backend auth token + user id so the watch can upload
+        // workouts directly. The watch never refreshes tokens — it relies on
+        // these pushes, which is safe because access tokens last 30 days.
+        let authToken = UserDefaults.standard.string(forKey: "authToken")
+        let backendUserId = UserDefaults.standard.string(forKey: "backendUserId")
+        if let authToken { payload["authToken"] = authToken }
+        if let backendUserId { payload["backendUserId"] = backendUserId }
+
         // Hash on the value-bearing fields only (not the timestamp) so we don't
-        // re-send identical state.
-        let stableHash = "\(payload["streak"] ?? 0)|\(payload["todayMiles"] ?? 0)|\(payload["goalMiles"] ?? 0)|\(payload["firstName"] ?? "")|\(payload["name"] ?? "")".hashValue
+        // re-send identical state. Token + id are included so a token change
+        // forces a re-push.
+        let stableHash = "\(payload["streak"] ?? 0)|\(payload["todayMiles"] ?? 0)|\(payload["goalMiles"] ?? 0)|\(payload["firstName"] ?? "")|\(payload["name"] ?? "")|\(authToken ?? "")|\(backendUserId ?? "")".hashValue
         if stableHash == lastPushedHash { return }
         lastPushedHash = stableHash
 
@@ -1455,6 +1464,12 @@ final class MADWatchBridge: NSObject {
             }
             if let nm = context["name"] as? String, !nm.isEmpty {
                 userManager.currentUser.name = nm
+            }
+            if let token = context["authToken"] as? String, !token.isEmpty {
+                UserDefaults.standard.set(token, forKey: "authToken")
+            }
+            if let backendUserId = context["backendUserId"] as? String, !backendUserId.isEmpty {
+                UserDefaults.standard.set(backendUserId, forKey: "backendUserId")
             }
             userManager.saveUserData()
         }
