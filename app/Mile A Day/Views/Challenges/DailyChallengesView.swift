@@ -7,6 +7,7 @@ struct DailyChallengesView: View {
     @State private var completions: [ChallengeCompletion] = ChallengeService.shared.allCompletions()
     @State private var selectedHistoryCompletion: ChallengeCompletion?
     @State private var todaysChallenge: DailyChallenge?
+    @State private var tomorrowsChallenge: DailyChallenge?
     @State private var todayProgress: Double = 0
     @State private var isTodayComplete: Bool = false
 
@@ -43,6 +44,9 @@ struct DailyChallengesView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     heroCard
+                    if let tomorrow = tomorrowsChallenge {
+                        tomorrowPreviewCard(tomorrow)
+                    }
                     statsRow
                     medalsGallery
                     historySection
@@ -72,9 +76,65 @@ struct DailyChallengesView: View {
         completions = ChallengeService.shared.allCompletions()
         if let remote = ChallengeService.shared as? RemoteChallengeService {
             todaysChallenge = remote.todayChallenge
+            tomorrowsChallenge = remote.tomorrowChallenge
             todayProgress = remote.todayProgress
             isTodayComplete = remote.todayCompleted
         }
+    }
+
+    // MARK: - Tomorrow Preview
+
+    private func tomorrowPreviewCard(_ challenge: DailyChallenge) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: challenge.gradient,
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 44, height: 44)
+                    .opacity(0.85)
+                Image(systemName: challenge.icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text("COMING TOMORROW")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.55))
+                Text(challenge.title)
+                    .font(.system(size: 16, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                Text(challenge.description)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.65))
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.white.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    (challenge.gradient.first ?? .white).opacity(0.25),
+                                    Color.white.opacity(0.05)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 1
+                        )
+                )
+        )
     }
 
     // MARK: - Hero
