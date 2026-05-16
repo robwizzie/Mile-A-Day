@@ -1264,4 +1264,94 @@ class HealthKitManager: ObservableObject {
         return workout.endDate
         #endif
     }
-} 
+
+    #if os(watchOS)
+    // MARK: - Watch Summary Refresh
+    /// Refreshes today's distance and the current streak from HealthKit. The watch
+    /// app can't rely on iOS pushing fresh values, so it queries HK directly each
+    /// time the home screen appears or returns to the foreground.
+    func refreshWatchSummary() {
+        if !isAuthorized {
+            requestAuthorization { [weak self] ok in
+                guard ok else { return }
+                self?.refreshWatchSummary()
+            }
+            return
+        }
+
+        fetchTodaysDistance()
+        recalculateWatchStreak()
+    }
+
+    /// Fetches the last year of running/walking workouts and recomputes the streak
+    /// in-line using the same threshold as iOS (>= 0.95 mi qualifies a day). Stays
+    /// self-contained because the iOS streak-calculation extension isn't compiled
+    /// into the watch target.
+    func recalculateWatchStreak() {
+        guard isAuthorized else { return }
+
+        let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
+        let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
+        let typePredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
+
+        let oneYearAgo = Calendar.current.date(byAdding: .day, value: -365, to: Date()) ?? Date.distantPast
+        let datePredicate = HKQuery.predicateForSamples(withStart: oneYearAgo, end: Date(), options: .strictStartDate)
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [typePredicate, datePredicate])
+
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+
+        let query = HKSampleQuery(
+            sampleType: HKObjectType.workoutType(),
+            predicate: predicate,
+            limit: HKObjectQueryNoLimit,
+            sortDescriptors: [sort]
+        ) { [weak self] _, samples, _ in
+            guard let self = self else { return }
+            let workouts = (samples as? [HKWorkout]) ?? []
+            let byDay = self.groupWorkoutsByDeviceDay(workouts: workouts)
+
+            // Per-day mile totals, then qualifying days (>= 0.95 mi).
+            let calendar = Calendar.current
+            let today = calendar.startOfDay(for: Date())
+            var qualifying: Set<Date> = []
+            for (date, dayWorkouts) in byDay {
+                let miles = dayWorkouts.reduce(0.0) { sum, w in
+                    sum + (w.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0)
+                }
+                if miles >= 0.95 { qualifying.insert(date) }
+            }
+
+            // Walk back from today counting consecutive qualifying days. If today
+            // doesn't qualify yet, the streak still includes yesterday's chain —
+            // matches iOS behavior, so the streak doesn't read 0 first thing in
+            // the morning before the user has run.
+            var streak = 0
+            var probe = today
+            if qualifying.contains(probe) {
+                streak += 1
+                probe = calendar.date(byAdding: .day, value: -1, to: probe) ?? probe
+            } else {
+                probe = calendar.date(byAdding: .day, value: -1, to: probe) ?? probe
+            }
+            while qualifying.contains(probe) {
+                streak += 1
+                guard let prev = calendar.date(byAdding: .day, value: -1, to: probe) else { break }
+                probe = prev
+                if streak > 1000 { break }
+            }
+
+            DispatchQueue.main.async {
+                self.retroactiveStreak = streak
+                self.cachedRetroactiveStreak = streak
+                self.saveCachedData()
+                if !self.hasIndexOrStreakLoaded {
+                    self.hasIndexOrStreakLoaded = true
+                    self.checkInitialDataReady()
+                }
+            }
+        }
+
+        healthStore.execute(query)
+    }
+    #endif
+}
