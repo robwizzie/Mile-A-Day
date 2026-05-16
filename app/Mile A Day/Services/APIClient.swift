@@ -177,6 +177,9 @@ class APIClient {
     private static func updateTokens(accessToken: String, refreshToken: String) {
         UserManager.shared.setTokens(accessToken: accessToken, refreshToken: refreshToken)
         print("[APIClient] ✅ Tokens updated in storage")
+        // Forward the freshly rotated token to the watch so it can keep
+        // uploading workouts directly.
+        MADWatchBridge.shared.pushSnapshotIfReady()
     }
 
     private static func signOutUser() {
