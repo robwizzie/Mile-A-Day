@@ -196,6 +196,7 @@ class UserManager: ObservableObject {
     ///
     /// Throws if the network call fails. Callers should surface the error and leave the
     /// user signed in so they can retry.
+    #if !os(watchOS)
     @MainActor
     func deleteAccount() async throws {
         guard let userId = currentUser.backendUserId, !userId.isEmpty else {
@@ -215,6 +216,7 @@ class UserManager: ObservableObject {
 
         signOut()
     }
+    #endif
 
     // Token management methods
     func setTokens(accessToken: String, refreshToken: String) {
