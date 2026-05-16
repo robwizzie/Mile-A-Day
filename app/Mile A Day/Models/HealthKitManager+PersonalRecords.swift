@@ -36,25 +36,8 @@ extension HealthKitManager {
             let mostMilesInDay: Double = 0.0
             let mostMilesWorkouts: [HKWorkout] = []
 
-            // Group workouts by day using location-aware time zones if enabled
-            if self.useLocationBasedTimezone {
-                    // For large datasets, only process recent workouts with location-aware logic
-                    if workouts.count > 100 {
-                        // Split into recent (last 30 days) and older workouts (placeholder for future optimization)
-                        // TEMPORARY: Use device timezone for all until we fix the deadlock
-                        let allWorkoutsByDay = self.groupWorkoutsByDeviceDay(workouts: workouts)
-                        self.processWorkoutsByDay(allWorkoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
-                    } else {
-                        // TEMPORARY: Use device timezone even for small datasets to prevent deadlock
-                        let workoutsByDay = self.groupWorkoutsByDeviceDay(workouts: workouts)
-                        self.processWorkoutsByDay(workoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
-                    }
-            } else {
-                // Legacy behavior: group by device timezone (safer for large datasets)
-                log("[HealthKit] Using device timezone grouping (\(workouts.count) workouts)")
-                let workoutsByDay = self.groupWorkoutsWithTimezoneAwareness(workouts: workouts)
-                self.processWorkoutsByDay(workoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
-            }
+            let workoutsByDay = self.groupWorkoutsByDeviceDay(workouts: workouts)
+            self.processWorkoutsByDay(workoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
 
             // Early return - we're done, no need to fetch
             return
@@ -94,36 +77,8 @@ extension HealthKitManager {
             let mostMilesInDay: Double = 0.0
             let mostMilesWorkouts: [HKWorkout] = []
 
-            // Group workouts by day using location-aware time zones if enabled
-            if self.useLocationBasedTimezone {
-                // For large datasets, only process recent workouts with location-aware logic
-                if workouts.count > 100 {
-                    log("[HealthKit] Large dataset (\(workouts.count) workouts) - using hybrid approach")
-
-                    // Split into recent (last 30 days) and older workouts
-                    let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-                    let recentWorkouts = workouts.filter { $0.endDate >= thirtyDaysAgo }
-                    let olderWorkouts = workouts.filter { $0.endDate < thirtyDaysAgo }
-
-                    log("[HealthKit] Processing \(recentWorkouts.count) recent workouts with location-aware timezone")
-                    log("[HealthKit] Processing \(olderWorkouts.count) older workouts with device timezone")
-
-                    // TEMPORARY: Use device timezone for all until we fix the deadlock
-                    log("[HealthKit] Temporarily using device timezone for all workouts to prevent deadlock")
-                    let allWorkoutsByDay = self.groupWorkoutsByDeviceDay(workouts: workouts)
-                    self.processWorkoutsByDay(allWorkoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
-                } else {
-                    // TEMPORARY: Use device timezone even for small datasets to prevent deadlock
-                    log("[HealthKit] Small dataset (\(workouts.count) workouts) - temporarily using device timezone")
-                    let workoutsByDay = self.groupWorkoutsByDeviceDay(workouts: workouts)
-                    self.processWorkoutsByDay(workoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
-                }
-            } else {
-                // Legacy behavior: group by device timezone (safer for large datasets)
-                log("[HealthKit] Using device timezone grouping (\(workouts.count) workouts)")
-                let workoutsByDay = self.groupWorkoutsWithTimezoneAwareness(workouts: workouts)
-                self.processWorkoutsByDay(workoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
-            }
+            let workoutsByDay = self.groupWorkoutsByDeviceDay(workouts: workouts)
+            self.processWorkoutsByDay(workoutsByDay, mostMilesInDay: mostMilesInDay, mostMilesWorkouts: mostMilesWorkouts)
         }
 
         healthStore.execute(query)
@@ -258,12 +213,8 @@ extension HealthKitManager {
         let streak = self.calculateRetroactiveStreak(workoutsByDay: workoutsByDay)
 
         DispatchQueue.main.async {
-            // NOTE: mostMilesInOneDay will be updated by calculateRetroactiveStreak with timezone corrections
-            // Only update if we don't have timezone corrections to apply
-            if !self.useLocationBasedTimezone {
-                self.mostMilesInOneDay = finalMostMilesInDay
-                self.mostMilesWorkouts = finalMostMilesWorkouts
-            }
+            self.mostMilesInOneDay = finalMostMilesInDay
+            self.mostMilesWorkouts = finalMostMilesWorkouts
             self.retroactiveStreak = streak
 
             // Save to cache after processing
