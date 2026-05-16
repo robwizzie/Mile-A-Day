@@ -869,7 +869,7 @@ class HealthKitManager: ObservableObject {
         let calendar = Calendar.current
         
         for workout in workouts {
-            let dateComponents = calendar.dateComponents([.year, .month, .day], from: workout.endDate)
+            let dateComponents = calendar.dateComponents([.year, .month, .day], from: workout.startDate)
             if let date = calendar.date(from: dateComponents) {
                 if workoutsByDay[date] == nil {
                     workoutsByDay[date] = []
