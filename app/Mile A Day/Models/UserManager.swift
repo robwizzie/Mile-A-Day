@@ -188,6 +188,34 @@ class UserManager: ObservableObject {
         saveUserData()
     }
     
+    /// Permanently deletes the user's account on the backend, then clears all local state.
+    ///
+    /// Calls `DELETE /users/{userId}`, which cascades to workouts, splits, competitions,
+    /// friendships, and refresh tokens. On success, performs the same local cleanup as
+    /// `signOut()` so the app returns to the unauthenticated state.
+    ///
+    /// Throws if the network call fails. Callers should surface the error and leave the
+    /// user signed in so they can retry.
+    @MainActor
+    func deleteAccount() async throws {
+        guard let userId = currentUser.backendUserId, !userId.isEmpty else {
+            throw NSError(
+                domain: "UserManager",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "No active user to delete."]
+            )
+        }
+
+        let _: [String: String] = try await APIClient.fancyFetch(
+            endpoint: "/users/\(userId)",
+            method: .DELETE,
+            body: nil,
+            responseType: [String: String].self
+        )
+
+        signOut()
+    }
+
     // Token management methods
     func setTokens(accessToken: String, refreshToken: String) {
         self.authToken = accessToken

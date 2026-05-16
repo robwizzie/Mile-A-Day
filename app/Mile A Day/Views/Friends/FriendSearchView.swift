@@ -10,9 +10,7 @@ struct FriendSearchView: View {
     @State private var selectedUser: BackendUser?
     @State private var searchTask: Task<Void, Never>?
     @State private var showingUnfriendAlert = false
-    @State private var showingBlockAlert = false
     @State private var userToUnfriend: BackendUser?
-    @State private var userToBlock: BackendUser?
     
     var body: some View {
         Group {
@@ -52,16 +50,6 @@ struct FriendSearchView: View {
         } message: {
             Text("You will no longer be friends with this person.")
         }
-        .alert("Block \(userToBlock?.displayName ?? "User")?", isPresented: $showingBlockAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Block", role: .destructive) {
-                if let user = userToBlock {
-                    handleBlock(user)
-                }
-            }
-        } message: {
-            Text("You will unfriend and block this person. They won't be able to see your profile or send you friend requests.")
-        }
     }
     // MARK: - Search Results View
     private var searchResultsView: some View {
@@ -85,13 +73,6 @@ struct FriendSearchView: View {
                                             showingUnfriendAlert = true
                                         } label: {
                                             Label("Unfriend", systemImage: "person.fill.xmark")
-                                        }
-
-                                        Button(role: .destructive) {
-                                            userToBlock = user
-                                            showingBlockAlert = true
-                                        } label: {
-                                            Label("Block", systemImage: "hand.raised.fill")
                                         }
                                     } label: {
                                         HStack(spacing: MADTheme.Spacing.xs) {
@@ -331,21 +312,6 @@ struct FriendSearchView: View {
         }
     }
 
-    private func handleBlock(_ user: BackendUser) {
-        Task {
-            do {
-                try await friendService.blockUser(user)
-                // Remove from search results
-                await MainActor.run {
-                    searchResults.removeAll { $0.user_id == user.user_id }
-                }
-            } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                }
-            }
-        }
-    }
 }
 
 // MARK: - Preview

@@ -7,26 +7,20 @@
 		<string>com.mileaday.background-refresh</string>
 	</array>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Mile A Day needs access to your Health data to track your running distance and workouts.</string>
+	<string>Mile A Day reads your workouts, walking and running distance, active energy, step count, and workout routes to track your daily mile, calculate streaks, and show your progress. This data is synced to Mile A Day's servers so you can compete with friends and view your history across devices.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>Mile A Day needs access to your Health data to track your running distance and workouts.</string>
+	<string>Mile A Day saves completed runs and walks (workouts, distance, and active energy) back to Health so your fitness records stay in sync with the rest of your apps.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Mile A Day needs access to your location to accurately track distance during your workouts.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Mile A Day needs access to your location to accurately track distance during your workouts, even when the app is in the background.</string>
+	<string>Mile A Day uses your location while a workout is in progress to measure your route and distance accurately. Location is only collected during an active workout.</string>
 	<key>NSMotionUsageDescription</key>
-	<string>Mile A Day needs access to your motion data to track distance and steps during indoor workouts.</string>
+	<string>Mile A Day uses motion and step data from the pedometer to measure distance during indoor workouts when GPS isn't available.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>background-processing</string>
-		<string>background-fetch</string>
-		<string>background-app-refresh</string>
 		<string>fetch</string>
 		<string>processing</string>
 		<string>location</string>
-		<string>workout</string>
 	</array>
 </dict>
 </plist>
