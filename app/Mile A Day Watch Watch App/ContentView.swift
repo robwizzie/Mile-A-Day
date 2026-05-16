@@ -79,11 +79,13 @@ struct WatchPressStyle: ButtonStyle {
 struct ContentView: View {
     @EnvironmentObject var healthManager: HealthKitManager
     @EnvironmentObject var userManager: UserManager
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var showWorkoutView = false
     @State private var selectedActivityType: HKWorkoutActivityType = .running
     @State private var locationType: HKWorkoutSessionLocationType = .outdoor
     @State private var ringPulse: Bool = false
+    @State private var isRefreshing: Bool = false
 
     private var goalDistance: Double {
         userManager.currentUser.goalMiles > 0 ? userManager.currentUser.goalMiles : 1.0
@@ -99,11 +101,13 @@ struct ContentView: View {
 
     private var remainingDistance: Double { max(goalDistance - currentDistance, 0) }
 
-    private var greetingFirstName: String? {
+    /// Returns the user's real first name only — never the default `"You"` placeholder.
+    private var realFirstName: String? {
         let first = userManager.currentUser.firstName?.trimmingCharacters(in: .whitespaces) ?? ""
         if !first.isEmpty { return first }
-        let fallback = userManager.currentUser.name.split(separator: " ").first.map(String.init) ?? ""
-        return fallback.isEmpty ? nil : fallback
+        let storedName = userManager.currentUser.name.trimmingCharacters(in: .whitespaces)
+        guard !storedName.isEmpty, storedName.lowercased() != "you" else { return nil }
+        return storedName.split(separator: " ").first.map(String.init)
     }
 
     var body: some View {
@@ -144,43 +148,80 @@ struct ContentView: View {
             )
         }
         .onAppear {
-            healthManager.fetchTodaysDistance()
+            refreshAll()
             // Gentle pulse on the ring when not yet complete — adds life to the screen.
             withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
                 ringPulse.toggle()
             }
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active { refreshAll() }
+        }
         .onChange(of: showWorkoutView) { oldValue, newValue in
             if oldValue && !newValue {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    healthManager.fetchTodaysDistance()
-                }
+                // HK takes a beat to finalize the finished workout before it shows
+                // up in queries — refresh once immediately and once shortly after
+                // so distance + streak both settle to the post-workout truth.
+                refreshAll()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { refreshAll() }
             }
+        }
+    }
+
+    /// Re-pulls today's distance and recomputes the streak from HealthKit.
+    private func refreshAll() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        healthManager.refreshWatchSummary()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            self.isRefreshing = false
         }
     }
 
     // MARK: - Header
 
     private var header: some View {
-        VStack(spacing: 1) {
-            HStack(spacing: 4) {
-                if let name = greetingFirstName {
-                    Text("Hey, ")
-                        .foregroundColor(WatchTheme.textSecondary)
-                    + Text(name)
-                        .foregroundColor(WatchTheme.textPrimary)
+        VStack(spacing: 3) {
+            // Top brand row — small wordmark + weekday/date, single line.
+            HStack(spacing: 6) {
+                Image(systemName: "figure.run.circle.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(WatchTheme.primaryButton)
+                Text("MILE A DAY")
+                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .foregroundColor(WatchTheme.textPrimary.opacity(0.85))
+                    .tracking(1.4)
+            }
+
+            // Personal line — uses the real first name only; defaults to a clean
+            // date string when no name is configured (avoids the "Hey, You" look).
+            Group {
+                if let name = realFirstName {
+                    (
+                        Text(greetingPrefix())
+                            .foregroundColor(WatchTheme.textSecondary)
+                        + Text(", \(name)")
+                            .foregroundColor(WatchTheme.textPrimary)
+                    )
                 } else {
-                    Text("Mile A Day")
-                        .foregroundColor(WatchTheme.textPrimary)
+                    Text(Date(), format: .dateTime.weekday(.wide).month(.abbreviated).day())
+                        .foregroundColor(WatchTheme.textSecondary)
                 }
             }
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
+            .font(.system(size: 12, weight: .semibold, design: .rounded))
             .lineLimit(1)
             .minimumScaleFactor(0.7)
+        }
+    }
 
-            Text(Date(), format: .dateTime.weekday(.wide).month().day())
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundColor(WatchTheme.textTertiary)
+    /// Time-of-day greeting prefix so the personal line doesn't always say "Hey".
+    private func greetingPrefix() -> String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 5..<12: return "Good morning"
+        case 12..<17: return "Good afternoon"
+        case 17..<22: return "Good evening"
+        default: return "Hi"
         }
     }
 
