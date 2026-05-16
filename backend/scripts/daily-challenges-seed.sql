@@ -17,7 +17,7 @@ BEGIN;
 UPDATE daily_challenges SET active = FALSE, rotation_index = 100 WHERE challenge_key = 'early_bird';
 UPDATE daily_challenges SET active = FALSE, rotation_index = 101 WHERE challenge_key = 'walk_it_out';
 
--- Active rotation (11 challenges, ~11-day cycle).
+-- Active rotation (7 challenges, ~weekly cycle).
 INSERT INTO daily_challenges (challenge_key, title, description_template, icon, gradient_start, gradient_end, type, active, rotation_index) VALUES
   ('beat_your_pace', 'Beat Your Pace',          'Run faster than {avg_pace} min/mi today',         'bolt.fill',           '#FF9500', '#FF3B30', 'pace',     TRUE, 0),
   ('double_down',    'Double Down',             'Run 2+ miles today instead of just 1',            '2.circle.fill',       '#AF52DE', '#007AFF', 'distance', TRUE, 1),
@@ -25,11 +25,7 @@ INSERT INTO daily_challenges (challenge_key, title, description_template, icon, 
   ('cross_train',    'Cross-Train',             'Mix it up — log both a walk and a run today',     'figure.mixed.cardio', '#34C759', '#5AC8FA', 'activity', TRUE, 3),
   ('speed_round',    'Speed Round',             'Finish your mile in under 12 minutes',            'timer',               '#FF3B30', '#FF2D55', 'pace',     TRUE, 4),
   ('bonus_mile',     'Bonus Mile',              'Run an extra half mile beyond your goal',         'plus.circle.fill',    '#32ADE6', '#007AFF', 'distance', TRUE, 5),
-  ('ten_k_steps',    '10K Steps',               'Hit 10,000 steps alongside your mile',            'shoeprints.fill',     '#00C7BE', '#34C759', 'steps',    TRUE, 6),
-  ('negative_split', 'Negative Split',          'Run your second mile faster than your first',     'arrow.down.right.circle.fill', '#5856D6', '#FF2D55', 'pace', TRUE, 7),
-  ('hat_trick',      'Hat Trick',               'Log 3+ separate workouts today',                  'sparkles',            '#FF9F0A', '#FF3B30', 'activity', TRUE, 8),
-  ('long_haul',      'Long Haul',               'Cover 3+ miles total across all workouts today',  'road.lanes',          '#30B0C7', '#0A84FF', 'distance', TRUE, 9),
-  ('streak_saver',   'Streak Saver',            'Lock in your mile before 6 PM',                   'shield.lefthalf.filled', '#FF453A', '#FF9500', 'time',  TRUE, 10)
+  ('ten_k_steps',    '10K Steps',               'Hit 10,000 steps alongside your mile',            'shoeprints.fill',     '#00C7BE', '#34C759', 'steps',    TRUE, 6)
 ON CONFLICT (challenge_key) DO UPDATE SET
   title                = EXCLUDED.title,
   description_template = EXCLUDED.description_template,

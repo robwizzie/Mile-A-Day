@@ -69,38 +69,6 @@ enum DailyChallengeCatalog {
                 gradient: [.mint, .green],
                 type: .steps
             ),
-            DailyChallenge(
-                key: "negative_split",
-                title: "Negative Split",
-                description: "Run your second mile faster than your first",
-                icon: "arrow.down.right.circle.fill",
-                gradient: [.indigo, .pink],
-                type: .pace
-            ),
-            DailyChallenge(
-                key: "hat_trick",
-                title: "Hat Trick",
-                description: "Log 3+ separate workouts today",
-                icon: "sparkles",
-                gradient: [.orange, .red],
-                type: .activity
-            ),
-            DailyChallenge(
-                key: "long_haul",
-                title: "Long Haul",
-                description: "Cover 3+ miles total across all workouts today",
-                icon: "road.lanes",
-                gradient: [.teal, .blue],
-                type: .distance
-            ),
-            DailyChallenge(
-                key: "streak_saver",
-                title: "Streak Saver",
-                description: "Lock in your mile before 6 PM",
-                icon: "shield.lefthalf.filled",
-                gradient: [.red, .orange],
-                type: .time
-            ),
         ]
     }
 
@@ -142,19 +110,12 @@ enum DailyChallengeCatalog {
             return min(ctx.distance / 2.0, 1.0)
         case "bonus_mile":
             return min(ctx.distance / (ctx.goalMiles + 0.5), 1.0)
-        case "long_haul":
-            return min(ctx.distance / 3.0, 1.0)
         case "ten_k_steps":
             return min(Double(ctx.steps) / 10000.0, 1.0)
         case "early_bird":
             return earlyBirdProgress(ctx: ctx)
         case "early_or_late":
             return earlyOrLateProgress(ctx: ctx)
-        case "streak_saver":
-            return streakSaverProgress(ctx: ctx)
-        case "hat_trick", "negative_split":
-            // No local data path for these (require workout-count / split comparisons).
-            return ctx.distance >= ctx.goalMiles * 0.95 ? 0.5 : 0
         default:
             return 0
         }
@@ -204,15 +165,6 @@ enum DailyChallengeCatalog {
         }
         let hour = Calendar.current.component(.hour, from: last)
         return (hour < 9 || hour >= 20) ? 1.0 : 0.75
-    }
-
-    private static func streakSaverProgress(ctx: Context) -> Double {
-        // Mile must finish before 6 PM local time.
-        guard let last = ctx.lastCompletion, Calendar.current.isDateInToday(last) else {
-            return ctx.distance >= ctx.goalMiles * 0.95 ? 0.75 : min(ctx.distance / max(ctx.goalMiles, 0.01), 0.5)
-        }
-        let hour = Calendar.current.component(.hour, from: last)
-        return hour < 18 ? 1.0 : 0.75
     }
 
     static func formatPace(_ pace: TimeInterval) -> String {

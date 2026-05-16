@@ -285,69 +285,6 @@ async function computeProgress(
       if (dayTotal >= goalMiles * 0.95) return 0.75; // mile done but outside windows
       return Math.min(dayTotal / Math.max(goalMiles, 0.01), 0.5);
     }
-    case "streak_saver": {
-      // Mile finished before 6 PM (18:00) local time.
-      const rows = await db.query<{
-        before_six: boolean;
-        day_total: string | null;
-      }>(
-        `SELECT
-					EXISTS (
-						SELECT 1 FROM workouts
-						WHERE user_id = $1 AND local_date = $2
-						  AND distance >= $3 * 0.95
-						  AND EXTRACT(HOUR FROM (device_end_date + timezone_offset * INTERVAL '1 minute')) < 18
-					) AS before_six,
-					(SELECT COALESCE(SUM(distance),0) FROM workouts WHERE user_id = $1 AND local_date = $2)::text AS day_total`,
-        [userId, localDate, goalMiles],
-      );
-      if (rows[0]?.before_six) return 1.0;
-      const dayTotal = parseFloat(rows[0]?.day_total ?? "0") || 0;
-      if (dayTotal >= goalMiles * 0.95) return 0.75;
-      return Math.min(dayTotal / Math.max(goalMiles, 0.01), 0.5);
-    }
-    case "hat_trick": {
-      // 3+ separate workouts today.
-      const rows = await db.query<{ cnt: string | null }>(
-        `SELECT COUNT(*)::text AS cnt FROM workouts WHERE user_id = $1 AND local_date = $2 AND distance >= 0.25`,
-        [userId, localDate],
-      );
-      const cnt = parseInt(rows[0]?.cnt ?? "0", 10) || 0;
-      return Math.min(cnt / 3.0, 1.0);
-    }
-    case "long_haul": {
-      const d = await dayTotalDistance(userId, localDate);
-      return Math.min(d / 3.0, 1.0);
-    }
-    case "negative_split": {
-      // At least one workout has split #2 pace strictly faster (lower sec/mi) than split #1 pace.
-      const rows = await db.query<{ ok: boolean; day_total: string | null }>(
-        `SELECT
-					EXISTS (
-						SELECT 1 FROM workouts w
-						WHERE w.user_id = $1 AND w.local_date = $2
-						  AND EXISTS (
-							SELECT 1 FROM workout_splits s1
-							JOIN workout_splits s2
-							  ON s1.workout_id = s2.workout_id
-							 AND s2.split_number = s1.split_number + 1
-							WHERE s1.workout_id = w.workout_id
-							  AND s1.split_pace > 0
-							  AND s2.split_pace > 0
-							  AND s1.split_distance >= 0.95
-							  AND s2.split_distance >= 0.95
-							  AND s2.split_pace < s1.split_pace
-						  )
-					) AS ok,
-					(SELECT COALESCE(SUM(distance),0) FROM workouts WHERE user_id = $1 AND local_date = $2)::text AS day_total`,
-        [userId, localDate],
-      );
-      if (rows[0]?.ok) return 1.0;
-      const dayTotal = parseFloat(rows[0]?.day_total ?? "0") || 0;
-      // Partial: hitting at least 2 miles signals you have splits to compare.
-      if (dayTotal >= 2.0) return 0.66;
-      return Math.min(dayTotal / 2.0, 0.5);
-    }
     case "beat_your_pace": {
       const rows = await db.query<{
         prior_min: string | null;
@@ -453,53 +390,6 @@ async function evaluatePredicate(
 					  )
 				) AS ok`,
         [userId, localDate, goalMiles],
-      );
-      return !!rows[0]?.ok;
-    }
-
-    case "streak_saver": {
-      const rows = await db.query<{ ok: boolean }>(
-        `SELECT EXISTS (
-					SELECT 1 FROM workouts
-					WHERE user_id = $1 AND local_date = $2
-					  AND distance >= $3 * 0.95
-					  AND EXTRACT(HOUR FROM (device_end_date + timezone_offset * INTERVAL '1 minute')) < 18
-				) AS ok`,
-        [userId, localDate, goalMiles],
-      );
-      return !!rows[0]?.ok;
-    }
-
-    case "hat_trick": {
-      const rows = await db.query<{ cnt: string | null }>(
-        `SELECT COUNT(*)::text AS cnt FROM workouts WHERE user_id = $1 AND local_date = $2 AND distance >= 0.25`,
-        [userId, localDate],
-      );
-      return (parseInt(rows[0]?.cnt ?? "0", 10) || 0) >= 3;
-    }
-
-    case "long_haul":
-      return (await dayTotalDistance(userId, localDate)) >= 3.0;
-
-    case "negative_split": {
-      const rows = await db.query<{ ok: boolean }>(
-        `SELECT EXISTS (
-					SELECT 1 FROM workouts w
-					WHERE w.user_id = $1 AND w.local_date = $2
-					  AND EXISTS (
-						SELECT 1 FROM workout_splits s1
-						JOIN workout_splits s2
-						  ON s1.workout_id = s2.workout_id
-						 AND s2.split_number = s1.split_number + 1
-						WHERE s1.workout_id = w.workout_id
-						  AND s1.split_pace > 0
-						  AND s2.split_pace > 0
-						  AND s1.split_distance >= 0.95
-						  AND s2.split_distance >= 0.95
-						  AND s2.split_pace < s1.split_pace
-					  )
-				) AS ok`,
-        [userId, localDate],
       );
       return !!rows[0]?.ok;
     }
