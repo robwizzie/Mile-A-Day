@@ -117,7 +117,7 @@ extension HealthKitManager {
         }
 
         let workoutsByDay = Dictionary(grouping: streakWorkouts) { workout in
-            Calendar.current.startOfDay(for: workout.endDate)
+            Calendar.current.startOfDay(for: workout.startDate)
         }
 
         var mostMiles = 0.0
@@ -355,7 +355,7 @@ extension HealthKitManager {
 
         // Filter cached workouts to current streak period
         let streakWorkouts = cachedWorkouts.filter { workout in
-            let workoutDay = calendar.startOfDay(for: workout.endDate)
+            let workoutDay = calendar.startOfDay(for: workout.startDate)
             return workoutDay >= streakStartDate && workoutDay <= today
         }
 

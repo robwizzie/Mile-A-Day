@@ -55,7 +55,7 @@ class WorkoutProcessor {
     /// Returns (correctedDate, timezoneOffsetInHours)
     /// Uses intelligent timezone detection for workouts at unusual hours
     private func determineLocalDateWithOffset(for workout: HKWorkout) -> (Date, Int) {
-        let deviceDate = workout.endDate
+        let deviceDate = workout.startDate
         let deviceStartOfDay = calendar.startOfDay(for: deviceDate)
         let hour = calendar.component(.hour, from: deviceDate)
         

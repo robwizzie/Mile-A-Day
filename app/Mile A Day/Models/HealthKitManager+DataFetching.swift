@@ -465,16 +465,16 @@ extension HealthKitManager {
         // Find workouts that need timezone correction
         for (deviceDate, dayWorkouts) in workoutsByDay {
             for workout in dayWorkouts {
-                let workoutHour = calendar.component(.hour, from: workout.endDate)
+                let workoutHour = calendar.component(.hour, from: workout.startDate)
 
-                // If workout was recorded between 10 PM - 6 AM (device time),
+                // If workout started between 10 PM - 6 AM (device time),
                 // it's likely from a different timezone
                 if workoutHour >= 22 || workoutHour <= 6 {
                     // Try common timezone corrections
                     let possibleOffsets = [-6, -5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6] // Hours
 
                     for offset in possibleOffsets {
-                        if let correctedDate = calendar.date(byAdding: .hour, value: offset, to: workout.endDate) {
+                        if let correctedDate = calendar.date(byAdding: .hour, value: offset, to: workout.startDate) {
                             let correctedDay = calendar.startOfDay(for: correctedDate)
                             let correctedHour = calendar.component(.hour, from: correctedDate)
 
