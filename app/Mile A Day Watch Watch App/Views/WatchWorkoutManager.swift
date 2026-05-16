@@ -2,16 +2,17 @@ import Foundation
 import HealthKit
 import CoreLocation
 
-class WatchWorkoutManager: NSObject, ObservableObject {
-    // Published properties for UI
-    @Published var distance: Double = 0.0 // in miles
+final class WatchWorkoutManager: NSObject, ObservableObject {
+    // Published UI state
+    @Published var distance: Double = 0.0 // miles
     @Published var elapsedTime: TimeInterval = 0
     @Published var currentHeartRate: Double = 0
     @Published var averageHeartRate: Double = 0
     @Published var calories: Double = 0
     @Published var isPaused: Bool = false
+    @Published var sessionState: HKWorkoutSessionState = .notStarted
 
-    // HealthKit properties
+    // HealthKit
     private let healthStore = HKHealthStore()
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
@@ -22,15 +23,12 @@ class WatchWorkoutManager: NSObject, ObservableObject {
     private var pausedTime: TimeInterval = 0
     private var pauseStartDate: Date?
 
-    // Heart rate tracking
+    // Heart rate samples for averaging
     private var heartRateSamples: [Double] = []
 
-    override init() {
-        super.init()
-    }
+    // MARK: - Lifecycle
 
     func startWorkout(activityType: HKWorkoutActivityType, locationType: HKWorkoutSessionLocationType) {
-        // Request HealthKit authorization
         let typesToShare: Set<HKSampleType> = [
             HKObjectType.workoutType(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
@@ -47,10 +45,9 @@ class WatchWorkoutManager: NSObject, ObservableObject {
 
         healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead) { [weak self] success, error in
             guard success else {
-                print("HealthKit authorization failed: \(error?.localizedDescription ?? "Unknown error")")
+                print("HealthKit authorization failed: \(error?.localizedDescription ?? "unknown")")
                 return
             }
-
             DispatchQueue.main.async {
                 self?.setupWorkoutSession(activityType: activityType, locationType: locationType)
             }
@@ -58,53 +55,49 @@ class WatchWorkoutManager: NSObject, ObservableObject {
     }
 
     private func setupWorkoutSession(activityType: HKWorkoutActivityType, locationType: HKWorkoutSessionLocationType) {
-        // Create workout configuration
         let configuration = HKWorkoutConfiguration()
         configuration.activityType = activityType
         configuration.locationType = locationType
 
         do {
-            // Create workout session
             session = try HKWorkoutSession(healthStore: healthStore, configuration: configuration)
             builder = session?.associatedWorkoutBuilder()
 
-            // Set ourselves as delegate
             session?.delegate = self
             builder?.delegate = self
 
-            // Setup data source
             builder?.dataSource = HKLiveWorkoutDataSource(
                 healthStore: healthStore,
                 workoutConfiguration: configuration
             )
 
-            // Start the workout session
-            startDate = Date()
-            session?.startActivity(with: startDate)
-            builder?.beginCollection(withStart: startDate!) { success, error in
+            let start = Date()
+            startDate = start
+            session?.startActivity(with: start)
+            builder?.beginCollection(withStart: start) { _, error in
                 if let error = error {
-                    print("Failed to begin collection: \(error.localizedDescription)")
-                    return
-                }
-
-                if success {
-                    print("Workout collection started successfully")
+                    print("beginCollection failed: \(error.localizedDescription)")
                 }
             }
 
-            // Start timer for elapsed time
             startTimer()
-
         } catch {
             print("Failed to create workout session: \(error.localizedDescription)")
         }
     }
 
     private func startTimer() {
+        timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            guard let self = self, let startDate = self.startDate, !self.isPaused else { return }
+            guard let self = self, let startDate = self.startDate else { return }
+            // While paused, freeze the displayed time at the moment of pause.
+            // While running, subtract all accumulated paused time.
             DispatchQueue.main.async {
-                self.elapsedTime = Date().timeIntervalSince(startDate) - self.pausedTime
+                if self.isPaused, let pauseStart = self.pauseStartDate {
+                    self.elapsedTime = pauseStart.timeIntervalSince(startDate) - self.pausedTime
+                } else {
+                    self.elapsedTime = Date().timeIntervalSince(startDate) - self.pausedTime
+                }
             }
         }
     }
@@ -119,42 +112,44 @@ class WatchWorkoutManager: NSObject, ObservableObject {
     func resumeWorkout() {
         guard isPaused else { return }
         isPaused = false
-
-        // Add the paused duration to total paused time
         if let pauseStart = pauseStartDate {
             pausedTime += Date().timeIntervalSince(pauseStart)
         }
         pauseStartDate = nil
-
         session?.resume()
     }
 
     func endWorkout(completion: @escaping (Bool) -> Void) {
-        // Stop timer
         timer?.invalidate()
         timer = nil
 
-        // End the workout session
-        session?.end()
+        // Compute average HR up front so the UI has it even if HK save fails.
+        if !heartRateSamples.isEmpty {
+            averageHeartRate = heartRateSamples.reduce(0, +) / Double(heartRateSamples.count)
+        }
 
-        // Finish building the workout
-        builder?.endCollection(withEnd: Date()) { [weak self] success, error in
+        guard let session = session, let builder = builder else {
+            completion(false)
+            return
+        }
+
+        session.end()
+
+        builder.endCollection(withEnd: Date()) { [weak self] success, error in
             guard success, error == nil else {
-                print("Failed to end collection: \(error?.localizedDescription ?? "Unknown error")")
-                completion(false)
+                print("endCollection failed: \(error?.localizedDescription ?? "unknown")")
+                DispatchQueue.main.async { completion(false) }
                 return
             }
-
-            self?.builder?.finishWorkout { workout, error in
+            builder.finishWorkout { _, error in
                 DispatchQueue.main.async {
                     if let error = error {
-                        print("Failed to finish workout: \(error.localizedDescription)")
+                        print("finishWorkout failed: \(error.localizedDescription)")
                         completion(false)
                     } else {
-                        print("Workout saved successfully to HealthKit")
-                        // Calculate average heart rate
-                        if let heartRateSamples = self?.heartRateSamples, !heartRateSamples.isEmpty {
-                            self?.averageHeartRate = heartRateSamples.reduce(0, +) / Double(heartRateSamples.count)
+                        // Refresh average HR one more time in case samples arrived late.
+                        if let samples = self?.heartRateSamples, !samples.isEmpty {
+                            self?.averageHeartRate = samples.reduce(0, +) / Double(samples.count)
                         }
                         completion(true)
                     }
@@ -169,21 +164,21 @@ class WatchWorkoutManager: NSObject, ObservableObject {
         DispatchQueue.main.async {
             switch statistics.quantityType {
             case HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning):
-                let distanceUnit = HKUnit.meter()
-                let value = statistics.sumQuantity()?.doubleValue(for: distanceUnit) ?? 0
-                self.distance = value * 0.000621371 // Convert meters to miles
+                let meters = statistics.sumQuantity()?.doubleValue(for: HKUnit.meter()) ?? 0
+                self.distance = meters * 0.000621371
 
             case HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned):
-                let energyUnit = HKUnit.kilocalorie()
-                let value = statistics.sumQuantity()?.doubleValue(for: energyUnit) ?? 0
-                self.calories = value
+                self.calories = statistics.sumQuantity()?.doubleValue(for: HKUnit.kilocalorie()) ?? 0
 
             case HKQuantityType.quantityType(forIdentifier: .heartRate):
-                let heartRateUnit = HKUnit.count().unitDivided(by: HKUnit.minute())
-                let value = statistics.mostRecentQuantity()?.doubleValue(for: heartRateUnit) ?? 0
-                self.currentHeartRate = value
-                if value > 0 {
-                    self.heartRateSamples.append(value)
+                let hrUnit = HKUnit.count().unitDivided(by: HKUnit.minute())
+                let hr = statistics.mostRecentQuantity()?.doubleValue(for: hrUnit) ?? 0
+                self.currentHeartRate = hr
+                if hr > 0 {
+                    self.heartRateSamples.append(hr)
+                }
+                if let avg = statistics.averageQuantity()?.doubleValue(for: hrUnit), avg > 0 {
+                    self.averageHeartRate = avg
                 }
 
             default:
@@ -197,34 +192,18 @@ class WatchWorkoutManager: NSObject, ObservableObject {
 extension WatchWorkoutManager: HKWorkoutSessionDelegate {
     func workoutSession(_ workoutSession: HKWorkoutSession, didChangeTo toState: HKWorkoutSessionState, from fromState: HKWorkoutSessionState, date: Date) {
         DispatchQueue.main.async {
-            switch toState {
-            case .notStarted:
-                print("Workout session not started")
-            case .running:
-                print("Workout session running")
-            case .ended:
-                print("Workout session ended")
-            case .paused:
-                print("Workout session paused")
-            case .prepared:
-                print("Workout session prepared")
-            case .stopped:
-                print("Workout session stopped")
-            @unknown default:
-                print("Workout session in unknown state")
-            }
+            self.sessionState = toState
         }
     }
 
     func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
-        print("Workout session failed with error: \(error.localizedDescription)")
+        print("Workout session failed: \(error.localizedDescription)")
     }
 }
 
 // MARK: - HKLiveWorkoutBuilderDelegate
 extension WatchWorkoutManager: HKLiveWorkoutBuilderDelegate {
     func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder, didCollectDataOf collectedTypes: Set<HKSampleType>) {
-        // Update statistics for collected data types
         for type in collectedTypes {
             guard let quantityType = type as? HKQuantityType else { continue }
             let statistics = workoutBuilder.statistics(for: quantityType)
@@ -232,7 +211,5 @@ extension WatchWorkoutManager: HKLiveWorkoutBuilderDelegate {
         }
     }
 
-    func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {
-        // Handle workout events if needed
-    }
+    func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) { }
 }
