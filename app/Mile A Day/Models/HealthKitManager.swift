@@ -1,6 +1,7 @@
 import Foundation
 import HealthKit
 import WidgetKit
+import WatchConnectivity
 import CoreLocation
 
 #if os(watchOS)
@@ -313,13 +314,29 @@ class HealthKitManager: ObservableObject {
     let healthStore = HKHealthStore()
     
     @Published var isAuthorized = false
-    @Published var todaysDistance: Double = 0.0
+    @Published var todaysDistance: Double = 0.0 {
+        didSet {
+            #if os(iOS)
+            // Sync the latest distance to the paired Apple Watch.
+            MADWatchBridge.shared.pushSnapshotIfReady()
+            #endif
+        }
+    }
     @Published var todaysWorkouts: [HKWorkout] = []  // Only today's workouts (for stats)
     @Published var recentWorkouts: [HKWorkout] = []
     @Published var totalLifetimeMiles: Double = 0.0
     @Published var fastestMilePace: TimeInterval = 0.0
     @Published var mostMilesInOneDay: Double = 0.0
-    @Published var retroactiveStreak: Int = 0
+    @Published var retroactiveStreak: Int = 0 {
+        didSet {
+            #if os(iOS)
+            // The iPhone has the authoritative streak (full HK history + workout
+            // index); the watch only sees what HealthKit has synced locally, so
+            // push every change so the watch can show the same number.
+            MADWatchBridge.shared.pushSnapshotIfReady()
+            #endif
+        }
+    }
     @Published var mostMilesWorkouts: [HKWorkout] = []
     @Published var todaysSteps: Int = 0
     @Published var dailyStepsData: [Date: Int] = [:]
@@ -397,6 +414,14 @@ class HealthKitManager: ObservableObject {
     // When false, uses device timezone (legacy behavior)
     // TEMPORARILY DISABLED due to deadlock issues
     @Published var useLocationBasedTimezone: Bool = false
+
+    #if os(watchOS)
+    /// Timestamp of the most recent iPhone-pushed snapshot. The watch can't see
+    /// the iPhone's full HealthKit history (3rd-party-imported workouts often
+    /// don't sync to the watch's HK store) so a local-only streak calc can
+    /// undercount badly. When this is recent, defer to the iPhone value.
+    var lastIOSSnapshotAt: Date?
+    #endif
     
     // Debug info for timezone calculations
     @Published var timezoneDebugInfo: String = ""
@@ -409,7 +434,7 @@ class HealthKitManager: ObservableObject {
         // Load preferences on initialization
         let prefs = AppPreferences.load()
         self.useLocationBasedTimezone = prefs.useLocationBasedTimezone
-        
+
         // PHASE 1: Try to load workout index first (instant)
         if let cachedIndex = WorkoutIndex.load() {
             self.workoutIndex = cachedIndex
@@ -421,10 +446,15 @@ class HealthKitManager: ObservableObject {
         } else {
             log("[HealthKit] 📋 No workout index found - will build on first data fetch")
         }
-        
+
         // Load cached data on initialization
         loadCachedData()
         #endif
+
+        // Activate the iPhone ⇄ Watch bridge on both platforms. The bridge
+        // shuttles authoritative iOS data (streak, today's distance, goal,
+        // name) to the watch so the two never disagree.
+        MADWatchBridge.shared.activate()
     }
     
     // MARK: - Caching Methods
@@ -902,16 +932,29 @@ class HealthKitManager: ObservableObject {
     /// Processes today's filtered workouts to calculate distance and update UI
     func processTodaysWorkouts(_ todaysWorkouts: [HKWorkout]) {
         var totalMiles: Double = 0.0
-        
+
         for workout in todaysWorkouts {
             if let distance = workout.totalDistance {
                 let miles = distance.doubleValue(for: HKUnit.mile())
                 totalMiles += miles
             }
         }
-        
+
         DispatchQueue.main.async {
+            #if os(watchOS)
+            // The watch's HK store can be missing workouts the iPhone has (3rd-party
+            // imports often sync to phone but not watch). Take the larger of the
+            // two so we never visibly under-count today's miles.
+            if let last = self.lastIOSSnapshotAt,
+               Date().timeIntervalSince(last) < 24 * 60 * 60,
+               self.todaysDistance > totalMiles {
+                // Keep the iOS-pushed value; local query was lower.
+            } else {
+                self.todaysDistance = totalMiles
+            }
+            #else
             self.todaysDistance = totalMiles
+            #endif
             self.todaysWorkouts = todaysWorkouts
             #if !os(watchOS)
             // Get current goal from widget store or default to 1.0
@@ -1286,9 +1329,18 @@ class HealthKitManager: ObservableObject {
     /// Fetches the last year of running/walking workouts and recomputes the streak
     /// in-line using the same threshold as iOS (>= 0.95 mi qualifies a day). Stays
     /// self-contained because the iOS streak-calculation extension isn't compiled
-    /// into the watch target.
+    /// into the watch target. Only used as a fallback when no recent iPhone
+    /// snapshot is available — iPhone's value is authoritative.
     func recalculateWatchStreak() {
         guard isAuthorized else { return }
+
+        // If iPhone pushed us a snapshot recently, trust it. Local HK on the
+        // watch is often missing workouts the iPhone has (imports from Strava /
+        // Garmin / Nike, older history that hasn't synced) so recomputing here
+        // can produce a much smaller number than the truth.
+        if let last = lastIOSSnapshotAt, Date().timeIntervalSince(last) < 24 * 60 * 60 {
+            return
+        }
 
         let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
         let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
@@ -1352,6 +1404,158 @@ class HealthKitManager: ObservableObject {
         }
 
         healthStore.execute(query)
+    }
+    #endif
+}
+
+// MARK: - iPhone ⇄ Watch Bridge
+// One small WCSession owner shared by both platforms. Lives in the same file as
+// HealthKitManager because that file is already compiled into both targets.
+//
+// iOS side: pushes the authoritative HealthKit snapshot (streak + today's
+// distance) plus profile bits (goal, first name) every time they change, using
+// `updateApplicationContext` — the latest dict is held by the system and
+// delivered to the watch on the next connection.
+//
+// Watch side: applies any received context to `HealthKitManager.shared` and
+// `UserManager.shared`. On launch, it also pulls the last cached context out
+// of `WCSession.receivedApplicationContext` so the watch shows the real
+// numbers immediately, before any new push arrives.
+final class MADWatchBridge: NSObject {
+    static let shared = MADWatchBridge()
+
+    private var isActivated = false
+    private var lastPushedHash: Int = 0
+
+    private override init() { super.init() }
+
+    func activate() {
+        guard WCSession.isSupported() else { return }
+        if isActivated { return }
+        isActivated = true
+        WCSession.default.delegate = self
+        WCSession.default.activate()
+    }
+
+    #if os(iOS)
+    /// Push the current snapshot if WCSession is up and the watch app is
+    /// installed. Safe to call from arbitrary update sites — coalesces by
+    /// hashing so identical contexts don't re-transmit.
+    func pushSnapshotIfReady() {
+        guard isActivated else { return }
+        guard WCSession.default.activationState == .activated else { return }
+        guard WCSession.default.isPaired, WCSession.default.isWatchAppInstalled else { return }
+
+        let hk = HealthKitManager.shared
+        let user = UserManager.shared.currentUser
+
+        let payload: [String: Any] = [
+            "streak": hk.retroactiveStreak,
+            "todayMiles": hk.todaysDistance,
+            "goalMiles": user.goalMiles > 0 ? user.goalMiles : 1.0,
+            "firstName": user.firstName ?? "",
+            "name": user.name,
+            "ts": Date().timeIntervalSince1970
+        ]
+
+        // Hash on the value-bearing fields only (not the timestamp) so we don't
+        // re-send identical state.
+        let stableHash = "\(payload["streak"] ?? 0)|\(payload["todayMiles"] ?? 0)|\(payload["goalMiles"] ?? 0)|\(payload["firstName"] ?? "")|\(payload["name"] ?? "")".hashValue
+        if stableHash == lastPushedHash { return }
+        lastPushedHash = stableHash
+
+        do {
+            try WCSession.default.updateApplicationContext(payload)
+        } catch {
+            print("[MADWatchBridge] updateApplicationContext failed: \(error.localizedDescription)")
+        }
+    }
+    #endif
+
+    #if os(watchOS)
+    /// Apply a snapshot from iOS to the local managers.
+    fileprivate func apply(context: [String: Any]) {
+        DispatchQueue.main.async {
+            let hk = HealthKitManager.shared
+            let userManager = UserManager.shared
+
+            // Mark that we just heard from the iPhone so the local fallback
+            // streak calc stays out of the way.
+            hk.lastIOSSnapshotAt = Date()
+
+            if let streak = context["streak"] as? Int {
+                // Always trust iPhone's streak over any local HK calculation.
+                hk.retroactiveStreak = streak
+                hk.cachedRetroactiveStreak = streak
+                hk.saveCachedData()
+                if !hk.hasIndexOrStreakLoaded {
+                    hk.hasIndexOrStreakLoaded = true
+                    hk.checkInitialDataReady()
+                }
+            }
+            if let miles = context["todayMiles"] as? Double, miles >= 0 {
+                // Watch may have its own live workout-in-progress that's farther
+                // along than iPhone's snapshot — keep the larger value so we
+                // never visibly regress mid-workout.
+                if miles > hk.todaysDistance {
+                    hk.todaysDistance = miles
+                }
+            }
+            if let goal = context["goalMiles"] as? Double, goal > 0 {
+                userManager.currentUser.goalMiles = goal
+            }
+            if let first = context["firstName"] as? String, !first.isEmpty {
+                userManager.currentUser.firstName = first
+            }
+            if let nm = context["name"] as? String, !nm.isEmpty {
+                userManager.currentUser.name = nm
+            }
+            userManager.saveUserData()
+        }
+    }
+
+    /// Hydrate from the last-cached iOS snapshot. Call on watch launch so the
+    /// home screen displays the real streak immediately rather than 0.
+    func hydrateFromCachedContext() {
+        let ctx = WCSession.default.receivedApplicationContext
+        if !ctx.isEmpty { apply(context: ctx) }
+    }
+    #endif
+}
+
+extension MADWatchBridge: WCSessionDelegate {
+    func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
+        if let error = error {
+            print("[MADWatchBridge] activation error: \(error.localizedDescription)")
+        }
+        #if os(iOS)
+        // Once activation finishes, send the initial snapshot so the watch is
+        // immediately in sync without waiting for the next data change.
+        DispatchQueue.main.async {
+            self.pushSnapshotIfReady()
+        }
+        #else
+        // On the watch, pick up whatever the iPhone last pushed.
+        let ctx = session.receivedApplicationContext
+        if !ctx.isEmpty {
+            self.apply(context: ctx)
+        }
+        #endif
+    }
+
+    #if os(iOS)
+    func sessionDidBecomeInactive(_ session: WCSession) { }
+
+    func sessionDidDeactivate(_ session: WCSession) {
+        // Required when switching watches; re-activate to keep working with the
+        // newly-paired device.
+        WCSession.default.activate()
+    }
+    #endif
+
+    #if os(watchOS)
+    func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String: Any]) {
+        apply(context: applicationContext)
     }
     #endif
 }
