@@ -141,7 +141,7 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
                 DispatchQueue.main.async { completion(false) }
                 return
             }
-            builder.finishWorkout { _, error in
+            builder.finishWorkout { workout, error in
                 DispatchQueue.main.async {
                     if let error = error {
                         print("finishWorkout failed: \(error.localizedDescription)")
@@ -152,6 +152,12 @@ final class WatchWorkoutManager: NSObject, ObservableObject {
                             self?.averageHeartRate = samples.reduce(0, +) / Double(samples.count)
                         }
                         completion(true)
+                        // Best-effort direct upload from the watch. Detached from
+                        // the UI completion above so the summary screen never
+                        // waits on the network. The iPhone sync is the backstop.
+                        if let workout {
+                            Task { await WatchWorkoutUploader.upload(workout) }
+                        }
                     }
                 }
             }
