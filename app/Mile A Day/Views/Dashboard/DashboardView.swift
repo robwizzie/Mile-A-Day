@@ -301,7 +301,7 @@ struct DashboardView: View {
                 }
 
                 // Admin celebration test menu
-                if userManager.currentUser.role == "admin" {
+                if AppEnvironment.isDevelopment && userManager.currentUser.role == "admin" {
                     Menu {
                         Button {
                             celebrationManager.resetDailyTracking()

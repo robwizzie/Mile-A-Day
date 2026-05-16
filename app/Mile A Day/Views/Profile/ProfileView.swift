@@ -50,8 +50,8 @@ struct ProfileView: View {
                 // Settings & Actions
                 settingsSection
 
-                // Development Section (admin or debug only)
-                if isAdminOrDebug {
+                // Development Section (development environment + admin only)
+                if showsDevelopmentSection {
                     developmentSection
                 }
             }
@@ -540,12 +540,8 @@ struct ProfileView: View {
 
     // MARK: - Development
 
-    private var isAdminOrDebug: Bool {
-        #if DEBUG
-        return true
-        #else
-        return userManager.currentUser.role == "admin"
-        #endif
+    private var showsDevelopmentSection: Bool {
+        AppEnvironment.isDevelopment && userManager.currentUser.role == "admin"
     }
 
     private var developmentSection: some View {
