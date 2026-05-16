@@ -68,17 +68,15 @@ extension CompetitionDetailView {
 
                     // Comp-wide activity calendar — defaults to "viewing all", tap
                     // any leaderboard row to focus on that competitor, "Show all"
-                    // pill on the calendar returns to aggregate. Streaks owns its
-                    // own dedicated calendar (streakCalendarStrip) with explicit
-                    // completed / today / missed states, so we skip this one.
-                    if competition.type != .streaks {
-                        DailyActivityCalendar(
-                            allUsers: rankedUsers,
-                            competition: competition,
-                            accent: gradientColors.first ?? MADTheme.Colors.madRed,
-                            focusedUserId: $expandedLeaderboardUserId
-                        )
-                    }
+                    // pill on the calendar returns to aggregate. For streaks, the
+                    // focused-user view also overlays life-loss / elimination cues
+                    // so it doubles as the streak status calendar.
+                    DailyActivityCalendar(
+                        allUsers: rankedUsers,
+                        competition: competition,
+                        accent: gradientColors.first ?? MADTheme.Colors.madRed,
+                        focusedUserId: $expandedLeaderboardUserId
+                    )
                 }
                 .padding(MADTheme.Spacing.md)
                 .background(
@@ -433,320 +431,6 @@ extension CompetitionDetailView {
                             )
                     )
             )
-        }
-    }
-
-    // MARK: - Streak Month View
-    var streakCalendarStrip: some View {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let acceptedUsers = competition.users.filter { $0.invite_status == .accepted }
-        let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
-        let currentUser = acceptedUsers.first(where: { $0.user_id == currentUserId })
-        let goal = competition.options.goal
-        // Parse start_date as a local calendar date (not UTC) to avoid timezone shift
-        let compStart: Date = {
-            guard let dateStr = competition.start_date else { return today }
-            let parts = dateStr.prefix(10).split(separator: "-")
-            guard parts.count == 3,
-                  let year = Int(parts[0]),
-                  let month = Int(parts[1]),
-                  let day = Int(parts[2]) else { return today }
-            var comps = DateComponents()
-            comps.year = year
-            comps.month = month
-            comps.day = day
-            return calendar.date(from: comps) ?? today
-        }()
-
-        let monthStart: Date = {
-            var comps = calendar.dateComponents([.year, .month], from: streakCalendarMonth)
-            comps.day = 1
-            return calendar.date(from: comps) ?? today
-        }()
-
-        let daysInMonth = calendar.range(of: .day, in: .month, for: monthStart)?.count ?? 30
-        let firstWeekday = calendar.component(.weekday, from: monthStart)
-        let leadingBlanks = (firstWeekday - calendar.firstWeekday + 7) % 7
-
-        let formatter: ISO8601DateFormatter = {
-            let f = ISO8601DateFormatter()
-            f.formatOptions = [.withFullDate]
-            return f
-        }()
-
-        let monthName = monthStart.formatted(.dateTime.month(.wide).year())
-        let weekdaySymbols = calendar.veryShortWeekdaySymbols
-        let reorderedWeekdays: [String] = {
-            let start = calendar.firstWeekday - 1
-            return Array(weekdaySymbols[start...]) + Array(weekdaySymbols[..<start])
-        }()
-
-        // Can navigate back if comp started before this month
-        let compStartMonth: Date = {
-            var comps = calendar.dateComponents([.year, .month], from: compStart)
-            comps.day = 1
-            return calendar.date(from: comps) ?? compStart
-        }()
-        let canGoBack = monthStart > compStartMonth
-
-        // Can navigate forward only if not already showing the current month
-        let todayMonth: Date = {
-            var comps = calendar.dateComponents([.year, .month], from: today)
-            comps.day = 1
-            return calendar.date(from: comps) ?? today
-        }()
-        let canGoForward = monthStart < todayMonth
-
-        return VStack(spacing: MADTheme.Spacing.md) {
-            // Month header with navigation arrows
-            HStack {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        streakCalendarMonth = calendar.date(byAdding: .month, value: -1, to: streakCalendarMonth) ?? streakCalendarMonth
-                        selectedStreakDay = nil
-                    }
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(canGoBack ? .white.opacity(0.6) : .white.opacity(0.15))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!canGoBack)
-
-                Spacer()
-
-                Text(monthName)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
-
-                Spacer()
-
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        streakCalendarMonth = calendar.date(byAdding: .month, value: 1, to: streakCalendarMonth) ?? streakCalendarMonth
-                        selectedStreakDay = nil
-                    }
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(canGoForward ? .white.opacity(0.6) : .white.opacity(0.15))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!canGoForward)
-            }
-
-            // Weekday headers + day grid
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 7), spacing: 2) {
-                ForEach(reorderedWeekdays, id: \.self) { day in
-                    Text(day)
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.3))
-                        .frame(height: 16)
-                }
-
-                ForEach(0..<leadingBlanks, id: \.self) { _ in
-                    Color.clear.frame(height: 32)
-                }
-
-                ForEach(1...daysInMonth, id: \.self) { day in
-                    let date: Date = {
-                        var comps = calendar.dateComponents([.year, .month], from: monthStart)
-                        comps.day = day
-                        return calendar.date(from: comps) ?? today
-                    }()
-                    let isTodayDate = calendar.isDateInToday(date)
-                    let isFuture = date > today
-                    let isBeforeComp = date < compStart
-                    let isInCompRange = !isBeforeComp && !isFuture
-                    let dayKey = formatter.string(from: calendar.startOfDay(for: date))
-                    let distance = currentUser?.intervals?[dayKey] ?? 0
-                    let completed = distance >= goal
-                    let missed = isInCompRange && !isTodayDate && !completed
-                    let isSelected = selectedStreakDay.map { calendar.isDate($0, inSameDayAs: date) } ?? false
-
-                    Button {
-                        if isInCompRange || isTodayDate {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                if isSelected {
-                                    selectedStreakDay = nil
-                                } else {
-                                    selectedStreakDay = date
-                                }
-                            }
-                        }
-                    } label: {
-                        ZStack {
-                            if isBeforeComp || isFuture {
-                                Text("\(day)")
-                                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.1))
-                            } else if completed {
-                                Circle()
-                                    .fill(Color.green.opacity(isSelected ? 0.9 : 0.65))
-                                    .frame(width: 28, height: 28)
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundColor(.white)
-                            } else if isTodayDate {
-                                Circle()
-                                    .fill(Color.orange.opacity(isSelected ? 0.9 : 0.7))
-                                    .frame(width: 28, height: 28)
-                                Text("\(day)")
-                                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-                            } else if missed {
-                                Circle()
-                                    .fill(Color.red.opacity(isSelected ? 0.4 : 0.25))
-                                    .frame(width: 28, height: 28)
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundColor(.red.opacity(0.7))
-                            } else {
-                                Text("\(day)")
-                                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.4))
-                            }
-                        }
-                        .frame(height: 32)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(isSelected ? Color.white.opacity(0.4) : (isTodayDate ? Color.orange.opacity(0.5) : .clear), lineWidth: 1.5)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isBeforeComp || isFuture)
-                }
-            }
-
-            // Day detail panel
-            if let selected = selectedStreakDay {
-                streakDayDetail(date: selected, users: acceptedUsers, goal: goal, formatter: formatter)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            // Legend
-            HStack(spacing: MADTheme.Spacing.lg) {
-                legendItem(color: .green, label: "Completed")
-                legendItem(color: .orange, label: "Today")
-                legendItem(color: .red, label: "Missed")
-            }
-            .padding(.top, MADTheme.Spacing.xs)
-        }
-        .padding(MADTheme.Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
-                )
-        )
-    }
-
-    // MARK: - Day Detail Panel
-    func streakDayDetail(date: Date, users: [CompetitionUser], goal: Double, formatter: ISO8601DateFormatter) -> some View {
-        let calendar = Calendar.current
-        let dayKey = formatter.string(from: calendar.startOfDay(for: date))
-        let isTodayDate = calendar.isDateInToday(date)
-        let dateLabel = isTodayDate ? "Today" : date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
-
-        return VStack(spacing: MADTheme.Spacing.sm) {
-            // Date header
-            HStack {
-                Text(dateLabel)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.8))
-                Spacer()
-                Text("Goal: \(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.35))
-            }
-
-            // Each user's status for this day
-            ForEach(users, id: \.id) { user in
-                let distance = user.intervals?[dayKey] ?? 0
-                let completed = distance >= goal
-
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 26)
-                        .overlay(
-                            Circle().stroke(completed ? Color.green.opacity(0.6) : Color.red.opacity(0.3), lineWidth: 1.5)
-                        )
-
-                    Text(user.displayName)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.8))
-                        .lineLimit(1)
-
-                    Spacer()
-
-                    if completed {
-                        HStack(spacing: 3) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 10))
-                                .foregroundColor(.green)
-                            Text(competition.options.formatQuantityWithUnit(distance))
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                                .foregroundColor(.green)
-                        }
-                    } else if isTodayDate && distance > 0 {
-                        Text("\(competition.options.formatQuantity(distance))/\(competition.options.goalFormatted)")
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                            .foregroundColor(.orange)
-                    } else if isTodayDate {
-                        Text("Not yet")
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                            .foregroundColor(.white.opacity(0.3))
-                    } else {
-                        HStack(spacing: 3) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 10))
-                                .foregroundColor(.red.opacity(0.6))
-                            if distance > 0 {
-                                Text(competition.options.formatQuantityWithUnit(distance))
-                                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                                    .foregroundColor(.red.opacity(0.6))
-                            } else {
-                                Text("Missed")
-                                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                                    .foregroundColor(.red.opacity(0.5))
-                            }
-                        }
-                    }
-                }
-                .padding(.vertical, 3)
-            }
-        }
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(Color.white.opacity(0.04))
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                )
-        )
-    }
-
-    func legendItem(color: Color, icon: String? = nil, label: String) -> some View {
-        HStack(spacing: 4) {
-            if let icon = icon {
-                Image(systemName: icon)
-                    .font(.system(size: 8))
-                    .foregroundColor(color.opacity(0.7))
-            } else {
-                Circle()
-                    .fill(color.opacity(0.65))
-                    .frame(width: 8, height: 8)
-            }
-            Text(label)
-                .font(.system(size: 10, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.4))
         }
     }
 
@@ -1324,6 +1008,101 @@ struct DailyActivityCalendar: View {
         return day >= start && day <= end
     }
 
+    // MARK: - Streak helpers
+    // Backend rule: each missed day decrements `remaining_lives`; once it hits 0
+    // the user is eliminated. The backend doesn't expose elimination dates, so
+    // we reconstruct per-day status by scanning `intervals` from the comp start.
+
+    private var isStreakComp: Bool { competition.type == .streaks }
+
+    /// Total lives at competition start. Zero for non-streaks comps.
+    private var totalLives: Int { isStreakComp ? competition.streakLives : 0 }
+
+    /// Ascending list of dates within [start, today) where the user missed goal.
+    /// Today is excluded — backend doesn't decrement mid-day.
+    private func missedDates(for user: CompetitionUser) -> [Date] {
+        guard isStreakComp, goal > 0 else { return [] }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        var day = cal.startOfDay(for: startDate)
+        if day > today { return [] }
+        var result: [Date] = []
+        while day < today {
+            let k = key(for: day)
+            let d = user.intervals?[k] ?? 0
+            if d < goal { result.append(day) }
+            guard let next = cal.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
+        return result
+    }
+
+    /// Lives the focused user has left now. Trusts `user.remaining_lives` when
+    /// present (backend-authoritative); otherwise computes from misses.
+    private var focusedLivesRemaining: Int {
+        guard let user = focusedUser, isStreakComp else { return 0 }
+        if let r = user.remaining_lives { return max(0, r) }
+        return max(0, totalLives - missedDates(for: user).count)
+    }
+
+    /// True iff the focused user is already out of the competition.
+    private var focusedIsEliminated: Bool {
+        guard isStreakComp, let user = focusedUser else { return false }
+        if let r = user.remaining_lives, r <= 0 { return true }
+        return missedDates(for: user).count >= totalLives && totalLives > 0
+    }
+
+    enum FocusedDayStatus {
+        case completed
+        case today                     // today, no completion yet (no miss either)
+        case lifeLost(livesLeftAfter: Int)
+        case eliminated                // the day this user got eliminated
+        case postElimination
+    }
+
+    // Shared streak palette — referenced by the focus bar, summary, legend, and
+    // calendar cell so visuals stay aligned if colors ever change.
+    static let streakHitColor = Color(red: 0.20, green: 0.78, blue: 0.35)
+    static let streakLifeLostColor = Color(red: 0.95, green: 0.62, blue: 0.18)
+    static let streakEliminatedColor = Color(red: 0.92, green: 0.27, blue: 0.27)
+
+    /// Streak-specific day status for the focused user. Nil when not focused on
+    /// a streaks comp, or when the day falls outside the active window — the
+    /// cell then renders its standard aggregate look.
+    private func streakStatus(for date: Date) -> FocusedDayStatus? {
+        guard isStreakComp, let user = focusedUser else { return nil }
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: date)
+        let start = cal.startOfDay(for: startDate)
+        let today = cal.startOfDay(for: Date())
+        if day < start || day > today { return nil }
+
+        let d = user.intervals?[key(for: day)] ?? 0
+        let hit = goal > 0 && d >= goal
+
+        if cal.isDateInToday(day) {
+            return hit ? .completed : .today
+        }
+        if hit { return .completed }
+
+        // Past miss — figure out which miss-number this day is.
+        let misses = missedDates(for: user)
+        guard let idx = misses.firstIndex(where: { cal.isDate($0, inSameDayAs: day) }) else {
+            return nil
+        }
+        let missNumber = idx + 1
+        if totalLives <= 0 {
+            return missNumber == 1 ? .eliminated : .postElimination
+        }
+        if missNumber < totalLives {
+            return .lifeLost(livesLeftAfter: totalLives - missNumber)
+        }
+        if missNumber == totalLives {
+            return .eliminated
+        }
+        return .postElimination
+    }
+
     private var monthName: String {
         let f = DateFormatter()
         f.dateFormat = "MMMM yyyy"
@@ -1384,15 +1163,29 @@ struct DailyActivityCalendar: View {
                         Circle()
                             .strokeBorder(effectiveAccent.opacity(0.6), lineWidth: 1.5)
                     )
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text("VIEWING")
                         .font(.system(size: 9, weight: .heavy, design: .rounded))
                         .tracking(1.0)
                         .foregroundColor(.white.opacity(0.5))
-                    Text(user.displayName)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(user.displayName)
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        if focusedIsEliminated {
+                            Text("OUT")
+                                .font(.system(size: 9, weight: .heavy, design: .rounded))
+                                .tracking(0.8)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(DailyActivityCalendar.streakEliminatedColor))
+                        }
+                    }
+                    if isStreakComp && totalLives > 0 {
+                        livesRow(remaining: focusedLivesRemaining)
+                    }
                 }
                 Spacer()
                 Button {
@@ -1434,6 +1227,29 @@ struct DailyActivityCalendar: View {
         }
     }
 
+    /// Heart row showing total lives at comp start, filled = remaining. Used in
+    /// the focus bar for streaks comps so the cost of each missed day is always
+    /// visible at the top of the calendar.
+    private func livesRow(remaining: Int) -> some View {
+        let cap = min(totalLives, 6) // Visual cap; "+N" overflow for big counts.
+        return HStack(spacing: 3) {
+            ForEach(0..<cap, id: \.self) { i in
+                Image(systemName: i < remaining ? "heart.fill" : "heart")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(i < remaining ? DailyActivityCalendar.streakEliminatedColor : .white.opacity(0.25))
+            }
+            if totalLives > 6 {
+                Text("+\(totalLives - 6)")
+                    .font(.system(size: 8, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            Text(focusedIsEliminated ? "Out of lives" : "\(remaining) left")
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+                .padding(.leading, 2)
+        }
+    }
+
     private var summaryHeader: some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 1) {
@@ -1454,7 +1270,7 @@ struct DailyActivityCalendar: View {
                 Text("\(aggregateHitDays)")
                     .font(.system(size: 18, weight: .black, design: .rounded))
                     .foregroundColor(.white)
-                Text(isFocused ? (goal > 0 ? "GOALS HIT" : "DAYS ACTIVE") : "ACTIVE DAYS")
+                Text(streakStatsLabel)
                     .font(.system(size: 9, weight: .heavy, design: .rounded))
                     .tracking(1.0)
                     .foregroundColor(.white.opacity(0.5))
@@ -1464,14 +1280,29 @@ struct DailyActivityCalendar: View {
                 .fill(Color.white.opacity(0.1))
                 .frame(width: 1, height: 28)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(formattedTotalDistance)
-                    .font(.system(size: 18, weight: .black, design: .rounded))
-                    .foregroundColor(.white)
-                Text("\(competition.options.unit.shortDisplayName.uppercased()) TOTAL")
-                    .font(.system(size: 9, weight: .heavy, design: .rounded))
-                    .tracking(1.0)
-                    .foregroundColor(.white.opacity(0.5))
+            // Third column: for streaks-focused, surface LIVES LEFT instead of
+            // total distance — it's the metric players actually care about in
+            // a streaks comp ("am I about to get knocked out?").
+            if isStreakComp && isFocused && totalLives > 0 {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("\(focusedLivesRemaining)/\(totalLives)")
+                        .font(.system(size: 18, weight: .black, design: .rounded))
+                        .foregroundColor(focusedIsEliminated ? DailyActivityCalendar.streakEliminatedColor : .white)
+                    Text("LIVES LEFT")
+                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .tracking(1.0)
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(formattedTotalDistance)
+                        .font(.system(size: 18, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("\(competition.options.unit.shortDisplayName.uppercased()) TOTAL")
+                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .tracking(1.0)
+                        .foregroundColor(.white.opacity(0.5))
+                }
             }
 
             Spacer()
@@ -1486,6 +1317,12 @@ struct DailyActivityCalendar: View {
                 }
             }
         }
+    }
+
+    private var streakStatsLabel: String {
+        if isStreakComp && isFocused { return "STREAK DAYS" }
+        if isFocused { return goal > 0 ? "GOALS HIT" : "DAYS ACTIVE" }
+        return "ACTIVE DAYS"
     }
 
     private var formattedTotalDistance: String {
@@ -1567,7 +1404,8 @@ struct DailyActivityCalendar: View {
                             hitRatio: hitRatio(for: date),
                             isInRange: isInRange(date),
                             isSelected: selectedDay.map { Calendar.current.isDate($0, inSameDayAs: date) } ?? false,
-                            accent: effectiveAccent
+                            accent: effectiveAccent,
+                            streakStatus: streakStatus(for: date)
                         )
                     }
                     .buttonStyle(.plain)
@@ -1637,23 +1475,37 @@ struct DailyActivityCalendar: View {
         .padding(.top, 4)
     }
 
+    @ViewBuilder
     private var legendRow: some View {
-        HStack(spacing: 14) {
-            if isFocused {
-                legendItem(state: .hit, label: goal > 0 ? "Goal hit" : "Active")
-                if goal > 0 {
-                    legendItem(state: .partial, label: "Partial")
+        if isStreakComp && isFocused {
+            // Streak-focused legend reads like a key for the life-loss visuals
+            // so users instantly grok what each cell color means.
+            HStack(spacing: 14) {
+                streakLegendItem(color: DailyActivityCalendar.streakHitColor, icon: "checkmark", label: "Hit")
+                if totalLives > 0 {
+                    streakLegendItem(color: DailyActivityCalendar.streakLifeLostColor, icon: "heart.slash.fill", label: "Life lost")
                 }
-                legendItem(state: .off, label: "Off")
-            } else {
-                legendItem(state: .hit, label: "All hit")
-                legendItem(state: .partial, label: "Some")
-                legendItem(state: .off, label: "None")
+                streakLegendItem(color: DailyActivityCalendar.streakEliminatedColor, icon: "xmark", label: "Out")
+                Spacer()
             }
-            Spacer()
-            Text("Counts \(competition.workouts.map { $0.displayName.lowercased() }.joined(separator: " + "))")
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundColor(.white.opacity(0.45))
+        } else {
+            HStack(spacing: 14) {
+                if isFocused {
+                    legendItem(state: .hit, label: goal > 0 ? "Goal hit" : "Active")
+                    if goal > 0 {
+                        legendItem(state: .partial, label: "Partial")
+                    }
+                    legendItem(state: .off, label: "Off")
+                } else {
+                    legendItem(state: .hit, label: "All hit")
+                    legendItem(state: .partial, label: "Some")
+                    legendItem(state: .off, label: "None")
+                }
+                Spacer()
+                Text("Counts \(competition.workouts.map { $0.displayName.lowercased() }.joined(separator: " + "))")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.45))
+            }
         }
     }
 
@@ -1677,6 +1529,22 @@ struct DailyActivityCalendar: View {
                 .foregroundColor(.white.opacity(0.55))
         }
     }
+
+    private func streakLegendItem(color: Color, icon: String, label: String) -> some View {
+        HStack(spacing: 5) {
+            ZStack {
+                Circle()
+                    .fill(color)
+                    .frame(width: 14, height: 14)
+                Image(systemName: icon)
+                    .font(.system(size: 7, weight: .heavy))
+                    .foregroundColor(.white)
+            }
+            Text(label)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.65))
+        }
+    }
 }
 
 private struct DailyCalendarCell: View {
@@ -1686,6 +1554,9 @@ private struct DailyCalendarCell: View {
     let isInRange: Bool
     let isSelected: Bool
     let accent: Color
+    /// When set (streaks comp + focused user), trumps the aggregate hit-ratio
+    /// rendering and shows life-loss / elimination state instead.
+    var streakStatus: DailyActivityCalendar.FocusedDayStatus? = nil
 
     private var hasAnyHits: Bool { hitRatio > 0 }
     private var isAllHit: Bool { hitRatio >= 0.999 }
@@ -1698,6 +1569,14 @@ private struct DailyCalendarCell: View {
     }
 
     var body: some View {
+        if let status = streakStatus {
+            streakBody(status)
+        } else {
+            aggregateBody
+        }
+    }
+
+    private var aggregateBody: some View {
         ZStack {
             // Base
             Circle()
@@ -1741,6 +1620,80 @@ private struct DailyCalendarCell: View {
                     hasAnyHits ? .white.opacity(0.9) :
                     .white.opacity(0.55)
                 )
+        }
+        .frame(height: 36)
+        .aspectRatio(1, contentMode: .fit)
+    }
+
+    // MARK: - Streak rendering
+    // Solid green for completed days, orange-with-broken-heart for life-lost,
+    // red-with-X for the elimination day, dim grey for post-elimination. The
+    // selected ring + today ring still overlay on top so navigation cues stay
+    // consistent with the aggregate cell.
+
+    @ViewBuilder
+    private func streakBody(_ status: DailyActivityCalendar.FocusedDayStatus) -> some View {
+        ZStack {
+            // Base + fill per status
+            switch status {
+            case .completed:
+                Circle().fill(DailyActivityCalendar.streakHitColor)
+            case .today:
+                Circle().fill(Color.white.opacity(0.05))
+            case .lifeLost:
+                Circle().fill(DailyActivityCalendar.streakLifeLostColor.opacity(0.85))
+            case .eliminated:
+                Circle().fill(DailyActivityCalendar.streakEliminatedColor.opacity(0.92))
+            case .postElimination:
+                Circle().fill(Color.white.opacity(0.05))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+            }
+
+            // Today ring (only when not selected) — also doubles as the "in
+            // progress" indicator for `.today` since that case has no solid fill.
+            if isToday && !isSelected {
+                Circle().strokeBorder(Color.white.opacity(0.7), lineWidth: 1.5)
+            }
+
+            // Selected ring trumps everything else.
+            if isSelected {
+                Circle()
+                    .strokeBorder(Color.white, lineWidth: 2)
+                    .shadow(color: DailyActivityCalendar.streakHitColor.opacity(0.5), radius: 4)
+            }
+
+            // Glyph layer
+            switch status {
+            case .completed:
+                Image(systemName: "checkmark")
+                    .font(.system(size: 12, weight: .heavy))
+                    .foregroundColor(.white)
+            case .today:
+                Text("\(dayNumber)")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+            case .lifeLost:
+                // Day number sits center, with a small broken-heart corner badge
+                // to telegraph "you spent a life here". Keep day number visible
+                // so users can still navigate by date.
+                Text("\(dayNumber)")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                Image(systemName: "heart.slash.fill")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(2)
+                    .background(Circle().fill(Color.black.opacity(0.35)))
+                    .offset(x: 11, y: -11)
+            case .eliminated:
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .heavy))
+                    .foregroundColor(.white)
+            case .postElimination:
+                Text("\(dayNumber)")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.28))
+            }
         }
         .frame(height: 36)
         .aspectRatio(1, contentMode: .fit)

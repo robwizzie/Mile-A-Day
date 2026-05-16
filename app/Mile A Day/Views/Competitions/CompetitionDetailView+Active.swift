@@ -20,14 +20,14 @@ extension CompetitionDetailView {
             // 3. Enhanced leaderboard (podium + rows)
             enhancedLeaderboard
 
-            // 4. Mode-specific content
-            if competition.type == .streaks {
-                streakCalendarStrip
-            } else if competition.type != .race {
+            // 4. Mode-specific content. Streaks intentionally has no extra section
+            // — the leaderboard's DailyActivityCalendar already covers per-user
+            // progress + life status, so a second calendar would be redundant.
+            if competition.type == .race {
+                raceProgressView
+            } else if competition.type != .streaks {
                 intervalNavigator
                 intervalContent
-            } else {
-                raceProgressView
             }
         }
         .overlay(alignment: .top) {

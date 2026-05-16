@@ -1,8 +1,22 @@
 import SwiftUI
 
+/// Top-level mode for the Friends tab: either the existing friends/requests
+/// management UI, or the new global/friends leaderboard.
+private enum FriendsTabMode: String, CaseIterable, Identifiable {
+    case friends, leaderboard
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .friends: return "Friends"
+        case .leaderboard: return "Leaderboard"
+        }
+    }
+}
+
 /// Main view for managing friends list
 struct FriendsListView: View {
     @ObservedObject var friendService: FriendService
+    @State private var topMode: FriendsTabMode = .friends
     @State private var selectedTab = 0
     @State private var showingSearch = false
     @State private var selectedUser: BackendUser?
@@ -18,25 +32,13 @@ struct FriendsListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Tab Selector
-            tabSelector
+            // Top-level mode picker
+            modePicker
 
-            // Content - Use conditional rendering for better performance
-            Group {
-                switch selectedTab {
-                case 0:
-                    friendsTab
-                        .id("friends-tab")
-                case 1:
-                    requestsTab
-                        .id("requests-tab")
-                case 2:
-                    sentTab
-                        .id("sent-tab")
-                default:
-                    friendsTab
-                        .id("friends-tab")
-                }
+            if topMode == .leaderboard {
+                LeaderboardSection()
+            } else {
+                friendsModeBody
             }
         }
         .background(MADTheme.Colors.appBackgroundGradient)
@@ -94,6 +96,43 @@ struct FriendsListView: View {
                         .padding(.top, 8)
                 }
             }
+    }
+
+    // MARK: - Mode Picker (Friends vs Leaderboard)
+    private var modePicker: some View {
+        Picker("Mode", selection: $topMode) {
+            ForEach(FriendsTabMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.top, MADTheme.Spacing.sm)
+        .padding(.bottom, MADTheme.Spacing.xs)
+    }
+
+    // MARK: - Friends Mode Body (existing Friends / Requests / Sent)
+    private var friendsModeBody: some View {
+        VStack(spacing: 0) {
+            tabSelector
+
+            Group {
+                switch selectedTab {
+                case 0:
+                    friendsTab
+                        .id("friends-tab")
+                case 1:
+                    requestsTab
+                        .id("requests-tab")
+                case 2:
+                    sentTab
+                        .id("sent-tab")
+                default:
+                    friendsTab
+                        .id("friends-tab")
+                }
+            }
+        }
     }
 
     // MARK: - Tab Selector

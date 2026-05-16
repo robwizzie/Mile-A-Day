@@ -39,10 +39,6 @@ struct CompetitionDetailView: View {
     // Hero count-up animation
     @State var heroAnimated = false
 
-    // Streak calendar
-    @State var streakCalendarMonth: Date = Date()
-    @State var selectedStreakDay: Date? = nil
-
     var body: some View {
         ZStack {
             MADTheme.Colors.appBackgroundGradient
