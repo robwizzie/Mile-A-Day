@@ -718,6 +718,7 @@ export async function fanOutFriendChallengePush(senderId: string, completion: Ch
 			data: {
 				sender_id: senderId,
 				challenge_key: completion.challengeKey,
+				challenge_title: completion.challengeTitle,
 				local_date: completion.localDate
 			}
 		}).catch(err => console.error('[Push] friend_challenge_completed send failed:', err.message));
