@@ -4,7 +4,7 @@ import UserNotifications
 
 struct MainTabView: View {
     @Environment(\.appStateManager) var appStateManager
-    @StateObject private var healthManager = HealthKitManager()
+    @StateObject private var healthManager = HealthKitManager.shared
     @StateObject private var userManager = UserManager.shared
     @StateObject private var notificationService = MADNotificationService.shared
     @StateObject private var competitionService = CompetitionService()
