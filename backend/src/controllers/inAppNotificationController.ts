@@ -5,7 +5,7 @@ const db = PostgresService.getInstance();
 
 interface HypeDerivation {
 	hype_target_user_id: string | null;
-	hype_context_type: 'mile' | 'badge' | 'pr' | null;
+	hype_context_type: 'mile' | 'badge' | 'pr' | 'challenge' | null;
 	hype_context_id: string | null;
 	hype_context_label: string | null;
 }
@@ -17,6 +17,7 @@ interface HypeDerivation {
 function deriveHypeContext(row: {
 	type: string;
 	title: string;
+	body: string | null;
 	data: Record<string, any> | null;
 	created_at: Date | string;
 }): HypeDerivation {
@@ -72,6 +73,21 @@ function deriveHypeContext(row: {
 			hype_context_type: 'pr',
 			hype_context_id: `${prType}:${workoutId}`,
 			hype_context_label: label ? String(label) : 'personal best'
+		};
+	}
+
+	if (row.type === 'friend_challenge_completed') {
+		const targetId = data.sender_id;
+		const localDate = data.local_date;
+		if (!targetId || !localDate) return empty;
+		// challenge_title was added to the push payload; older rows fall back to
+		// the notification body, which is the challenge title verbatim.
+		const label = data.challenge_title || row.body || "today's challenge";
+		return {
+			hype_target_user_id: String(targetId),
+			hype_context_type: 'challenge',
+			hype_context_id: `${targetId}:${localDate}`,
+			hype_context_label: String(label)
 		};
 	}
 
