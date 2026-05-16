@@ -14,7 +14,7 @@ struct HypeStatusResponse: Decodable {
 /// it to produce a contextual hype-back notification ("X hyped you earning 'Y'")
 /// and dedupes by (sender, target, type, id) so the same event can't be re-hyped.
 struct HypeContext {
-    let contextType: String   // "mile" | "badge" | "pr"
+    let contextType: String   // "mile" | "badge" | "pr" | "challenge"
     let contextId: String
     let contextLabel: String
 }
@@ -34,7 +34,7 @@ enum HypeService {
         )
     }
 
-    /// Send a contextual hype tied to a specific event (mile / badge / pr).
+    /// Send a contextual hype tied to a specific event (mile / badge / pr / challenge).
     /// Maps APIError.conflict → silent "already hyped" state (caller should keep
     /// the button hidden). APIError.rateLimited propagates so the caller can
     /// surface "out of hypes for today".

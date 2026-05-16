@@ -156,6 +156,18 @@ struct NotificationInboxView: View {
                 contextLabel: data["pr_label"] ?? "personal best"
             )
 
+        case "friend_challenge_completed":
+            guard let targetId = data["sender_id"] else { return nil }
+            // local_date is in the payload; fall back to the row's creation date.
+            // The fallback uses the UTC created_at and can be off-by-one for
+            // legacy rows completed near local midnight — new pushes carry local_date.
+            let localDate = data["local_date"] ?? String(notification.created_at.prefix(10))
+            return HypeContext(
+                contextType: "challenge",
+                contextId: "\(targetId):\(localDate)",
+                contextLabel: data["challenge_title"] ?? notification.body
+            )
+
         default:
             return nil
         }
@@ -169,7 +181,7 @@ struct NotificationInboxView: View {
             if data["kind"] == "streak_broken" { return nil }
             if notification.title.hasPrefix("Streak broken") { return nil }
             return data["user_id"]
-        case "friend_badge_earned", "friend_personal_best":
+        case "friend_badge_earned", "friend_personal_best", "friend_challenge_completed":
             return data["sender_id"]
         default:
             return nil
