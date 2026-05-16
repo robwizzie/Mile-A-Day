@@ -7,9 +7,7 @@ struct FriendsListView: View {
     @State private var showingSearch = false
     @State private var selectedUser: BackendUser?
     @State private var showingUnfriendAlert = false
-    @State private var showingBlockAlert = false
     @State private var userToUnfriend: BackendUser?
-    @State private var userToBlock: BackendUser?
 
     // Nudge state
     @State private var nudgeStatuses: [String: NudgeStatusResponse] = [:]
@@ -87,16 +85,6 @@ struct FriendsListView: View {
                 }
             } message: {
                 Text("You will no longer be friends with this person.")
-            }
-            .alert("Block \(userToBlock?.displayName ?? "User")?", isPresented: $showingBlockAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Block", role: .destructive) {
-                    if let user = userToBlock {
-                        handleBlock(user)
-                    }
-                }
-            } message: {
-                Text("You will unfriend and block this person. They won't be able to see your profile or send you friend requests.")
             }
             .overlay(alignment: .top) {
                 if let feedback = nudgeFeedback {
@@ -357,12 +345,6 @@ struct FriendsListView: View {
                 Label("Unfriend", systemImage: "person.fill.xmark")
             }
 
-            Button(role: .destructive) {
-                userToBlock = friend
-                showingBlockAlert = true
-            } label: {
-                Label("Block", systemImage: "hand.raised.fill")
-            }
         } label: {
             HStack(spacing: MADTheme.Spacing.xs) {
                 Text("Friends")
@@ -632,15 +614,6 @@ struct FriendsListView: View {
         }
     }
 
-    private func handleBlock(_ user: BackendUser) {
-        Task {
-            do {
-                try await friendService.blockUser(user)
-            } catch {
-                // Handle error
-            }
-        }
-    }
 }
 
 // MARK: - Nudge Feedback Model

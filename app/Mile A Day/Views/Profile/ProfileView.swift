@@ -477,17 +477,6 @@ struct ProfileView: View {
 
                 settingsDivider
 
-                NavigationLink(destination: BlockedUsersView(friendService: FriendService())) {
-                    MADSettingsRow(
-                        icon: "hand.raised.fill",
-                        title: "Blocked Users",
-                        subtitle: "Manage blocked accounts",
-                        iconColor: Color.orange
-                    )
-                }
-
-                settingsDivider
-
                 Button(action: { activeSheet = .privacySettings }) {
                     MADSettingsRow(
                         icon: "lock.shield.fill",
