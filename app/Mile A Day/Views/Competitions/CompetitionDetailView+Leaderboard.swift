@@ -68,13 +68,17 @@ extension CompetitionDetailView {
 
                     // Comp-wide activity calendar — defaults to "viewing all", tap
                     // any leaderboard row to focus on that competitor, "Show all"
-                    // pill on the calendar returns to aggregate.
-                    DailyActivityCalendar(
-                        allUsers: rankedUsers,
-                        competition: competition,
-                        accent: gradientColors.first ?? MADTheme.Colors.madRed,
-                        focusedUserId: $expandedLeaderboardUserId
-                    )
+                    // pill on the calendar returns to aggregate. Streaks owns its
+                    // own dedicated calendar (streakCalendarStrip) with explicit
+                    // completed / today / missed states, so we skip this one.
+                    if competition.type != .streaks {
+                        DailyActivityCalendar(
+                            allUsers: rankedUsers,
+                            competition: competition,
+                            accent: gradientColors.first ?? MADTheme.Colors.madRed,
+                            focusedUserId: $expandedLeaderboardUserId
+                        )
+                    }
                 }
                 .padding(MADTheme.Spacing.md)
                 .background(
