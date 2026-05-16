@@ -295,9 +295,7 @@ final class WorkoutProcessor {
 
 #endif
 class HealthKitManager: ObservableObject {
-    #if os(watchOS)
     static let shared = HealthKitManager()
-    #endif
     
     let healthStore = HKHealthStore()
     
