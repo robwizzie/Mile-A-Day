@@ -11,12 +11,10 @@ struct Mile_A_Day_Watch_Watch_AppApp: App {
             ContentView()
                 .environmentObject(healthManager)
                 .environmentObject(userManager)
+                .preferredColorScheme(.dark)
                 .onAppear {
-                    // Request HealthKit authorization on app launch
                     healthManager.requestAuthorization { authorized in
-                        if authorized {
-                            print("HealthKit authorized on Apple Watch")
-                        } else {
+                        if !authorized {
                             print("HealthKit authorization denied on Apple Watch")
                         }
                     }
