@@ -14,6 +14,7 @@ import {
 	HYPE_DAILY_LIMIT,
 	HypeContext
 } from '../services/hypeService.js';
+import { hasChallengeCompletion } from '../services/dailyChallengeService.js';
 
 const db = PostgresService.getInstance();
 
@@ -78,6 +79,8 @@ function buildHypeBackBody(senderName: string, context: HypeContext | undefined)
 			return `${senderName} hyped you earning '${context.contextLabel}' 🔥`;
 		case 'pr':
 			return `${senderName} hyped your new ${context.contextLabel} 🔥`;
+		case 'challenge':
+			return `${senderName} hyped your '${context.contextLabel}' challenge 🔥`;
 	}
 }
 
@@ -106,9 +109,9 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
 			});
 		}
 		if (allCtx) {
-			if (!['mile', 'badge', 'pr'].includes(rawContextType)) {
+			if (!['mile', 'badge', 'pr', 'challenge'].includes(rawContextType)) {
 				return res.status(400).json({
-					error: "context_type must be one of 'mile' | 'badge' | 'pr'"
+					error: "context_type must be one of 'mile' | 'badge' | 'pr' | 'challenge'"
 				});
 			}
 			context = {
@@ -143,6 +146,15 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
 			const milesOnDate = await getMilesOnLocalDate(targetUserId, dateMatch[1]);
 			if (milesOnDate < 1.0) {
 				return res.status(400).json({ error: "This user didn't complete a mile that day" });
+			}
+		} else if (context.contextType === 'challenge') {
+			const dateMatch = context.contextId.match(/:(\d{4}-\d{2}-\d{2})$/);
+			if (!dateMatch) {
+				return res.status(400).json({ error: 'Invalid challenge context_id; expected "<userId>:YYYY-MM-DD"' });
+			}
+			const completed = await hasChallengeCompletion(targetUserId, dateMatch[1]);
+			if (!completed) {
+				return res.status(400).json({ error: "This user didn't complete a challenge that day" });
 			}
 		}
 

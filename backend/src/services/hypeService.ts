@@ -31,7 +31,7 @@ export async function canHype(senderId: string): Promise<boolean> {
 }
 
 export interface HypeContext {
-	contextType: 'mile' | 'badge' | 'pr';
+	contextType: 'mile' | 'badge' | 'pr' | 'challenge';
 	contextId: string;
 	contextLabel: string;
 }
