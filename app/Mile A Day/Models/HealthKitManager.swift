@@ -388,7 +388,15 @@ class HealthKitManager: ObservableObject {
         return _workoutsByUUID?[uuid]
     }
     #endif
-    
+
+    #if os(watchOS)
+    /// Timestamp of the most recent iPhone-pushed snapshot. The watch's local HK
+    /// store is often missing workouts the iPhone has (3rd-party imports, older
+    /// history), so when a recent snapshot exists we trust iPhone's numbers over
+    /// the local fallback calc.
+    var lastIOSSnapshotAt: Date?
+    #endif
+
     func log(_ message: String) {}
     
     // Current streak caching properties.
