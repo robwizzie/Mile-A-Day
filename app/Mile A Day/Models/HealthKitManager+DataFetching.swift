@@ -467,7 +467,7 @@ extension HealthKitManager {
             for workout in dayWorkouts {
                 let workoutHour = calendar.component(.hour, from: workout.startDate)
 
-                // If workout was recorded between 10 PM - 6 AM (device time),
+                // If workout started between 10 PM - 6 AM (device time),
                 // it's likely from a different timezone
                 if workoutHour >= 22 || workoutHour <= 6 {
                     // Try common timezone corrections
