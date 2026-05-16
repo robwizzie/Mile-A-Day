@@ -2,7 +2,6 @@ import { Response } from 'express';
 import { AuthenticatedRequest } from '../middleware/auth.js';
 import { PostgresService } from '../services/DbService.js';
 import { getFriendship } from '../services/friendshipService.js';
-import { getTodayMiles, getMilesOnLocalDate } from '../services/workoutService.js';
 import { getUser } from '../services/userService.js';
 import { sendPush } from '../services/pushNotificationService.js';
 import { shouldSendNotification } from '../services/notificationSettingsService.js';
@@ -14,7 +13,6 @@ import {
 	HYPE_DAILY_LIMIT,
 	HypeContext
 } from '../services/hypeService.js';
-import { hasChallengeCompletion } from '../services/dailyChallengeService.js';
 
 const db = PostgresService.getInstance();
 
@@ -128,35 +126,10 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
 			});
 		}
 
-		// Validate the target actually completed the event being hyped.
-		// - No context (legacy): require they ran today.
-		// - mile context: contextId is "userId:YYYY-MM-DD" — require ≥1 mile on
-		//   that local date. Lets users hype old mile-completion notifications.
-		// - badge / pr: the event reference + dedupe handles it; no mile gate.
-		if (!context) {
-			const todayMiles = await getTodayMiles(targetUserId);
-			if (todayMiles < 1.0) {
-				return res.status(400).json({ error: "This user hasn't completed their mile today" });
-			}
-		} else if (context.contextType === 'mile') {
-			const dateMatch = context.contextId.match(/:(\d{4}-\d{2}-\d{2})$/);
-			if (!dateMatch) {
-				return res.status(400).json({ error: 'Invalid mile context_id; expected "<userId>:YYYY-MM-DD"' });
-			}
-			const milesOnDate = await getMilesOnLocalDate(targetUserId, dateMatch[1]);
-			if (milesOnDate < 1.0) {
-				return res.status(400).json({ error: "This user didn't complete a mile that day" });
-			}
-		} else if (context.contextType === 'challenge') {
-			const dateMatch = context.contextId.match(/:(\d{4}-\d{2}-\d{2})$/);
-			if (!dateMatch) {
-				return res.status(400).json({ error: 'Invalid challenge context_id; expected "<userId>:YYYY-MM-DD"' });
-			}
-			const completed = await hasChallengeCompletion(targetUserId, dateMatch[1]);
-			if (!completed) {
-				return res.status(400).json({ error: "This user didn't complete a challenge that day" });
-			}
-		}
+		// No event-occurred validation: the recipient only sees a hype affordance
+		// when a real notification exists, so the notification itself is the proof.
+		// Abuse is bounded by the friend/co-participant gate, per-context dedupe,
+		// and the daily hype limit below.
 
 		// Context-aware dedupe pre-check (legacy no-context hypes skip this).
 		if (context) {
