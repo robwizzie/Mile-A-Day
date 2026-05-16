@@ -20,6 +20,8 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
     private(set) var todayProgress: Double = 0
     private(set) var todayCompleted: Bool = false
     private(set) var todayLocalDate: String?
+    private(set) var tomorrowChallenge: DailyChallenge?
+    private(set) var tomorrowLocalDate: String?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -83,11 +85,14 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
                 responseType: TodayResponseDTO.self
             )
             let challenge = response.challenge.toDailyChallenge()
+            let tomorrow = response.tomorrowChallenge?.toDailyChallenge()
             await MainActor.run {
                 self.todayChallenge = challenge
                 self.todayProgress = response.progress
                 self.todayCompleted = response.completed
                 self.todayLocalDate = response.localDate
+                self.tomorrowChallenge = tomorrow
+                self.tomorrowLocalDate = response.tomorrowLocalDate
                 self.saveTodaySnapshot(response: response)
                 NotificationCenter.default.post(name: ChallengeService.changedNotification, object: nil)
             }
@@ -199,6 +204,9 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         let progress: Double
         let completed: Bool
         let completedAt: Date?
+        // Older server builds may not return tomorrow yet; keep optional for backward compat.
+        let tomorrowChallenge: ChallengeDTO?
+        let tomorrowLocalDate: String?
     }
 
     struct CompletionItemDTO: Codable {

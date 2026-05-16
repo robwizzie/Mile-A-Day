@@ -6,7 +6,9 @@ import SwiftUI
 /// Used by both `DailyChallengeCard` (on the dashboard) and `DailyChallengesView`
 /// (detail screen) so they always agree on "today's challenge".
 enum DailyChallengeCatalog {
-    /// Returns the pool of 7 challenges, pace strings parameterized by the user's fastest pace.
+    /// Local mirror of the backend `daily_challenges` catalog. The backend is the source of truth
+    /// (returns per-user description + dynamic `cross_train` variant); this pool is the offline
+    /// fallback when `RemoteChallengeService` can't reach the server.
     static func pool(avgPace: Double) -> [DailyChallenge] {
         [
             DailyChallenge(
@@ -28,19 +30,19 @@ enum DailyChallengeCatalog {
                 type: .distance
             ),
             DailyChallenge(
-                key: "early_bird",
-                title: "Early Bird",
-                description: "Complete your mile before noon",
-                icon: "sunrise.fill",
-                gradient: [.yellow, .orange],
+                key: "early_or_late",
+                title: "Early Bird or Night Owl",
+                description: "Finish a mile before 9 AM or after 8 PM",
+                icon: "moon.stars.fill",
+                gradient: [.yellow, .indigo],
                 type: .time
             ),
             DailyChallenge(
-                key: "walk_it_out",
-                title: "Walk It Out",
-                description: "Walk your mile today — slow and steady",
-                icon: "figure.walk",
-                gradient: [.green, .teal],
+                key: "cross_train",
+                title: "Mix It Up",
+                description: "Log both a walk and a run today (at least 0.5 mi each)",
+                icon: "figure.mixed.cardio",
+                gradient: [.green, .cyan],
                 type: .activity
             ),
             DailyChallenge(
@@ -66,6 +68,38 @@ enum DailyChallengeCatalog {
                 icon: "shoeprints.fill",
                 gradient: [.mint, .green],
                 type: .steps
+            ),
+            DailyChallenge(
+                key: "negative_split",
+                title: "Negative Split",
+                description: "Run your second mile faster than your first",
+                icon: "arrow.down.right.circle.fill",
+                gradient: [.indigo, .pink],
+                type: .pace
+            ),
+            DailyChallenge(
+                key: "hat_trick",
+                title: "Hat Trick",
+                description: "Log 3+ separate workouts today",
+                icon: "sparkles",
+                gradient: [.orange, .red],
+                type: .activity
+            ),
+            DailyChallenge(
+                key: "long_haul",
+                title: "Long Haul",
+                description: "Cover 3+ miles total across all workouts today",
+                icon: "road.lanes",
+                gradient: [.teal, .blue],
+                type: .distance
+            ),
+            DailyChallenge(
+                key: "streak_saver",
+                title: "Streak Saver",
+                description: "Lock in your mile before 6 PM",
+                icon: "shield.lefthalf.filled",
+                gradient: [.red, .orange],
+                type: .time
             ),
         ]
     }
@@ -98,14 +132,29 @@ enum DailyChallengeCatalog {
             return speedRoundProgress(ctx: ctx)
         case "walk_it_out":
             return walkItOutProgress(ctx: ctx)
+        case "cross_train":
+            // Offline fallback only — server returns the authoritative variant + progress.
+            // Locally we just show "log a walk and a run" progress as a sensible default.
+            let walkP = min(ctx.todaysWalkingDistance / 0.5, 1.0)
+            let runP = min(max(ctx.distance - ctx.todaysWalkingDistance, 0) / 0.5, 1.0)
+            return min((walkP + runP) / 2.0, 1.0)
         case "double_down":
             return min(ctx.distance / 2.0, 1.0)
         case "bonus_mile":
             return min(ctx.distance / (ctx.goalMiles + 0.5), 1.0)
+        case "long_haul":
+            return min(ctx.distance / 3.0, 1.0)
         case "ten_k_steps":
             return min(Double(ctx.steps) / 10000.0, 1.0)
         case "early_bird":
             return earlyBirdProgress(ctx: ctx)
+        case "early_or_late":
+            return earlyOrLateProgress(ctx: ctx)
+        case "streak_saver":
+            return streakSaverProgress(ctx: ctx)
+        case "hat_trick", "negative_split":
+            // No local data path for these (require workout-count / split comparisons).
+            return ctx.distance >= ctx.goalMiles * 0.95 ? 0.5 : 0
         default:
             return 0
         }
@@ -146,6 +195,24 @@ enum DailyChallengeCatalog {
         }
         let hour = Calendar.current.component(.hour, from: last)
         return hour < 12 ? 1.0 : 0.75 // goal finished but too late — won't complete
+    }
+
+    private static func earlyOrLateProgress(ctx: Context) -> Double {
+        // Mile must finish before 9 AM OR at/after 8 PM local time.
+        guard let last = ctx.lastCompletion, Calendar.current.isDateInToday(last) else {
+            return ctx.distance >= ctx.goalMiles * 0.95 ? 0.75 : min(ctx.distance / max(ctx.goalMiles, 0.01), 0.5)
+        }
+        let hour = Calendar.current.component(.hour, from: last)
+        return (hour < 9 || hour >= 20) ? 1.0 : 0.75
+    }
+
+    private static func streakSaverProgress(ctx: Context) -> Double {
+        // Mile must finish before 6 PM local time.
+        guard let last = ctx.lastCompletion, Calendar.current.isDateInToday(last) else {
+            return ctx.distance >= ctx.goalMiles * 0.95 ? 0.75 : min(ctx.distance / max(ctx.goalMiles, 0.01), 0.5)
+        }
+        let hour = Calendar.current.component(.hour, from: last)
+        return hour < 18 ? 1.0 : 0.75
     }
 
     static func formatPace(_ pace: TimeInterval) -> String {

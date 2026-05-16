@@ -682,12 +682,19 @@ struct DailyChallengeCard: View {
     @ObservedObject var userManager: UserManager
     @Environment(\.colorScheme) var colorScheme
     @State private var todaysChallenge: DailyChallenge?
+    @State private var tomorrowsChallenge: DailyChallenge?
     @State private var challengeProgressValue: Double = 0
     @State private var isCompleted: Bool = false
     @State private var challengesCompletedCount: Int = ChallengeService.shared.allCompletions().count
+    @State private var challengeStreak: Int = ChallengeService.shared.currentChallengeStreak()
+    @State private var iconPulse: Bool = false
 
-    private var challengeProgress: Double? {
-        todaysChallenge == nil ? nil : challengeProgressValue
+    private var primaryColor: Color {
+        todaysChallenge?.gradient.first ?? MADTheme.Colors.madRed
+    }
+
+    private var accentColor: Color {
+        isCompleted ? .green : primaryColor
     }
 
     var body: some View {
@@ -695,7 +702,7 @@ struct DailyChallengeCard: View {
             if let challenge = todaysChallenge {
                 challengeCard(challenge)
             } else {
-                EmptyView()
+                placeholderCard
             }
         }
         .task {
@@ -706,108 +713,274 @@ struct DailyChallengeCard: View {
         .onReceive(NotificationCenter.default.publisher(for: ChallengeService.changedNotification)) { _ in
             refreshFromService()
         }
+        .onAppear {
+            // Subtle pulse on the icon when not completed — draws the eye without being annoying.
+            iconPulse = true
+        }
+    }
+
+    // MARK: Loading / empty state — never disappear from the dashboard.
+
+    @ViewBuilder
+    private var placeholderCard: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color.white.opacity(0.08))
+                    .frame(width: 56, height: 56)
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundColor(MADTheme.Colors.madRed.opacity(0.7))
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("DAILY CHALLENGE")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .tracking(1.0)
+                    .foregroundColor(MADTheme.Colors.madRed)
+                Text("Loading today's challenge…")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+                Text("Tap to see what's in store")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.secondary)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.secondary)
+        }
+        .padding(16)
+        .background(cardBackground)
+        .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 3)
     }
 
     @ViewBuilder
     private func challengeCard(_ challenge: DailyChallenge) -> some View {
-        HStack(spacing: 14) {
-            // Challenge icon
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: isCompleted ? [.green, .green.opacity(0.8)] : challenge.gradient,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 40, height: 40)
+        VStack(alignment: .leading, spacing: 12) {
+            // Top row: icon + title + reward chip
+            HStack(spacing: 14) {
+                challengeIcon(challenge)
 
-                Image(systemName: isCompleted ? "checkmark" : challenge.icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.white)
-            }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack {
-                        Text("Daily Challenge")
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text("DAILY CHALLENGE")
                             .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .foregroundColor(isCompleted ? .green : (challenge.gradient.first ?? .orange))
-                            .textCase(.uppercase)
-                            .tracking(0.8)
+                            .tracking(1.0)
+                            .foregroundColor(accentColor)
 
-                        Spacer()
+                        if challengeStreak >= 2 {
+                            HStack(spacing: 2) {
+                                Image(systemName: "flame.fill")
+                                    .font(.system(size: 8, weight: .bold))
+                                Text("\(challengeStreak)")
+                                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                            }
+                            .foregroundColor(.orange)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule().fill(Color.orange.opacity(0.18))
+                            )
+                        }
+
+                        Spacer(minLength: 0)
 
                         if isCompleted {
                             HStack(spacing: 3) {
-                                Image(systemName: "star.fill")
-                                    .font(.system(size: 9))
-                                    .foregroundColor(.yellow)
+                                Image(systemName: "checkmark.seal.fill")
+                                    .font(.system(size: 10))
                                 Text("\(challengesCompletedCount)")
-                                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                                    .foregroundColor(.yellow)
+                                    .font(.system(size: 11, weight: .heavy, design: .rounded))
                             }
+                            .foregroundColor(.green)
+                        } else {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.secondary)
                         }
                     }
 
                     Text(isCompleted ? "\(challenge.title) — Complete!" : challenge.title)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .font(.system(size: 18, weight: .heavy, design: .rounded))
                         .foregroundColor(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
 
                     Text(challenge.description)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundColor(.secondary)
                         .lineLimit(2)
-
-                    if let progress = challengeProgress {
-                        // Progress bar
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color.white.opacity(0.1))
-                                    .frame(height: 4)
-
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(
-                                        LinearGradient(
-                                            colors: isCompleted ? [.green, .green] : challenge.gradient,
-                                            startPoint: .leading,
-                                            endPoint: .trailing
-                                        )
-                                    )
-                                    .frame(width: progress * geo.size.width, height: 4)
-                                    .animation(.easeOut(duration: 0.5), value: progress)
-                            }
-                        }
-                        .frame(height: 4)
-                        .padding(.top, 4)
-                    }
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(14)
-            .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(.ultraThinMaterial)
 
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill((isCompleted ? Color.green : (challenge.gradient.first ?? .orange)).opacity(0.05))
+            // Progress bar with inline percentage
+            progressRow(challenge)
 
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(
+            // Footer: tomorrow preview (incomplete) OR celebration (complete)
+            footerRow(challenge)
+        }
+        .padding(16)
+        .background(cardBackground)
+        .shadow(color: accentColor.opacity(0.18), radius: 10, x: 0, y: 4)
+    }
+
+    @ViewBuilder
+    private func challengeIcon(_ challenge: DailyChallenge) -> some View {
+        ZStack {
+            // Outer halo
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: isCompleted ? [.green.opacity(0.35), .green.opacity(0.0)] : [primaryColor.opacity(0.35), primaryColor.opacity(0.0)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 68, height: 68)
+                .scaleEffect(iconPulse && !isCompleted ? 1.05 : 1.0)
+                .animation(
+                    isCompleted ? .default :
+                        .easeInOut(duration: 1.8).repeatForever(autoreverses: true),
+                    value: iconPulse
+                )
+
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: isCompleted ? [.green, Color(red: 0.18, green: 0.78, blue: 0.42)] : challenge.gradient,
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 54, height: 54)
+                .overlay(
+                    Circle().stroke(Color.white.opacity(0.25), lineWidth: 1)
+                )
+
+            Image(systemName: isCompleted ? "checkmark" : challenge.icon)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundColor(.white)
+        }
+    }
+
+    @ViewBuilder
+    private func progressRow(_ challenge: DailyChallenge) -> some View {
+        let progress = challengeProgressValue
+        VStack(alignment: .leading, spacing: 4) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(0.10))
+                        .frame(height: 8)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(
                             LinearGradient(
-                                colors: [
-                                    (isCompleted ? Color.green : (challenge.gradient.first ?? .orange)).opacity(0.2),
-                                    Color.clear
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
+                                colors: isCompleted ? [.green, Color(red: 0.18, green: 0.78, blue: 0.42)] : challenge.gradient,
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
                         )
+                        .frame(width: max(8, progress * geo.size.width), height: 8)
+                        .animation(.spring(response: 0.7, dampingFraction: 0.85), value: progress)
                 }
-            )
-            .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+            }
+            .frame(height: 8)
+            HStack {
+                Text(isCompleted ? "Locked in" : progressLabel(progress))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(accentColor)
+                Spacer()
+                Text("\(Int(round(min(progress, 1.0) * 100)))%")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .foregroundColor(.primary.opacity(0.7))
+                    .contentTransition(.numericText())
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func footerRow(_ challenge: DailyChallenge) -> some View {
+        if isCompleted {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.yellow)
+                Text("Nice work — \(challengesCompletedCount) total completion\(challengesCompletedCount == 1 ? "" : "s")")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.primary.opacity(0.8))
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.secondary)
+            }
+            .padding(.top, 2)
+        } else if let tomorrow = tomorrowsChallenge {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.secondary)
+                Text("Tomorrow:")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(.secondary)
+                HStack(spacing: 5) {
+                    Image(systemName: tomorrow.icon)
+                        .font(.system(size: 10, weight: .bold))
+                    Text(tomorrow.title)
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .lineLimit(1)
+                }
+                .foregroundColor(tomorrow.gradient.first ?? .primary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule().fill((tomorrow.gradient.first ?? .gray).opacity(0.12))
+                )
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private var cardBackground: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18)
+                .fill(.ultraThinMaterial)
+
+            RoundedRectangle(cornerRadius: 18)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            accentColor.opacity(0.16),
+                            accentColor.opacity(0.04),
+                            Color.clear
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(
+                    LinearGradient(
+                        colors: [
+                            accentColor.opacity(0.45),
+                            accentColor.opacity(0.10),
+                            Color.white.opacity(0.05)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        }
+    }
+
+    private func progressLabel(_ value: Double) -> String {
+        if value <= 0 { return "Let's go — start your mile" }
+        if value < 0.5 { return "Off the line — keep building" }
+        if value < 0.85 { return "Closing in" }
+        return "So close — finish strong"
     }
 
     /// Read the server-backed state from `ChallengeService.shared` (a `RemoteChallengeService`).
@@ -815,10 +988,12 @@ struct DailyChallengeCard: View {
     private func refreshFromService() {
         if let remote = ChallengeService.shared as? RemoteChallengeService {
             todaysChallenge = remote.todayChallenge
+            tomorrowsChallenge = remote.tomorrowChallenge
             challengeProgressValue = remote.todayProgress
             isCompleted = remote.todayCompleted
         }
         challengesCompletedCount = ChallengeService.shared.allCompletions().count
+        challengeStreak = ChallengeService.shared.currentChallengeStreak()
     }
 }
 
