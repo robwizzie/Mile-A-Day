@@ -722,9 +722,9 @@ struct DashboardView: View {
         VStack(spacing: 16) {
             inProgressBannerSection
             competitionInvitesSection
-            dailyChallengeSection
             instructionsSection
             todayProgressSection
+            dailyChallengeSection
             friendActivitySection
             activeCompetitionSection
             stepsAndBadgesSection

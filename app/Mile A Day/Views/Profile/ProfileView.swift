@@ -439,17 +439,6 @@ struct ProfileView: View {
 
                 settingsDivider
 
-                NavigationLink(destination: AppSettingsView(healthManager: healthManager)) {
-                    MADSettingsRow(
-                        icon: "gear.circle.fill",
-                        title: "App Settings",
-                        subtitle: "Timezone and tracking preferences",
-                        iconColor: Color.gray
-                    )
-                }
-
-                settingsDivider
-
                 Button {
                     if let url = URL(string: "x-apple-health://") {
                         UIApplication.shared.open(url)

@@ -102,6 +102,9 @@ class UserManager: ObservableObject {
         // Push streak to widget store
         #if !os(watchOS)
         WidgetDataStore.save(streak: currentUser.streak)
+        // Mirror the latest profile/goal to the watch so its home screen never
+        // disagrees with the iPhone (streak, goal, first name).
+        MADWatchBridge.shared.pushSnapshotIfReady()
         #endif
     }
     
