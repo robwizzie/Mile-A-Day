@@ -293,18 +293,6 @@ final class WorkoutProcessor {
     }
 }
 
-struct AppPreferences: Codable {
-    var useLocationBasedTimezone: Bool = false
-    var showTimezoneDebugInfo: Bool = false
-    
-    static let `default` = AppPreferences()
-    
-    static func load() -> AppPreferences {
-        .default
-    }
-    
-    func save() {}
-}
 #endif
 class HealthKitManager: ObservableObject {
     #if os(watchOS)
@@ -409,32 +397,11 @@ class HealthKitManager: ObservableObject {
     @Published var cachedCurrentStreakStats: (totalMiles: Double, mostMiles: Double, fastestPace: TimeInterval, streakDays: Int) = (0.0, 0.0, 0.0, 0)
     var lastCurrentStreakStatsUpdate: Date?
     
-    // Feature flag for location-based timezone calculation
-    // When true, uses workout location to determine timezone for streak calculation
-    // When false, uses device timezone (legacy behavior)
-    // TEMPORARILY DISABLED due to deadlock issues
-    @Published var useLocationBasedTimezone: Bool = false
-
-    #if os(watchOS)
-    /// Timestamp of the most recent iPhone-pushed snapshot. The watch can't see
-    /// the iPhone's full HealthKit history (3rd-party-imported workouts often
-    /// don't sync to the watch's HK store) so a local-only streak calc can
-    /// undercount badly. When this is recent, defer to the iPhone value.
-    var lastIOSSnapshotAt: Date?
-    #endif
-    
-    // Debug info for timezone calculations
-    @Published var timezoneDebugInfo: String = ""
-    
     init() {
         #if os(watchOS)
         // For watchOS, use simplified initialization
         loadCachedData()
         #else
-        // Load preferences on initialization
-        let prefs = AppPreferences.load()
-        self.useLocationBasedTimezone = prefs.useLocationBasedTimezone
-
         // PHASE 1: Try to load workout index first (instant)
         if let cachedIndex = WorkoutIndex.load() {
             self.workoutIndex = cachedIndex
@@ -721,17 +688,8 @@ class HealthKitManager: ObservableObject {
                 return
             }
             
-            // Filter workouts based on timezone setting
-            if self.useLocationBasedTimezone {
-                // Filter workouts to find those that occurred "today" in their local timezone
-                self.filterWorkoutsForToday(workouts: workouts) { todaysWorkouts in
-                    self.processTodaysWorkouts(todaysWorkouts)
-                }
-            } else {
-                // Legacy behavior: filter by device timezone
-                let todaysWorkouts = self.filterWorkoutsByDeviceToday(workouts: workouts)
-                self.processTodaysWorkouts(todaysWorkouts)
-            }
+            let todaysWorkouts = self.filterWorkoutsByDeviceToday(workouts: workouts)
+            self.processTodaysWorkouts(todaysWorkouts)
         }
         
         healthStore.execute(query)
@@ -1018,8 +976,6 @@ class HealthKitManager: ObservableObject {
         
         // Use notify instead of wait to avoid blocking
         dispatchGroup.notify(queue: .main) {
-            let debugInfo = "Grouped \(workouts.count) workouts into \(workoutsByDay.count) distinct days using location-aware timezones"
-            self.timezoneDebugInfo = debugInfo
             completion(workoutsByDay)
         }
     }
@@ -1252,24 +1208,8 @@ class HealthKitManager: ObservableObject {
     // fetchAllWorkoutData moved to HealthKitManager+DataFetching.swift
     
     // performInitialWorkoutFetch, fetchWorkoutsSmartly, updateCachedWorkoutData,
-    // recalculateStatsWithAllWorkouts, recalculateStreakWithCurrentSettings,
-    // debugWorkoutTimezones moved to HealthKitManager+DataFetching.swift
-    
-    /// Analyzes a single workout's timezone information
-    func analyzeWorkoutTimezone(_ workout: HKWorkout) {
-        // Try to determine workout's local timezone
-        getLocalCalendar(for: workout) { calendar in
-            // Show what day it falls on in each timezone
-            let deviceDay = Calendar.current.startOfDay(for: workout.endDate)
-            let localDay = calendar.startOfDay(for: workout.endDate)
-            
-            // Check if this affects streak calculation
-            if deviceDay != localDay {
-                // Timezone mismatch detected
-            }
-        }
-    }
-    
+    // recalculateStatsWithAllWorkouts moved to HealthKitManager+DataFetching.swift
+
     // Format pace in minutes:seconds per mile
     func formatPace(minutesPerMile: TimeInterval) -> String {
         guard minutesPerMile > 0 else { return "N/A" }

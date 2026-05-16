@@ -245,37 +245,6 @@ extension HealthKitManager {
         }
     }
 
-    /// Recalculates streak using current timezone settings
-    /// Call this after changing useLocationBasedTimezone to refresh calculations
-    func recalculateStreakWithCurrentSettings() {
-        timezoneDebugInfo = "Recalculating streak..."
-        calculatePersonalRecords()
-    }
-
-    /// Debug method to analyze specific workout timezone handling
-    func debugWorkoutTimezones() {
-        // Look for ANY recent workouts (last 30 days) to debug
-        let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: Date()) ?? Date()
-        let now = Date()
-
-        getWorkoutsForDateRange(start: thirtyDaysAgo, end: now) { workouts in
-            if workouts.isEmpty {
-                // If no recent workouts, check all workouts
-                self.getAllWorkouts { allWorkouts in
-                    // Just analyze the 5 most recent ones
-                    let recentFive = Array(allWorkouts.prefix(5))
-                    for workout in recentFive {
-                        self.analyzeWorkoutTimezone(workout)
-                    }
-                }
-            } else {
-                for workout in workouts {
-                    self.analyzeWorkoutTimezone(workout)
-                }
-            }
-        }
-    }
-
     // MARK: - Step Counter Functions
 
     // Fetch today's step count
