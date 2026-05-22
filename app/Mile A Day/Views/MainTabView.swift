@@ -190,6 +190,13 @@ struct MainTabView: View {
 
     private func handlePendingNotification() {
         guard let type = notificationService.pendingNotificationType else { return }
+        // Mirror the live `.didTapPushNotification` handler so a cold-launch tap
+        // routes to the same destination a warm tap would.
+        //
+        // NOTE: do NOT clear pendingNotificationType for friend_request /
+        // competition_invite here — FriendsListView / CompetitionsListView read
+        // the flag in their own `.task` to select the inner Requests/Invites
+        // sub-tab, then clear it. Clearing it here would break that hand-off.
         Task {
             switch type {
             case "friend_request", "friend_request_accepted":
@@ -199,9 +206,16 @@ struct MainTabView: View {
                  "competition_finished", "competition_updates", "competition_nudge":
                 await competitionService.refreshAllData()
                 selectedTab = 1
+            case "competition_flex", "competition_milestone", "friend_nudge",
+                 "friend_activity", "streak_broken", "personal_best",
+                 "lead_change", "clash_tie":
+                selectedTab = 0
+                showNotificationInbox = true
+                notificationService.pendingNotificationType = nil
             default:
                 notificationService.pendingNotificationType = nil
             }
+            await refreshUnreadCount()
         }
     }
 

@@ -360,6 +360,7 @@ extension MADNotificationService {
 
 // MARK: - UNUserNotificationCenterDelegate
 extension MADNotificationService: UNUserNotificationCenterDelegate {
+    @MainActor
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         // For daily reminders, do a last-second check: if the content says
         // "Mile still waiting" but the user has actually completed their goal,
@@ -410,6 +411,7 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         return [.banner, .sound]
     }
 
+    @MainActor
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let userInfo = response.notification.request.content.userInfo
 
