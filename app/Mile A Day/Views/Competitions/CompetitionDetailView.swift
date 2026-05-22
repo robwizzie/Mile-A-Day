@@ -458,8 +458,12 @@ struct CompetitionDetailView: View {
                 tiles.append(RuleTileData(icon: "arrow.trianglehead.2.clockwise",
                     label: "Interval", value: interval.displayName))
             }
+            // Targets end either on a duration or when someone reaches the point target
             if let duration = opts.durationFormatted {
                 tiles.append(RuleTileData(icon: "clock.fill", label: "Duration", value: duration))
+            } else if opts.first_to > 0 {
+                tiles.append(RuleTileData(icon: "flag.checkered", label: "First To",
+                    value: "\(opts.first_to)", tint: .yellow))
             }
         case .clash:
             tiles.append(RuleTileData(icon: "ruler", label: "Unit",

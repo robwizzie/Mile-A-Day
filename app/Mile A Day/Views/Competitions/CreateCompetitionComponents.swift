@@ -153,6 +153,46 @@ struct DurationPreset: View {
     }
 }
 
+// MARK: - End Mode Option
+
+/// Segmented option used by Targets to choose between a fixed duration and a
+/// "first to X points" end condition.
+struct EndModeOption: View {
+    let title: String
+    let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: icon)
+                    .font(.title3)
+                    .foregroundColor(isSelected ? MADTheme.Colors.primary : .white.opacity(0.6))
+
+                Text(title)
+                    .font(MADTheme.Typography.callout)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                    .foregroundColor(.white)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, MADTheme.Spacing.lg)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(isSelected ? MADTheme.Colors.primary.opacity(0.2) : Color.white.opacity(0.1))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .stroke(
+                        isSelected ? MADTheme.Colors.primary : Color.white.opacity(0.1),
+                        lineWidth: isSelected ? 2 : 1
+                    )
+            )
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+}
+
 // MARK: - Interval Option Button
 
 struct IntervalOptionButton: View {

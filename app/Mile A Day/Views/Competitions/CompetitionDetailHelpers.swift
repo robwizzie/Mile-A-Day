@@ -346,8 +346,17 @@ struct EditCompetitionSettingsView: View {
         competition.type == .apex || competition.type == .targets || competition.type == .clash
     }
 
+    /// A targets competition that ends on a point target ("first to X") rather
+    /// than a fixed duration. The end mode is fixed at creation, so this is
+    /// derived from the immutable options.
+    private var isFirstToTargets: Bool {
+        competition.type == .targets
+            && competition.options.duration_hours == nil
+            && competition.options.first_to > 0
+    }
+
     private var needsFirstTo: Bool {
-        competition.type == .streaks || competition.type == .clash
+        competition.type == .streaks || competition.type == .clash || isFirstToTargets
     }
 
     var body: some View {

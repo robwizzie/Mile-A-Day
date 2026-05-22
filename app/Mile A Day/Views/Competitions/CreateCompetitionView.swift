@@ -22,6 +22,9 @@ struct CreateCompetitionView: View {
     @State private var selectedWorkouts: Set<CompetitionActivity> = [.run]
     @State private var firstTo: Int = 1
     @State private var interval: CompetitionInterval = .day
+    /// Targets only: when true the competition ends when someone reaches the
+    /// point target ("first to X") instead of on a fixed duration/end date.
+    @State private var targetsUseFirstTo: Bool = false
 
     // UI state
     @State private var isCreating = false
@@ -92,15 +95,22 @@ struct CreateCompetitionView: View {
     }
 
     var needsFirstTo: Bool {
-        selectedType == .streaks || selectedType == .clash
+        selectedType == .streaks || selectedType == .clash || (selectedType == .targets && targetsUseFirstTo)
     }
 
-    /// Only Apex and Targets need a fixed duration
+    /// Apex always needs a fixed duration. Targets need one unless the user
+    /// chose the "first to X points" end condition.
     /// Clash ends when point target is reached
     /// Streaks end when someone breaks their streak
     /// Race ends when someone reaches the distance
     var needsDuration: Bool {
-        selectedType == .apex || selectedType == .targets
+        selectedType == .apex || (selectedType == .targets && !targetsUseFirstTo)
+    }
+
+    /// Targets can end either on a duration or when someone reaches the point
+    /// target, so they get a mode toggle.
+    var needsTargetsEndMode: Bool {
+        selectedType == .targets
     }
 
     /// Description for the unit-only section (Clash and Apex)
@@ -148,11 +158,16 @@ struct CreateCompetitionView: View {
                             intervalSection
                         }
 
+                        // Targets: choose between a fixed duration and "first to X points"
+                        if needsTargetsEndMode {
+                            targetsEndModeSection
+                        }
+
                         if needsFirstTo {
                             firstToSection
                         }
 
-                        // Duration (only for apex and targets - others end by condition)
+                        // Duration (apex always; targets when not using "first to X")
                         if needsDuration {
                             durationSection
                         }
@@ -232,6 +247,8 @@ struct CreateCompetitionView: View {
                     durationHours = 168   // 1 week default
                     hasEndDate = true
                     isCustomDuration = false
+                    targetsUseFirstTo = false
+                    firstTo = 10          // Default "first to 10 points"
                 case .race:
                     goal = 26.2           // Marathon
                     hasEndDate = false
@@ -654,6 +671,44 @@ struct CreateCompetitionView: View {
                             .stroke(Color.white.opacity(0.1), lineWidth: 1)
                     )
             )
+            .padding(.horizontal, MADTheme.Spacing.sm)
+        }
+    }
+
+    // MARK: - Targets End Mode Section
+
+    /// Targets can end either after a fixed duration or when the first
+    /// competitor reaches the point target. This segmented toggle picks which.
+    var targetsEndModeSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("End Condition")
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundColor(.white.opacity(0.6))
+
+                Text(targetsUseFirstTo
+                    ? "Ends when someone reaches the point target"
+                    : "Ends after a fixed length of time")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .padding(.horizontal, MADTheme.Spacing.sm)
+
+            HStack(spacing: MADTheme.Spacing.md) {
+                EndModeOption(
+                    title: "Set Duration",
+                    icon: "calendar",
+                    isSelected: !targetsUseFirstTo,
+                    action: { targetsUseFirstTo = false }
+                )
+
+                EndModeOption(
+                    title: "First to Points",
+                    icon: "flag.checkered",
+                    isSelected: targetsUseFirstTo,
+                    action: { targetsUseFirstTo = true }
+                )
+            }
             .padding(.horizontal, MADTheme.Spacing.sm)
         }
     }

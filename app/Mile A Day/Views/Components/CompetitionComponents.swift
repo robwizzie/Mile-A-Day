@@ -203,8 +203,11 @@ struct CompetitionCard: View {
                             if let interval = competition.options.interval {
                                 StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
                             }
+                            // Targets end either on a duration or a point target ("first to X")
                             if let durationStr = competition.options.durationFormatted {
                                 StatChip(icon: "clock", text: durationStr)
+                            } else if competition.options.first_to > 0 {
+                                StatChip(icon: "flag.checkered", text: "First to \(competition.options.first_to)")
                             }
 
                         case .clash:
@@ -560,8 +563,11 @@ struct InviteCard: View {
                         if let interval = competition.options.interval {
                             StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
                         }
+                        // Targets end either on a duration or a point target ("first to X")
                         if let durationStr = competition.options.durationFormatted {
                             StatChip(icon: "clock", text: durationStr)
+                        } else if competition.options.first_to > 0 {
+                            StatChip(icon: "flag.checkered", text: "First to \(competition.options.first_to)")
                         }
 
                     case .clash:
