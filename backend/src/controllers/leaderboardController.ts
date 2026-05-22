@@ -6,7 +6,6 @@ import {
   clampOffset,
   LeaderboardMetric,
   LeaderboardPeriod,
-  LeaderboardScope,
 } from "../services/leaderboardService.js";
 
 const VALID_METRICS: ReadonlySet<LeaderboardMetric> = new Set([
@@ -19,10 +18,6 @@ const VALID_PERIODS: ReadonlySet<LeaderboardPeriod> = new Set([
   "year",
   "all",
 ]);
-const VALID_SCOPES: ReadonlySet<LeaderboardScope> = new Set([
-  "global",
-  "friends",
-]);
 
 export async function getLeaderboardHandler(
   req: AuthenticatedRequest,
@@ -34,34 +29,21 @@ export async function getLeaderboardHandler(
 
   const metricRaw = String(req.query.metric ?? "miles");
   const periodRaw = String(req.query.period ?? "week");
-  const scopeRaw = String(req.query.scope ?? "global");
 
   if (!VALID_METRICS.has(metricRaw as LeaderboardMetric)) {
-    return res
-      .status(400)
-      .json({
-        error: `Invalid metric. Must be one of: ${[...VALID_METRICS].join(", ")}`,
-      });
+    return res.status(400).json({
+      error: `Invalid metric. Must be one of: ${[...VALID_METRICS].join(", ")}`,
+    });
   }
   if (!VALID_PERIODS.has(periodRaw as LeaderboardPeriod)) {
-    return res
-      .status(400)
-      .json({
-        error: `Invalid period. Must be one of: ${[...VALID_PERIODS].join(", ")}`,
-      });
-  }
-  if (!VALID_SCOPES.has(scopeRaw as LeaderboardScope)) {
-    return res
-      .status(400)
-      .json({
-        error: `Invalid scope. Must be one of: ${[...VALID_SCOPES].join(", ")}`,
-      });
+    return res.status(400).json({
+      error: `Invalid period. Must be one of: ${[...VALID_PERIODS].join(", ")}`,
+    });
   }
 
   const metric = metricRaw as LeaderboardMetric;
   const period =
     metricRaw === "streak" ? "all" : (periodRaw as LeaderboardPeriod);
-  const scope = scopeRaw as LeaderboardScope;
   const limit = clampLimit(Number(req.query.limit));
   const offset = clampOffset(Number(req.query.offset));
 
@@ -69,7 +51,6 @@ export async function getLeaderboardHandler(
     const page = await getLeaderboard({
       metric,
       period,
-      scope,
       userId,
       limit,
       offset,
