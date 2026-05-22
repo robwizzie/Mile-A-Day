@@ -757,10 +757,7 @@ extension CompetitionDetailView {
         case .day:
             return formatter.string(from: calendar.startOfDay(for: date))
         case .week:
-            var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
-            components.weekday = calendar.firstWeekday
-            let startOfWeek = calendar.date(from: components) ?? date
-            return formatter.string(from: startOfWeek)
+            return competition.weeklyIntervalKey(for: date)
         case .month:
             var components = calendar.dateComponents([.year, .month], from: date)
             components.day = 1

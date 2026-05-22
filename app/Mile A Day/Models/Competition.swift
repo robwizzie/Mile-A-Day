@@ -106,6 +106,36 @@ struct Competition: Codable, Identifiable {
         return f
     }()
 
+    /// Eastern-Time Gregorian calendar — the timezone the backend buckets workout
+    /// dates and competition start/end dates in.
+    private static let etCalendar: Calendar = {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "America/New_York")!
+        c.locale = Locale(identifier: "en_US_POSIX")
+        return c
+    }()
+
+    /// The weekly interval key ("YYYY-MM-DD" for the day that begins the 7-day window
+    /// containing `date`). Weekly windows are anchored to the competition's start_date —
+    /// week 1 is start..start+6, week 2 is start+7..start+13, etc. — so this MUST match
+    /// getCurrentInterval(..., 'week', start_date) in the backend's competitionService.ts.
+    /// Falls back to the calendar-week start when start_date is unknown (lobby state).
+    func weeklyIntervalKey(for date: Date) -> String {
+        let cal = Self.etCalendar
+        guard let startDate = startDateFormatted else {
+            var comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+            comps.weekday = cal.firstWeekday
+            let startOfWeek = cal.date(from: comps) ?? date
+            return Self.etDateFormatter.string(from: startOfWeek)
+        }
+        let startDay = cal.startOfDay(for: startDate)
+        let curDay = cal.startOfDay(for: date)
+        let days = cal.dateComponents([.day], from: startDay, to: curDay).day ?? 0
+        let weekIndex = Int(floor(Double(days) / 7.0))
+        let windowStart = cal.date(byAdding: .day, value: weekIndex * 7, to: startDay) ?? startDay
+        return Self.etDateFormatter.string(from: windowStart)
+    }
+
     var startDateFormatted: Date? {
         guard let dateStr = start_date else { return nil }
         return Self.etDateFormatter.date(from: dateStr)

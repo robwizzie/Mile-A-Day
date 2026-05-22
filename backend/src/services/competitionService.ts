@@ -134,8 +134,8 @@ function checkKeys(params: CreateCompetitionParams) {
 	} else if (type === 'targets') {
 		requiredKeys.push('goal', 'unit', 'interval');
 
-		if (end_date === undefined && options.duration_hours === undefined) {
-			missingKeys.push('(end_date or duration_hours)');
+		if (end_date === undefined && options.duration_hours === undefined && options.first_to === undefined) {
+			missingKeys.push('(first_to, end_date, or duration_hours)');
 		}
 	} else if (type === 'race') {
 		requiredKeys.push('goal', 'unit');
@@ -418,13 +418,13 @@ export async function getUserScores(
 
 	// Bucket rows into per-user interval totals.
 	for (const row of batchRows) {
-		const intervalKey = getCurrentInterval(row.local_date, competition.options.interval);
+		const intervalKey = getCurrentInterval(row.local_date, competition.options.interval, competition.start_date);
 		const buckets = userData[row.user_id].intervals;
 		buckets[intervalKey] = (buckets[intervalKey] ?? 0) + Number(row.total_distance);
 	}
 
 	const allIntervals = getIntervalRange(competition);
-	const todaysInterval = getCurrentInterval(getTodayET(), competition.options.interval);
+	const todaysInterval = getCurrentInterval(getTodayET(), competition.options.interval, competition.start_date);
 
 	// Determine the inclusive end index for scoring:
 	// - If excludeCurrentInterval=true, stop one interval before today.
@@ -523,7 +523,11 @@ export async function getUserScores(
 	return userData;
 }
 
-function getCurrentInterval(currentDate: Date | string | number, interval?: 'day' | 'week' | 'month'): string {
+function getCurrentInterval(
+	currentDate: Date | string | number,
+	interval?: 'day' | 'week' | 'month',
+	startDate?: string | null
+): string {
 	let year: number, month: number, day: number;
 
 	if (typeof currentDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(currentDate)) {
@@ -544,6 +548,19 @@ function getCurrentInterval(currentDate: Date | string | number, interval?: 'day
 	const pad = (n: number) => String(n).padStart(2, '0');
 
 	if (interval === 'week') {
+		// Anchor weekly windows to the competition's start date so the first week
+		// is start..start+6 (not snapped to a Sun–Sat calendar week). The interval
+		// key is the date that begins the 7-day window containing currentDate.
+		if (startDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+			const [sy, sm, sd] = startDate.split('-').map(Number);
+			const startMs = Date.UTC(sy, sm - 1, sd);
+			const curMs = Date.UTC(year, month - 1, day);
+			const weekIndex = Math.floor((curMs - startMs) / 86400000 / 7);
+			const windowStartMs = startMs + weekIndex * 7 * 86400000;
+			const d = new Date(windowStartMs);
+			return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+		}
+		// Fallback (no start date): snap to the calendar week ending Sunday.
 		const d = new Date(year, month - 1, day);
 		const daysUntilSunday = (7 - d.getDay()) % 7;
 		d.setDate(d.getDate() + daysUntilSunday);
@@ -565,14 +582,10 @@ function getIntervalRange(competition: Competition): string[] {
 	const [ey, em, ed] = endDateStr.split('-').map(Number);
 
 	// Pure calendar-date iteration via UTC math — DST-free because we never mix timezones.
+	// Weekly windows are anchored to the start date (handled by getCurrentInterval), so we
+	// iterate from start_date itself in 7-day steps rather than snapping to a calendar week.
 	const endUtcMs = Date.UTC(ey, em - 1, ed);
 	let currentMs = Date.UTC(sy, sm - 1, sd);
-
-	if (competition.options.interval === 'week') {
-		const dayOfWeek = new Date(currentMs).getUTCDay();
-		const daysUntilSunday = (7 - dayOfWeek) % 7;
-		currentMs += daysUntilSunday * 86400000;
-	}
 
 	const toDateStr = (ms: number): string => {
 		const d = new Date(ms);
@@ -583,7 +596,7 @@ function getIntervalRange(competition: Competition): string[] {
 	};
 
 	while (currentMs <= endUtcMs) {
-		const intervalKey = getCurrentInterval(toDateStr(currentMs), competition.options.interval);
+		const intervalKey = getCurrentInterval(toDateStr(currentMs), competition.options.interval, competition.start_date);
 		intervals.push(intervalKey);
 
 		if (competition.options.interval === 'week') {
@@ -689,9 +702,10 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 		}
 	}
 
-	// Check 3: first_to condition (clash only — races use goal, apex/targets use duration,
-	// streaks use first_to as "lives" via checkStreaksEliminated below).
-	if (!shouldResolve && competition.options.first_to && competition.type === 'clash') {
+	// Check 3: first_to condition (clash and targets — first competitor to reach the
+	// point target wins; races use goal, apex uses duration, streaks use first_to as
+	// "lives" via the streaks elimination check below).
+	if (!shouldResolve && competition.options.first_to && (competition.type === 'clash' || competition.type === 'targets')) {
 		const scores = await getUserScores(competition, { excludeCurrentInterval: true });
 		const scoreValues = Object.values(scores);
 		if (scoreValues.length > 0) {

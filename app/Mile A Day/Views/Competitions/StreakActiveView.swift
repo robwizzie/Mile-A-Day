@@ -47,10 +47,7 @@ struct StreakActiveView: View {
         case .day:
             return Self.isoDateFormatter.string(from: calendar.startOfDay(for: selectedIntervalDate))
         case .week:
-            var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedIntervalDate)
-            components.weekday = calendar.firstWeekday
-            let startOfWeek = calendar.date(from: components) ?? selectedIntervalDate
-            return Self.isoDateFormatter.string(from: startOfWeek)
+            return competition.weeklyIntervalKey(for: selectedIntervalDate)
         case .month:
             var components = calendar.dateComponents([.year, .month], from: selectedIntervalDate)
             components.day = 1
