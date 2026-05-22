@@ -80,6 +80,15 @@ enum DailyChallengeCatalog {
         return challenges[dayOfYear % challenges.count]
     }
 
+    /// Look up a challenge by its key (title, icon, gradient only — descriptions
+    /// vary per-user so they're omitted here). Falls back to nil if the key
+    /// isn't in the local catalog (e.g., backend rolled out a new challenge
+    /// that this app build doesn't know about yet).
+    static func byKey(_ key: String) -> DailyChallenge? {
+        // avgPace doesn't matter here — we only need title/icon/gradient.
+        return pool(avgPace: 0).first { $0.key == key }
+    }
+
     struct Context {
         let distance: Double               // today's total distance (miles)
         let steps: Int                     // today's step count

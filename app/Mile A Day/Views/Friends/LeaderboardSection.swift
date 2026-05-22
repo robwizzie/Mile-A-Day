@@ -10,9 +10,6 @@ final class LeaderboardViewModel {
     var period: LeaderboardPeriod = .week {
         didSet { if oldValue != period { refresh() } }
     }
-    var scope: LeaderboardScope = .global {
-        didSet { if oldValue != scope { refresh() } }
-    }
 
     private(set) var entries: [LeaderboardEntry] = []
     private(set) var currentUserEntry: LeaderboardEntry?
@@ -21,18 +18,13 @@ final class LeaderboardViewModel {
     private(set) var isLoading: Bool = false
     private(set) var isLoadingMore: Bool = false
     private(set) var errorMessage: String?
-    private(set) var viewerOptedOut: Bool = false
-    private(set) var isUpdatingOptOut: Bool = false
 
     private var loadTask: Task<Void, Never>?
 
-    /// Loads the first page. Cancels any in-flight request. Called on initial
-    /// appearance and whenever a filter changes.
     func refresh() {
         loadTask?.cancel()
         let snapshotMetric = metric
         let snapshotPeriod = period
-        let snapshotScope = scope
 
         loadTask = Task { @MainActor in
             isLoading = true
@@ -41,37 +33,31 @@ final class LeaderboardViewModel {
                 let page = try await LeaderboardService.fetch(
                     metric: snapshotMetric,
                     period: snapshotPeriod,
-                    scope: snapshotScope,
                     offset: 0
                 )
-                // Only commit if filters haven't shifted under us mid-flight.
                 guard !Task.isCancelled,
                       snapshotMetric == self.metric,
-                      snapshotPeriod == self.period,
-                      snapshotScope == self.scope else { return }
+                      snapshotPeriod == self.period else { return }
 
                 self.entries = page.entries
                 self.currentUserEntry = page.current_user_entry
                 self.totalCount = page.total_count
                 self.hasMore = page.has_more
-                self.viewerOptedOut = page.viewer_opted_out
             } catch {
                 if !Task.isCancelled {
-                    self.errorMessage = "Couldn't load leaderboard"
+                    print("[Leaderboard] fetch failed: \(error)")
+                    self.errorMessage = friendlyMessage(for: error)
                 }
             }
             self.isLoading = false
         }
     }
 
-    /// Fetches the next page and appends to `entries`. Guarded so duplicate
-    /// "load more" triggers from rapid scrolling don't cause overlapping fetches.
     func loadMore() {
         guard hasMore, !isLoading, !isLoadingMore else { return }
         let nextOffset = entries.count
         let snapshotMetric = metric
         let snapshotPeriod = period
-        let snapshotScope = scope
 
         Task { @MainActor in
             isLoadingMore = true
@@ -79,12 +65,10 @@ final class LeaderboardViewModel {
                 let page = try await LeaderboardService.fetch(
                     metric: snapshotMetric,
                     period: snapshotPeriod,
-                    scope: snapshotScope,
                     offset: nextOffset
                 )
                 guard snapshotMetric == self.metric,
-                      snapshotPeriod == self.period,
-                      snapshotScope == self.scope else {
+                      snapshotPeriod == self.period else {
                     self.isLoadingMore = false
                     return
                 }
@@ -92,206 +76,348 @@ final class LeaderboardViewModel {
                 self.hasMore = page.has_more
                 self.totalCount = page.total_count
             } catch {
-                // Stay silent on load-more errors — first page already rendered,
-                // and the user can pull-to-refresh if they want to retry.
+                print("[Leaderboard] loadMore failed: \(error)")
             }
             isLoadingMore = false
         }
     }
 
-    /// Toggles the viewer's leaderboard visibility. Optimistically flips the
-    /// local flag, calls the backend, refreshes the page on success, or rolls
-    /// back the flag on failure.
-    func setOptOut(_ optOut: Bool) {
-        guard let userId = UserDefaults.standard.string(forKey: "backendUserId"),
-              !userId.isEmpty else { return }
-        let previous = viewerOptedOut
-        viewerOptedOut = optOut
-        isUpdatingOptOut = true
-
-        Task { @MainActor in
-            do {
-                let committed = try await LeaderboardService.setOptOut(userId: userId, optOut: optOut)
-                self.viewerOptedOut = committed
-                self.isUpdatingOptOut = false
-                // Reload so opting in immediately surfaces the user's row.
-                self.refresh()
-            } catch {
-                self.viewerOptedOut = previous
-                self.isUpdatingOptOut = false
-                self.errorMessage = "Couldn't update leaderboard visibility"
-            }
+    /// Translate framework errors into one-line user copy. Surfaces the real
+    /// error message so we can diagnose without console access — generic
+    /// fallbacks were hiding the actual cause.
+    private func friendlyMessage(for error: Error) -> String {
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain {
+            return "Couldn't reach the server. Check your connection."
         }
+        if error is DecodingError {
+            return "Decode error — backend response doesn't match. Update the app or backend."
+        }
+        // APIError (and most other errors) conform to LocalizedError —
+        // expose the real message so 500s, 404s, auth issues etc. are visible.
+        if let localized = (error as? LocalizedError)?.errorDescription {
+            return localized
+        }
+        return error.localizedDescription
     }
 }
 
 // MARK: - Section View
 
 struct LeaderboardSection: View {
+    @ObservedObject var friendService: FriendService
+    /// Optional handler so the empty state can offer an "Add friends" CTA
+    /// without coupling the leaderboard view to the parent's sheet machinery.
+    var onAddFriends: (() -> Void)? = nil
     @State private var vm = LeaderboardViewModel()
+    @State private var selectedUser: BackendUser?
 
     var body: some View {
         ScrollView {
-            VStack(spacing: MADTheme.Spacing.md) {
-                headerRow
-                filterStack
-                if vm.metric == .miles {
-                    periodPicker
-                }
-                if vm.viewerOptedOut {
-                    optOutBanner
-                }
-                content
+            LazyVStack(spacing: MADTheme.Spacing.lg, pinnedViews: []) {
+                heroCard
+                filterChips
+                contentBody
             }
             .padding(.horizontal, MADTheme.Spacing.md)
-            .padding(.top, MADTheme.Spacing.sm)
-            .padding(.bottom, MADTheme.Spacing.lg)
+            .padding(.top, MADTheme.Spacing.md)
+            .padding(.bottom, MADTheme.Spacing.xl)
         }
         .scrollIndicators(.hidden)
-        .refreshable {
-            vm.refresh()
-        }
+        .refreshable { vm.refresh() }
         .onAppear {
-            if vm.entries.isEmpty { vm.refresh() }
+            if vm.entries.isEmpty && vm.errorMessage == nil { vm.refresh() }
+        }
+        .sheet(item: $selectedUser) { user in
+            NavigationStack {
+                UserProfileDetailView(user: user, friendService: friendService)
+            }
         }
     }
 
-    // MARK: Header (visibility menu)
+    /// Build a BackendUser stub from a leaderboard entry. UserProfileDetailView
+    /// reads `username`, `displayName`, `bio`, `profile_image_url`, `user_id` —
+    /// the other BackendUser fields aren't used in its render path, so leaving
+    /// them empty is safe. Avoids a network roundtrip on every row tap.
+    private func makeBackendUser(_ entry: LeaderboardEntry) -> BackendUser {
+        BackendUser(
+            user_id: entry.user_id,
+            username: entry.username,
+            email: "",
+            first_name: entry.first_name,
+            last_name: entry.last_name,
+            bio: nil,
+            profile_image_url: entry.profile_image_url,
+            apple_id: nil,
+            auth_provider: nil,
+            role: nil
+        )
+    }
 
-    private var headerRow: some View {
-        HStack {
-            Spacer()
-            Menu {
-                if vm.viewerOptedOut {
-                    Button {
-                        vm.setOptOut(false)
-                    } label: {
-                        Label("Show me on the leaderboard", systemImage: "eye")
-                    }
-                } else {
-                    Button(role: .destructive) {
-                        vm.setOptOut(true)
-                    } label: {
-                        Label("Hide me from the leaderboard", systemImage: "eye.slash")
+    // MARK: Hero — viewer's own rank within friends
+
+    @ViewBuilder
+    private var heroCard: some View {
+        if let me = vm.currentUserEntry {
+            youCard(entry: me)
+        } else if !vm.isLoading && vm.entries.isEmpty == false {
+            // Viewer has no activity for this period yet — nudge them.
+            notRankedCard
+        } else {
+            EmptyView()
+        }
+    }
+
+    private func youCard(entry: LeaderboardEntry) -> some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("YOUR RANK")
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.5))
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("#\(entry.rank)")
+                        .font(.system(size: 34, weight: .black, design: .rounded))
+                        .foregroundColor(.white)
+                    if vm.totalCount > 0 {
+                        Text("of \(vm.totalCount)")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.4))
                     }
                 }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.55))
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
-            }
-            .disabled(vm.isUpdatingOptOut)
-        }
-    }
-
-    // MARK: Opt-out banner
-
-    private var optOutBanner: some View {
-        HStack(spacing: MADTheme.Spacing.sm) {
-            Image(systemName: "eye.slash.fill")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(.orange)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("You're hidden")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.9))
-                Text("Your name and stats don't appear on any leaderboard.")
+                Text(filterSubtitle)
                     .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.55))
+                    .foregroundColor(.white.opacity(0.45))
             }
 
             Spacer()
 
-            Button("Show me") { vm.setOptOut(false) }
-                .font(.system(size: 12, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(MADTheme.Colors.madRed))
-                .disabled(vm.isUpdatingOptOut)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(formatValue(entry.value, metric: vm.metric))
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Text(metricUnitText)
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .tracking(1.0)
+                    .foregroundColor(.white.opacity(0.45))
+            }
         }
-        .padding(MADTheme.Spacing.md)
+        .padding(MADTheme.Spacing.lg)
         .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(Color.orange.opacity(0.10))
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                .fill(
+                    LinearGradient(
+                        colors: [MADTheme.Colors.madRed.opacity(0.55), MADTheme.Colors.madRed.opacity(0.20)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
                 .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                        .strokeBorder(Color.orange.opacity(0.3), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .strokeBorder(MADTheme.Colors.madRed.opacity(0.45), lineWidth: 1)
                 )
         )
     }
 
-    // MARK: Filters
-
-    private var filterStack: some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            Picker("Scope", selection: Binding(get: { vm.scope }, set: { vm.scope = $0 })) {
-                ForEach(LeaderboardScope.allCases) { scope in
-                    Text(scope.displayName).tag(scope)
-                }
+    private var notRankedCard: some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            Image(systemName: vm.metric == .streak ? "flame" : "figure.run")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(.white.opacity(0.35))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("YOU'RE NOT RANKED YET")
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.45))
+                Text(vm.metric == .streak ? "Start a streak to appear on the board." : "Log a run for \(vm.period.displayName.lowercased()) to climb the board.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
             }
-            .pickerStyle(.segmented)
+            Spacer()
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
+    }
 
-            Picker("Metric", selection: Binding(get: { vm.metric }, set: { vm.metric = $0 })) {
-                ForEach(LeaderboardMetric.allCases) { metric in
-                    Text(metric.displayName).tag(metric)
-                }
+    // MARK: Filter chips
+
+    /// One horizontal row of compact pill buttons. Each opens a Menu — much
+    /// less visually noisy than stacked segmented controls.
+    private var filterChips: some View {
+        HStack(spacing: 8) {
+            metricChip
+            if vm.metric == .miles {
+                periodChip
             }
-            .pickerStyle(.segmented)
+            Spacer()
         }
     }
 
-    private var periodPicker: some View {
-        Picker("Period", selection: Binding(get: { vm.period }, set: { vm.period = $0 })) {
-            ForEach(LeaderboardPeriod.allCases) { period in
-                Text(period.displayName).tag(period)
+    private var metricChip: some View {
+        Menu {
+            Picker("Metric", selection: Binding(get: { vm.metric }, set: { vm.metric = $0 })) {
+                ForEach(LeaderboardMetric.allCases) { m in
+                    Label(m.displayName, systemImage: m == .miles ? "figure.run" : "flame.fill").tag(m)
+                }
             }
+        } label: {
+            chipLabel(
+                icon: vm.metric == .miles ? "figure.run" : "flame.fill",
+                text: vm.metric.displayName
+            )
         }
-        .pickerStyle(.segmented)
+    }
+
+    private var periodChip: some View {
+        Menu {
+            Picker("Period", selection: Binding(get: { vm.period }, set: { vm.period = $0 })) {
+                ForEach(LeaderboardPeriod.allCases) { p in
+                    Text(p.displayName).tag(p)
+                }
+            }
+        } label: {
+            chipLabel(icon: "calendar", text: vm.period.displayName)
+        }
+    }
+
+    private func chipLabel(icon: String, text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .bold))
+            Text(text)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+            Image(systemName: "chevron.down")
+                .font(.system(size: 8, weight: .heavy))
+                .opacity(0.6)
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            Capsule()
+                .fill(Color.white.opacity(0.08))
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+        )
     }
 
     // MARK: Content
 
     @ViewBuilder
-    private var content: some View {
+    private var contentBody: some View {
         if vm.isLoading && vm.entries.isEmpty {
             loadingState
         } else if let err = vm.errorMessage, vm.entries.isEmpty {
             errorState(err)
         } else if vm.entries.isEmpty {
-            emptyState
+            // First-time onboarding when the user hasn't added any friends —
+            // turns a dead-end empty state into a clear next action.
+            if friendService.friends.isEmpty {
+                firstTimeEmptyState
+            } else {
+                emptyState
+            }
         } else {
-            list
+            entriesList
         }
     }
 
-    private var loadingState: some View {
+    private var firstTimeEmptyState: some View {
         VStack(spacing: MADTheme.Spacing.md) {
-            ProgressView()
-                .tint(MADTheme.Colors.madRed)
-            Text("Loading rankings…")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
+            Image(systemName: "person.2.badge.plus")
+                .font(.system(size: 36, weight: .bold))
+                .foregroundColor(MADTheme.Colors.madRed.opacity(0.85))
+                .padding(.bottom, 4)
+
+            Text("Add friends to compete")
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+
+            Text("Your leaderboard fills in as soon as you add a friend. The board ranks you against people you actually know.")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, MADTheme.Spacing.lg)
+
+            if let onAddFriends = onAddFriends {
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    onAddFriends()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.badge.plus")
+                            .font(.system(size: 13, weight: .bold))
+                        Text("Find Friends")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .background(
+                        Capsule()
+                            .fill(MADTheme.Colors.madRed)
+                            .shadow(color: MADTheme.Colors.madRed.opacity(0.35), radius: 8, y: 3)
+                    )
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 6)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, MADTheme.Spacing.xl)
     }
 
+    private var loadingState: some View {
+        VStack(spacing: MADTheme.Spacing.md) {
+            ProgressView().tint(MADTheme.Colors.madRed)
+            Text("Loading rankings…")
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, MADTheme.Spacing.xxl)
+    }
+
     private func errorState(_ message: String) -> some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 24))
-                .foregroundColor(.orange.opacity(0.7))
+        VStack(spacing: MADTheme.Spacing.md) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 28))
+                .foregroundColor(.orange.opacity(0.75))
+
+            Text("Leaderboard didn't load")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.85))
+
+            // Full error text — selectable so the user can copy + send it back
+            // when reporting issues. Wider than the rest of the UI on purpose.
             Text(message)
-                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .font(.system(size: 12, weight: .regular, design: .monospaced))
                 .foregroundColor(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+                .padding(MADTheme.Spacing.md)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                        .fill(Color.black.opacity(0.25))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                                .strokeBorder(Color.orange.opacity(0.3), lineWidth: 1)
+                        )
+                )
+
             Button("Retry") { vm.refresh() }
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundColor(MADTheme.Colors.madRed)
-                .padding(.top, 4)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .background(Capsule().fill(MADTheme.Colors.madRed))
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, MADTheme.Spacing.xl)
@@ -300,99 +426,183 @@ struct LeaderboardSection: View {
     private var emptyState: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
             Image(systemName: vm.metric == .streak ? "flame" : "figure.run")
-                .font(.system(size: 28))
+                .font(.system(size: 32))
                 .foregroundColor(.white.opacity(0.25))
-            Text(vm.metric == .streak ? "No active streaks yet" : "No miles logged for this range")
+            Text(emptyStateMessage)
                 .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundColor(.white.opacity(0.55))
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, MADTheme.Spacing.xl)
+        .padding(.vertical, MADTheme.Spacing.xxl)
     }
 
-    private var list: some View {
-        VStack(spacing: 6) {
-            // Pin the current user's row at the top when they're not already on
-            // the visible page — keeps "where am I?" answerable without scrolling.
-            if let me = vm.currentUserEntry,
-               !vm.entries.contains(where: { $0.is_current_user }) {
-                LeaderboardRow(entry: me, metric: vm.metric)
-                Divider()
-                    .overlay(Color.white.opacity(0.06))
-                    .padding(.vertical, 4)
+    private var emptyStateMessage: String {
+        switch vm.metric {
+        case .streak: return "None of your friends have an active streak yet."
+        case .miles: return "None of your friends have logged miles for this period."
+        }
+    }
+
+    @ViewBuilder
+    private var entriesList: some View {
+        let podium = Array(vm.entries.prefix(3))
+        let rest = vm.entries.count > 3 ? Array(vm.entries.dropFirst(3)) : []
+
+        VStack(spacing: MADTheme.Spacing.lg) {
+            if !podium.isEmpty {
+                podiumRow(podium: podium)
             }
 
-            ForEach(vm.entries) { entry in
-                LeaderboardRow(entry: entry, metric: vm.metric)
-                    .onAppear {
-                        // Trigger next-page fetch when the second-to-last visible
-                        // row appears — smoother than waiting for the very last.
-                        if let last = vm.entries.last,
-                           entry.id == last.id || entry.rank >= last.rank - 1 {
-                            vm.loadMore()
+            if !rest.isEmpty {
+                VStack(spacing: 4) {
+                    ForEach(rest) { entry in
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            selectedUser = makeBackendUser(entry)
+                        } label: {
+                            listRow(entry: entry)
+                        }
+                        .buttonStyle(.plain)
+                        .onAppear {
+                            if let last = vm.entries.last,
+                               entry.id == last.id || entry.rank >= last.rank - 1 {
+                                vm.loadMore()
+                            }
                         }
                     }
+                }
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .fill(Color.white.opacity(0.03))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                .strokeBorder(Color.white.opacity(0.05), lineWidth: 1)
+                        )
+                )
             }
 
             if vm.isLoadingMore {
-                ProgressView()
-                    .tint(MADTheme.Colors.madRed)
+                ProgressView().tint(MADTheme.Colors.madRed)
                     .padding(.vertical, MADTheme.Spacing.md)
             } else if !vm.hasMore && vm.entries.count > 5 {
-                Text("End of leaderboard")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                    .tracking(1.2)
-                    .foregroundColor(.white.opacity(0.3))
-                    .padding(.vertical, MADTheme.Spacing.md)
+                Text("END OF LEADERBOARD")
+                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .tracking(1.4)
+                    .foregroundColor(.white.opacity(0.25))
+                    .padding(.top, 4)
             }
         }
     }
-}
 
-// MARK: - Row
+    // MARK: Podium (top 3)
 
-private struct LeaderboardRow: View {
-    let entry: LeaderboardEntry
-    let metric: LeaderboardMetric
+    private func podiumRow(podium: [LeaderboardEntry]) -> some View {
+        // Visually: 2nd · 1st · 3rd, with 1st elevated. Falls back gracefully
+        // when fewer than 3 entries exist.
+        let first = podium.first(where: { $0.rank == 1 }) ?? podium[0]
+        let second = podium.first(where: { $0.rank == 2 })
+        let third = podium.first(where: { $0.rank == 3 })
 
-    private var rankColors: [Color] {
-        switch entry.rank {
-        case 1: return [.yellow, .orange]
-        case 2: return [Color(white: 0.85), Color(white: 0.6)]
-        case 3: return [Color(red: 0.85, green: 0.55, blue: 0.25), Color(red: 0.6, green: 0.35, blue: 0.15)]
-        default: return [Color.white.opacity(0.22), Color.white.opacity(0.08)]
-        }
-    }
-
-    private var valueText: String {
-        switch metric {
-        case .miles:
-            if entry.value >= 100 {
-                return String(format: "%.0f mi", entry.value)
+        return HStack(alignment: .bottom, spacing: MADTheme.Spacing.sm) {
+            if let s = second {
+                podiumSlot(entry: s, height: 100, avatarSize: 48, accent: medalColor(2))
+            } else {
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 100)
             }
-            return String(format: "%.1f mi", entry.value)
-        case .streak:
-            let days = Int(entry.value)
-            return days == 1 ? "1 day" : "\(days) days"
+
+            podiumSlot(entry: first, height: 124, avatarSize: 60, accent: medalColor(1), isFirst: true)
+
+            if let t = third {
+                podiumSlot(entry: t, height: 84, avatarSize: 44, accent: medalColor(3))
+            } else {
+                Color.clear.frame(maxWidth: .infinity, maxHeight: 84)
+            }
         }
     }
 
-    var body: some View {
-        HStack(spacing: MADTheme.Spacing.md) {
-            // Rank pill — top 3 get medal gradients, everyone else gets a muted disc.
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(colors: rankColors, startPoint: .top, endPoint: .bottom)
+    private func podiumSlot(entry: LeaderboardEntry, height: CGFloat, avatarSize: CGFloat, accent: Color, isFirst: Bool = false) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            selectedUser = makeBackendUser(entry)
+        } label: {
+            podiumSlotContent(entry: entry, height: height, avatarSize: avatarSize, accent: accent, isFirst: isFirst)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func podiumSlotContent(entry: LeaderboardEntry, height: CGFloat, avatarSize: CGFloat, accent: Color, isFirst: Bool) -> some View {
+        VStack(spacing: 6) {
+            ZStack(alignment: .topTrailing) {
+                AvatarView(name: entry.displayName, imageURL: entry.profile_image_url, size: avatarSize)
+                    .overlay(
+                        Circle().strokeBorder(accent, lineWidth: isFirst ? 3 : 2)
                     )
-                    .frame(width: 32, height: 32)
                 Text("\(entry.rank)")
-                    .font(.system(size: 13, weight: .heavy, design: .rounded))
-                    .foregroundColor(entry.rank <= 3 ? .black.opacity(0.7) : .white.opacity(0.75))
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .foregroundColor(.black.opacity(0.8))
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(accent))
+                    .offset(x: 4, y: -4)
             }
+            if isFirst {
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(accent)
+                    .offset(y: -2)
+            }
+            VStack(spacing: 1) {
+                Text(entry.displayName)
+                    .font(.system(size: isFirst ? 13 : 11, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                if entry.is_current_user {
+                    Text("YOU")
+                        .font(.system(size: 8, weight: .black, design: .rounded))
+                        .tracking(0.5)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Capsule().fill(MADTheme.Colors.madRed))
+                }
+                Text(formatValue(entry.value, metric: vm.metric))
+                    .font(.system(size: isFirst ? 14 : 12, weight: .heavy, design: .rounded))
+                    .foregroundColor(accent)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: height, alignment: .bottom)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .fill(entry.is_current_user ? MADTheme.Colors.madRed.opacity(0.10) : Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                        .strokeBorder(entry.is_current_user ? MADTheme.Colors.madRed.opacity(0.3) : Color.white.opacity(0.06), lineWidth: 1)
+                )
+        )
+    }
 
-            AvatarView(name: entry.displayName, imageURL: entry.profile_image_url, size: 36)
+    private func medalColor(_ rank: Int) -> Color {
+        switch rank {
+        case 1: return Color(red: 1.0, green: 0.82, blue: 0.20)        // gold
+        case 2: return Color(white: 0.78)                                // silver
+        case 3: return Color(red: 0.82, green: 0.55, blue: 0.30)         // bronze
+        default: return .white.opacity(0.4)
+        }
+    }
+
+    // MARK: List row (ranks 4+)
+
+    private func listRow(entry: LeaderboardEntry) -> some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            Text("\(entry.rank)")
+                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .frame(width: 28, alignment: .center)
+
+            AvatarView(name: entry.displayName, imageURL: entry.profile_image_url, size: 34)
                 .overlay(
                     Circle().strokeBorder(entry.is_current_user ? MADTheme.Colors.madRed : Color.clear, lineWidth: 1.5)
                 )
@@ -400,7 +610,7 @@ private struct LeaderboardRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
                     Text(entry.displayName)
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)
                     if entry.is_current_user {
@@ -415,30 +625,52 @@ private struct LeaderboardRow: View {
                 }
                 if let username = entry.username, !username.isEmpty, username != entry.displayName {
                     Text("@\(username)")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.4))
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.35))
                         .lineLimit(1)
                 }
             }
 
             Spacer()
 
-            Text(valueText)
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundColor(entry.rank <= 3 ? .yellow : .white.opacity(0.85))
+            Text(formatValue(entry.value, metric: vm.metric))
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.85))
         }
         .padding(.horizontal, MADTheme.Spacing.md)
-        .padding(.vertical, MADTheme.Spacing.sm)
+        .padding(.vertical, 9)
         .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(entry.is_current_user ? MADTheme.Colors.madRed.opacity(0.08) : Color.white.opacity(0.03))
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                        .strokeBorder(
-                            entry.is_current_user ? MADTheme.Colors.madRed.opacity(0.3) : Color.white.opacity(0.05),
-                            lineWidth: 1
-                        )
-                )
+            entry.is_current_user
+                ? RoundedRectangle(cornerRadius: 0).fill(MADTheme.Colors.madRed.opacity(0.06))
+                : RoundedRectangle(cornerRadius: 0).fill(Color.clear)
         )
+    }
+
+    // MARK: Helpers
+
+    private var filterSubtitle: String {
+        switch vm.metric {
+        case .miles:
+            return "\(vm.period.displayName) · Friends"
+        case .streak:
+            return "Current streak · Friends"
+        }
+    }
+
+    private var metricUnitText: String {
+        switch vm.metric {
+        case .miles: return "MILES"
+        case .streak: return "DAYS"
+        }
+    }
+
+    private func formatValue(_ value: Double, metric: LeaderboardMetric) -> String {
+        switch metric {
+        case .miles:
+            if value >= 100 { return String(format: "%.0f", value) }
+            return String(format: "%.1f", value)
+        case .streak:
+            return "\(Int(value))"
+        }
     }
 }

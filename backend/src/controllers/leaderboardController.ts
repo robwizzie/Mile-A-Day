@@ -13,6 +13,7 @@ const VALID_METRICS: ReadonlySet<LeaderboardMetric> = new Set([
   "streak",
 ]);
 const VALID_PERIODS: ReadonlySet<LeaderboardPeriod> = new Set([
+  "today",
   "week",
   "month",
   "year",

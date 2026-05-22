@@ -3,7 +3,7 @@ import { PostgresService } from "./DbService.js";
 const db = PostgresService.getInstance();
 
 export type LeaderboardMetric = "miles" | "streak";
-export type LeaderboardPeriod = "week" | "month" | "year" | "all";
+export type LeaderboardPeriod = "today" | "week" | "month" | "year" | "all";
 
 export interface LeaderboardEntry {
   rank: number;
@@ -47,11 +47,18 @@ export function clampOffset(raw: number | undefined): number {
 /**
  * Start date (inclusive, ISO date string) for a period. `all` returns null —
  * caller should omit the date WHERE clause entirely. Rolling windows ending
- * today: 'week' = last 7 days, 'month' = 30, 'year' = 365.
+ * today: 'today' = just today, 'week' = last 7 days, 'month' = 30, 'year' = 365.
  */
 function periodStartDate(period: LeaderboardPeriod): string | null {
   if (period === "all") return null;
-  const days = period === "week" ? 7 : period === "month" ? 30 : 365;
+  const days =
+    period === "today"
+      ? 1
+      : period === "week"
+        ? 7
+        : period === "month"
+          ? 30
+          : 365;
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - (days - 1));
   return d.toISOString().slice(0, 10);

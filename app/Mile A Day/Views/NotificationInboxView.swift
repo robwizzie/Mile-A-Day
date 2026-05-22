@@ -13,6 +13,48 @@ struct NotificationInboxView: View {
     @State private var hypedRowIds: Set<String> = []
     @State private var hypeToast: String?
 
+    /// Active category filter. `all` shows everything; the others narrow
+    /// the feed to a related cluster of notification types so users can
+    /// focus (e.g., "just show me what's happening in my competitions").
+    @State private var filter: NotificationFilter = .all
+
+    enum NotificationFilter: Hashable, CaseIterable {
+        case all, friends, comps, achievements
+
+        var title: String {
+            switch self {
+            case .all: return "All"
+            case .friends: return "Friends"
+            case .comps: return "Comps"
+            case .achievements: return "Awards"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .all: return "tray.full.fill"
+            case .friends: return "person.2.fill"
+            case .comps: return "trophy.fill"
+            case .achievements: return "medal.fill"
+            }
+        }
+
+        /// Notification types that belong to this category. `all` returns
+        /// nil — caller skips the filter step entirely.
+        func matches(_ type: String) -> Bool {
+            switch self {
+            case .all:
+                return true
+            case .friends:
+                return type.hasPrefix("friend_")
+            case .comps:
+                return type.hasPrefix("competition_") || type == "lead_change" || type == "clash_tie"
+            case .achievements:
+                return type == "badge_earned" || type == "personal_best" || type == "streak_broken"
+            }
+        }
+    }
+
     var body: some View {
         ZStack {
             MADTheme.Colors.appBackgroundGradient
@@ -28,38 +70,9 @@ struct NotificationInboxView: View {
                         .foregroundColor(.white.opacity(0.4))
                 }
             } else if notifications.isEmpty {
-                VStack(spacing: MADTheme.Spacing.md) {
-                    Image(systemName: "bell.slash")
-                        .font(.system(size: 40))
-                        .foregroundColor(.white.opacity(0.15))
-                    Text("No notifications yet")
-                        .font(.system(size: 15, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.4))
-                    Text("Your activity feed will appear here")
-                        .font(.system(size: 12, design: .rounded))
-                        .foregroundColor(.white.opacity(0.25))
-                }
+                emptyState
             } else {
-                ScrollView {
-                    LazyVStack(spacing: MADTheme.Spacing.sm) {
-                        ForEach(notifications) { notification in
-                            notificationRow(notification)
-                                .onAppear {
-                                    if notification.id == notifications.last?.id && hasMore {
-                                        loadMore()
-                                    }
-                                }
-                        }
-
-                        if isLoading {
-                            ProgressView()
-                                .scaleEffect(0.8)
-                                .tint(MADTheme.Colors.madRed)
-                                .padding()
-                        }
-                    }
-                    .padding(MADTheme.Spacing.md)
-                }
+                feedScrollView
             }
         }
         .navigationTitle("Notifications")
@@ -103,6 +116,227 @@ struct NotificationInboxView: View {
             }
         }
         .animation(.spring(response: 0.3), value: hypeToast)
+    }
+
+    // MARK: - Feed shell
+
+    /// Friendly empty state — same visual grammar as Friends/Compete empty
+    /// states elsewhere in the app (centered icon disc + title + subtitle).
+    private var emptyState: some View {
+        VStack(spacing: MADTheme.Spacing.md) {
+            Image(systemName: "bell.badge.fill")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(
+                    LinearGradient(colors: [.white.opacity(0.35), .white.opacity(0.15)], startPoint: .top, endPoint: .bottom)
+                )
+                .frame(width: 64, height: 64)
+                .background(Circle().fill(Color.white.opacity(0.06)))
+
+            VStack(spacing: 4) {
+                Text("No notifications yet")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+                Text("Friend activity, competition updates, and badge wins will land here")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.4))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, MADTheme.Spacing.xl)
+            }
+        }
+    }
+
+    /// Feed grouped by time bucket — Today / Yesterday / Earlier — so the
+    /// list reads chronologically the way a social feed does instead of an
+    /// undifferentiated stream. Filter chips sit inline at the top of the
+    /// feed (scroll away with content — not sticky).
+    private var feedScrollView: some View {
+        ScrollView {
+            LazyVStack(spacing: MADTheme.Spacing.lg) {
+                filterChipsBar
+
+                let groups = groupedNotifications
+                if groups.isEmpty {
+                    filteredEmptyState
+                        .padding(.top, 60)
+                } else {
+                    ForEach(groups, id: \.title) { group in
+                        VStack(alignment: .leading, spacing: 8) {
+                            feedSectionHeader(group.title)
+                            VStack(spacing: 6) {
+                                ForEach(group.items) { notification in
+                                    notificationRow(notification)
+                                        .onAppear {
+                                            if notification.id == notifications.last?.id && hasMore {
+                                                loadMore()
+                                            }
+                                        }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                        .tint(MADTheme.Colors.madRed)
+                        .padding()
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.top, MADTheme.Spacing.sm)
+            .padding(.bottom, MADTheme.Spacing.lg)
+        }
+    }
+
+    /// Filter chip row at the top of the feed. Horizontal scroll lets each
+    /// chip claim its natural width (icon + label + count badge) without
+    /// fighting the others for space — the row never gets scrunched even
+    /// when counts get into the double digits. Scrolls away with the feed.
+    private var filterChipsBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(NotificationFilter.allCases, id: \.self) { f in
+                    filterChip(f)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .scrollClipDisabled()
+    }
+
+    private func filterChip(_ f: NotificationFilter) -> some View {
+        let count = countFor(filter: f)
+        let isSelected = filter == f
+        return Button {
+            withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+                filter = f
+            }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: f.icon)
+                    .font(.system(size: 11, weight: .bold))
+                Text(f.title)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .foregroundColor(isSelected ? .white : .white.opacity(0.55))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule().fill(isSelected ? Color.white.opacity(0.22) : Color.white.opacity(0.10))
+                        )
+                }
+            }
+            .foregroundColor(isSelected ? .white : .white.opacity(0.6))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .background(
+                Capsule()
+                    .fill(isSelected ? MADTheme.Colors.madRed : Color.white.opacity(0.06))
+                    .overlay(
+                        Capsule().strokeBorder(
+                            isSelected ? Color.clear : Color.white.opacity(0.10),
+                            lineWidth: 1
+                        )
+                    )
+            )
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func countFor(filter f: NotificationFilter) -> Int {
+        notifications.filter { f.matches($0.type) }.count
+    }
+
+    /// Empty state shown when the active filter excludes every notification
+    /// (e.g., user picks "Comps" but has no competition notifications).
+    /// Different copy than the universal empty state so users know to try
+    /// "All" if they're not sure where their stuff is.
+    private var filteredEmptyState: some View {
+        VStack(spacing: MADTheme.Spacing.sm) {
+            Image(systemName: filter.icon)
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(.white.opacity(0.25))
+                .frame(width: 50, height: 50)
+                .background(Circle().fill(Color.white.opacity(0.04)))
+            Text("No \(filter.title.lowercased()) notifications")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.6))
+            Button("Show all") { filter = .all }
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundColor(MADTheme.Colors.madRed)
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Inline section divider — small uppercase label on the left + a
+    /// fading line to the right. Quieter than the old sticky uppercase
+    /// banner; doesn't overlap scrolling content on stutter.
+    private func feedSectionHeader(_ title: String) -> some View {
+        HStack(spacing: 10) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .tracking(1.4)
+                .foregroundColor(.white.opacity(0.4))
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.12), Color.white.opacity(0)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(height: 1)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    /// Groups notifications into Today / Yesterday / Earlier this week /
+    /// Older buckets, after applying the active category filter. Buckets
+    /// with zero items don't render.
+    private var groupedNotifications: [(title: String, items: [InAppNotification])] {
+        let cal = Calendar.current
+        let now = Date()
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        func bucket(for n: InAppNotification) -> Int {
+            // Parse created_at with or without fractional seconds.
+            var date: Date? = formatter.date(from: n.created_at)
+            if date == nil {
+                formatter.formatOptions = [.withInternetDateTime]
+                date = formatter.date(from: n.created_at)
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            }
+            guard let d = date else { return 3 }
+            if cal.isDateInToday(d) { return 0 }
+            if cal.isDateInYesterday(d) { return 1 }
+            let days = cal.dateComponents([.day], from: d, to: now).day ?? 0
+            return days < 7 ? 2 : 3
+        }
+
+        // Apply category filter before bucketing — if the filter excludes
+        // everything, the caller renders `filteredEmptyState`.
+        let filtered = notifications.filter { filter.matches($0.type) }
+
+        var buckets: [Int: [InAppNotification]] = [:]
+        for n in filtered {
+            buckets[bucket(for: n), default: []].append(n)
+        }
+
+        let titles = ["Today", "Yesterday", "Earlier this week", "Older"]
+        return titles.enumerated().compactMap { (idx, title) in
+            guard let items = buckets[idx], !items.isEmpty else { return nil }
+            return (title: title, items: items)
+        }
     }
 
     private func showHypeToast(_ message: String) {
@@ -296,78 +530,143 @@ struct NotificationInboxView: View {
     }
 
     private func notificationRow(_ notification: InAppNotification) -> some View {
-        Button {
+        let accent = notificationColor(for: notification.type)
+        let isUnread = !notification.is_read
+
+        return Button {
             handleNotificationTap(notification)
         } label: {
             HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
-                // Type icon
-                notificationIcon(for: notification.type)
-                    .frame(width: 36, height: 36)
-                    .background(
-                        Circle()
-                            .fill(notificationColor(for: notification.type).opacity(0.12))
-                    )
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(notification.title)
-                        .font(.system(size: 13, weight: notification.is_read ? .medium : .bold, design: .rounded))
-                        .foregroundColor(.white)
-
-                    Text(notification.body)
-                        .font(.system(size: 12, design: .rounded))
-                        .foregroundColor(.white.opacity(0.55))
-                        .lineLimit(2)
-
-                    Text(relativeTime(notification.created_at))
-                        .font(.system(size: 10, design: .rounded))
-                        .foregroundColor(.white.opacity(0.3))
-                        .padding(.top, 1)
-                }
-
-                Spacer()
-
-                if canShowHypeButton(notification) {
-                    let hyped = isAlreadyHyped(notification)
-                    Button {
-                        if !hyped { performHype(notification) }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("🔥")
-                                .font(.system(size: 13))
-                                .opacity(hyped ? 0.4 : 1)
-                            Text(hyped ? "Hyped" : "Hype")
-                                .font(.system(size: 12, weight: .semibold, design: .rounded))
-                                .foregroundColor(hyped ? .white.opacity(0.35) : .orange)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule().fill(
-                                hyped ? Color.white.opacity(0.06) : Color.orange.opacity(0.18)
+                // Larger type icon with colored gradient disc — reads as a
+                // "feed event avatar" rather than a small system glyph.
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [accent.opacity(0.30), accent.opacity(0.12)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
                             )
                         )
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(hyped)
+                        .frame(width: 44, height: 44)
+                        .overlay(Circle().strokeBorder(accent.opacity(0.35), lineWidth: 1))
+                    notificationIcon(for: notification.type)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(accent)
                 }
 
-                if !notification.is_read {
+                VStack(alignment: .leading, spacing: 4) {
+                    // Type label + time — small caption row that makes
+                    // "what kind of event is this" instantly readable.
+                    HStack(spacing: 6) {
+                        Text(typeLabel(for: notification.type))
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                            .tracking(0.6)
+                            .foregroundColor(accent)
+                        Text("·")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.white.opacity(0.25))
+                        Text(relativeTime(notification.created_at))
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.45))
+                    }
+
+                    Text(notification.title)
+                        .font(.system(size: 14, weight: isUnread ? .heavy : .semibold, design: .rounded))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.leading)
+
+                    Text(notification.body)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.6))
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+
+                    if canShowHypeButton(notification) {
+                        let hyped = isAlreadyHyped(notification)
+                        Button {
+                            if !hyped { performHype(notification) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: hyped ? "hands.clap.fill" : "hands.clap")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .opacity(hyped ? 0.45 : 1)
+                                Text(hyped ? "Hyped" : "Hype")
+                                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                            }
+                            .foregroundColor(hyped ? .white.opacity(0.35) : .white)
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule()
+                                    .fill(hyped ? Color.white.opacity(0.06) : Color.orange)
+                                    .shadow(color: hyped ? .clear : Color.orange.opacity(0.35), radius: 5, y: 2)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(hyped)
+                        .padding(.top, 4)
+                    }
+                }
+
+                Spacer(minLength: 4)
+
+                if isUnread {
                     Circle()
                         .fill(MADTheme.Colors.madRed)
                         .frame(width: 8, height: 8)
+                        .padding(.top, 6)
                 }
             }
             .padding(MADTheme.Spacing.md)
             .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                    .fill(notification.is_read ? Color.white.opacity(0.03) : Color.white.opacity(0.06))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                            .stroke(Color.white.opacity(notification.is_read ? 0.04 : 0.08), lineWidth: 1)
-                    )
+                ZStack(alignment: .leading) {
+                    Rectangle()
+                        .fill(isUnread ? Color.white.opacity(0.06) : Color.white.opacity(0.03))
+
+                    // Colored leading stripe — quick visual identifier for
+                    // the notification type. Plain rectangle clipped by the
+                    // outer rounded shape so it hugs the card's curve
+                    // instead of overflowing past the rounded corners.
+                    Rectangle()
+                        .fill(accent.opacity(isUnread ? 0.85 : 0.35))
+                        .frame(width: 3)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                        .strokeBorder(Color.white.opacity(isUnread ? 0.10 : 0.05), lineWidth: 1)
+                )
             )
         }
         .buttonStyle(.plain)
+    }
+
+    /// Friendly category label paired with each row's icon. Matches the
+    /// `iconForType` casing so users see "FRIEND · 5m ago" at a glance.
+    private func typeLabel(for type: String) -> String {
+        switch type {
+        case "friend_request": return "FRIEND REQUEST"
+        case "friend_request_accepted": return "FRIEND"
+        case "friend_nudge": return "NUDGE"
+        case "friend_activity": return "FRIEND"
+        case "friend_badge_earned": return "FRIEND BADGE"
+        case "friend_personal_best": return "FRIEND PR"
+        case "friend_challenge_completed": return "FRIEND CHALLENGE"
+        case "competition_invite": return "COMP INVITE"
+        case "competition_accepted": return "COMP JOINED"
+        case "competition_started": return "COMP STARTED"
+        case "competition_finished": return "COMP FINISHED"
+        case "competition_nudge": return "COMP NUDGE"
+        case "competition_flex": return "FLEX"
+        case "competition_milestone": return "MILESTONE"
+        case "streak_broken": return "STREAK"
+        case "personal_best": return "PERSONAL BEST"
+        case "badge_earned": return "BADGE"
+        case "lead_change": return "LEAD CHANGE"
+        case "clash_tie": return "CLASH TIE"
+        default: return "UPDATE"
+        }
     }
 
     // MARK: - Helpers

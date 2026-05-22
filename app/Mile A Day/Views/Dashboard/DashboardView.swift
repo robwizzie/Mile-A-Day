@@ -13,6 +13,11 @@ import ActivityKit
 struct DashboardView: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
+    /// Bindings owned by MainTabView — the inbox bell + count moved into
+    /// the new MADTabHeader on Dashboard, but MainTabView still drives
+    /// cross-tab routing (push handlers can flip `showNotificationInbox`).
+    @Binding var unreadNotificationCount: Int
+    @Binding var showNotificationInbox: Bool
     @EnvironmentObject var notificationService: MADNotificationService
     @EnvironmentObject var competitionService: CompetitionService
     @EnvironmentObject var friendService: FriendService
@@ -37,12 +42,18 @@ struct DashboardView: View {
     /// Controls presentation of the manual workout entry sheet.
     @State private var showManualWorkoutEntry = false
 
+    /// Competition opened directly from a Dashboard rivalry-hint row. Sheet
+    /// presentation, not a tab switch — keeps the user on Dashboard in the
+    /// back stack so dismiss returns them to where they tapped.
+    @State private var rivalryDeepLinkCompetition: Competition?
+
     /// User preference: "chart" (line chart) or "streak" (streak card)
     @AppStorage("weekViewStyle") private var weekViewStyle: String = "streak"
 
     /// Collapsible section state
     @AppStorage("statsCollapsed") private var statsCollapsed: Bool = true
     @AppStorage("workoutsCollapsed") private var workoutsCollapsed: Bool = true
+
 
     /// Navigation state for badges view from celebration
     @State private var navigateToBadgesFromCelebration = false
@@ -249,137 +260,52 @@ struct DashboardView: View {
     var body: some View {
         // iOS 26: Simple ScrollView with background - no ZStack needed
         // NavigationStack is provided by MainTabView
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(spacing: 0) {
-                // Week view: user can toggle between chart and dots
-                weekViewSection
-                    .padding(.top, 8)
-                    .padding(.bottom, 8)
+        VStack(spacing: 0) {
+            MADTabHeader(
+                title: "Mile A Day",
+                actions: dashboardHeaderActions
+            )
 
-                dashboardContent
-                    .frame(maxWidth: .infinity)
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 0) {
+                    // HealthKit permission gate — without auth, today's
+                    // distance never loads and the app silently looks broken.
+                    if !healthManager.isAuthorized {
+                        healthKitDisabledBanner
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                            .padding(.top, MADTheme.Spacing.md)
+                    }
+
+                    // Replay celebration card — only when today's mile is
+                    // done and the celebration isn't currently on screen.
+                    if currentState.isCompleted
+                        && celebrationManager.hasShownGoalCelebrationToday
+                        && !celebrationManager.isShowingCelebration {
+                        replayTodaysCelebrationCard
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                            .padding(.top, MADTheme.Spacing.sm)
+                    }
+
+                    // Week view: user can toggle between chart and dots
+                    weekViewSection
+                        .padding(.top, 8)
+                        .padding(.bottom, 8)
+
+                    dashboardContent
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .scrollContentBackground(.hidden)
+            .refreshable {
+                await refreshDataAsync()
             }
         }
-        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .background(MADTheme.Colors.appBackgroundGradient)
-        .scrollContentBackground(.hidden)
-        .refreshable {
-            await refreshDataAsync()
-        }
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationTitle("Mile A Day")
-        // iOS 26: Liquid Glass is automatic - no modifiers needed
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Image("mad-logo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(height: 28)
-            }
-
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                if userManager.hasNewBadges {
-                    NavigationLink(destination: BadgesView(userManager: userManager, initialBadge: nil, initialFilter: .new)) {
-                        Image(systemName: "trophy.fill")
-                            .foregroundStyle(.yellow)
-                    }
-                }
-
-                // Replay today's celebration (so the user can re-watch and re-share).
-                // Shown once the goal has been completed today and the celebration is
-                // not currently on screen.
-                if currentState.isCompleted
-                    && celebrationManager.hasShownGoalCelebrationToday
-                    && !celebrationManager.isShowingCelebration {
-                    Button {
-                        replayTodaysCelebration()
-                    } label: {
-                        Image(systemName: "sparkles")
-                            .foregroundStyle(MADTheme.Colors.madRed)
-                    }
-                    .accessibilityLabel("Replay today's celebration")
-                }
-
-                // Admin celebration test menu
-                if AppEnvironment.isDevelopment && userManager.currentUser.role == "admin" {
-                    Menu {
-                        Button {
-                            celebrationManager.resetDailyTracking()
-                            celebrationManager.clearAll()
-                            let stats = buildTestGoalCompletionStats()
-                            celebrationManager.addCelebration(.goalCompleted(stats: stats))
-                        } label: {
-                            Label("Test Goal Completion", systemImage: "flame.fill")
-                        }
-
-                        Button {
-                            celebrationManager.clearAll()
-                            let stats = buildTestGoalCompletionStats()
-                            celebrationManager.addCelebration(.postGoalWorkout(stats: stats))
-                        } label: {
-                            Label("Test Extra Mile", systemImage: "star.fill")
-                        }
-
-                        Button {
-                            celebrationManager.clearAll()
-                            if let badge = userManager.currentUser.badges.first {
-                                celebrationManager.addCelebration(.badgeUnlocked(badge: badge))
-                            }
-                        } label: {
-                            Label("Test Badge Unlock", systemImage: "trophy.fill")
-                        }
-
-                        Divider()
-
-                        Menu {
-                            Button("Year 1 (Gold)")          { triggerYearlyTest(years: 1) }
-                            Button("Year 2 (Rose Gold)")     { triggerYearlyTest(years: 2) }
-                            Button("Year 3 (Platinum)")      { triggerYearlyTest(years: 3) }
-                            Button("Year 4 (Sapphire)")      { triggerYearlyTest(years: 4) }
-                            Button("Year 5 (Diamond)")       { triggerYearlyTest(years: 5) }
-                            Button("Year 10 (Holographic)")  { triggerYearlyTest(years: 10) }
-                            Button("Year 25 (Holographic)")  { triggerYearlyTest(years: 25) }
-                        } label: {
-                            Label("Test Year Milestone", systemImage: "calendar.badge.plus")
-                        }
-
-                        Divider()
-
-                        Button {
-                            celebrationManager.resetDailyTracking()
-                            celebrationManager.clearAll()
-                            let stats = buildTestGoalCompletionStats()
-                            celebrationManager.addCelebration(.goalCompleted(stats: stats))
-                            celebrationManager.addCelebration(.postGoalWorkout(stats: stats))
-                            if let badge = userManager.currentUser.badges.first {
-                                celebrationManager.addCelebration(.badgeUnlocked(badge: badge))
-                            }
-                        } label: {
-                            Label("Test All Celebrations", systemImage: "wand.and.stars")
-                        }
-                    } label: {
-                        Image(systemName: "flask.fill")
-                            .foregroundStyle(.purple)
-                    }
-                }
-
-                Button {
-                    showManualWorkoutEntry = true
-                } label: {
-                    Image(systemName: "plus.circle")
-                }
-
-                Button {
-                    showInstructions = true
-                } label: {
-                    Image(systemName: "info.circle")
-                }
-
-                Button {
-                    showGoalSheet = true
-                } label: {
-                    Image(systemName: "gearshape")
-                }
+        .toolbar(.hidden, for: .navigationBar)
+        .navigationDestination(isPresented: $showNotificationInbox) {
+            NotificationInboxView(competitionService: competitionService) { newCount in
+                unreadNotificationCount = newCount
             }
         }
             .sheet(isPresented: $showManualWorkoutEntry) {
@@ -477,6 +403,16 @@ struct DashboardView: View {
                 )
                 .presentationDetents([.height(300)])
                     }
+            // Rivalry deep-link sheet — tapping a "close to passing" row on
+            // the dashboard opens that specific competition.
+            .sheet(item: $rivalryDeepLinkCompetition) { competition in
+                NavigationStack {
+                    CompetitionDetailView(
+                        competition: competition,
+                        competitionService: competitionService
+                    )
+                }
+            }
             .sheet(isPresented: $showInstructions) {
                 InstructionsView()
             }
@@ -650,6 +586,154 @@ struct DashboardView: View {
         }
     }
 
+    // MARK: - Header Actions
+
+    /// Curated 3-action header — bell (with unread count badge), + (manual
+    /// workout), gear (goal/settings). Trophy / sparkles / admin / info
+    /// were moved out of the header to match Friends/Compete/Profile (which
+    /// each have 2-3 actions). Replay is now an inline card in the body
+    /// when applicable; admin/info will get re-surfaced in Profile later.
+    private var dashboardHeaderActions: [MADHeaderAction] {
+        [
+            MADHeaderAction(
+                id: "bell",
+                systemImage: "bell.fill",
+                style: .notification(count: unreadNotificationCount)
+            ) { showNotificationInbox = true },
+            // `square.and.pencil` reads as "log/edit an entry" — distinct
+            // from the Compete tab's `+` icon (which means "create a new
+            // competition"). Both being plain `+` was confusing.
+            MADHeaderAction(
+                id: "add-workout",
+                systemImage: "square.and.pencil",
+                style: .cta
+            ) { showManualWorkoutEntry = true },
+            MADHeaderAction(
+                id: "goal",
+                systemImage: "gearshape.fill"
+            ) { showGoalSheet = true }
+        ]
+    }
+
+    // MARK: - Replay Celebration Card
+
+    /// Inline replacement for the old sparkles toolbar button. Only shown
+    /// when today's goal has been completed and the celebration isn't
+    /// currently on screen — sits right at the top of the dashboard content
+    /// where the achievement is contextually relevant.
+    private var replayTodaysCelebrationCard: some View {
+        Button {
+            replayTodaysCelebration()
+        } label: {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.yellow, MADTheme.Colors.madRed], startPoint: .top, endPoint: .bottom)
+                    )
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Replay today's celebration")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("Re-watch or share your mile-a-day moment")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [Color.yellow.opacity(0.4), MADTheme.Colors.madRed.opacity(0.3)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - HealthKit Permission Banner
+
+    /// Shown when HealthKit is denied or hasn't been requested yet. Tapping
+    /// re-prompts the system dialog; if the user previously declined, iOS
+    /// silently no-ops the re-prompt so we also include a deep-link to the
+    /// app's Settings page where they can flip the toggle manually.
+    private var healthKitDisabledBanner: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "heart.text.square.fill")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.red, .pink], startPoint: .top, endPoint: .bottom)
+                    )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Enable Apple Health")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("Mile A Day needs Health access to count today's miles.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                        .lineLimit(2)
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    healthManager.requestAuthorization { _ in }
+                } label: {
+                    Text("Enable")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(MADTheme.Colors.madRed))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Text("Open Settings")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.75))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            Capsule()
+                                .fill(Color.white.opacity(0.08))
+                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+                        )
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+            }
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                .fill(Color.red.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .strokeBorder(Color.red.opacity(0.3), lineWidth: 1)
+                )
+        )
+    }
+
     // MARK: - Week View (Chart or Dots toggle)
 
     @ViewBuilder
@@ -724,6 +808,10 @@ struct DashboardView: View {
             competitionInvitesSection
             instructionsSection
             todayProgressSection
+            // Cross-comp rivalries — surface "you're X behind Y in [comp]"
+            // hints from every active competition so users see all their
+            // close-pass opportunities in one place.
+            rivalriesSection
             dailyChallengeSection
             friendActivitySection
             activeCompetitionSection
@@ -734,6 +822,102 @@ struct DashboardView: View {
         .padding(.top, 8)
         .padding(.bottom, 100) // Extra padding for tab bar
         .clipped() // Prevent content overflow from causing horizontal jitter
+    }
+
+    /// Aggregated rivalry hints across all the viewer's active competitions.
+    /// Each row shows: competition name, "you're X behind {avatar} Name",
+    /// and tapping a row deep-links into that competition. Hidden when
+    /// there are no close-pass opportunities.
+    @ViewBuilder
+    private var rivalriesSection: some View {
+        let hints: [(Competition, RivalryHint)] = competitionService.competitions
+            .compactMap { comp in
+                guard let hint = comp.rivalryHint else { return nil }
+                return (comp, hint)
+            }
+            .sorted { $0.1.gap < $1.1.gap }   // smallest gap first — most actionable
+
+        if !hints.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(
+                            LinearGradient(colors: [.orange, .yellow], startPoint: .top, endPoint: .bottom)
+                        )
+                    Text("CLOSE TO PASSING")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .tracking(1.2)
+                        .foregroundColor(.white.opacity(0.6))
+                    Spacer()
+                }
+
+                VStack(spacing: 6) {
+                    ForEach(Array(hints.prefix(3)), id: \.0.competition_id) { (comp, hint) in
+                        rivalryDashboardRow(competition: comp, hint: hint)
+                    }
+                }
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(Color.orange.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .strokeBorder(Color.orange.opacity(0.25), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    private func rivalryDashboardRow(competition: Competition, hint: RivalryHint) -> some View {
+        Button {
+            // Present the comp detail directly as a sheet from Dashboard —
+            // taking the user straight to the comp they tapped instead of
+            // dumping them on the Compete tab and making them find it again.
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            rivalryDeepLinkCompetition = competition
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.up.right.circle.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.orange, .yellow], startPoint: .top, endPoint: .bottom)
+                    )
+
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(hint.gapText)
+                            .font(.system(size: 13, weight: .heavy, design: .rounded))
+                            .foregroundColor(.orange)
+                        // Suffix copy is kind-aware — "from passing X" for
+                        // cumulative comps, "from today's clash win vs X"
+                        // for the daily clash race.
+                        Text(hint.actionSuffix)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.85))
+                            .lineLimit(1)
+                    }
+                    Text(competition.competition_name)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.white.opacity(0.04))
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

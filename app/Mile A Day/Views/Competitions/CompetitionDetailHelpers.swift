@@ -146,7 +146,10 @@ struct InviteFriendView: View {
             .navigationTitle("Invite Friends")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                // Use `.confirmationAction` so iOS owns the placement +
+                // hit-target. Custom `.navigationBarLeading` placements can
+                // miss the first tap when sheet drag gestures conflict.
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         dismiss()
                     }
@@ -531,11 +534,11 @@ struct EditCompetitionSettingsView: View {
             .navigationTitle("Edit Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                         .foregroundColor(.white)
                 }
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button {
                         saveSettings()
                     } label: {

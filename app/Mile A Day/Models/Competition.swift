@@ -151,6 +151,159 @@ struct Competition: Codable, Identifiable {
     var streakLives: Int {
         options.lives ?? (options.first_to > 0 ? options.first_to : 0)
     }
+
+    /// When the viewer is close to overtaking the next person above them in
+    /// the standings, returns a hint describing the gap. Returns nil when
+    /// the viewer isn't in striking distance, is already leading, or the
+    /// competition type isn't comparison-based (streaks — independent
+    /// streaks per user — never returns a hint).
+    ///
+    /// Special case for **clash**: prefer today's daily miles gap (more
+    /// actionable — "go a little farther and you win today's point") over
+    /// the cumulative wins-based gap. Wins-based hint only kicks in when
+    /// the daily race isn't close.
+    var rivalryHint: RivalryHint? {
+        // Streaks: each user's streak is independent — "passing" doesn't apply.
+        guard type != .streaks else { return nil }
+        // Only useful while the comp is live.
+        guard status == .active else { return nil }
+        guard let currentUserId = UserDefaults.standard.string(forKey: "backendUserId") else { return nil }
+
+        // For clash, the daily miles race is the more actionable signal.
+        // Try that first; fall through to the overall score gap if not close.
+        if type == .clash, let dailyHint = clashDailyRivalryHint(currentUserId: currentUserId) {
+            return dailyHint
+        }
+
+        let ranked = users
+            .filter { $0.invite_status == .accepted }
+            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        guard ranked.count >= 2 else { return nil }
+        guard let myIndex = ranked.firstIndex(where: { $0.user_id == currentUserId }) else { return nil }
+        guard myIndex > 0 else { return nil } // already leading
+
+        let me = ranked[myIndex]
+        let target = ranked[myIndex - 1]
+        let myScore = me.score ?? 0
+        let targetScore = target.score ?? 0
+        let gap = targetScore - myScore
+        guard gap > 0 else { return nil }
+
+        // Format gap based on comp type. Clash/targets are points-based;
+        // apex/race are miles-based.
+        let isPoints = type == .clash || type == .targets
+        let threshold: Double = isPoints ? 1.001 : 0.5
+        guard gap <= threshold else { return nil }
+
+        let gapText: String
+        if isPoints {
+            let pts = Int(gap.rounded())
+            gapText = pts == 1 ? "1 \(type == .targets ? "point" : "win")" : "\(pts) \(type == .targets ? "points" : "wins")"
+        } else {
+            gapText = String(format: "%.2f \(options.unit.shortDisplayName)", gap)
+        }
+
+        return RivalryHint(
+            targetUserId: target.user_id,
+            targetDisplayName: target.displayName,
+            targetProfileImageURL: target.profile_image_url,
+            gap: gap,
+            gapText: gapText,
+            competitionName: competition_name,
+            kind: isPoints ? .wins : .miles
+        )
+    }
+
+    /// Clash-specific: compute today's interval winner and report the gap
+    /// if the viewer is within 0.5 mi of the daily leader. Returns nil for
+    /// non-clash comps or when the viewer is already leading today / not
+    /// close enough to act on.
+    private func clashDailyRivalryHint(currentUserId: String) -> RivalryHint? {
+        guard type == .clash else { return nil }
+
+        // Build today's interval key matching the per-comp interval setting.
+        // Default to .day if interval is missing.
+        let interval = options.interval ?? .day
+        let calendar = Calendar.current
+        let now = Date()
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        let key: String
+        switch interval {
+        case .day:
+            key = formatter.string(from: calendar.startOfDay(for: now))
+        case .week:
+            var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)
+            components.weekday = calendar.firstWeekday
+            let start = calendar.date(from: components) ?? now
+            key = formatter.string(from: start)
+        case .month:
+            var components = calendar.dateComponents([.year, .month], from: now)
+            components.day = 1
+            let start = calendar.date(from: components) ?? now
+            key = formatter.string(from: start)
+        }
+
+        let accepted = users.filter { $0.invite_status == .accepted }
+        guard accepted.count >= 2 else { return nil }
+        guard let me = accepted.first(where: { $0.user_id == currentUserId }) else { return nil }
+
+        let myMiles = me.intervals?[key] ?? 0
+        // Find the highest-miles person today (excluding me).
+        guard let leader = accepted
+            .filter({ $0.user_id != currentUserId })
+            .max(by: { ($0.intervals?[key] ?? 0) < ($1.intervals?[key] ?? 0) })
+        else { return nil }
+
+        let leaderMiles = leader.intervals?[key] ?? 0
+        let gap = leaderMiles - myMiles
+        // If I'm already winning today, no rivalry hint needed.
+        guard gap > 0 else { return nil }
+        // Within striking distance — same threshold as cumulative miles hints.
+        guard gap <= 0.5 else { return nil }
+
+        return RivalryHint(
+            targetUserId: leader.user_id,
+            targetDisplayName: leader.displayName,
+            targetProfileImageURL: leader.profile_image_url,
+            gap: gap,
+            gapText: String(format: "%.2f \(options.unit.shortDisplayName)", gap),
+            competitionName: competition_name,
+            kind: .clashToday
+        )
+    }
+}
+
+/// Lightweight "you're X behind Y" signal surfaced on comp previews and
+/// optionally aggregated on the dashboard. Built by `Competition.rivalryHint`.
+struct RivalryHint: Identifiable, Equatable {
+    let targetUserId: String
+    let targetDisplayName: String
+    let targetProfileImageURL: String?
+    let gap: Double
+    let gapText: String
+    let competitionName: String
+    /// Distinguishes the rivalry context so the UI can phrase the hint
+    /// appropriately. `clashToday` is the "win today's point" framing;
+    /// `miles` / `wins` are cumulative passing.
+    let kind: Kind
+
+    enum Kind: Equatable {
+        case miles       // cumulative miles (apex, race)
+        case wins        // cumulative wins/points (clash, targets)
+        case clashToday  // today's daily clash race
+    }
+
+    var id: String { targetUserId }
+
+    /// Suffix copy paired with `gapText` in the UI. Lets the same component
+    /// render "0.20 mi from passing Sarah" vs "0.20 mi from today's win".
+    var actionSuffix: String {
+        switch kind {
+        case .miles, .wins: return "from passing \(targetDisplayName)"
+        case .clashToday: return "from winning today's clash vs \(targetDisplayName)"
+        }
+    }
 }
 
 /// Competition lifecycle status - derived from dates
@@ -545,11 +698,14 @@ struct FriendNudgeResponse: Codable {
     let message: String
 }
 
-struct NudgeStatusResponse: Codable {
+struct NudgeStatusResponse: Codable, Equatable {
     let can_nudge: Bool
     let has_completed_mile: Bool
     let already_nudged_today: Bool
     let today_miles: Double?
+    /// Friend's current streak (in days). Optional for backward compatibility
+    /// with pre-leaderboard backend deploys.
+    let current_streak: Int?
 }
 
 struct NudgeStatusBatchResponse: Codable {
