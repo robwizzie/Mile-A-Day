@@ -528,8 +528,10 @@ struct DashboardView: View {
         Task {
             do {
                 let stats = try await workoutService.getUserStats(userId: userId)
+                print("[Dashboard] 📡 Backend best_split_time = \(stats.bestSplitTimeSeconds?.description ?? "nil") sec/mi")
                 if let bestSplitSeconds = stats.bestSplitTimeSeconds, bestSplitSeconds > 0 {
                     let paceMinutesPerMile = bestSplitSeconds / 60.0
+                    print("[Dashboard] ✅ Updating fastest pace from backend → \(paceMinutesPerMile) min/mi")
                     await MainActor.run {
                         userManager.updateFastestPaceFromBackend(paceMinutesPerMile)
                     }

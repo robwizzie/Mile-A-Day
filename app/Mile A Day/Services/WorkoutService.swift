@@ -492,28 +492,20 @@ struct UserStatsAPIResponse: Decodable {
         self.totalMiles = try container.decode(Double.self, forKey: .totalMiles)
         self.bestMilesDay = try? container.decode(BestMilesDay.self, forKey: .bestMilesDay)
 
-        // best_split_time may be a number, null, or an object like {"workout":{}}; capture only if it's a number
-        // Try to decode as Double first
+        // The backend returns best_split_time in one of three shapes:
+        //   1) a number (legacy clients / direct value): 409.27
+        //   2) null: when the user has no qualifying splits
+        //   3) an object: { "best_split_time": 409.27, "workout": {...} }
+        //      — current shape from getBestSplit() in workoutService.ts
+        // Accept all three so the iOS PR keeps tracking the API.
         if let numeric = try? container.decode(Double.self, forKey: .bestSplitTime) {
             self.bestSplitTimeSeconds = numeric
-        } else if container.contains(.bestSplitTime) {
-            // If the key exists but isn't a number, try to decode as a nested dictionary {"workout":{}}
-            // This pattern matches the API response structure
-            do {
-                let nestedContainer = try container.nestedContainer(
-                    keyedBy: DynamicCodingKeys.self, forKey: .bestSplitTime)
-                // If we got here, it's an object - check if it has a "workout" key
-                if let workoutKey = DynamicCodingKeys(stringValue: "workout"),
-                    nestedContainer.contains(workoutKey)
-                {
-                    self.bestSplitTimeSeconds = nil
-                } else {
-                    self.bestSplitTimeSeconds = nil
-                }
-            } catch {
-                // If decoding fails, just set to nil
-                self.bestSplitTimeSeconds = nil
-            }
+        } else if let nested = try? container.nestedContainer(
+            keyedBy: DynamicCodingKeys.self, forKey: .bestSplitTime),
+            let innerKey = DynamicCodingKeys(stringValue: "best_split_time"),
+            let inner = try? nested.decode(Double.self, forKey: innerKey)
+        {
+            self.bestSplitTimeSeconds = inner
         } else {
             self.bestSplitTimeSeconds = nil
         }
