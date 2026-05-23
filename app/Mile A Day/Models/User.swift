@@ -105,8 +105,10 @@ struct User: Identifiable, Codable {
         // Update total miles from HealthKit
         self.totalMiles = totalMiles
         
-        // Update fastest mile pace
-        if fastestPace > 0 && (self.fastestMilePace == 0 || fastestPace < self.fastestMilePace) {
+        // Fastest mile pace is owned by the backend (workout_splits). Only seed it
+        // from HealthKit if we have nothing yet — otherwise wait for the backend
+        // fetch to overwrite it via updateFastestPaceFromBackend.
+        if fastestPace > 0 && self.fastestMilePace == 0 {
             self.fastestMilePace = fastestPace
         }
         

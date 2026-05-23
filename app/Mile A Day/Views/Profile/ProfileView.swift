@@ -596,10 +596,10 @@ struct ProfileView: View {
         }
     }
 
+    /// Backend (workout_splits) is authoritative; HealthKit is fallback only.
     private var bestFastestMilePace: TimeInterval {
-        let hkPace = healthManager.fastestMilePace
-        if hkPace > 0 { return hkPace }
-        return userManager.currentUser.fastestMilePace
+        if userManager.currentUser.fastestMilePace > 0 { return userManager.currentUser.fastestMilePace }
+        return healthManager.fastestMilePace
     }
 
     /// Drag-to-reorder handler: moves the badge at `from` to position `to` in the

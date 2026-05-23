@@ -23,11 +23,10 @@ struct UnifiedStatsGrid: View {
         case currentStreak = "Current Streak"
     }
 
-    /// HealthKit pace (from actual split times) is authoritative; backend is fallback only
+    /// Backend (workout_splits) is authoritative; HealthKit is fallback only
     var bestAllTimeFastestPace: TimeInterval {
-        let hkPace = healthManager.fastestMilePace
-        if hkPace > 0 { return hkPace }
-        return user.fastestMilePace
+        if user.fastestMilePace > 0 { return user.fastestMilePace }
+        return healthManager.fastestMilePace
     }
 
     var isFastestPaceLoading: Bool {

@@ -262,14 +262,14 @@ class UserManager: ObservableObject {
         saveUserData()
     }
     
-    // Update fastest mile pace from backend (only if it's actually faster)
+    // Set fastest mile pace from backend. The backend's workout_splits table is the
+    // authoritative source of truth for PRs — this overwrites whatever was there
+    // (including a stale HealthKit-derived value), so the value can go up or down.
     func updateFastestPaceFromBackend(_ paceMinutesPerMile: TimeInterval) {
         guard paceMinutesPerMile > 0 else { return }
-        // Only update if we don't have a pace yet OR the backend value is faster (lower)
-        if currentUser.fastestMilePace == 0 || paceMinutesPerMile < currentUser.fastestMilePace {
-            currentUser.fastestMilePace = paceMinutesPerMile
-            saveUserData()
-        }
+        guard currentUser.fastestMilePace != paceMinutesPerMile else { return }
+        currentUser.fastestMilePace = paceMinutesPerMile
+        saveUserData()
     }
 
     // Legacy method for backward compatibility

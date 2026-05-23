@@ -34,11 +34,10 @@ struct StreakCard: View {
     // Streak milestone milestones
     private let milestones = [3, 5, 7, 10, 14, 21, 30, 50, 60, 75, 90, 100, 150, 200, 250, 365, 500, 1000]
 
-    /// HealthKit pace (from actual split times) is authoritative; backend is fallback only
+    /// Backend (workout_splits) is authoritative; HealthKit is fallback only
     private var bestFastestPace: TimeInterval {
-        let hkPace = healthManager.fastestMilePace
-        if hkPace > 0 { return hkPace }
-        return fastestPace
+        if fastestPace > 0 { return fastestPace }
+        return healthManager.fastestMilePace
     }
 
     private var nextMilestone: (value: Int, progress: Double, daysToGo: Int)? {

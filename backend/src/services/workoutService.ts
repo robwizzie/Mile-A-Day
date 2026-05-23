@@ -190,7 +190,8 @@ export async function getBestSplit(userId: string, startDate?: string) {
     FROM workout_splits ws
     JOIN workouts w ON ws.workout_id = w.workout_id
     WHERE w.user_id = $1
-	AND split_distance >= 1
+	AND split_distance >= 0.95
+	AND ws.split_pace > 0
 	`;
 
 	const params: (string | number)[] = [userId];

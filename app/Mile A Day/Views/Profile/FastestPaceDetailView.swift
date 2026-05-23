@@ -9,12 +9,11 @@ struct FastestPaceDetailView: View {
     @State private var dayWorkouts: [HKWorkout] = []
     @State private var isLoading = true
 
-    /// Use HealthKit pace (calculated from actual split times) as the authoritative source.
-    /// Falls back to backend value only if HealthKit hasn't calculated yet.
+    /// Backend (workout_splits) is authoritative; HealthKit is fallback only
+    /// until the backend value loads.
     private var bestPace: TimeInterval {
-        let hkPace = healthManager.fastestMilePace
-        if hkPace > 0 { return hkPace }
-        return userManager.currentUser.fastestMilePace
+        if userManager.currentUser.fastestMilePace > 0 { return userManager.currentUser.fastestMilePace }
+        return healthManager.fastestMilePace
     }
 
     var formattedPace: String {

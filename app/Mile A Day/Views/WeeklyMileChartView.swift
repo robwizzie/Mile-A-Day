@@ -90,10 +90,10 @@ struct WeeklyMileChartView: View {
         userManager.currentUser.streak
     }
 
+    /// Backend (workout_splits) is authoritative; HealthKit is fallback only.
     private var bestFastestPace: TimeInterval {
-        let hkPace = healthManager.fastestMilePace
-        if hkPace > 0 { return hkPace }
-        return userManager.currentUser.fastestMilePace
+        if userManager.currentUser.fastestMilePace > 0 { return userManager.currentUser.fastestMilePace }
+        return healthManager.fastestMilePace
     }
 
     private var daysCompletedThisWeek: Int {
