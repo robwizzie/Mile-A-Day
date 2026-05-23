@@ -259,8 +259,12 @@ struct DashboardView: View {
                 dashboardContent
                     .frame(maxWidth: .infinity)
             }
+            // Pin VStack width to the ScrollView so a child with intrinsic
+            // width > screen (long names, wide rows) can't push the page
+            // sideways and create horizontal overscroll.
+            .frame(maxWidth: .infinity)
         }
-        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        .scrollBounceBehavior(.basedOnSize)
         .background(MADTheme.Colors.appBackgroundGradient)
         .scrollContentBackground(.hidden)
         .refreshable {

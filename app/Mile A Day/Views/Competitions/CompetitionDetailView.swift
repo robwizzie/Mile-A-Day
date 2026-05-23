@@ -44,31 +44,39 @@ struct CompetitionDetailView: View {
             MADTheme.Colors.appBackgroundGradient
                 .ignoresSafeArea(.all)
 
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: MADTheme.Spacing.lg) {
-                    // Unified premium header across all states
-                    premiumHero
+            GeometryReader { proxy in
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(spacing: MADTheme.Spacing.lg) {
+                        // Unified premium header across all states
+                        premiumHero
 
-                    // Always-visible Timeline (start/end/remaining) + Rules cards
-                    // so users can read the comp at a glance no matter the state.
-                    timelineCard
+                        // Always-visible Timeline (start/end/remaining) + Rules cards
+                        // so users can read the comp at a glance no matter the state.
+                        timelineCard
 
-                    quickRulesCard
+                        quickRulesCard
 
-                    // Status-specific content (leaderboard / podium / participants etc.)
-                    switch competition.status {
-                    case .lobby, .scheduled:
-                        lobbyContent
-                    case .active:
-                        activeContent
-                    case .finished:
-                        finishedContent
+                        // Status-specific content (leaderboard / podium / participants etc.)
+                        switch competition.status {
+                        case .lobby, .scheduled:
+                            lobbyContent
+                        case .active:
+                            activeContent
+                        case .finished:
+                            finishedContent
+                        }
                     }
+                    .padding(MADTheme.Spacing.md)
+                    .padding(.bottom, MADTheme.Spacing.xxl)
+                    // Hard-pin content width to the viewport. `.frame(maxWidth: .infinity)`
+                    // alone wasn't enough: if a child (long row, calendar grid, badge cluster)
+                    // has natural width > viewport, SwiftUI's vertical ScrollView still grows
+                    // contentSize horizontally and lets you pan sideways. Locking the VStack to
+                    // an exact width forces children to fit and kills the horizontal scroll.
+                    .frame(width: proxy.size.width)
                 }
-                .padding(MADTheme.Spacing.md)
-                .padding(.bottom, MADTheme.Spacing.xxl)
+                .scrollBounceBehavior(.basedOnSize)
             }
-            .scrollBounceBehavior(.basedOnSize)
         }
         .navigationTitle(competition.competition_name)
         .navigationBarTitleDisplayMode(.inline)
