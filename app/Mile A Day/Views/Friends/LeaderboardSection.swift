@@ -535,7 +535,7 @@ struct LeaderboardSection: View {
     private func podiumSlotContent(entry: LeaderboardEntry, height: CGFloat, avatarSize: CGFloat, accent: Color, isFirst: Bool) -> some View {
         VStack(spacing: 6) {
             ZStack(alignment: .topTrailing) {
-                AvatarView(name: entry.displayName, imageURL: entry.profile_image_url, size: avatarSize)
+                AvatarView(name: entry.fullName, imageURL: entry.profile_image_url, size: avatarSize)
                     .overlay(
                         Circle().strokeBorder(accent, lineWidth: isFirst ? 3 : 2)
                     )
@@ -553,7 +553,7 @@ struct LeaderboardSection: View {
                     .offset(y: -2)
             }
             VStack(spacing: 1) {
-                Text(entry.displayName)
+                Text(handleText(entry))
                     .font(.system(size: isFirst ? 13 : 11, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
                     .lineLimit(1)
@@ -569,6 +569,13 @@ struct LeaderboardSection: View {
                 Text(formatValue(entry.value, metric: vm.metric))
                     .font(.system(size: isFirst ? 14 : 12, weight: .heavy, design: .rounded))
                     .foregroundColor(accent)
+                if let subtitle = podiumStatsSubtitle(entry) {
+                    Text(subtitle)
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.45))
+                        .lineLimit(1)
+                        .padding(.horizontal, 2)
+                }
             }
         }
         .frame(maxWidth: .infinity)
@@ -602,14 +609,14 @@ struct LeaderboardSection: View {
                 .foregroundColor(.white.opacity(0.5))
                 .frame(width: 28, alignment: .center)
 
-            AvatarView(name: entry.displayName, imageURL: entry.profile_image_url, size: 34)
+            AvatarView(name: entry.fullName, imageURL: entry.profile_image_url, size: 34)
                 .overlay(
                     Circle().strokeBorder(entry.is_current_user ? MADTheme.Colors.madRed : Color.clear, lineWidth: 1.5)
                 )
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(entry.displayName)
+                    Text(handleText(entry))
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)
@@ -623,10 +630,10 @@ struct LeaderboardSection: View {
                             .background(Capsule().fill(MADTheme.Colors.madRed))
                     }
                 }
-                if let username = entry.username, !username.isEmpty, username != entry.displayName {
-                    Text("@\(username)")
+                if let subtitle = statsSubtitle(entry) {
+                    Text(subtitle)
                         .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.35))
+                        .foregroundColor(.white.opacity(0.45))
                         .lineLimit(1)
                 }
             }
@@ -662,6 +669,55 @@ struct LeaderboardSection: View {
         case .miles: return "MILES"
         case .streak: return "DAYS"
         }
+    }
+
+    /// Username with @ prefix when available, real name as fallback so users
+    /// without a username still render readably.
+    private func handleText(_ entry: LeaderboardEntry) -> String {
+        if let u = entry.username, !u.isEmpty { return "@\(u)" }
+        return entry.fullName
+    }
+
+    /// Sub-line shown beneath the handle in list rows.
+    /// For the miles metric we omit total miles (it's already the primary value
+    /// on the right), keeping just the best pace. For streak we show both.
+    private func statsSubtitle(_ entry: LeaderboardEntry) -> String? {
+        let paceText = formatPace(entry.period_best_pace)
+        switch vm.metric {
+        case .miles:
+            return paceText.map { "Best mile · \($0)" }
+        case .streak:
+            let milesText = entry.period_miles.map { formatMiles($0) }
+            let joined = [milesText, paceText].compactMap { $0 }.joined(separator: " · ")
+            return joined.isEmpty ? nil : joined
+        }
+    }
+
+    /// Tighter version of statsSubtitle for the podium — no labels, just
+    /// "X.X mi · 8:32/mi". Falls back gracefully when either stat is missing.
+    private func podiumStatsSubtitle(_ entry: LeaderboardEntry) -> String? {
+        let paceText = formatPace(entry.period_best_pace)
+        switch vm.metric {
+        case .miles:
+            return paceText
+        case .streak:
+            let milesText = entry.period_miles.map { formatMiles($0) }
+            let joined = [milesText, paceText].compactMap { $0 }.joined(separator: " · ")
+            return joined.isEmpty ? nil : joined
+        }
+    }
+
+    private func formatMiles(_ value: Double) -> String {
+        if value >= 100 { return String(format: "%.0f mi", value) }
+        return String(format: "%.1f mi", value)
+    }
+
+    private func formatPace(_ secondsPerMile: Double?) -> String? {
+        guard let s = secondsPerMile, s > 0, s.isFinite else { return nil }
+        let total = Int(s.rounded())
+        let m = total / 60
+        let sec = total % 60
+        return String(format: "%d:%02d/mi", m, sec)
     }
 
     private func formatValue(_ value: Double, metric: LeaderboardMetric) -> String {

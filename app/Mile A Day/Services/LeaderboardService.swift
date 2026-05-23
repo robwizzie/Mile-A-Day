@@ -44,21 +44,39 @@ struct LeaderboardEntry: Decodable, Identifiable {
     let last_name: String?
     let profile_image_url: String?
     let value: Double
+    /// Total miles within the active period (or all-time when metric=streak).
+    /// Optional so older backend builds without the field still decode.
+    let period_miles: Double?
+    /// Fastest mile pace (seconds/mi) within the same window; nil if none recorded.
+    let period_best_pace: Double?
     let is_current_user: Bool
 
     var id: String { user_id }
 
+    /// Prefer @username on the leaderboard so handles are recognizable.
+    /// Falls back to first/last name, then "Anonymous" if neither exists.
     var displayName: String {
+        if let username = username, !username.isEmpty {
+            return username
+        }
         if let first = first_name, !first.isEmpty {
             if let last = last_name, !last.isEmpty {
                 return "\(first) \(last)"
             }
             return first
         }
-        if let username = username, !username.isEmpty {
-            return username
-        }
         return "Anonymous"
+    }
+
+    /// Real name for the avatar's initials fallback — username initials look noisy.
+    var fullName: String {
+        if let first = first_name, !first.isEmpty {
+            if let last = last_name, !last.isEmpty {
+                return "\(first) \(last)"
+            }
+            return first
+        }
+        return displayName
     }
 }
 
