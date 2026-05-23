@@ -136,6 +136,65 @@ struct Competition: Codable, Identifiable {
         return Self.etDateFormatter.string(from: windowStart)
     }
 
+    /// The [start, end] day boundaries (inclusive, ET) of the interval window that
+    /// contains `date`, honoring the competition's cadence. Weekly windows are
+    /// anchored to start_date (so a week can run e.g. Wed→Tue), matching
+    /// `weeklyIntervalKey(for:)` and the backend. Both dates are midnight-ET.
+    func intervalWindow(for date: Date) -> (start: Date, end: Date) {
+        let cal = Self.etCalendar
+        switch options.interval ?? .day {
+        case .day:
+            let start = cal.startOfDay(for: date)
+            return (start, start)
+        case .week:
+            let windowStart: Date
+            if let startDate = startDateFormatted {
+                let startDay = cal.startOfDay(for: startDate)
+                let curDay = cal.startOfDay(for: date)
+                let days = cal.dateComponents([.day], from: startDay, to: curDay).day ?? 0
+                let weekIndex = Int(floor(Double(days) / 7.0))
+                windowStart = cal.date(byAdding: .day, value: weekIndex * 7, to: startDay) ?? startDay
+            } else {
+                var comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+                comps.weekday = cal.firstWeekday
+                windowStart = cal.date(from: comps) ?? cal.startOfDay(for: date)
+            }
+            let end = cal.date(byAdding: .day, value: 6, to: windowStart) ?? windowStart
+            return (windowStart, end)
+        case .month:
+            var comps = cal.dateComponents([.year, .month], from: date)
+            comps.day = 1
+            let start = cal.date(from: comps) ?? cal.startOfDay(for: date)
+            let nextMonth = cal.date(byAdding: .month, value: 1, to: start) ?? start
+            let end = cal.date(byAdding: .day, value: -1, to: nextMonth) ?? start
+            return (start, end)
+        }
+    }
+
+    /// The instant the interval containing `date` expires — the end of its last ET
+    /// day. Clamped to the competition's own end date so the final interval never
+    /// counts down past the competition itself.
+    func intervalExpiry(for date: Date) -> Date {
+        let cal = Self.etCalendar
+        let window = intervalWindow(for: date)
+        let expiry = cal.date(byAdding: .day, value: 1, to: window.end) ?? window.end
+        if let endDate = endDateFormatted,
+           let compExpiry = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: endDate)),
+           compExpiry < expiry {
+            return compExpiry
+        }
+        return expiry
+    }
+
+    /// True when the interval window containing `date` also contains right now —
+    /// i.e. `date` falls in the live interval.
+    func isCurrentInterval(_ date: Date) -> Bool {
+        let cal = Self.etCalendar
+        let window = intervalWindow(for: date)
+        let now = cal.startOfDay(for: Date())
+        return now >= window.start && now <= window.end
+    }
+
     var startDateFormatted: Date? {
         guard let dateStr = start_date else { return nil }
         return Self.etDateFormatter.date(from: dateStr)

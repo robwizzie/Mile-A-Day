@@ -302,15 +302,23 @@ extension CompetitionDetailView {
 
             Spacer()
 
-            VStack(spacing: 2) {
+            VStack(spacing: 3) {
                 Text(intervalDateLabel)
                     .font(MADTheme.Typography.headline)
                     .foregroundColor(.white)
 
-                if !isToday {
+                if let range = intervalRangeLabel {
+                    Text(range)
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.white.opacity(0.5))
+                } else if !isToday {
                     Text(selectedIntervalDate.formatted(date: .abbreviated, time: .omitted))
                         .font(MADTheme.Typography.caption)
                         .foregroundColor(.white.opacity(0.5))
+                }
+
+                if competition.isCurrentInterval(selectedIntervalDate) {
+                    intervalCountdown
                 }
             }
 
@@ -799,20 +807,76 @@ extension CompetitionDetailView {
                 return selectedIntervalDate.formatted(date: .abbreviated, time: .omitted)
             }
         case .week:
-            if calendar.isDate(Date(), equalTo: selectedIntervalDate, toGranularity: .weekOfYear) {
+            // Weeks are anchored to the competition's start date, so the label
+            // reflects "Week N" of the comp rather than the calendar week. The
+            // explicit Wed→Tue date range is shown separately in intervalRangeLabel.
+            if competition.isCurrentInterval(selectedIntervalDate) {
                 return "This Week"
             }
-            var components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: selectedIntervalDate)
-            components.weekday = calendar.firstWeekday
-            let startOfWeek = calendar.date(from: components) ?? selectedIntervalDate
-            let endOfWeek = calendar.date(byAdding: .day, value: 6, to: startOfWeek) ?? selectedIntervalDate
-            return "\(startOfWeek.formatted(.dateTime.month(.abbreviated).day())) - \(endOfWeek.formatted(.dateTime.month(.abbreviated).day()))"
+            if let startDate = competition.startDateFormatted {
+                let window = competition.intervalWindow(for: selectedIntervalDate)
+                let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: startDate), to: window.start).day ?? 0
+                return "Week \(max(1, days / 7 + 1))"
+            }
+            return "Week"
         case .month:
             if calendar.isDate(Date(), equalTo: selectedIntervalDate, toGranularity: .month) {
                 return "This Month"
             }
             return selectedIntervalDate.formatted(.dateTime.month(.wide).year())
         }
+    }
+
+    /// Explicit start→end day range for the selected interval (e.g. "Wed, May 21 –
+    /// Tue, May 27"), so users can see exactly which days an anchored window covers.
+    /// Returned only for week/month intervals — daily intervals are self-evident.
+    var intervalRangeLabel: String? {
+        let interval = competition.options.interval ?? .day
+        guard interval != .day else { return nil }
+        let window = competition.intervalWindow(for: selectedIntervalDate)
+        let style = Date.FormatStyle.dateTime.weekday(.abbreviated).month(.abbreviated).day()
+        let plain = Date.FormatStyle.dateTime.month(.abbreviated).day()
+        switch interval {
+        case .week:
+            return "\(window.start.formatted(style)) – \(window.end.formatted(style))"
+        case .month:
+            return "\(window.start.formatted(plain)) – \(window.end.formatted(plain))"
+        case .day:
+            return nil
+        }
+    }
+
+    /// Live "Ends in 2d 4h" countdown until the current interval closes. Ticks each
+    /// minute via TimelineView and clamps to the competition's own end date.
+    @ViewBuilder
+    var intervalCountdown: some View {
+        let expiry = competition.intervalExpiry(for: selectedIntervalDate)
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            let remaining = max(0, expiry.timeIntervalSince(context.date))
+            HStack(spacing: 4) {
+                Image(systemName: "timer")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(remaining <= 0 ? "Interval ended" : "Ends in \(Self.countdownString(remaining))")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+            }
+            .foregroundColor(MADTheme.Colors.madRed)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Capsule().fill(MADTheme.Colors.madRed.opacity(0.14))
+            )
+        }
+    }
+
+    /// Compact "2d 4h" / "5h 12m" / "8m" remaining-time string.
+    static func countdownString(_ total: TimeInterval) -> String {
+        let secs = Int(total)
+        let days = secs / 86_400
+        let hours = (secs % 86_400) / 3_600
+        let mins = (secs % 3_600) / 60
+        if days > 0 { return "\(days)d \(hours)h" }
+        if hours > 0 { return "\(hours)h \(mins)m" }
+        return "\(max(1, mins))m"
     }
 
     func leaderboardScoreLabel(for user: CompetitionUser) -> String {
@@ -993,8 +1057,23 @@ struct DailyActivityCalendar: View {
         return cells
     }
 
+    /// Bucket key for a calendar cell — must dispatch on the competition's interval
+    /// so weekly/monthly competitions map every day in a window to the same key the
+    /// backend stored progress under. A pure daily key here would silently return 0
+    /// for every cell in a week/month competition. Mirrors the parent view's
+    /// `intervalKey(for:)`.
     private func key(for date: Date) -> String {
-        isoDateFormatter.string(from: Calendar.current.startOfDay(for: date))
+        switch competition.options.interval ?? .day {
+        case .day:
+            return isoDateFormatter.string(from: Calendar.current.startOfDay(for: date))
+        case .week:
+            return competition.weeklyIntervalKey(for: date)
+        case .month:
+            var comps = Calendar.current.dateComponents([.year, .month], from: date)
+            comps.day = 1
+            let monthStart = Calendar.current.date(from: comps) ?? date
+            return isoDateFormatter.string(from: monthStart)
+        }
     }
 
     private func isInRange(_ date: Date) -> Bool {
