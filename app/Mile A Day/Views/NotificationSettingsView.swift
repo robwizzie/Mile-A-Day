@@ -320,17 +320,11 @@ struct NotificationSettingsView: View {
     private func saveAndApply() {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         prefs.save()
-        if prefs.dailyReminderEnabled {
-            let widgetData = WidgetDataStore.load()
-            notificationService.updateDailyReminder(
-                isCompleted: widgetData.miles >= widgetData.goal,
-                currentMiles: widgetData.miles,
-                goalMiles: widgetData.goal,
-                at: prefs.dailyReminderHour
-            )
-        } else {
-            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [MADNotificationService.Identifier.dailyReminder])
-        }
+        // Daily reminder is now backend-driven (server cron + APNs push). Clear
+        // any legacy local-notification still pending from older app versions —
+        // the backend respects `daily_reminder_enabled` and `daily_reminder_hour`
+        // which are synced below as part of the prefs payload.
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [MADNotificationService.Identifier.dailyReminder])
 
         // Sync preferences to the backend so push notification filtering works
         Task {
@@ -347,6 +341,9 @@ struct NotificationSettingsView: View {
                     "competition_milestones_enabled": prefs.competitionMilestonesEnabled,
                     "quiet_hours_start": prefs.dndEnabled ? prefs.dndStartHour : NSNull(),
                     "quiet_hours_end": prefs.dndEnabled ? prefs.dndEndHour : NSNull(),
+                    "daily_reminder_enabled": prefs.dailyReminderEnabled,
+                    "daily_reminder_hour": prefs.dailyReminderHour,
+                    "timezone_offset_minutes": TimeZone.current.secondsFromGMT() / 60,
                 ]
                 _ = try await friendService.updateNotificationSettings(backendSettings)
             } catch {

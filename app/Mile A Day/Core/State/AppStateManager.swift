@@ -82,6 +82,7 @@ class AppStateManager: ObservableObject {
         Task {
             await MADNotificationService.shared.requestAuthorization()
             MADNotificationService.shared.registerForRemoteNotifications()
+            await MADNotificationService.shared.syncDailyReminderPrefsToBackend()
         }
 
         DispatchQueue.main.async {

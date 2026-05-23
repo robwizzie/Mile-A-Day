@@ -127,56 +127,58 @@ final class MADNotificationService: NSObject, ObservableObject {
         schedule(content: content, trigger: .none, identifier: Identifier.friendCompleted(friendName))
     }
 
-    /// Updates the daily reminder with intelligent scheduling.
-    /// Schedules a one-shot notification for the next occurrence of the reminder hour.
-    /// Content changes based on whether the user has completed their goal:
-    /// - Completed: "Way to go!" congratulatory message
-    /// - Not completed: "Mile still waiting…" motivational nudge
-    /// Must be called on every foreground resume and health data update so the
-    /// notification always reflects the latest completion state.
+    /// Daily "Mile still waiting…" reminders are now sent by the backend as
+    /// push notifications, gated on the authoritative server-side completion
+    /// state (see `backend/src/services/dailyReminderService.ts`). The previous
+    /// local-notification implementation baked the "still waiting" vs.
+    /// "completed" text in at schedule time and couldn't be re-evaluated when
+    /// the app was backgrounded — so finishing your mile on the watch (or any
+    /// path that didn't wake the iPhone app before 6 PM) would still fire the
+    /// stale "still waiting" notification.
+    ///
+    /// This stub is kept so existing call sites compile and so any legacy local
+    /// reminder still pending in `UNUserNotificationCenter` from older app
+    /// versions is cleared on next run. Preferences (`dailyReminderEnabled`,
+    /// `dailyReminderHour`) are now synced to the backend via
+    /// `syncDailyReminderPrefsToBackend()`.
     func updateDailyReminder(isCompleted: Bool, currentMiles: Double = 0, goalMiles: Double = 1.0, at hour: Int? = nil) {
-        // Remove any pending daily reminder first
         center.removePendingNotificationRequests(withIdentifiers: [Identifier.dailyReminder])
+    }
 
-        // Respect user preferences
+    /// Pushes the user's daily-reminder preferences + current UTC offset to the
+    /// backend so the server cron knows when (and whether) to fire the daily
+    /// "Mile still waiting…" push.
+    ///
+    /// Safe to call repeatedly. No-ops if the user isn't authenticated.
+    @MainActor
+    func syncDailyReminderPrefsToBackend() async {
+        guard UserDefaults.standard.string(forKey: "authToken") != nil else { return }
+
         let prefs = NotificationPreferences.load()
-        guard prefs.dailyReminderEnabled else { return }
+        let tzOffsetMinutes = TimeZone.current.secondsFromGMT() / 60
 
-        let reminderHour = hour ?? prefs.dailyReminderHour
-
-        // Schedule a one-shot notification for the next occurrence of reminderHour.
-        // One-shot ensures stale content can never fire on a future day — the app must
-        // re-evaluate and reschedule each time it runs.
-        let now = Date()
-        var targetComponents = Calendar.current.dateComponents([.year, .month, .day], from: now)
-        targetComponents.hour = reminderHour
-        targetComponents.minute = 0
-        targetComponents.second = 0
-
-        if let targetDate = Calendar.current.date(from: targetComponents), targetDate <= now {
-            // Already past the reminder hour today — schedule for tomorrow
-            if let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: now) {
-                targetComponents = Calendar.current.dateComponents([.year, .month, .day], from: tomorrow)
-                targetComponents.hour = reminderHour
-                targetComponents.minute = 0
-                targetComponents.second = 0
-            }
+        struct DailyReminderPrefs: Codable {
+            let daily_reminder_enabled: Bool
+            let daily_reminder_hour: Int
+            let timezone_offset_minutes: Int
         }
+        let payload = DailyReminderPrefs(
+            daily_reminder_enabled: prefs.dailyReminderEnabled,
+            daily_reminder_hour: prefs.dailyReminderHour,
+            timezone_offset_minutes: tzOffsetMinutes
+        )
 
-        let trigger = UNCalendarNotificationTrigger(dateMatching: targetComponents, repeats: false)
-
-        let content = UNMutableNotificationContent()
-        content.sound = .default
-
-        if isCompleted {
-            content.title = "Way to go!"
-            content.body = "You crushed your mile today. See you tomorrow at the start line!"
-        } else {
-            content.title = "Mile still waiting…"
-            content.body = "Don't forget to log your daily mile! Lace up and get moving."
+        do {
+            let body = try JSONEncoder().encode(payload)
+            let _: NotificationSettingsResponse = try await APIClient.fancyFetch(
+                endpoint: "/notifications/preferences",
+                method: .PUT,
+                body: body,
+                responseType: NotificationSettingsResponse.self
+            )
+        } catch {
+            print("[Notifications] Failed to sync daily reminder prefs: \(error.localizedDescription)")
         }
-
-        schedule(content: content, trigger: .calendar(trigger), identifier: Identifier.dailyReminder)
     }
     
     // MARK: - Smart Notification Logic

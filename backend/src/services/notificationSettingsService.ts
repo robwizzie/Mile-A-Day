@@ -16,6 +16,9 @@ export interface NotificationPreferences {
 	step_goal_enabled: boolean;
 	quiet_hours_start: number | null; // hour 0-23 or null for no quiet hours
 	quiet_hours_end: number | null;
+	daily_reminder_enabled: boolean;
+	daily_reminder_hour: number; // 0-23, hour in user's local timezone
+	timezone_offset_minutes: number | null; // user's current UTC offset in minutes
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferences = {
@@ -29,7 +32,10 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
 	competition_milestones_enabled: true,
 	step_goal_enabled: true,
 	quiet_hours_start: null,
-	quiet_hours_end: null
+	quiet_hours_end: null,
+	daily_reminder_enabled: true,
+	daily_reminder_hour: 18,
+	timezone_offset_minutes: null
 };
 
 export async function getNotificationPreferences(userId: string): Promise<NotificationPreferences> {
@@ -49,7 +55,10 @@ export async function getNotificationPreferences(userId: string): Promise<Notifi
 		competition_milestones_enabled: row.competition_milestones_enabled ?? true,
 		step_goal_enabled: row.step_goal_enabled ?? true,
 		quiet_hours_start: row.quiet_hours_start ?? null,
-		quiet_hours_end: row.quiet_hours_end ?? null
+		quiet_hours_end: row.quiet_hours_end ?? null,
+		daily_reminder_enabled: row.daily_reminder_enabled ?? true,
+		daily_reminder_hour: row.daily_reminder_hour ?? 18,
+		timezone_offset_minutes: row.timezone_offset_minutes ?? null
 	};
 }
 
@@ -74,7 +83,10 @@ export async function updateNotificationPreferences(
 		{ key: 'competition_milestones_enabled', value: prefs.competition_milestones_enabled },
 		{ key: 'step_goal_enabled', value: prefs.step_goal_enabled },
 		{ key: 'quiet_hours_start', value: prefs.quiet_hours_start },
-		{ key: 'quiet_hours_end', value: prefs.quiet_hours_end }
+		{ key: 'quiet_hours_end', value: prefs.quiet_hours_end },
+		{ key: 'daily_reminder_enabled', value: prefs.daily_reminder_enabled },
+		{ key: 'daily_reminder_hour', value: prefs.daily_reminder_hour },
+		{ key: 'timezone_offset_minutes', value: prefs.timezone_offset_minutes }
 	];
 
 	for (const field of fields) {

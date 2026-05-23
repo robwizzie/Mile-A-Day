@@ -24,6 +24,15 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             }
         }
 
+        // On cold launches for already-authenticated users (no auth flow runs),
+        // push the latest daily-reminder prefs + current TZ to the backend so
+        // the server cron has up-to-date scheduling info.
+        if UserDefaults.standard.bool(forKey: "MAD_IsAuthenticated") {
+            Task {
+                await MADNotificationService.shared.syncDailyReminderPrefsToBackend()
+            }
+        }
+
         return true
     }
 

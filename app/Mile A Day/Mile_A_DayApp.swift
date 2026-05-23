@@ -37,6 +37,7 @@ struct Mile_A_DayApp: App {
                         Task {
                             await MADNotificationService.shared.requestAuthorization()
                             MADNotificationService.shared.registerForRemoteNotifications()
+                            await MADNotificationService.shared.syncDailyReminderPrefsToBackend()
                             await DailyStepsSyncService.shared.syncNow(force: true)
                         }
                     }

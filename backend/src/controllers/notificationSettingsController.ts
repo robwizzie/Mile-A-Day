@@ -4,7 +4,7 @@ import {
 	getNotificationPreferences,
 	updateNotificationPreferences,
 	getFriendNotificationSettings,
-	updateFriendNotificationSettings,
+	updateFriendNotificationSettings
 } from '../services/notificationSettingsService.js';
 
 export async function getPreferences(req: AuthenticatedRequest, res: Response) {
@@ -19,12 +19,27 @@ export async function getPreferences(req: AuthenticatedRequest, res: Response) {
 
 export async function updatePreferences(req: AuthenticatedRequest, res: Response) {
 	try {
-		const { quiet_hours_start, quiet_hours_end } = req.body;
+		const { quiet_hours_start, quiet_hours_end, daily_reminder_hour, timezone_offset_minutes } = req.body;
 		if (quiet_hours_start !== undefined && quiet_hours_start !== null && (quiet_hours_start < 0 || quiet_hours_start > 23)) {
 			return res.status(400).json({ error: 'quiet_hours_start must be 0-23 or null' });
 		}
 		if (quiet_hours_end !== undefined && quiet_hours_end !== null && (quiet_hours_end < 0 || quiet_hours_end > 23)) {
 			return res.status(400).json({ error: 'quiet_hours_end must be 0-23 or null' });
+		}
+		if (
+			daily_reminder_hour !== undefined &&
+			daily_reminder_hour !== null &&
+			(daily_reminder_hour < 0 || daily_reminder_hour > 23)
+		) {
+			return res.status(400).json({ error: 'daily_reminder_hour must be 0-23' });
+		}
+		// UTC offsets range roughly from -12:00 (-720) to +14:00 (+840) minutes.
+		if (
+			timezone_offset_minutes !== undefined &&
+			timezone_offset_minutes !== null &&
+			(timezone_offset_minutes < -720 || timezone_offset_minutes > 840)
+		) {
+			return res.status(400).json({ error: 'timezone_offset_minutes must be between -720 and 840' });
 		}
 
 		const updated = await updateNotificationPreferences(req.userId!, req.body);
@@ -53,7 +68,7 @@ export async function updateFriendSettings(req: AuthenticatedRequest, res: Respo
 		const updated = await updateFriendNotificationSettings(req.userId!, friendId, {
 			muted,
 			nudges_muted,
-			activity_muted,
+			activity_muted
 		});
 		res.status(200).json(updated);
 	} catch (error: any) {

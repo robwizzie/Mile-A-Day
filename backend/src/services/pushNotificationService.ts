@@ -88,7 +88,8 @@ export type NotificationType =
 	| 'badge_earned'
 	| 'friend_badge_earned'
 	| 'friend_challenge_completed'
-	| 'hype_received';
+	| 'hype_received'
+	| 'daily_reminder';
 
 interface PushPayload {
 	title: string;
@@ -192,7 +193,13 @@ const HIGH_PRIORITY_TYPES: NotificationType[] = [
 	'competition_finished',
 	// Flexes are time-of-day specific (you flexed because you're winning *now*);
 	// queueing them past quiet hours / daily cap delivers stale taunts.
-	'competition_flex'
+	'competition_flex',
+	// Daily reminders are evaluated server-side at the user's chosen hour and
+	// already filtered to users who haven't completed their mile. Queueing one
+	// to the 10 AM flush would resend the same "Mile still waiting…" text the
+	// next morning without rechecking — reintroducing the exact stale-text race
+	// the server-side path was built to eliminate.
+	'daily_reminder'
 ];
 
 async function getDailyNotificationCount(userId: string): Promise<number> {
