@@ -105,6 +105,9 @@ struct RecentWorkoutsView: View {
     let workouts: [HKWorkout]
     @EnvironmentObject var healthManager: HealthKitManager
     @State private var selectedWorkout: IdentifiableWorkout?
+    @State private var displayCount: Int = 10
+
+    private static let pageSize: Int = 10
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
@@ -119,7 +122,7 @@ struct RecentWorkoutsView: View {
                     .padding(.vertical)
             } else {
                 LazyVStack(spacing: MADTheme.Spacing.md) {
-                    ForEach(workouts.prefix(10), id: \.uuid) { workout in
+                    ForEach(workouts.prefix(displayCount), id: \.uuid) { workout in
                         Button {
                             selectedWorkout = IdentifiableWorkout(workout: workout)
                         } label: {
@@ -130,12 +133,34 @@ struct RecentWorkoutsView: View {
                         .buttonStyle(ScaleButtonStyle())
                     }
                 }
+
+                if displayCount < workouts.count {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            displayCount = min(displayCount + Self.pageSize, workouts.count)
+                        }
+                    } label: {
+                        Text("Load More")
+                            .font(MADTheme.Typography.subheadline)
+                            .foregroundColor(MADTheme.Colors.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, MADTheme.Spacing.sm)
+                    }
+                    .buttonStyle(ScaleButtonStyle())
+                    .padding(.top, MADTheme.Spacing.xs)
+                }
             }
         }
         .padding()
         .cardStyle()
         .sheet(item: $selectedWorkout) { identifiableWorkout in
             WorkoutDetailView(workout: identifiableWorkout.workout)
+        }
+        .onChange(of: workouts.count) { _, _ in
+            // Reset paging when the underlying list changes (e.g., refresh).
+            if displayCount > max(Self.pageSize, workouts.count) {
+                displayCount = Self.pageSize
+            }
         }
     }
 }
