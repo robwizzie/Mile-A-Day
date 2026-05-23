@@ -19,38 +19,20 @@ struct MainTabView: View {
         TabView(selection: $selectedTab) {
             Tab("Dashboard", systemImage: "house.fill", value: 0) {
                 NavigationStack {
-                    DashboardView(healthManager: healthManager, userManager: userManager)
+                    // Bell + inbox routing moved into DashboardView itself
+                    // so it can live inside the new MADTabHeader (consistent
+                    // with Friends / Compete / Profile). MainTabView still
+                    // owns the count for cross-tab triggers via
+                    // `notificationInboxBridge`.
+                    DashboardView(
+                        healthManager: healthManager,
+                        userManager: userManager,
+                        unreadNotificationCount: $unreadNotificationCount,
+                        showNotificationInbox: $showNotificationInbox
+                    )
                         .environmentObject(notificationService)
                         .environmentObject(competitionService)
                         .environmentObject(friendService)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button {
-                                    showNotificationInbox = true
-                                } label: {
-                                    ZStack(alignment: .topTrailing) {
-                                        Image(systemName: "bell.fill")
-                                            .font(.system(size: 16))
-                                            .foregroundColor(.white.opacity(0.7))
-
-                                        if unreadNotificationCount > 0 {
-                                            Text("\(min(unreadNotificationCount, 99))")
-                                                .font(.system(size: 9, weight: .bold, design: .rounded))
-                                                .foregroundColor(.white)
-                                                .padding(.horizontal, 4)
-                                                .padding(.vertical, 1)
-                                                .background(Capsule().fill(MADTheme.Colors.madRed))
-                                                .offset(x: 8, y: -6)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        .navigationDestination(isPresented: $showNotificationInbox) {
-                            NotificationInboxView(competitionService: competitionService) { newCount in
-                                unreadNotificationCount = newCount
-                            }
-                        }
                 }
             }
             
@@ -111,7 +93,12 @@ struct MainTabView: View {
                     selectedTab = 1
                 case "competition_flex", "competition_milestone", "friend_nudge",
                      "friend_activity", "streak_broken", "personal_best",
-                     "lead_change", "clash_tie":
+                     "lead_change", "clash_tie",
+                     // badge_earned was previously unrouted — pushes landed
+                     // silently. Route to Dashboard + open the inbox so the
+                     // user actually sees the badge they earned.
+                     "badge_earned", "friend_badge_earned",
+                     "friend_challenge_completed", "friend_personal_best":
                     selectedTab = 0
                     showNotificationInbox = true
                 default:

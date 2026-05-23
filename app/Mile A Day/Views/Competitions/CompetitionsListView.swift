@@ -20,8 +20,36 @@ struct CompetitionsListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Tab Selector
-            tabSelector
+            MADTabHeader(
+                title: "Compete",
+                actions: headerActions
+            )
+
+            // Pill-style sub-tabs replace the underline TabButtons for
+            // consistency with the Friends tab's mode picker.
+            MADPillPicker(
+                selection: Binding(
+                    get: { selectedTab == 0 ? CompeteTab.my : .invites },
+                    set: { selectedTab = $0 == .my ? 0 : 1 }
+                ),
+                options: [
+                    .init(
+                        id: .my,
+                        title: "My Comps",
+                        systemImage: "trophy.fill",
+                        badgeCount: 0
+                    ),
+                    .init(
+                        id: .invites,
+                        title: "Invites",
+                        systemImage: "envelope.fill",
+                        badgeCount: competitionService.invites.count
+                    )
+                ]
+            )
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.top, MADTheme.Spacing.xs)
+            .padding(.bottom, MADTheme.Spacing.sm)
 
             // Content
             Group {
@@ -35,8 +63,7 @@ struct CompetitionsListView: View {
             }
         }
         .background(MADTheme.Colors.appBackgroundGradient)
-        .navigationTitle("Competitions")
-        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showingCreateCompetition) {
             CreateCompetitionView { createdId in
                 Task {
@@ -95,65 +122,33 @@ struct CompetitionsListView: View {
         }
     }
 
-    // MARK: - Tab Selector
-    private var tabSelector: some View {
-        HStack {
-            HStack(spacing: 0) {
-                TabButton(
-                    title: "My Comps",
-                    count: competitionService.competitions.filter { $0.status != .finished }.count,
-                    isSelected: selectedTab == 0,
-                    showCountAsNotification: false,
-                    action: { selectedTab = 0 }
-                )
-
-                TabButton(
-                    title: "Invites",
-                    count: competitionService.invites.count,
-                    isSelected: selectedTab == 1,
-                    action: { selectedTab = 1 }
-                )
-            }
-
-            Spacer()
-
-            HStack(spacing: MADTheme.Spacing.md) {
-                if trophyService.totalCompetitions > 0 {
-                    Button(action: { showingTrophyCase = true }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "trophy.fill")
-                                .font(.system(size: 14))
-                                .foregroundStyle(
-                                    LinearGradient(
-                                        colors: [.yellow, .orange],
-                                        startPoint: .top,
-                                        endPoint: .bottom
-                                    )
-                                )
-                            Text("\(trophyService.totalCompetitions)")
-                                .font(.system(size: 13, weight: .bold, design: .rounded))
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(
-                            Capsule()
-                                .fill(Color.white.opacity(0.08))
-                        )
-                    }
-                }
-
-                Button(action: { showingCreateCompetition = true }) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(MADTheme.Colors.madRed)
-                }
-            }
+    // MARK: - Header Actions
+    private var headerActions: [MADHeaderAction] {
+        var actions: [MADHeaderAction] = []
+        if trophyService.totalCompetitions > 0 {
+            // Achievement style: gold pill with the win count. Reads as a flex,
+            // not an alert — distinct from notification-style red badges.
+            actions.append(
+                MADHeaderAction(
+                    id: "trophy",
+                    systemImage: "trophy.fill",
+                    style: .achievement(count: trophyService.totalCompetitions)
+                ) { showingTrophyCase = true }
+            )
         }
-        .padding(.horizontal, MADTheme.Spacing.md)
-        .padding(.vertical, MADTheme.Spacing.sm)
-        .background(Color.clear)
+        // CTA style: filled red circle so "create new competition" stands out
+        // as the primary action on the page.
+        actions.append(
+            MADHeaderAction(
+                id: "create",
+                systemImage: "plus",
+                style: .cta
+            ) { showingCreateCompetition = true }
+        )
+        return actions
     }
+
+    private enum CompeteTab: Hashable { case my, invites }
 
     // MARK: - Competitions Tab
     private var competitionsTab: some View {
@@ -504,17 +499,73 @@ struct CompetitionsListView: View {
     }
 
     // MARK: - Loading View
+    /// Skeleton card list — mirrors the Friends-home loading state so both
+    /// tabs share the same perceived-performance treatment instead of a bare
+    /// spinner. Renders 3 placeholder competition cards while the real list
+    /// fetches.
     private var loadingView: some View {
-        VStack(spacing: MADTheme.Spacing.lg) {
-            ProgressView()
-                .scaleEffect(1.5)
-                .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
-
-            Text("Loading...")
-                .font(MADTheme.Typography.body)
-                .foregroundColor(MADTheme.Colors.secondaryText)
+        ScrollView {
+            VStack(spacing: MADTheme.Spacing.md) {
+                ForEach(0..<3, id: \.self) { _ in competitionSkeletonCard }
+            }
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.top, MADTheme.Spacing.md)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .scrollIndicators(.hidden)
+    }
+
+    private var competitionSkeletonCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: MADTheme.Spacing.md) {
+                Circle()
+                    .fill(Color.white.opacity(0.08))
+                    .frame(width: 48, height: 48)
+                    .shimmer()
+                VStack(alignment: .leading, spacing: 6) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(0.08))
+                        .frame(width: 140, height: 14)
+                        .shimmer()
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(0.06))
+                        .frame(width: 80, height: 10)
+                        .shimmer()
+                }
+                Spacer()
+            }
+            HStack(spacing: 6) {
+                ForEach(0..<3, id: \.self) { _ in
+                    Capsule()
+                        .fill(Color.white.opacity(0.06))
+                        .frame(width: 60, height: 24)
+                        .shimmer()
+                }
+                Spacer()
+            }
+            HStack(spacing: -8) {
+                ForEach(0..<3, id: \.self) { _ in
+                    Circle()
+                        .fill(Color.white.opacity(0.06))
+                        .frame(width: 28, height: 28)
+                        .overlay(Circle().strokeBorder(MADTheme.Colors.madBlack, lineWidth: 2))
+                        .shimmer()
+                }
+                Spacer()
+                Capsule()
+                    .fill(Color.white.opacity(0.06))
+                    .frame(width: 80, height: 22)
+                    .shimmer()
+            }
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+                )
+        )
     }
 
     // MARK: - Helper Methods

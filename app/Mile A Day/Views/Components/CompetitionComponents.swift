@@ -99,229 +99,291 @@ struct CompetitionCard: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 0) {
-                // Type color accent on left edge
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(typeGradient)
-                    .frame(width: 4)
-                    .padding(.vertical, MADTheme.Spacing.md)
-
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                    // Header: Icon + Name + Owner badge
-                    HStack(spacing: MADTheme.Spacing.md) {
-                        Image(systemName: competition.type.icon)
-                            .font(.title3)
-                            .foregroundStyle(typeGradient)
-                            .frame(width: 40, height: 40)
-                            .background(
-                                Circle()
-                                    .fill(Color(hex: competition.type.gradient[0]).opacity(0.12))
-                            )
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(competition.competition_name)
-                                .font(MADTheme.Typography.headline)
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-
-                            HStack(spacing: MADTheme.Spacing.xs) {
-                                Text(competition.type.displayName)
-                                    .font(MADTheme.Typography.caption)
-                                    .foregroundColor(.white.opacity(0.5))
-
-                                Text("\u{00B7}")
-                                    .foregroundColor(.white.opacity(0.3))
-
-                                Label(
-                                    "\(competition.acceptedUsersCount)",
-                                    systemImage: "person.2"
-                                )
-                                .font(MADTheme.Typography.caption)
-                                .foregroundColor(.white.opacity(0.5))
-
-                                Text("\u{00B7}")
-                                    .foregroundColor(.white.opacity(0.3))
-
-                                ForEach(competition.workouts, id: \.self) { activity in
-                                    HStack(spacing: 2) {
-                                        Image(systemName: activity.icon)
-                                            .font(.system(size: 8))
-                                        Text(activity.displayName)
-                                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                                    }
-                                    .foregroundColor(activity.color)
-                                }
-                            }
-                        }
-
-                        Spacer()
-
-                        if competition.isWinner {
-                            Image(systemName: "crown.fill")
-                                .font(.caption)
-                                .foregroundColor(.yellow)
-                        }
-                    }
-
-                    // Stats chips
-                    HStack(spacing: MADTheme.Spacing.sm) {
-                        // Type-specific stat chips
-                        switch competition.type {
-                        case .apex:
-                            StatChip(icon: "ruler", text: competition.options.unit.shortDisplayName)
-                            if let durationStr = competition.options.durationFormatted {
-                                StatChip(icon: "clock", text: durationStr)
-                            }
-
-                        case .streaks:
-                            StatChip(
-                                icon: "target",
-                                text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
-                            )
-                            if let interval = competition.options.interval {
-                                StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
-                            }
-                            let streakLives = competition.streakLives
-                            if streakLives > 0 {
-                                if let currentUserId = UserDefaults.standard.string(forKey: "backendUserId"),
-                                   let currentUser = competition.users.first(where: { $0.user_id == currentUserId }),
-                                   let lives = currentUser.remaining_lives {
-                                    LivesChip(remaining: lives, total: streakLives)
-                                } else {
-                                    StatChip(
-                                        icon: "heart",
-                                        text: "\(streakLives) \(streakLives == 1 ? "life" : "lives")"
-                                    )
-                                }
-                            }
-
-                        case .targets:
-                            StatChip(
-                                icon: "target",
-                                text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
-                            )
-                            if let interval = competition.options.interval {
-                                StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
-                            }
-                            // Targets end either on a duration or a point target ("first to X")
-                            if let durationStr = competition.options.durationFormatted {
-                                StatChip(icon: "clock", text: durationStr)
-                            } else if competition.options.first_to > 0 {
-                                StatChip(icon: "flag.checkered", text: "First to \(competition.options.first_to)")
-                            }
-
-                        case .clash:
-                            StatChip(icon: "ruler", text: competition.options.unit.shortDisplayName)
-                            if competition.options.first_to > 0 {
-                                StatChip(
-                                    icon: "star",
-                                    text: "First to \(competition.options.first_to)"
-                                )
-                            }
-                            if let interval = competition.options.interval {
-                                StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
-                            }
-
-                        case .race:
-                            StatChip(
-                                icon: "target",
-                                text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
-                            )
-                        }
-
-                        Spacer()
-                    }
-
-                    // Divider
-                    Rectangle()
-                        .fill(Color.white.opacity(0.06))
-                        .frame(height: 1)
-
-                    competitionStatusFooter
+            VStack(alignment: .leading, spacing: 14) {
+                cardHeader
+                statChipsRow
+                // Rivalry hint — shown inline when the viewer is within
+                // striking distance of overtaking the next person above
+                // them. Tightly scoped to active comps with comparison-based
+                // scoring (skips streaks).
+                if let hint = competition.rivalryHint {
+                    rivalryHintRow(hint)
                 }
-                .padding(.horizontal, MADTheme.Spacing.md)
-                .padding(.vertical, MADTheme.Spacing.md)
+                cardFooter
             }
+            .padding(MADTheme.Spacing.md)
             .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
                     .fill(.ultraThinMaterial)
                     .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        // Subtle type-tinted color wash so the card reads as
+                        // "this kind of competition" at a glance without the
+                        // heavy left-edge strip that dominated visually.
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(hex: competition.type.gradient[0]).opacity(0.10),
+                                        Color.clear
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        Color(hex: competition.type.gradient[0]).opacity(0.35),
+                                        Color.white.opacity(0.06)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 1
+                            )
                     )
             )
         }
         .buttonStyle(ScaleButtonStyle())
     }
 
-    @ViewBuilder
-    private var competitionStatusFooter: some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            if competition.status == .finished {
-                // Finished competition footer
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    Image(systemName: "trophy.fill")
-                        .font(.system(size: 12))
-                        .foregroundStyle(
-                            LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
+    // MARK: - Header (icon + name + type + crown)
+
+    private var cardHeader: some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            // Type icon in a colored disc — the focal element.
+            Image(systemName: competition.type.icon)
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(typeGradient)
+                .frame(width: 48, height: 48)
+                .background(
+                    Circle()
+                        .fill(Color(hex: competition.type.gradient[0]).opacity(0.14))
+                        .overlay(
+                            Circle()
+                                .strokeBorder(
+                                    LinearGradient(
+                                        colors: competition.type.gradient.map { Color(hex: $0).opacity(0.55) },
+                                        startPoint: .top, endPoint: .bottom
+                                    ),
+                                    lineWidth: 1.5
+                                )
                         )
+                )
 
-                    if let winner = winnerName {
-                        Text("\(winner) won")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.8))
-                    } else {
-                        Text("Tap to see results")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundColor(.white.opacity(0.5))
-                    }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(competition.competition_name)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Text(competition.type.displayName)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+            }
 
-                    Spacer()
+            Spacer(minLength: 4)
 
-                    // Status label
-                    HStack(spacing: 5) {
+            if competition.isWinner {
+                // Gold crown puck — matches the trophy-pill style used in
+                // headers across the app. Reads as a flex, not an alert.
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
+                    )
+                    .frame(width: 30, height: 30)
+                    .background(
                         Circle()
-                            .fill(competition.status.color)
-                            .frame(width: 6, height: 6)
-
-                        Text(statusText)
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                            .foregroundColor(competition.status.color)
-                    }
-                }
-            } else {
-                // Participant avatars with status indicators
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    ForEach(Array(competition.users.prefix(6)), id: \.id) { user in
-                        ParticipantAvatar(user: user, isOwner: user.user_id == competition.owner)
-                    }
-
-                    if competition.users.count > 6 {
-                        Text("+\(competition.users.count - 6)")
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.5))
-                            .frame(width: 28, height: 28)
-                            .background(
-                                Circle()
-                                    .fill(Color.white.opacity(0.08))
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.yellow.opacity(0.20), Color.orange.opacity(0.10)],
+                                    startPoint: .top, endPoint: .bottom
+                                )
                             )
+                            .overlay(Circle().strokeBorder(Color.yellow.opacity(0.4), lineWidth: 1))
+                    )
+            }
+        }
+    }
+
+    // MARK: - Stat chips (type-specific)
+
+    @ViewBuilder
+    private var statChipsRow: some View {
+        // Horizontal scroll catches long chip rows (e.g., Targets with goal +
+        // interval + duration) without truncating or wrapping awkwardly.
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                switch competition.type {
+                case .apex:
+                    StatChip(icon: "ruler", text: competition.options.unit.shortDisplayName)
+                    if let durationStr = competition.options.durationFormatted {
+                        StatChip(icon: "clock", text: durationStr)
                     }
 
-                    Spacer()
-
-                    // Status label
-                    HStack(spacing: 5) {
-                        Circle()
-                            .fill(competition.status.color)
-                            .frame(width: 6, height: 6)
-
-                        Text(statusText)
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                            .foregroundColor(competition.status.color)
+                case .streaks:
+                    StatChip(
+                        icon: "target",
+                        text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
+                    )
+                    if let interval = competition.options.interval {
+                        StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
                     }
+                    let streakLives = competition.streakLives
+                    if streakLives > 0 {
+                        if let currentUserId = UserDefaults.standard.string(forKey: "backendUserId"),
+                           let currentUser = competition.users.first(where: { $0.user_id == currentUserId }),
+                           let lives = currentUser.remaining_lives {
+                            LivesChip(remaining: lives, total: streakLives)
+                        } else {
+                            StatChip(
+                                icon: "heart",
+                                text: "\(streakLives) \(streakLives == 1 ? "life" : "lives")"
+                            )
+                        }
+                    }
+
+                case .targets:
+                    StatChip(
+                        icon: "target",
+                        text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
+                    )
+                    if let interval = competition.options.interval {
+                        StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
+                    }
+                    // Targets end either on a duration or a point target ("first to X")
+                    if let durationStr = competition.options.durationFormatted {
+                        StatChip(icon: "clock", text: durationStr)
+                    } else if competition.options.first_to > 0 {
+                        StatChip(icon: "flag.checkered", text: "First to \(competition.options.first_to)")
+                    }
+
+                case .clash:
+                    StatChip(icon: "ruler", text: competition.options.unit.shortDisplayName)
+                    if competition.options.first_to > 0 {
+                        StatChip(
+                            icon: "star",
+                            text: "First to \(competition.options.first_to)"
+                        )
+                    }
+                    if let interval = competition.options.interval {
+                        StatChip(icon: "arrow.trianglehead.2.clockwise", text: interval.displayName)
+                    }
+
+                case .race:
+                    StatChip(
+                        icon: "target",
+                        text: "\(competition.options.goalFormatted) \(competition.options.unit.shortDisplayName)"
+                    )
+                }
+
+                // Workout-type chips inline with stats so users see "you can do
+                // this as running or walking" alongside the rules.
+                ForEach(competition.workouts, id: \.self) { activity in
+                    StatChip(icon: activity.icon, text: activity.displayName, accent: activity.color)
                 }
             }
         }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+    }
+
+    // MARK: - Rivalry Hint Row
+
+    /// Inline "you're X behind Y" badge surfaced on active comps when the
+    /// viewer is close to overtaking. Designed to be a celebratory nudge —
+    /// orange accent + arrow.up icon imply "push for it" rather than alarm.
+    private func rivalryHintRow(_ hint: RivalryHint) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.up.right.circle.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(
+                    LinearGradient(colors: [.orange, .yellow], startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+
+            Text(hint.gapText)
+                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .foregroundColor(.orange)
+
+            Text(hint.actionSuffix)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.7))
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            Capsule()
+                .fill(Color.orange.opacity(0.12))
+                .overlay(Capsule().strokeBorder(Color.orange.opacity(0.35), lineWidth: 1))
+        )
+    }
+
+    // MARK: - Footer (participants + status pill)
+
+    private var cardFooter: some View {
+        HStack(spacing: MADTheme.Spacing.sm) {
+            // Positive spacing instead of overlapping — the previous -8
+            // overlap required a black ring overlay to visually separate
+            // adjacent avatars, but that overlay sat on top of each avatar's
+            // status ring (green/orange/red) and corner status badge,
+            // hiding both. With positive spacing the status colors do the
+            // separation work themselves, and the badges are fully visible.
+            HStack(spacing: 6) {
+                ForEach(Array(competition.users.prefix(4)), id: \.id) { user in
+                    ParticipantAvatar(user: user, isOwner: user.user_id == competition.owner)
+                }
+            }
+
+            if competition.users.count > 4 {
+                Text("+\(competition.users.count - 4)")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.10))
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                    )
+            }
+
+            Spacer()
+
+            statusPill
+        }
+    }
+
+    /// Status condensed to a single pill — dot + colored text on a tinted
+    /// background. Same visual grammar as the leaderboard score pills.
+    private var statusPill: some View {
+        let accent = competition.status.color
+        let label: String = {
+            if competition.status == .finished, let winner = winnerName {
+                return "🏆 \(winner) won"
+            }
+            return statusText
+        }()
+        return HStack(spacing: 5) {
+            Circle()
+                .fill(accent)
+                .frame(width: 6, height: 6)
+            Text(label)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundColor(accent)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(
+            Capsule()
+                .fill(accent.opacity(0.12))
+                .overlay(Capsule().strokeBorder(accent.opacity(0.3), lineWidth: 1))
+        )
     }
 
     private var winnerName: String? {
@@ -365,20 +427,29 @@ struct CompetitionCard: View {
 struct StatChip: View {
     let icon: String
     let text: String
+    /// Optional accent color — when set, icon + border take this tint so
+    /// chips can convey meaning (e.g., activity-type color coding) without
+    /// breaking the otherwise-neutral chip aesthetic.
+    var accent: Color? = nil
 
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 10))
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(accent ?? .white.opacity(0.7))
             Text(text)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.8))
         }
-        .foregroundColor(.white.opacity(0.7))
         .padding(.horizontal, MADTheme.Spacing.sm)
         .padding(.vertical, 5)
         .background(
             Capsule()
-                .fill(Color.white.opacity(0.08))
+                .fill(accent?.opacity(0.12) ?? Color.white.opacity(0.08))
+                .overlay(
+                    Capsule()
+                        .strokeBorder(accent?.opacity(0.3) ?? Color.white.opacity(0.06), lineWidth: 1)
+                )
         )
     }
 }
@@ -390,28 +461,53 @@ struct LivesChip: View {
     let total: Int
 
     private var isEliminated: Bool { remaining <= 0 }
+    private var isLastLife: Bool { remaining == 1 && total > 1 }
+
+    /// Color encodes danger level:
+    /// - eliminated → red wash
+    /// - last life → red accent (one slip and you're out)
+    /// - otherwise → neutral pink/red on glass
+    private var accent: Color {
+        if isEliminated { return .red }
+        if isLastLife { return .red }
+        return Color(red: 0.95, green: 0.35, blue: 0.45)
+    }
 
     var body: some View {
-        HStack(spacing: 3) {
-            ForEach(0..<total, id: \.self) { i in
-                let alive = i < remaining
-                Image(systemName: alive ? "heart.fill" : "heart.slash.fill")
-                    .font(.system(size: 8))
-                    .foregroundColor(alive ? .red : .gray.opacity(0.4))
-                    .shadow(color: alive ? .red.opacity(0.3) : .clear, radius: 1)
-            }
-
+        HStack(spacing: 4) {
             if isEliminated {
+                // OUT pill — no hearts, just the bad-news state.
+                Image(systemName: "heart.slash.fill")
+                    .font(.system(size: 10, weight: .bold))
                 Text("OUT")
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .foregroundColor(.red.opacity(0.7))
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .tracking(0.4)
+            } else {
+                // ♥ N — clear count with a single heart glyph. Better than
+                // a row of tiny heart icons that read as decoration rather
+                // than data (especially when total is 1).
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 10, weight: .bold))
+                Text("\(remaining)")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                if isLastLife {
+                    Text("LAST")
+                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .tracking(0.5)
+                        .opacity(0.85)
+                }
             }
         }
+        .foregroundColor(accent)
         .padding(.horizontal, MADTheme.Spacing.sm)
         .padding(.vertical, 5)
         .background(
             Capsule()
-                .fill(isEliminated ? Color.red.opacity(0.1) : Color.white.opacity(0.08))
+                .fill(accent.opacity(isEliminated || isLastLife ? 0.18 : 0.12))
+                .overlay(
+                    Capsule()
+                        .strokeBorder(accent.opacity(isLastLife ? 0.5 : 0.3), lineWidth: 1)
+                )
         )
     }
 }
@@ -433,33 +529,30 @@ struct ParticipantAvatar: View {
     private var statusIcon: String {
         switch user.invite_status {
         case .accepted: return "checkmark"
-        case .pending: return "clock"
+        case .pending: return "clock.fill"
         case .declined: return "xmark"
         }
     }
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
+        ZStack(alignment: .topTrailing) {
             AvatarView(name: user.displayName, imageURL: user.profile_image_url, size: 28)
                 .overlay(
                     Circle()
-                        .stroke(statusColor.opacity(0.8), lineWidth: 2)
+                        .strokeBorder(statusColor.opacity(0.85), lineWidth: 2)
                 )
 
-            // Status badge
+            // Status badge positioned at the TOP of the avatar so it doesn't
+            // collide with overlapping stacks (footer rows often pack avatars
+            // tight and a bottom badge gets covered by the next avatar's
+            // edge). Top placement is always visible.
             Image(systemName: statusIcon)
-                .font(.system(size: 6, weight: .bold))
+                .font(.system(size: 7, weight: .heavy))
                 .foregroundColor(.white)
-                .frame(width: 12, height: 12)
-                .background(
-                    Circle()
-                        .fill(statusColor)
-                )
-                .overlay(
-                    Circle()
-                        .stroke(Color(white: 0.1), lineWidth: 1)
-                )
-                .offset(x: 2, y: 2)
+                .frame(width: 13, height: 13)
+                .background(Circle().fill(statusColor))
+                .overlay(Circle().strokeBorder(Color(white: 0.1), lineWidth: 1.5))
+                .offset(x: 2, y: -2)
         }
     }
 }

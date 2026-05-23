@@ -10,7 +10,6 @@ import {
   updateUserBio,
   updateUserProfileImage,
   uploadProfileImage,
-  updateLeaderboardOptOut,
 } from "../controllers/usersController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
 
@@ -49,11 +48,6 @@ router.post(
   requireSelfAccess("userId"),
   upload.single("image"),
   uploadProfileImage,
-);
-router.patch(
-  "/:userId/leaderboard-opt-out",
-  requireSelfAccess("userId"),
-  updateLeaderboardOptOut,
 );
 
 export default router;

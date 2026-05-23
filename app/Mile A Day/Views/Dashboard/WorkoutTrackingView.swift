@@ -75,7 +75,12 @@ struct WorkoutTrackingView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
+                    // contentShape expands the hit target to the full padded
+                    // bounds so the first tap registers even on the gaps
+                    // between the icon glyph and the text.
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 Spacer()
             }
             .padding(.top, 16)
@@ -139,7 +144,9 @@ struct WorkoutTrackingView: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
                 Spacer()
             }
             .padding(.top, 16)

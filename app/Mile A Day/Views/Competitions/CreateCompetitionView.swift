@@ -8,6 +8,11 @@ struct CreateCompetitionView: View {
     /// Called with the created competition ID when user taps "View Lobby"
     var onCreated: ((String) -> Void)?
 
+    /// Optional friend to pre-select when the sheet opens. Used by the
+    /// "Compete together" CTA on friend profiles so users land in the form
+    /// already targeting that person — no friend-picker step needed.
+    var preselectedFriend: BackendUser?
+
     // Form fields
     @State private var selectedFriends: Set<BackendUser> = []
     @State private var selectedType: CompetitionType = .apex
@@ -222,6 +227,18 @@ struct CreateCompetitionView: View {
                     try await friendService.loadFriends()
                 } catch {
                     print("Failed to load friends: \(error)")
+                }
+                // Pre-select the friend if the sheet was opened from a
+                // profile's "Compete together" CTA. Done after loadFriends
+                // so the picker reflects the selection immediately.
+                if let friend = preselectedFriend, selectedFriends.isEmpty {
+                    await MainActor.run {
+                        // Set.insert returns a tuple — discard it explicitly
+                        // so Swift doesn't infer that as the closure's
+                        // return type (which makes MainActor.run's result
+                        // non-Void and "unused").
+                        _ = selectedFriends.insert(friend)
+                    }
                 }
             }
             .onChange(of: selectedType) { _, newType in
@@ -1036,9 +1053,8 @@ struct CreateCompetitionView: View {
             }
             .navigationTitle("Select Friends")
             .navigationBarTitleDisplayMode(.inline)
-            // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         showFriendPicker = false
                     }
@@ -1074,9 +1090,8 @@ struct CreateCompetitionView: View {
             }
             .navigationTitle("Competition Type")
             .navigationBarTitleDisplayMode(.inline)
-            // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         showTypeSelector = false
                     }

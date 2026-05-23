@@ -16,6 +16,7 @@ enum LeaderboardMetric: String, CaseIterable, Identifiable {
 }
 
 enum LeaderboardPeriod: String, CaseIterable, Identifiable {
+    case today
     case week
     case month
     case year
@@ -24,23 +25,11 @@ enum LeaderboardPeriod: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .today: return "Today"
         case .week: return "Week"
         case .month: return "Month"
         case .year: return "Year"
         case .all: return "All-Time"
-        }
-    }
-}
-
-enum LeaderboardScope: String, CaseIterable, Identifiable {
-    case global
-    case friends
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .global: return "Global"
-        case .friends: return "Friends"
         }
     }
 }
@@ -78,44 +67,25 @@ struct LeaderboardPage: Decodable {
     let total_count: Int
     let has_more: Bool
     let current_user_entry: LeaderboardEntry?
-    /// True when the viewer has opted out of leaderboards — UI uses this to
-    /// show a "you're hidden" banner with a one-tap re-enable button.
-    let viewer_opted_out: Bool
-}
-
-private struct OptOutResponse: Decodable {
-    let leaderboard_opt_out: Bool
-}
-
-private struct OptOutRequestBody: Encodable {
-    let optOut: Bool
 }
 
 // MARK: - Service
 
-/// Fetches paginated leaderboard pages from the backend. Stateless — pagination
-/// state lives in the view model so the user can re-issue requests on every
-/// filter change without coupling to a singleton's stored cursor.
+/// Fetches paginated leaderboard pages from the backend. Scope is always the
+/// viewer's friend group (plus themselves) — Global was intentionally dropped;
+/// can be re-added later if needed.
 enum LeaderboardService {
     static let defaultPageSize = 25
 
     static func fetch(
         metric: LeaderboardMetric,
         period: LeaderboardPeriod,
-        scope: LeaderboardScope,
         limit: Int = defaultPageSize,
         offset: Int = 0
     ) async throws -> LeaderboardPage {
-        var components = URLComponents()
-        components.path = "/leaderboard"
-        components.queryItems = [
-            URLQueryItem(name: "metric", value: metric.rawValue),
-            URLQueryItem(name: "period", value: period.rawValue),
-            URLQueryItem(name: "scope", value: scope.rawValue),
-            URLQueryItem(name: "limit", value: String(limit)),
-            URLQueryItem(name: "offset", value: String(offset))
-        ]
-        let endpoint = components.url?.relativeString ?? "/leaderboard"
+        // Build the query string by hand — enum raw values + ints, so no
+        // URL-encoding required. Avoids URLComponents quirks with path-only URLs.
+        let endpoint = "/leaderboard?metric=\(metric.rawValue)&period=\(period.rawValue)&limit=\(limit)&offset=\(offset)"
 
         return try await APIClient.fancyFetch(
             endpoint: endpoint,
@@ -123,18 +93,5 @@ enum LeaderboardService {
             body: nil,
             responseType: LeaderboardPage.self
         )
-    }
-
-    /// Toggles the viewer's leaderboard visibility on the backend. Returns the
-    /// committed value so callers can update local state without a refetch.
-    static func setOptOut(userId: String, optOut: Bool) async throws -> Bool {
-        let body = try JSONEncoder().encode(OptOutRequestBody(optOut: optOut))
-        let response = try await APIClient.fancyFetch(
-            endpoint: "/users/\(userId)/leaderboard-opt-out",
-            method: .PATCH,
-            body: body,
-            responseType: OptOutResponse.self
-        )
-        return response.leaderboard_opt_out
     }
 }

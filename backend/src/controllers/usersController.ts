@@ -11,7 +11,6 @@ import {
   updateBio,
   updateProfileImage,
 } from "../services/userService.js";
-import { setLeaderboardOptOut } from "../services/leaderboardService.js";
 
 const db = PostgresService.getInstance();
 
@@ -263,26 +262,5 @@ export async function uploadProfileImage(req: Request, res: Response) {
       error: "Profile image upload failed",
       message: error instanceof Error ? error.message : "Unknown error",
     });
-  }
-}
-
-export async function updateLeaderboardOptOut(req: Request, res: Response) {
-  if (!hasRequiredKeys(["userId"], req, res)) return;
-
-  const userId = req.params.userId;
-  const { optOut } = req.body ?? {};
-
-  if (typeof optOut !== "boolean") {
-    return res
-      .status(400)
-      .json({ error: "Body must include boolean `optOut` field." });
-  }
-
-  try {
-    const value = await setLeaderboardOptOut(userId, optOut);
-    res.json({ leaderboard_opt_out: value });
-  } catch (err: any) {
-    console.error("Error updating leaderboard opt-out:", err.message);
-    res.status(500).json({ error: "Failed to update leaderboard opt-out" });
   }
 }

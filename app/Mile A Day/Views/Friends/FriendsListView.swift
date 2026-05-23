@@ -16,9 +16,11 @@ private enum FriendsTabMode: String, CaseIterable, Identifiable {
 /// Main view for managing friends list
 struct FriendsListView: View {
     @ObservedObject var friendService: FriendService
+    @StateObject private var healthManager = HealthKitManager.shared
+    @StateObject private var userManager = UserManager.shared
     @State private var topMode: FriendsTabMode = .friends
-    @State private var selectedTab = 0
     @State private var showingSearch = false
+    @State private var showingRequestsSheet = false
     @State private var selectedUser: BackendUser?
     @State private var showingUnfriendAlert = false
     @State private var userToUnfriend: BackendUser?
@@ -30,284 +32,614 @@ struct FriendsListView: View {
     @State private var bellShakeIds: Set<String> = []
     @State private var bellAnimatedIds: Set<String> = []
 
-    var body: some View {
-        VStack(spacing: 0) {
-            // Top-level mode picker
-            modePicker
+    // Personal rank — fetched on appear so the hero card can show "#4 of 8 this week"
+    // without coupling to the leaderboard view's state.
+    @State private var myRankEntry: LeaderboardEntry?
+    @State private var myRankTotal: Int = 0
 
-            if topMode == .leaderboard {
-                LeaderboardSection()
-            } else {
-                friendsModeBody
+    // Shared namespace so a friend row can slide smoothly between
+    // "Cheer Them On" and "Done Today" when their status flips.
+    @Namespace private var friendRowNamespace
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            VStack(spacing: 0) {
+                friendsHeader
+                modePicker
+
+                if topMode == .leaderboard {
+                    LeaderboardSection(
+                        friendService: friendService,
+                        onAddFriends: { showingSearch = true }
+                    )
+                } else {
+                    friendsHome
+                }
+            }
+
+            // Toast floats above all content. zIndex keeps it on top, and the
+            // safe-area padding lets it sit cleanly below the status bar
+            // instead of overlapping the custom header.
+            if let feedback = nudgeFeedback {
+                nudgeFeedbackBanner(feedback)
+                    .padding(.horizontal, MADTheme.Spacing.md)
+                    .padding(.top, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(100)
             }
         }
         .background(MADTheme.Colors.appBackgroundGradient)
-        .navigationTitle("Friends")
-        .navigationBarTitleDisplayMode(.inline)
-        // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
-            .sheet(isPresented: $showingSearch) {
-                NavigationStack {
-                    FriendSearchView(friendService: friendService)
-                }
+        .toolbar(.hidden, for: .navigationBar)
+        .sheet(isPresented: $showingSearch) {
+            NavigationStack {
+                FriendSearchView(friendService: friendService)
             }
-            .sheet(item: $selectedUser) { user in
-                NavigationStack {
-                    UserProfileDetailView(user: user, friendService: friendService)
-                }
+        }
+        .sheet(isPresented: $showingRequestsSheet) {
+            NavigationStack {
+                FriendRequestsSheet(
+                    friendService: friendService,
+                    onSelectUser: { user in
+                        showingRequestsSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            selectedUser = user
+                        }
+                    },
+                    onAccept: handleAcceptRequest,
+                    onDecline: handleDeclineRequest,
+                    onCancel: handleCancelRequest
+                )
             }
-            .task {
-                // Only load once when view first appears
-                if friendService.friends.isEmpty && friendService.friendRequests.isEmpty && friendService.sentRequests.isEmpty {
-                    await friendService.refreshAllData()
-                }
-                // Handle cold-launch deep link
-                if MADNotificationService.shared.pendingNotificationType == "friend_request" {
-                    selectedTab = 1
-                    MADNotificationService.shared.pendingNotificationType = nil
-                }
-                // Load nudge statuses for friends
-                await loadNudgeStatuses()
+        }
+        .sheet(item: $selectedUser) { user in
+            NavigationStack {
+                UserProfileDetailView(user: user, friendService: friendService)
             }
-            .refreshable {
+        }
+        .task {
+            if friendService.friends.isEmpty && friendService.friendRequests.isEmpty && friendService.sentRequests.isEmpty {
                 await friendService.refreshAllData()
-                await loadNudgeStatuses()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
-                guard let type = notification.userInfo?["type"] as? String else { return }
-                if type == "friend_request" {
-                    selectedTab = 1
+            if MADNotificationService.shared.pendingNotificationType == "friend_request" {
+                showingRequestsSheet = true
+                MADNotificationService.shared.pendingNotificationType = nil
+            }
+            await loadNudgeStatuses()
+            await loadMyRank()
+        }
+        .refreshable {
+            await friendService.refreshAllData()
+            await loadNudgeStatuses()
+            await loadMyRank()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
+            guard let type = notification.userInfo?["type"] as? String else { return }
+            if type == "friend_request" {
+                showingRequestsSheet = true
+            }
+        }
+        .alert("Unfriend \(userToUnfriend?.displayName ?? "User")?", isPresented: $showingUnfriendAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Unfriend", role: .destructive) {
+                if let user = userToUnfriend {
+                    handleUnfriend(user)
                 }
             }
-            .alert("Unfriend \(userToUnfriend?.displayName ?? "User")?", isPresented: $showingUnfriendAlert) {
-                Button("Cancel", role: .cancel) { }
-                Button("Unfriend", role: .destructive) {
-                    if let user = userToUnfriend {
-                        handleUnfriend(user)
-                    }
+        } message: {
+            Text("You will no longer be friends with this person.")
+        }
+    }
+
+    // MARK: - Custom header (title + search + requests-with-badge)
+
+    private var friendsHeader: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("Friends")
+                .font(.system(size: 30, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                headerCircleButton(systemImage: "magnifyingglass") {
+                    showingSearch = true
                 }
-            } message: {
-                Text("You will no longer be friends with this person.")
-            }
-            .overlay(alignment: .top) {
-                if let feedback = nudgeFeedback {
-                    nudgeFeedbackBanner(feedback)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                        .zIndex(10)
-                        .padding(.top, 8)
+                // Badge counts only incoming requests — sent ones aren't a
+                // notification, they're just pending state the user already
+                // knows about. Surfacing the sent count would over-alert.
+                headerCircleButton(
+                    systemImage: "person.crop.circle.badge.plus",
+                    badgeCount: friendService.friendRequests.count
+                ) {
+                    showingRequestsSheet = true
                 }
             }
+        }
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.top, MADTheme.Spacing.sm)
+        .padding(.bottom, 4)
+    }
+
+    private func headerCircleButton(systemImage: String, badgeCount: Int = 0, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.85))
+                    .frame(width: 38, height: 38)
+                    .background(
+                        Circle()
+                            .fill(Color.white.opacity(0.08))
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+                    )
+
+                if badgeCount > 0 {
+                    Text("\(min(badgeCount, 99))")
+                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Capsule().fill(MADTheme.Colors.madRed))
+                        .overlay(Capsule().strokeBorder(Color.black, lineWidth: 1.5))
+                        .offset(x: 4, y: -4)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Mode Picker (Friends vs Leaderboard)
+    // Uses the shared MADPillPicker so this picker, the Compete sub-tabs,
+    // and the Requests sheet picker all read with the same visual grammar.
     private var modePicker: some View {
-        Picker("Mode", selection: $topMode) {
-            ForEach(FriendsTabMode.allCases) { mode in
-                Text(mode.displayName).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
+        MADPillPicker(
+            selection: $topMode,
+            options: [
+                .init(id: .friends, title: "Friends", systemImage: "person.2.fill"),
+                .init(id: .leaderboard, title: "Leaderboard", systemImage: "trophy.fill")
+            ]
+        )
         .padding(.horizontal, MADTheme.Spacing.md)
         .padding(.top, MADTheme.Spacing.sm)
         .padding(.bottom, MADTheme.Spacing.xs)
     }
 
-    // MARK: - Friends Mode Body (existing Friends / Requests / Sent)
-    private var friendsModeBody: some View {
-        VStack(spacing: 0) {
-            tabSelector
+    // MARK: - Friends Mode Body — hero card + split sections
 
-            Group {
-                switch selectedTab {
-                case 0:
-                    friendsTab
-                        .id("friends-tab")
-                case 1:
-                    requestsTab
-                        .id("requests-tab")
-                case 2:
-                    sentTab
-                        .id("sent-tab")
-                default:
-                    friendsTab
-                        .id("friends-tab")
+    private var friendsHome: some View {
+        ScrollView {
+            VStack(spacing: MADTheme.Spacing.lg) {
+                personalHeroCard
+
+                if friendService.isLoading && friendService.friends.isEmpty {
+                    friendsSkeletonList
+                } else if friendService.friends.isEmpty {
+                    FriendEmptyStateView(
+                        title: "No Friends Yet",
+                        message: "Start building your running community by adding friends!",
+                        systemImage: "person.2",
+                        actionTitle: "Add Friends",
+                        action: { showingSearch = true }
+                    )
+                    .padding(.top, MADTheme.Spacing.lg)
+                } else {
+                    cheerThemOnSection
+                    doneTodaySection
                 }
             }
+            // Spring animation triggers whenever nudge statuses or friend
+            // count change — friends slide between Cheer/Done sections via
+            // matchedGeometryEffect on each row.
+            .animation(.spring(response: 0.45, dampingFraction: 0.85), value: nudgeStatuses)
+            .animation(.spring(response: 0.45, dampingFraction: 0.85), value: friendService.friends.count)
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.top, MADTheme.Spacing.md)
+            .padding(.bottom, MADTheme.Spacing.xxl)
         }
+        .scrollIndicators(.hidden)
     }
 
-    // MARK: - Tab Selector
-    private var tabSelector: some View {
-        HStack {
-            HStack(spacing: 0) {
-                TabButton(
-                    title: "Friends",
-                    count: friendService.friends.count,
-                    isSelected: selectedTab == 0,
-                    showCountAsNotification: false,
-                    action: { selectedTab = 0 }
-                )
+    // MARK: Personal hero card
 
-                TabButton(
-                    title: "Requests",
-                    count: friendService.friendRequests.count,
-                    isSelected: selectedTab == 1,
-                    action: { selectedTab = 1 }
-                )
+    /// Top card showing the user's own progress + streak + rank. Tapping it
+    /// jumps to the Leaderboard mode so they can see the full standings.
+    private var personalHeroCard: some View {
+        let goal = max(userManager.currentUser.goalMiles, 0.01)
+        let today = healthManager.todaysDistance
+        let progress = min(today / goal, 1.0)
+        let isComplete = today >= goal
+        let streak = userManager.currentUser.streak
+        // Streak-saver: active streak + not done + past 9pm = visual escalation.
+        // Pulls the card toward red to signal genuine risk of losing the streak.
+        let hour = Calendar.current.component(.hour, from: Date())
+        let streakInDanger = streak > 0 && !isComplete && hour >= 21
 
-                TabButton(
-                    title: "Sent",
-                    count: friendService.sentRequests.count,
-                    isSelected: selectedTab == 2,
-                    showCountAsNotification: false,
-                    action: { selectedTab = 2 }
-                )
+        return Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+                topMode = .leaderboard
             }
+        } label: {
+            HStack(spacing: MADTheme.Spacing.md) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.white.opacity(0.08), lineWidth: 5)
+                        .frame(width: 78, height: 78)
+                    Circle()
+                        .trim(from: 0, to: progress)
+                        .stroke(
+                            isComplete ? Color.green : MADTheme.Colors.madRed,
+                            style: StrokeStyle(lineWidth: 5, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 78, height: 78)
+                    VStack(spacing: 0) {
+                        Text(String(format: today >= 10 ? "%.1f" : "%.2f", today))
+                            .font(.system(size: 18, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                        Text("mi today")
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                }
 
-            Spacer()
-
-            Button(action: { showingSearch = true }) {
-                Image(systemName: "person.badge.plus")
-                    .font(.title2)
-                    .foregroundColor(MADTheme.Colors.madRed)
-            }
-        }
-        .padding(.horizontal, MADTheme.Spacing.md)
-        .padding(.vertical, MADTheme.Spacing.sm)
-        .background(Color.clear)
-    }
-
-    // MARK: - Friends Tab
-    private var friendsTab: some View {
-        Group {
-            if friendService.isLoading {
-                loadingView
-            } else if friendService.friends.isEmpty {
-                FriendEmptyStateView(
-                    title: "No Friends Yet",
-                    message: "Start building your running community by adding friends!",
-                    systemImage: "person.2",
-                    actionTitle: "Add Friends",
-                    action: { showingSearch = true }
-                )
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: MADTheme.Spacing.md) {
-                        ForEach(friendService.friends) { friend in
-                            friendRow(friend: friend)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(heroHeadline(isComplete: isComplete))
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(heroHeadlineColor(isComplete: isComplete))
+                            .lineLimit(1)
+                        if streak > 0 {
+                            HStack(spacing: 2) {
+                                Image(systemName: "flame.fill")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.orange)
+                                Text("\(streak)")
+                                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                                    .foregroundColor(.orange)
+                            }
                         }
                     }
-                    .padding(MADTheme.Spacing.md)
+
+                    Text(heroSubtitle(isComplete: isComplete))
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                        .lineLimit(2)
                 }
+
+                Spacer(minLength: 4)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(Color.white.opacity(0.06)))
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(streakInDanger ? MADTheme.Colors.madRed.opacity(0.10) : Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .strokeBorder(
+                                streakInDanger ? MADTheme.Colors.madRed.opacity(0.5) : Color.white.opacity(0.08),
+                                lineWidth: streakInDanger ? 1.5 : 1
+                            )
+                    )
+                    .shadow(color: streakInDanger ? MADTheme.Colors.madRed.opacity(0.25) : .clear, radius: 12, y: 4)
+            )
+            .overlay(alignment: .topTrailing) {
+                if streakInDanger {
+                    HStack(spacing: 3) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("STREAK AT RISK")
+                            .font(.system(size: 9, weight: .heavy, design: .rounded))
+                            .tracking(0.8)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(MADTheme.Colors.madRed))
+                    .offset(x: -10, y: -8)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Time-aware headline. Communicates urgency as the day winds down so
+    /// users get a gentle reminder before midnight risks the streak.
+    private func heroHeadline(isComplete: Bool) -> String {
+        if isComplete { return "You're on a roll" }
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 5..<12: return "Good morning"
+        case 12..<17: return "Halfway through"
+        case 17..<20: return "Strong finish"
+        default: return "Time's running short"   // 20:00–04:59 — late or pre-dawn
+        }
+    }
+
+    /// Red headline when the day is nearly over and the mile isn't done —
+    /// reinforces the urgency in the copy.
+    private func heroHeadlineColor(isComplete: Bool) -> Color {
+        if isComplete { return .white }
+        let hour = Calendar.current.component(.hour, from: Date())
+        return hour >= 20 ? .orange : .white
+    }
+
+    private func heroSubtitle(isComplete: Bool) -> String {
+        if let entry = myRankEntry {
+            let prefix = isComplete ? "Goal complete" : "Keep going"
+            return "\(prefix) · Ranked #\(entry.rank) this week"
+        }
+        return isComplete ? "Goal complete · Tap to see the leaderboard" : "Tap to see the leaderboard"
+    }
+
+    // MARK: Split sections
+
+    private var incompleteFriends: [BackendUser] {
+        friendService.friends
+            .filter { friend in
+                !(nudgeStatuses[friend.user_id]?.has_completed_mile ?? false)
+            }
+            // Sort by progress descending so the closest-to-done friends bubble
+            // to the top — they're the most satisfying to nudge.
+            .sorted { lhs, rhs in
+                let lhsMi = nudgeStatuses[lhs.user_id]?.today_miles ?? 0
+                let rhsMi = nudgeStatuses[rhs.user_id]?.today_miles ?? 0
+                return lhsMi > rhsMi
+            }
+    }
+
+    private var completedFriends: [BackendUser] {
+        friendService.friends
+            .filter { friend in
+                nudgeStatuses[friend.user_id]?.has_completed_mile ?? false
+            }
+            // Highest miles first — rewards the day's top performers with
+            // visibility at the top of the section.
+            .sorted { lhs, rhs in
+                let lhsMi = nudgeStatuses[lhs.user_id]?.today_miles ?? 0
+                let rhsMi = nudgeStatuses[rhs.user_id]?.today_miles ?? 0
+                return lhsMi > rhsMi
+            }
+    }
+
+    @ViewBuilder
+    private var cheerThemOnSection: some View {
+        let incomplete = incompleteFriends
+        if !incomplete.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                sectionHeader(
+                    title: "CHEER THEM ON",
+                    trailing: "\(incomplete.count) mid-mile"
+                )
+                VStack(spacing: 6) {
+                    ForEach(incomplete) { friend in
+                        friendRowCompact(friend: friend, isCompleted: false)
+                    }
+                }
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .fill(Color.white.opacity(0.03))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                .strokeBorder(Color.white.opacity(0.05), lineWidth: 1)
+                        )
+                )
+            }
+        } else if !friendService.friends.isEmpty {
+            // Celebratory state — everyone in the friend group has crushed
+            // their mile today. Shown only after data has loaded (`friends`
+            // non-empty) so it doesn't flicker before the nudge statuses arrive.
+            allDoneCelebration
+        }
+    }
+
+    /// Friendly empty state for "Cheer Them On" when every friend has hit
+    /// their goal — rewards the user with a moment of group accomplishment
+    /// rather than an empty section.
+    private var allDoneCelebration: some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            Image(systemName: "party.popper.fill")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(.green)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Color.green.opacity(0.15)))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Everyone's crushed it today")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Text("All \(friendService.friends.count) friends hit their goal.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+            Spacer()
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                .fill(Color.green.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .strokeBorder(Color.green.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+
+    @ViewBuilder
+    private var doneTodaySection: some View {
+        let complete = completedFriends
+        if !complete.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                sectionHeader(
+                    title: "DONE TODAY",
+                    trailing: "\(complete.count) of \(friendService.friends.count)"
+                )
+                VStack(spacing: 6) {
+                    ForEach(complete) { friend in
+                        friendRowCompact(friend: friend, isCompleted: true)
+                    }
+                }
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .fill(Color.white.opacity(0.03))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                .strokeBorder(Color.white.opacity(0.05), lineWidth: 1)
+                        )
+                )
             }
         }
     }
 
-    // MARK: - Friend Row with Nudge
-    private func friendRow(friend: BackendUser) -> some View {
+    private func sectionHeader(title: String, trailing: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .tracking(1.4)
+                .foregroundColor(.white.opacity(0.4))
+            Spacer()
+            Text(trailing)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.4))
+        }
+        .padding(.horizontal, 4)
+    }
+
+    // MARK: Compact friend row (ring avatar)
+
+    /// One unified row used in both sections — appearance and trailing action
+    /// flip based on `isCompleted`. The progress ring color also adapts:
+    /// green when done, accent when in-progress.
+    private func friendRowCompact(friend: BackendUser, isCompleted: Bool) -> some View {
         let status = nudgeStatuses[friend.user_id]
-        let hasCompletedMile = status?.has_completed_mile ?? false
         let alreadyNudged = status?.already_nudged_today ?? false
         let todayMiles = status?.today_miles ?? 0
         let goalMiles: Double = 1.0
         let progress = min(todayMiles / goalMiles, 1.0)
 
-        return Button {
-            selectedUser = friend
-        } label: {
-            VStack(spacing: MADTheme.Spacing.sm) {
-                // Top row: avatar, name, menu
-                HStack(spacing: MADTheme.Spacing.md) {
-                    ProfileImageView(user: friend, size: 44)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(friend.username ?? "Unknown")
-                            .font(.system(size: 15, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white)
-                        if friend.displayName != friend.username {
-                            Text(friend.displayName)
-                                .font(.system(size: 11, design: .rounded))
-                                .foregroundColor(.white.opacity(0.5))
-                        }
-                    }
-
-                    Spacer()
-
-                    friendMenu(friend: friend)
-                }
-
-                // Progress section
-                if hasCompletedMile {
-                    // Completed state
-                    HStack(spacing: MADTheme.Spacing.sm) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 14))
-                            .foregroundColor(.green)
-
-                        Text("Goal complete")
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundColor(.green.opacity(0.9))
-
-                        Spacer()
-
-                        Text("\(String(format: "%.2f", todayMiles)) mi today")
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundColor(.white.opacity(0.6))
-                    }
-                    .padding(.horizontal, MADTheme.Spacing.sm)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.green.opacity(0.08))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.green.opacity(0.12), lineWidth: 1)
-                            )
-                    )
-                } else {
-                    // In-progress state with progress bar and nudge
-                    VStack(spacing: 6) {
-                        HStack {
-                            Text("\(String(format: "%.2f", todayMiles)) / \(String(format: "%.0f", goalMiles)) mi")
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.5))
-
-                            Spacer()
-
-                            Text("\(Int(progress * 100))%")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .foregroundColor(progress > 0 ? .orange.opacity(0.8) : .white.opacity(0.3))
-                        }
-
-                        // Progress bar with nudge button
-                        HStack(spacing: MADTheme.Spacing.sm) {
-                            GeometryReader { geo in
-                                ZStack(alignment: .leading) {
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .fill(Color.white.opacity(0.06))
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .fill(
-                                            LinearGradient(
-                                                colors: [.orange.opacity(0.6), .orange],
-                                                startPoint: .leading,
-                                                endPoint: .trailing
-                                            )
-                                        )
-                                        .frame(width: max(geo.size.width * progress, progress > 0 ? 4 : 0))
-                                }
-                            }
-                            .frame(height: 28)
-                            .clipShape(RoundedRectangle(cornerRadius: 5))
-
-                            // Nudge button
-                            nudgeButton(friend: friend, alreadyNudged: alreadyNudged)
-                        }
-                    }
-                }
+        // Two sibling buttons in a single HStack — NOT nested. Previously
+        // the Nudge button lived inside the row's outer Button label, which
+        // caused SwiftUI's gesture system to ambiguously route the first
+        // tap between them. Splitting them as siblings means each has its
+        // own discrete hit area; first tap on the row opens the profile,
+        // first tap on the nudge button sends the nudge.
+        return HStack(spacing: 0) {
+            Button {
+                selectedUser = friend
+            } label: {
+                tappableRowContent(
+                    friend: friend,
+                    isCompleted: isCompleted,
+                    status: status,
+                    todayMiles: todayMiles,
+                    goalMiles: goalMiles,
+                    progress: progress
+                )
             }
-            .padding(MADTheme.Spacing.md)
-            .madCard()
+            .buttonStyle(.plain)
+
+            if !isCompleted {
+                nudgeButton(friend: friend, alreadyNudged: alreadyNudged)
+                    .padding(.trailing, MADTheme.Spacing.md)
+            }
         }
-        .buttonStyle(PlainButtonStyle())
+        // Shared identity across sections so a friend moving from Cheer →
+        // Done (or vice versa) slides instead of fade-popping.
+        .matchedGeometryEffect(id: friend.user_id, in: friendRowNamespace)
+    }
+
+    /// Just the visual content of a friend row — avatar + name + subtitle +
+    /// chevron-when-completed. Nudge button is rendered separately as a
+    /// sibling so it doesn't compete with the row's open-profile tap.
+    @ViewBuilder
+    private func tappableRowContent(friend: BackendUser, isCompleted: Bool, status: NudgeStatusResponse?, todayMiles: Double, goalMiles: Double, progress: Double) -> some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            AvatarWithRing(
+                name: friend.displayName,
+                imageURL: friend.profile_image_url,
+                progress: progress,
+                size: 52,
+                ringWidth: 3,
+                accent: .orange,
+                badge: isCompleted ? .check : nil
+            )
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(friend.username ?? friend.displayName)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    if let streak = status?.current_streak, streak > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "flame.fill")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("\(streak)")
+                                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        }
+                        .foregroundColor(.orange)
+                    }
+                }
+
+                Text(rowSubtitle(isCompleted: isCompleted, todayMiles: todayMiles, goal: goalMiles))
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 4)
+
+            if isCompleted {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white.opacity(0.3))
+                    .padding(.trailing, 4)
+            }
+        }
+        .padding(.leading, MADTheme.Spacing.md)
+        .padding(.trailing, MADTheme.Spacing.sm)
+        .padding(.vertical, 10)
+        // Claim the whole padded area as the tap target — without this,
+        // gaps between the avatar/name/spacer can swallow taps.
+        .contentShape(Rectangle())
+    }
+
+    private func rowSubtitle(isCompleted: Bool, todayMiles: Double, goal: Double) -> String {
+        if isCompleted {
+            return String(format: "Goal complete · %.2f mi today", todayMiles)
+        }
+        let percent = Int((min(todayMiles / goal, 1.0)) * 100)
+        return String(format: "%.2f / %.0f mi · %d%%", todayMiles, goal, percent)
+    }
+
+    // MARK: Personal rank fetch
+
+    /// Reads the viewer's rank within their friend group for THIS week.
+    /// Used by the hero card subtitle. Silently no-ops on failure — the card
+    /// just falls back to a generic subtitle.
+    private func loadMyRank() async {
+        do {
+            let page = try await LeaderboardService.fetch(
+                metric: .miles,
+                period: .week,
+                limit: 1,
+                offset: 0
+            )
+            await MainActor.run {
+                self.myRankEntry = page.current_user_entry
+                self.myRankTotal = page.total_count
+            }
+        } catch {
+            // Hero card subtitle silently falls back — no UI noise required.
+            print("[FriendsList] loadMyRank failed: \(error)")
+        }
     }
 
     // MARK: - Nudge Button (only shown when friend hasn't completed goal)
@@ -374,169 +706,51 @@ struct FriendsListView: View {
         }
     }
 
-    // MARK: - Friend Menu
-    private func friendMenu(friend: BackendUser) -> some View {
-        Menu {
-            Button(role: .destructive) {
-                userToUnfriend = friend
-                showingUnfriendAlert = true
-            } label: {
-                Label("Unfriend", systemImage: "person.fill.xmark")
-            }
-
-        } label: {
-            HStack(spacing: MADTheme.Spacing.xs) {
-                Text("Friends")
-                    .font(MADTheme.Typography.smallBold)
-                Image(systemName: "chevron.down")
-                    .font(.caption2)
-            }
-            .foregroundColor(.green)
-            .padding(.horizontal, MADTheme.Spacing.md)
-            .padding(.vertical, MADTheme.Spacing.sm)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                    .fill(Color.green.opacity(0.1))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                            .stroke(Color.green.opacity(0.3), lineWidth: 1)
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
     // MARK: - Nudge Feedback Banner
+    /// Substantial floating card so it's clearly visible even when stacked
+    /// over other tab content. Uses a colored leading stripe + ultraThinMaterial
+    /// backdrop so it reads as a system toast rather than blending into the
+    /// scroll content.
     private func nudgeFeedbackBanner(_ feedback: NudgeFeedback) -> some View {
-        HStack(spacing: 6) {
+        let accent: Color = feedback.isError ? .red : .green
+
+        return HStack(spacing: MADTheme.Spacing.sm) {
+            // Constrain stripe height — `Rectangle()` is greedy and will
+            // grow to fill the parent's available height (which was the
+            // entire screen when this lived in an .overlay). Locking
+            // height to 28pt matches the icon disc next to it.
+            Rectangle()
+                .fill(accent)
+                .frame(width: 4, height: 28)
+                .cornerRadius(2)
+
             Image(systemName: feedback.icon)
-                .font(.system(size: 12))
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(accent)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(accent.opacity(0.18)))
+
             Text(feedback.message)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.95))
+                .lineLimit(2)
+
+            Spacer(minLength: 4)
         }
-        .foregroundColor(feedback.isError ? .red : .green)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.leading, 6)
+        .padding(.trailing, MADTheme.Spacing.md)
+        .padding(.vertical, MADTheme.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
         .background(
-            Capsule()
-                .fill(feedback.isError ? Color.red.opacity(0.12) : Color.green.opacity(0.12))
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.4), radius: 12, y: 6)
         )
-    }
-
-    // MARK: - Requests Tab
-    private var requestsTab: some View {
-        Group {
-            if friendService.isLoading {
-                loadingView
-            } else if friendService.friendRequests.isEmpty {
-                FriendEmptyStateView(
-                    title: "No Friend Requests",
-                    message: "You don't have any pending friend requests at the moment.",
-                    systemImage: "person.crop.circle.badge.exclamationmark"
-                )
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: MADTheme.Spacing.md) {
-                        ForEach(friendService.friendRequests) { request in
-                            UserProfileCard(
-                                user: request,
-                                showDetails: false,
-                                onTap: {
-                                    selectedUser = request
-                                },
-                                actionButton: AnyView(
-                                    VStack(spacing: MADTheme.Spacing.sm) {
-                                        // Accept button
-                                        Button(action: {
-                                            handleAcceptRequest(request)
-                                        }) {
-                                            HStack(spacing: MADTheme.Spacing.xs) {
-                                                Image(systemName: "checkmark")
-                                                    .font(.system(size: 12, weight: .semibold))
-                                                Text("Accept")
-                                                    .font(MADTheme.Typography.smallBold)
-                                            }
-                                            .foregroundColor(.white)
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, MADTheme.Spacing.sm)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                                                    .fill(Color.green)
-                                            )
-                                        }
-                                        .buttonStyle(.plain)
-
-                                        // Decline button
-                                        Button(action: {
-                                            handleDeclineRequest(request)
-                                        }) {
-                                            HStack(spacing: MADTheme.Spacing.xs) {
-                                                Image(systemName: "xmark")
-                                                    .font(.system(size: 12, weight: .semibold))
-                                                Text("Decline")
-                                                    .font(MADTheme.Typography.smallBold)
-                                            }
-                                            .foregroundColor(.white.opacity(0.7))
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, MADTheme.Spacing.sm)
-                                            .background(
-                                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                                                    .fill(Color.red.opacity(0.2))
-                                                    .overlay(
-                                                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                                                            .stroke(Color.red.opacity(0.4), lineWidth: 1)
-                                                    )
-                                            )
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                    .frame(width: 90)
-                                )
-                            )
-                        }
-                    }
-                    .padding(MADTheme.Spacing.md)
-                }
-            }
-        }
-    }
-
-    // MARK: - Sent Tab
-    private var sentTab: some View {
-        Group {
-            if friendService.isLoading {
-                loadingView
-            } else if friendService.sentRequests.isEmpty {
-                FriendEmptyStateView(
-                    title: "No Sent Requests",
-                    message: "You haven't sent any friend requests yet.",
-                    systemImage: "paperplane"
-                )
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: MADTheme.Spacing.md) {
-                        ForEach(friendService.sentRequests) { request in
-                            UserProfileCard(
-                                user: request,
-                                onTap: {
-                                    selectedUser = request
-                                },
-                                actionButton: AnyView(
-                                    FriendActionButton(
-                                        title: "Cancel",
-                                        style: .secondary,
-                                        action: {
-                                            handleCancelRequest(request)
-                                        }
-                                    )
-                                )
-                            )
-                        }
-                    }
-                    .padding(MADTheme.Spacing.md)
-                }
-            }
-        }
     }
 
     // MARK: - Loading View
@@ -551,6 +765,56 @@ struct FriendsListView: View {
                 .foregroundColor(MADTheme.Colors.secondaryText)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Skeleton Loader
+    /// Placeholder rows shown while friend data is loading. Perceived
+    /// performance > spinner-on-blank-screen — users see the eventual layout
+    /// shape immediately, which makes the wait feel shorter.
+    private var friendsSkeletonList: some View {
+        VStack(spacing: MADTheme.Spacing.sm) {
+            VStack(spacing: 6) {
+                ForEach(0..<3, id: \.self) { _ in skeletonRow() }
+            }
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(Color.white.opacity(0.03))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .strokeBorder(Color.white.opacity(0.05), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    private func skeletonRow() -> some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            Circle()
+                .fill(Color.white.opacity(0.08))
+                .frame(width: 52, height: 52)
+                .shimmer()
+
+            VStack(alignment: .leading, spacing: 6) {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.white.opacity(0.08))
+                    .frame(width: 110, height: 12)
+                    .shimmer()
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.white.opacity(0.06))
+                    .frame(width: 160, height: 10)
+                    .shimmer()
+            }
+
+            Spacer(minLength: 4)
+
+            Capsule()
+                .fill(Color.white.opacity(0.08))
+                .frame(width: 64, height: 26)
+                .shimmer()
+        }
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Nudge Methods
@@ -582,7 +846,8 @@ struct FriendsListView: View {
                         can_nudge: false,
                         has_completed_mile: existing?.has_completed_mile ?? false,
                         already_nudged_today: true,
-                        today_miles: existing?.today_miles
+                        today_miles: existing?.today_miles,
+                        current_streak: existing?.current_streak
                     )
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     showNudgeFeedback(NudgeFeedback(
@@ -656,55 +921,12 @@ struct FriendsListView: View {
 }
 
 // MARK: - Nudge Feedback Model
-private struct NudgeFeedback: Equatable {
+// Internal (not `private`) because UserProfileDetailView uses the same
+// type for its nudge confirmation toast — both surfaces share visual treatment.
+struct NudgeFeedback: Equatable {
     let icon: String
     let message: String
     let isError: Bool
-}
-
-// MARK: - Tab Button Component
-struct TabButton: View {
-    let title: String
-    let count: Int
-    let isSelected: Bool
-    var showCountAsNotification: Bool = true
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: MADTheme.Spacing.xs) {
-                HStack(spacing: MADTheme.Spacing.xs) {
-                    Text(title)
-                        .font(MADTheme.Typography.headline)
-                        .foregroundColor(isSelected ? MADTheme.Colors.madRed : MADTheme.Colors.secondaryText)
-
-                    if count > 0 {
-                        if showCountAsNotification {
-                            Text("\(count)")
-                                .font(MADTheme.Typography.caption)
-                                .foregroundColor(.white)
-                                .padding(.horizontal, MADTheme.Spacing.sm)
-                                .padding(.vertical, 2)
-                                .background(
-                                    Capsule()
-                                        .fill(MADTheme.Colors.madRed)
-                                )
-                        } else {
-                            Text("(\(count))")
-                                .font(MADTheme.Typography.caption)
-                                .foregroundColor(isSelected ? MADTheme.Colors.madRed.opacity(0.7) : MADTheme.Colors.secondaryText.opacity(0.7))
-                        }
-                    }
-                }
-
-                Rectangle()
-                    .fill(isSelected ? MADTheme.Colors.madRed : Color.clear)
-                    .frame(height: 2)
-            }
-        }
-        .buttonStyle(PlainButtonStyle())
-        .frame(maxWidth: .infinity)
-    }
 }
 
 // MARK: - Bell Shake Animation Modifier

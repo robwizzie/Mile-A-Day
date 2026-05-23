@@ -125,18 +125,18 @@ struct FriendActionButton: View {
                         .progressViewStyle(CircularProgressViewStyle(tint: style.foregroundColor))
                 } else {
                     Text(title)
-                        .font(MADTheme.Typography.smallBold)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
                 }
             }
             .foregroundColor(style.foregroundColor)
             .padding(.horizontal, MADTheme.Spacing.md)
-            .padding(.vertical, MADTheme.Spacing.sm)
+            .padding(.vertical, 9)
             .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
+                Capsule()
                     .fill(style.backgroundColor)
                     .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.small)
-                            .stroke(style.borderColor, lineWidth: style.borderWidth)
+                        Capsule()
+                            .strokeBorder(style.borderColor, lineWidth: style.borderWidth)
                     )
             )
         }

@@ -15,6 +15,15 @@ struct ProfileView: View {
     @State private var pinnedBadgeForDetail: Badge?
     @State private var isShowingBadgeDetail = false
 
+    // Section tabs — mirrors UserProfileDetailView's structure so navigating
+    // between own profile and friend profile feels consistent. Own profile
+    // adds a 4th Settings tab since you can only manage your own account.
+    @State private var profileTab: OwnProfileTab = .activity
+
+    enum OwnProfileTab: Hashable {
+        case activity, stats, badges, settings
+    }
+
     enum ProfileSheetType: String, Identifiable {
         case totalMiles, fastestPace, mostMiles
         case editProfile, usernameSetup, privacySettings
@@ -22,48 +31,53 @@ struct ProfileView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: MADTheme.Spacing.lg) {
-                // Profile Header (matches friend profile style)
-                profileHeader
-
-                // Pinned medals showcase
-                PinnedBadgesShowcase(
-                    pinnedBadges: userManager.pinnedBadges,
-                    onManageTapped: { showingManagePins = true },
-                    onBadgeTapped: { badge in
-                        pinnedBadgeForDetail = badge
-                        isShowingBadgeDetail = true
+        VStack(spacing: 0) {
+            MADTabHeader(
+                title: "Profile",
+                actions: [
+                    MADHeaderAction(id: "edit", systemImage: "pencil") {
+                        activeSheet = .editProfile
                     },
-                    ownerDisplayName: nil,
-                    onReorder: { from, to in
-                        reorderPinnedBadges(from: from, to: to)
+                    MADHeaderAction(id: "privacy", systemImage: "lock.shield.fill") {
+                        activeSheet = .privacySettings
                     }
-                )
+                ]
+            )
 
-                // Streak & Goal Row
-                streakAndGoalRow
+            ScrollView {
+                VStack(spacing: MADTheme.Spacing.lg) {
+                    // Profile Header (matches friend profile style)
+                    profileHeader
 
-                // Performance Stats
-                performanceSection
+                    // Tab picker — same grammar as friend profile.
+                    MADPillPicker(
+                        selection: $profileTab,
+                        options: [
+                            .init(id: .activity, title: "Activity", systemImage: "flame.fill"),
+                            .init(id: .stats, title: "Stats", systemImage: "chart.bar.fill"),
+                            .init(id: .badges, title: "Badges", systemImage: "trophy.fill"),
+                            .init(id: .settings, title: "Settings", systemImage: "gearshape.fill")
+                        ]
+                    )
 
-                // Settings & Actions
-                settingsSection
-
-                // Development Section (development environment + admin only)
-                if showsDevelopmentSection {
-                    developmentSection
+                    Group {
+                        switch profileTab {
+                        case .activity: ownActivityTabContent
+                        case .stats: ownStatsTabContent
+                        case .badges: ownBadgesTabContent
+                        case .settings: ownSettingsTabContent
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.18), value: profileTab)
                 }
+                .padding(.horizontal, MADTheme.Spacing.md)
+                .padding(.top, MADTheme.Spacing.sm)
+                .padding(.bottom, 100)
             }
-            .padding(.horizontal, MADTheme.Spacing.md)
-            .padding(.top, MADTheme.Spacing.sm)
-            .padding(.bottom, 100)
+            .scrollContentBackground(.hidden)
         }
         .background(MADTheme.Colors.appBackgroundGradient)
-        .scrollContentBackground(.hidden)
-        .navigationTitle("Profile")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+        .toolbar(.hidden, for: .navigationBar)
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .totalMiles:
@@ -128,6 +142,58 @@ struct ProfileView: View {
     }
 
     // MARK: - Profile Header
+
+    // MARK: - Tab Content
+
+    /// Today's snapshot — streak + goal completion. Mirrors the friend
+    /// profile's Activity tab role: "what's happening right now".
+    @ViewBuilder
+    private var ownActivityTabContent: some View {
+        VStack(spacing: MADTheme.Spacing.lg) {
+            streakAndGoalRow
+        }
+    }
+
+    /// Performance metrics — same role as the friend profile's Stats tab.
+    @ViewBuilder
+    private var ownStatsTabContent: some View {
+        VStack(spacing: MADTheme.Spacing.lg) {
+            performanceSection
+        }
+    }
+
+    /// Pinned medals + manage button — friend profile's Badges tab shows
+    /// a compare grid; own profile shows what's currently pinned with the
+    /// ability to reorder / change selections.
+    @ViewBuilder
+    private var ownBadgesTabContent: some View {
+        VStack(spacing: MADTheme.Spacing.lg) {
+            PinnedBadgesShowcase(
+                pinnedBadges: userManager.pinnedBadges,
+                onManageTapped: { showingManagePins = true },
+                onBadgeTapped: { badge in
+                    pinnedBadgeForDetail = badge
+                    isShowingBadgeDetail = true
+                },
+                ownerDisplayName: nil,
+                onReorder: { from, to in
+                    reorderPinnedBadges(from: from, to: to)
+                }
+            )
+        }
+    }
+
+    /// Settings + sign-out + (dev only) developer tools. Own-profile-only
+    /// tab since you can't manage someone else's account.
+    @ViewBuilder
+    private var ownSettingsTabContent: some View {
+        VStack(spacing: MADTheme.Spacing.lg) {
+            settingsSection
+            if showsDevelopmentSection {
+                developmentSection
+            }
+        }
+    }
 
     private var profileHeader: some View {
         VStack(spacing: 0) {
@@ -245,6 +311,11 @@ struct ProfileView: View {
                 .padding(.bottom, MADTheme.Spacing.lg)
             }
         }
+        // Clip the inner LinearGradient banner to the card shape so it
+        // doesn't bleed past the rounded top corners. Same fix as the
+        // friend profile header — madLiquidGlass styles a rounded
+        // background but doesn't clip the children.
+        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous))
         .madLiquidGlass()
         .onAppear {
             loadProfileImage()

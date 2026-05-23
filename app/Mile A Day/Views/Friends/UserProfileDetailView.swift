@@ -21,6 +21,26 @@ struct UserProfileDetailView: View {
     @State private var selectedWorkout: FriendWorkout?
     @State private var friendTodayChallenge: RemoteChallengeService.FriendTodayDTO?
 
+    // Nudge state — fetched on appear, only relevant when viewing a friend
+    // who hasn't completed today and hasn't been nudged in the last 24h.
+    @State private var nudgeStatus: NudgeStatusResponse?
+    @State private var isNudging = false
+    @State private var nudgeFeedback: NudgeFeedback?
+
+    // Compete-together sheet — opens CreateCompetitionView with this friend
+    // pre-selected. Sheet state lives here so the CTA can present the
+    // standard NavigationStack-wrapped form modal.
+    @State private var showCompeteSheet = false
+
+    // Section tabs — break up the previously long vertical list into
+    // focused views. Same tab grammar as own ProfileView so navigating
+    // between profiles feels consistent.
+    @State private var profileTab: FriendProfileTab = .activity
+
+    enum FriendProfileTab: Hashable {
+        case activity, stats, badges
+    }
+
     private var canLoadMore: Bool {
         hasLoadedInitial && friendWorkouts.count >= workoutLimit
     }
@@ -32,56 +52,51 @@ struct UserProfileDetailView: View {
 
             ScrollView {
                 VStack(spacing: MADTheme.Spacing.lg) {
-                    // Profile Header
+                    // Profile header stays above the tab picker — it's the
+                    // identity surface and applies to every tab.
                     profileHeader
 
-                    // Stats Section
-                    if !isPrivate {
-                        FriendStatsView(user: user, stats: userStats)
-                    } else {
+                    if isPrivate {
                         privateAccountView
-                    }
-
-                    // Today's Daily Challenge indicator
-                    if !isPrivate, let today = friendTodayChallenge {
-                        FriendTodayChallengeRow(today: today)
-                    }
-
-                    // Badges Section — pinned showcase + owned/not-owned compare grid.
-                    if !isPrivate && hasLoadedBadges && !isCurrentUser() && !catalogBadges.isEmpty {
-                        FriendBadgeCompareView(
-                            ownerDisplayName: user.username ?? user.displayName,
-                            earnedBadges: userBadges,
-                            catalogBadges: catalogBadges,
-                            viewerEarnedBadgeIds: Set(userManager.currentUser.badges.filter { !$0.isLocked }.map { $0.id })
+                    } else {
+                        // Tab picker — same pill-style grammar as Friends /
+                        // Compete / Profile mode pickers.
+                        MADPillPicker(
+                            selection: $profileTab,
+                            options: [
+                                .init(id: .activity, title: "Activity", systemImage: "flame.fill"),
+                                .init(id: .stats, title: "Stats", systemImage: "chart.bar.fill"),
+                                .init(id: .badges, title: "Badges", systemImage: "trophy.fill")
+                            ]
                         )
-                    }
 
-                    // Recent Workouts Section
-                    if !isPrivate && !friendWorkouts.isEmpty {
-                        VStack(spacing: MADTheme.Spacing.md) {
-                            FriendWorkoutsSection(
-                                workouts: friendWorkouts,
-                                onWorkoutTap: { workout in
-                                    selectedWorkout = workout
-                                }
-                            )
-
-                            if canLoadMore && !isLoadingMoreWorkouts {
-                                loadMoreButton
+                        // Content for the selected tab.
+                        Group {
+                            switch profileTab {
+                            case .activity: activityTabContent
+                            case .stats: statsTabContent
+                            case .badges: badgesTabContent
                             }
                         }
+                        .animation(.easeInOut(duration: 0.18), value: profileTab)
                     }
                 }
                 .padding(.vertical, MADTheme.Spacing.md)
                 .padding(.horizontal, MADTheme.Spacing.md)
+            }
+            .refreshable {
+                await refreshProfileData()
             }
         }
         .navigationTitle(user.username ?? "Profile")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
+            // `.cancellationAction` instead of `.navigationBarLeading` — the
+            // semantic placement gives iOS responsibility for hit-targeting
+            // and avoids first-tap-fail issues that show up when custom
+            // placements collide with sheet drag gestures.
+            ToolbarItem(placement: .cancellationAction) {
                 Button("Close") {
                     dismiss()
                 }
@@ -90,6 +105,23 @@ struct UserProfileDetailView: View {
         }
         .sheet(item: $selectedWorkout) { workout in
             FriendWorkoutDetailSheet(workout: workout)
+        }
+        .sheet(isPresented: $showCompeteSheet) {
+            CreateCompetitionView(
+                onCreated: { _ in
+                    showCompeteSheet = false
+                },
+                preselectedFriend: user
+            )
+        }
+        .overlay(alignment: .top) {
+            if let feedback = nudgeFeedback {
+                profileNudgeBanner(feedback)
+                    .padding(.horizontal, MADTheme.Spacing.md)
+                    .padding(.top, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(100)
+            }
         }
         .onAppear {
             loadUserData()
@@ -100,6 +132,9 @@ struct UserProfileDetailView: View {
         }
         .task {
             await loadBadges()
+        }
+        .task {
+            await loadNudgeStatus()
         }
     }
 
@@ -148,7 +183,11 @@ struct UserProfileDetailView: View {
     private var profileHeader: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .top) {
-                // Background gradient
+                // Background gradient — clipped to the same rounded shape as
+                // the parent card (set on the outer `.clipShape` below) so
+                // the gradient doesn't bleed past the top-left / top-right
+                // corners. Without the clip, the gradient renders to the
+                // raw VStack bounds and the corners appear square.
                 LinearGradient(
                     gradient: Gradient(colors: [
                         MADTheme.Colors.madRed.opacity(0.3),
@@ -200,15 +239,441 @@ struct UserProfileDetailView: View {
                         }
                     }
 
-                    // Friend Action Button
-                    friendActionButton
-                        .padding(.horizontal, MADTheme.Spacing.lg)
+                    // Friend status pill (friendship state + actions menu).
+                    // Centered at natural size — used to be full-width which
+                    // made it dominate the header.
+                    HStack { friendActionButton }
+                        .frame(maxWidth: .infinity)
+
+                    // Action row — Nudge + Compete share a single horizontal
+                    // row of equal-width pills. Previously each was a
+                    // full-width stacked button; the new layout reads as one
+                    // CTA region and takes one row instead of three. Hype
+                    // stays out (context-dependent, lives on push events).
+                    if !isCurrentUser(), friendService.isFriend(user) {
+                        actionRow
+                            .padding(.horizontal, MADTheme.Spacing.lg)
+                    }
                 }
                 .padding(.horizontal, MADTheme.Spacing.md)
                 .padding(.bottom, MADTheme.Spacing.lg)
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous))
         .madLiquidGlass()
+    }
+
+    // MARK: - Tab Content
+
+    /// Today's snapshot + week chart + daily challenge + recent workouts.
+    /// Default landing tab — the most time-sensitive info.
+    @ViewBuilder
+    private var activityTabContent: some View {
+        VStack(spacing: MADTheme.Spacing.lg) {
+            if !isCurrentUser(), friendService.isFriend(user) {
+                friendTodayProgressCard
+            }
+            if !isCurrentUser(), !friendWorkouts.isEmpty {
+                Last7DaysChart(workouts: friendWorkouts)
+            }
+            if let today = friendTodayChallenge {
+                FriendTodayChallengeRow(today: today)
+            }
+            if !friendWorkouts.isEmpty {
+                VStack(spacing: MADTheme.Spacing.md) {
+                    FriendWorkoutsSection(
+                        workouts: friendWorkouts,
+                        onWorkoutTap: { workout in selectedWorkout = workout }
+                    )
+                    if canLoadMore && !isLoadingMoreWorkouts {
+                        loadMoreButton
+                    }
+                }
+            }
+        }
+    }
+
+    /// Performance metrics (streak, total miles, best pace, best day, etc.)
+    @ViewBuilder
+    private var statsTabContent: some View {
+        FriendStatsView(user: user, stats: userStats)
+    }
+
+    /// Badge collection — pinned showcase + side-by-side comparison grid.
+    @ViewBuilder
+    private var badgesTabContent: some View {
+        if hasLoadedBadges && !isCurrentUser() && !catalogBadges.isEmpty {
+            FriendBadgeCompareView(
+                ownerDisplayName: user.username ?? user.displayName,
+                earnedBadges: userBadges,
+                catalogBadges: catalogBadges,
+                viewerEarnedBadgeIds: Set(userManager.currentUser.badges.filter { !$0.isLocked }.map { $0.id })
+            )
+        } else {
+            VStack(spacing: MADTheme.Spacing.md) {
+                ProgressView().tint(MADTheme.Colors.madRed)
+                Text("Loading badges…")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, MADTheme.Spacing.xl)
+        }
+    }
+
+    // MARK: - Action Row (Nudge + Compete)
+
+    /// Side-by-side pills for the two main actions you can take on a
+    /// friend's profile. Nudge is hidden when the friend has already
+    /// completed today; in that case Compete takes full width alone.
+    @ViewBuilder
+    private var actionRow: some View {
+        let nudgeIsAvailable: Bool = {
+            guard let status = nudgeStatus else { return false }
+            return !status.has_completed_mile
+        }()
+
+        HStack(spacing: 8) {
+            if nudgeIsAvailable {
+                nudgeProfileButton
+            }
+            competeTogetherButton
+        }
+    }
+
+    // MARK: - Compete Together
+
+    private var competeTogetherButton: some View {
+        // Secondary-weight outlined pill — yellow border, faint fill, no
+        // shadow. Nudge is the primary action when applicable; Compete is
+        // an occasional thing, so it doesn't need to fight Nudge for
+        // attention. Smaller text + tighter padding keeps it discoverable
+        // without overwhelming the profile header.
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showCompeteSheet = true
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 11, weight: .bold))
+                Text("Compete")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+            }
+            .foregroundColor(Color.yellow)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity)
+            .background(
+                Capsule()
+                    .fill(Color.yellow.opacity(0.08))
+                    .overlay(Capsule().strokeBorder(Color.yellow.opacity(0.4), lineWidth: 1))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Refresh
+
+    /// Re-fetches today's nudge status, today's challenge, recent workouts,
+    /// and badges. Wired to the ScrollView's `.refreshable` so pulling down
+    /// the profile gives the user fresh data without closing the sheet.
+    private func refreshProfileData() async {
+        // Capture MainActor-isolated values into locals BEFORE entering the
+        // TaskGroup. The closures passed to `group.addTask` are nonisolated,
+        // so they can't read `isCurrentUser()` or `workoutLimit` directly
+        // (Swift 6 error). Hoisting the reads gives the tasks plain values.
+        let isCurrent = isCurrentUser()
+        let limit = workoutLimit
+        let userId = user.user_id
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await loadNudgeStatus() }
+            group.addTask { await loadFriendTodayChallenge() }
+            group.addTask { await loadBadges() }
+            group.addTask {
+                if !isCurrent {
+                    do {
+                        let workouts = try await friendService.fetchRecentWorkouts(for: userId, limit: limit)
+                        await MainActor.run { self.friendWorkouts = workouts }
+                    } catch {
+                        print("[UserProfile] refresh workouts failed: \(error)")
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Today Progress
+    /// Today's distance + completion + streak. Renders only for friends (not
+    /// self, not strangers) since the data comes from the nudge-status fetch
+    /// which is gated on friendship.
+    @ViewBuilder
+    private var friendTodayProgressCard: some View {
+        if let status = nudgeStatus {
+            let today = status.today_miles ?? 0
+            let goal: Double = 1.0
+            let progress = min(today / goal, 1.0)
+            let isComplete = status.has_completed_mile
+            let streak = status.current_streak ?? 0
+            let remaining = max(0, goal - today)
+
+            HStack(spacing: MADTheme.Spacing.md) {
+                // Progress ring with miles in the center.
+                ZStack {
+                    Circle()
+                        .stroke(Color.white.opacity(0.08), lineWidth: 5)
+                        .frame(width: 72, height: 72)
+                    Circle()
+                        .trim(from: 0, to: progress)
+                        .stroke(
+                            isComplete ? Color.green : Color.orange,
+                            style: StrokeStyle(lineWidth: 5, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .frame(width: 72, height: 72)
+                    VStack(spacing: 0) {
+                        Text(String(format: today >= 10 ? "%.1f" : "%.2f", today))
+                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                        Text("mi")
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("TODAY")
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .tracking(1.0)
+                        .foregroundColor(.white.opacity(0.5))
+
+                    HStack(spacing: 6) {
+                        Text(isComplete ? "Goal complete" : String(format: "%.2f mi to go", remaining))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundColor(isComplete ? .green : .white)
+                            .lineLimit(1)
+                        if streak > 0 {
+                            HStack(spacing: 2) {
+                                Image(systemName: "flame.fill")
+                                    .font(.system(size: 10, weight: .bold))
+                                Text("\(streak)")
+                                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            }
+                            .foregroundColor(.orange)
+                        }
+                    }
+
+                    Text(isComplete
+                        ? String(format: "%.2f mi · Goal 1 mi", today)
+                        : String(format: "%d%% of today's mile", Int(progress * 100)))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+
+                Spacer()
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(
+                                isComplete ? Color.green.opacity(0.3) : Color.white.opacity(0.08),
+                                lineWidth: 1
+                            )
+                    )
+            )
+        } else {
+            // Loading skeleton while nudge status fetches.
+            HStack(spacing: MADTheme.Spacing.md) {
+                Circle()
+                    .fill(Color.white.opacity(0.06))
+                    .frame(width: 72, height: 72)
+                VStack(alignment: .leading, spacing: 6) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(0.06))
+                        .frame(width: 60, height: 9)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(0.06))
+                        .frame(width: 140, height: 13)
+                }
+                Spacer()
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    // MARK: - Nudge Button
+    /// Mirrors the row-style nudge in FriendsListView: prominent CTA when
+    /// available, muted "Nudged" pill when used today, hidden otherwise.
+    @ViewBuilder
+    private var nudgeProfileButton: some View {
+        if !isCurrentUser(),
+           friendService.isFriend(user),
+           let status = nudgeStatus,
+           !status.has_completed_mile {
+            if status.already_nudged_today {
+                HStack(spacing: 5) {
+                    Image(systemName: "bell.slash.fill")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("Nudged")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                }
+                .foregroundColor(.white.opacity(0.35))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .frame(maxWidth: .infinity)
+                .background(
+                    Capsule()
+                        .fill(Color.white.opacity(0.05))
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+                )
+            } else {
+                // Outlined orange pill — matches the Compete button's
+                // visual weight (12pt / 14pad / 9vpad, no gradient or
+                // shadow) so the two CTAs sit side-by-side without one
+                // dominating. Drop the username — was making the button
+                // too wide; "Nudge" alone is unambiguous in context.
+                Button {
+                    handleProfileNudge()
+                } label: {
+                    HStack(spacing: 5) {
+                        if isNudging {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .tint(.orange)
+                        } else {
+                            Image(systemName: "bell.badge.fill")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Nudge")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .lineLimit(1)
+                        }
+                    }
+                    .foregroundColor(Color.orange)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        Capsule()
+                            .fill(Color.orange.opacity(0.08))
+                            .overlay(Capsule().strokeBorder(Color.orange.opacity(0.4), lineWidth: 1))
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isNudging)
+            }
+        }
+    }
+
+    private func handleProfileNudge() {
+        isNudging = true
+        Task {
+            do {
+                try await friendService.nudgeFriend(user.user_id)
+                await MainActor.run {
+                    isNudging = false
+                    FlexNudgeTracker.markFriendNudgeSent(friendId: user.user_id)
+                    // Preserve existing miles/completion in the optimistic update.
+                    nudgeStatus = NudgeStatusResponse(
+                        can_nudge: false,
+                        has_completed_mile: nudgeStatus?.has_completed_mile ?? false,
+                        already_nudged_today: true,
+                        today_miles: nudgeStatus?.today_miles,
+                        current_streak: nudgeStatus?.current_streak
+                    )
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    showProfileNudgeFeedback(NudgeFeedback(
+                        icon: "bell.badge.fill",
+                        message: "Nudge sent to \(user.displayName)!",
+                        isError: false
+                    ))
+                }
+            } catch {
+                await MainActor.run {
+                    isNudging = false
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    showProfileNudgeFeedback(NudgeFeedback(
+                        icon: "xmark.circle.fill",
+                        message: "Couldn't send nudge",
+                        isError: true
+                    ))
+                }
+            }
+        }
+    }
+
+    private func loadNudgeStatus() async {
+        guard !isCurrentUser(), friendService.isFriend(user) else { return }
+        do {
+            let status = try await friendService.checkNudgeStatus(for: user.user_id)
+            await MainActor.run { self.nudgeStatus = status }
+        } catch {
+            print("[UserProfile] loadNudgeStatus failed: \(error)")
+        }
+    }
+
+    private func showProfileNudgeFeedback(_ feedback: NudgeFeedback) {
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+            nudgeFeedback = feedback
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                nudgeFeedback = nil
+            }
+        }
+    }
+
+    /// Same visual treatment as the floating toast in FriendsListView so the
+    /// nudge confirmation reads as a consistent system event across surfaces.
+    private func profileNudgeBanner(_ feedback: NudgeFeedback) -> some View {
+        let accent: Color = feedback.isError ? .red : .green
+        return HStack(spacing: MADTheme.Spacing.sm) {
+            // Constrain stripe height — `Rectangle()` is greedy and grows
+            // to fill the .overlay's full parent height (the entire screen)
+            // otherwise. Locking to 28pt matches the icon next to it.
+            Rectangle()
+                .fill(accent)
+                .frame(width: 4, height: 28)
+                .cornerRadius(2)
+
+            Image(systemName: feedback.icon)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(accent)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(accent.opacity(0.18)))
+
+            Text(feedback.message)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.95))
+                .lineLimit(2)
+
+            Spacer(minLength: 4)
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, MADTheme.Spacing.md)
+        .padding(.vertical, MADTheme.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.4), radius: 12, y: 6)
+        )
     }
 
     // MARK: - Friend Action Button
@@ -558,34 +1023,72 @@ struct FriendWorkoutDetailSheet: View {
 struct FriendTodayChallengeRow: View {
     let today: RemoteChallengeService.FriendTodayDTO
 
+    /// Look up the challenge metadata so we can show its name + icon instead
+    /// of a generic "Completed / Not yet". Falls back to neutral styling when
+    /// the backend returns a key the local catalog doesn't know.
+    private var challenge: DailyChallenge? {
+        guard let key = today.challengeKey else { return nil }
+        return DailyChallengeCatalog.byKey(key)
+    }
+
     var body: some View {
         HStack(spacing: 14) {
             ZStack {
                 Circle()
                     .fill(
                         LinearGradient(
-                            colors: today.completed ? [.green, .green.opacity(0.8)] : [.white.opacity(0.2), .white.opacity(0.1)],
+                            colors: iconGradient,
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: 40, height: 40)
-                Image(systemName: today.completed ? "checkmark" : "hourglass")
-                    .font(.system(size: 18, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                Image(systemName: iconName)
+                    .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.white)
             }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("TODAY'S CHALLENGE")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .tracking(0.8)
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .tracking(1.0)
                     .foregroundColor(.white.opacity(0.5))
-                Text(today.completed ? "Completed" : "Not yet")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundColor(today.completed ? .green : .white.opacity(0.85))
+                if let challenge = challenge {
+                    Text(challenge.title)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                } else {
+                    Text("Today's challenge")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                }
             }
 
             Spacer()
+
+            // Status pill on the right — clear "Completed" / "In progress"
+            // signal that doesn't compete with the challenge name.
+            HStack(spacing: 4) {
+                Image(systemName: today.completed ? "checkmark.circle.fill" : "hourglass")
+                    .font(.system(size: 11, weight: .bold))
+                Text(today.completed ? "Done" : "Not yet")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+            }
+            .foregroundColor(today.completed ? .green : .white.opacity(0.55))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(today.completed ? Color.green.opacity(0.12) : Color.white.opacity(0.06))
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(
+                                today.completed ? Color.green.opacity(0.3) : Color.white.opacity(0.12),
+                                lineWidth: 1
+                            )
+                    )
+            )
         }
         .padding(14)
         .background(
@@ -596,6 +1099,269 @@ struct FriendTodayChallengeRow: View {
                         .stroke(.white.opacity(0.1), lineWidth: 1)
                 )
         )
+    }
+
+    private var iconName: String {
+        if let challenge = challenge { return challenge.icon }
+        return today.completed ? "checkmark" : "hourglass"
+    }
+
+    private var iconGradient: [Color] {
+        if let challenge = challenge {
+            return challenge.gradient
+        }
+        return today.completed
+            ? [.green, .green.opacity(0.8)]
+            : [.white.opacity(0.2), .white.opacity(0.1)]
+    }
+}
+
+// MARK: - Last 7 Days Mini Chart
+
+/// Bar chart of the friend's last 7 days of miles. Aggregates from
+/// `friendWorkouts` rather than fetching new data — instant render, no extra
+/// request. Goal-hit days are green, partial days orange, zeros muted; today
+/// is ringed so users orient themselves at a glance.
+struct Last7DaysChart: View {
+    let workouts: [FriendWorkout]
+
+    private let goalMiles: Double = 1.0
+    private let calendar = Calendar.current
+
+    /// Selected day for the inline detail panel. Tapping a bar toggles
+    /// selection — second tap on the same day closes the panel.
+    @State private var selectedDay: Date?
+
+    /// Map of date (start of day) → total miles for that day, drawn from
+    /// the friend's recent workouts. Only includes the last 7 days.
+    private var milesByDay: [Date: Double] {
+        let cutoff = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -6, to: Date()) ?? Date())
+        var result: [Date: Double] = [:]
+        for workout in workouts {
+            guard let day = parseDay(workout.date) else { continue }
+            guard day >= cutoff else { continue }
+            result[day, default: 0] += workout.distance
+        }
+        return result
+    }
+
+    /// 7 days ending today, oldest first.
+    private var days: [Date] {
+        let today = calendar.startOfDay(for: Date())
+        return (0..<7).reversed().compactMap { offset in
+            calendar.date(byAdding: .day, value: -offset, to: today)
+        }
+    }
+
+    private var weekTotal: Double {
+        milesByDay.values.reduce(0, +)
+    }
+
+    /// Tallest bar's value — used to scale the rest. Min of 1 mile so a
+    /// week with one short run doesn't look like a wall.
+    private var maxValue: Double {
+        max(milesByDay.values.max() ?? 0, 1.0)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            HStack {
+                Text("LAST 7 DAYS")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.5))
+                Spacer()
+                Text(String(format: "%.1f mi total", weekTotal))
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                ForEach(days, id: \.self) { day in
+                    barColumn(for: day)
+                }
+            }
+            .frame(height: 92)
+
+            if let selected = selectedDay {
+                dayDetailPanel(for: selected)
+                    .transition(.asymmetric(
+                        insertion: .opacity.combined(with: .move(edge: .top)),
+                        removal: .opacity
+                    ))
+            }
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
+        .animation(.spring(response: 0.32, dampingFraction: 0.85), value: selectedDay)
+    }
+
+    private func barColumn(for day: Date) -> some View {
+        let miles = milesByDay[day] ?? 0
+        let progress = min(miles / maxValue, 1.0)
+        let isToday = calendar.isDateInToday(day)
+        let didHit = miles >= goalMiles
+        let isSelected = selectedDay.map { calendar.isDate($0, inSameDayAs: day) } ?? false
+        let color: Color = miles == 0
+            ? Color.white.opacity(0.12)
+            : (didHit ? .green : .orange)
+
+        return Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            // Second tap on the same bar closes the detail panel.
+            if isSelected {
+                selectedDay = nil
+            } else {
+                selectedDay = day
+            }
+        } label: {
+            VStack(spacing: 6) {
+                // Bar
+                GeometryReader { geo in
+                    VStack {
+                        Spacer(minLength: 0)
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: miles == 0 ? [color, color] : [color, color.opacity(0.7)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .frame(height: max(geo.size.height * progress, miles > 0 ? 4 : 2))
+                            .overlay(
+                                // Selection ring on the bar — sits inside
+                                // the bar so it doesn't change the layout
+                                // when toggled on/off.
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(isSelected ? 0.6 : 0), lineWidth: 1.5)
+                            )
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
+                // Day initial
+                Text(dayLetter(for: day))
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .foregroundColor(isToday || isSelected ? .white : .white.opacity(0.45))
+                    .frame(width: 18, height: 18)
+                    .background(
+                        Circle()
+                            .fill(
+                                isSelected ? color.opacity(0.85) :
+                                (isToday ? MADTheme.Colors.madRed : Color.clear)
+                            )
+                    )
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Per-workout breakdown of the selected day — shows date, total miles,
+    /// and each individual workout (type + distance). When the day has no
+    /// activity, surfaces a friendly "no miles" message instead.
+    @ViewBuilder
+    private func dayDetailPanel(for day: Date) -> some View {
+        let dayWorkouts = workouts.compactMap { workout -> FriendWorkout? in
+            guard let workoutDay = parseDay(workout.date) else { return nil }
+            return calendar.isDate(workoutDay, inSameDayAs: day) ? workout : nil
+        }
+        let total = dayWorkouts.reduce(0.0) { $0 + $1.distance }
+        let dateLabel: String = {
+            if calendar.isDateInToday(day) { return "Today" }
+            if calendar.isDateInYesterday(day) { return "Yesterday" }
+            let formatter = DateFormatter()
+            formatter.dateFormat = "EEEE, MMM d"
+            return formatter.string(from: day)
+        }()
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(dateLabel)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.85))
+                Spacer()
+                Text(String(format: "%.2f mi", total))
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .foregroundColor(total >= goalMiles ? .green : (total > 0 ? .orange : .white.opacity(0.4)))
+            }
+
+            if dayWorkouts.isEmpty {
+                Text("No miles logged")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.4))
+            } else {
+                ForEach(dayWorkouts) { workout in
+                    HStack(spacing: 8) {
+                        Image(systemName: workoutTypeIcon(workout.workoutType))
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(workoutTypeColor(workout.workoutType))
+                            .frame(width: 20, height: 20)
+                            .background(
+                                Circle().fill(workoutTypeColor(workout.workoutType).opacity(0.15))
+                            )
+                        Text(workout.workoutType.capitalized)
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.8))
+                        Spacer()
+                        Text(String(format: "%.2f mi", workout.distance))
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.85))
+                    }
+                }
+            }
+        }
+        .padding(.top, 10)
+        .padding(.horizontal, 4)
+    }
+
+    private func workoutTypeIcon(_ type: String) -> String {
+        switch type.lowercased() {
+        case "running": return "figure.run"
+        case "walking": return "figure.walk"
+        case "cycling": return "figure.outdoor.cycle"
+        case "hiking": return "figure.hiking"
+        default: return "figure.run"
+        }
+    }
+
+    private func workoutTypeColor(_ type: String) -> Color {
+        switch type.lowercased() {
+        case "running": return .red
+        case "walking": return .blue
+        case "cycling": return .green
+        case "hiking": return .brown
+        default: return .gray
+        }
+    }
+
+    private func dayLetter(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEEE" // single letter
+        return formatter.string(from: date)
+    }
+
+    private func parseDay(_ string: String) -> Date? {
+        // Workout dates come in two formats from the backend.
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+        if let parsed = formatter.date(from: string) {
+            return calendar.startOfDay(for: parsed)
+        }
+        formatter.dateFormat = "yyyy-MM-dd"
+        if let parsed = formatter.date(from: string) {
+            return calendar.startOfDay(for: parsed)
+        }
+        return nil
     }
 }
 

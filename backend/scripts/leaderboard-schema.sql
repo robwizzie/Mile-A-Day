@@ -19,12 +19,11 @@ CREATE INDEX IF NOT EXISTS idx_users_current_streak_desc
 CREATE INDEX IF NOT EXISTS idx_workouts_local_date_user_id
     ON workouts (local_date, user_id);
 
--- Per-user opt-out for the global/friends leaderboard. Defaults to FALSE so
--- existing users appear on the leaderboard automatically; toggled via the
--- PATCH /users/:userId/leaderboard-opt-out endpoint. Opted-out users are
--- excluded from both the rankings list and their own current_user_entry.
+-- Per-user opt-out was removed when Global leaderboard was dropped. If a
+-- previous deploy of this script created the column, this cleans it up.
+-- Drop is safe: nothing in the codebase references this column anymore.
 ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS leaderboard_opt_out BOOLEAN NOT NULL DEFAULT FALSE;
+    DROP COLUMN IF EXISTS leaderboard_opt_out;
 
 -- One-time backfill: seed current_streak for every existing user. Safe to
 -- re-run; recomputes from workouts each call. Comment out after the first
