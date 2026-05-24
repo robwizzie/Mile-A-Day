@@ -217,12 +217,17 @@ async function getCurrentUserStreakEntry(
  * queries fast.
  */
 async function getMilesLeaderboard(args: LeaderboardArgs): Promise<LeaderboardPage> {
-	const { period, userId, limit, offset } = args;
+	const { metric, period, userId, limit, offset } = args;
 	const startDate = periodStartDate(period);
 	const ids = await rankingUserIds(userId);
+	// miles_ran counts running workouts only; miles_total includes walks + runs.
+	// The sub-line best-pace stays unfiltered so it matches the user's
+	// fastest-mile PR shown elsewhere (a walk would never win the MIN anyway).
+	const runOnly = metric === 'miles_ran';
 
 	const params: any[] = [ids];
 	const wheres: string[] = [`w.user_id = ANY($1::text[])`];
+	if (runOnly) wheres.push(`w.workout_type = 'running'`);
 	let dateParamIndex: number | null = null;
 	if (startDate) {
 		params.push(startDate);
@@ -294,7 +299,7 @@ async function getMilesLeaderboard(args: LeaderboardArgs): Promise<LeaderboardPa
 		is_current_user: r.user_id === userId
 	}));
 
-	const current_user_entry = await getCurrentUserMilesEntry(userId, ids, startDate, entries);
+	const current_user_entry = await getCurrentUserMilesEntry(userId, ids, startDate, runOnly, entries);
 
 	return {
 		entries,
@@ -308,6 +313,7 @@ async function getCurrentUserMilesEntry(
 	userId: string,
 	ids: string[],
 	startDate: string | null,
+	runOnly: boolean,
 	pageEntries: LeaderboardEntry[]
 ): Promise<LeaderboardEntry | null> {
 	const inPage = pageEntries.find(e => e.is_current_user);
@@ -315,6 +321,7 @@ async function getCurrentUserMilesEntry(
 
 	const params: any[] = [userId];
 	const wheres: string[] = [`w.user_id = $1`];
+	if (runOnly) wheres.push(`w.workout_type = 'running'`);
 	if (startDate) {
 		params.push(startDate);
 		wheres.push(`w.local_date >= $${params.length}`);
@@ -331,6 +338,7 @@ async function getCurrentUserMilesEntry(
 	// Rank = 1 + count of friends-or-self whose period total exceeds mine.
 	const rankParams: any[] = [myValue, ids];
 	const rankInnerWheres: string[] = [`w.user_id = ANY($2::text[])`];
+	if (runOnly) rankInnerWheres.push(`w.workout_type = 'running'`);
 	if (startDate) {
 		rankParams.push(startDate);
 		rankInnerWheres.push(`w.local_date >= $${rankParams.length}`);

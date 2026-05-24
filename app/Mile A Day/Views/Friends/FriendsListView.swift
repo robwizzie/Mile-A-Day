@@ -627,7 +627,7 @@ struct FriendsListView: View {
     private func loadMyRank() async {
         do {
             let page = try await LeaderboardService.fetch(
-                metric: .miles,
+                metric: .milesRan,
                 period: .week,
                 limit: 1,
                 offset: 0
