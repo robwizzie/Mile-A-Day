@@ -303,8 +303,15 @@ class HealthKitManager: ObservableObject {
     @Published var todaysDistance: Double = 0.0 {
         didSet {
             #if os(iOS)
-            // Sync the latest distance to the paired Apple Watch.
-            MADWatchBridge.shared.pushSnapshotIfReady()
+            // Sync the latest distance to the paired Apple Watch. Deferred to the
+            // next runloop because this didSet fires inside HealthKitManager.init
+            // (loadCachedData + workout-index hydration). pushSnapshotIfReady reads
+            // HealthKitManager.shared; calling it synchronously during the
+            // singleton's own static init re-enters dispatch_once and traps with
+            // EXC_BREAKPOINT.
+            DispatchQueue.main.async {
+                MADWatchBridge.shared.pushSnapshotIfReady()
+            }
             #endif
         }
     }
@@ -318,8 +325,12 @@ class HealthKitManager: ObservableObject {
             #if os(iOS)
             // The iPhone has the authoritative streak (full HK history + workout
             // index); the watch only sees what HealthKit has synced locally, so
-            // push every change so the watch can show the same number.
-            MADWatchBridge.shared.pushSnapshotIfReady()
+            // push every change so the watch can show the same number. Deferred
+            // for the same reason as todaysDistance above — this fires during
+            // HealthKitManager.shared static init and must not re-enter it.
+            DispatchQueue.main.async {
+                MADWatchBridge.shared.pushSnapshotIfReady()
+            }
             #endif
         }
     }
