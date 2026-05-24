@@ -119,7 +119,7 @@ async function getStreakLeaderboard(args: LeaderboardArgs): Promise<LeaderboardP
 				FROM workout_splits ws
 				JOIN workouts w ON w.workout_id = ws.workout_id
 				WHERE w.user_id = u.user_id
-				  AND ws.split_distance >= 0.95
+				  AND ws.split_distance >= 0.999
 				  AND ws.split_pace > 0
 			) AS period_best_pace,
 			RANK() OVER (ORDER BY u.current_streak DESC)::int AS rank
@@ -181,7 +181,7 @@ async function getCurrentUserStreakEntry(
 				FROM workout_splits ws
 				JOIN workouts w ON w.workout_id = ws.workout_id
 				WHERE w.user_id = u.user_id
-				  AND ws.split_distance >= 0.95
+				  AND ws.split_distance >= 0.999
 				  AND ws.split_pace > 0
 			) AS period_best_pace,
 			(
@@ -274,7 +274,7 @@ async function getMilesLeaderboard(args: LeaderboardArgs): Promise<LeaderboardPa
 				FROM workout_splits ws
 				JOIN workouts w ON w.workout_id = ws.workout_id
 				WHERE w.user_id = u.user_id
-				  AND ws.split_distance >= 0.95
+				  AND ws.split_distance >= 0.999
 				  AND ws.split_pace > 0
 				  ${bestPaceDateClause}
 			) AS period_best_pace,
@@ -365,7 +365,7 @@ async function getCurrentUserMilesEntry(
 
 	// Best mile pace within the same period (or all-time when startDate is null).
 	const paceParams: any[] = [userId];
-	const paceWheres: string[] = [`w.user_id = $1`, `ws.split_distance >= 0.95`, `ws.split_pace > 0`];
+	const paceWheres: string[] = [`w.user_id = $1`, `ws.split_distance >= 0.999`, `ws.split_pace > 0`];
 	if (startDate) {
 		paceParams.push(startDate);
 		paceWheres.push(`w.local_date >= $${paceParams.length}`);
@@ -410,10 +410,11 @@ export async function getLeaderboard(args: LeaderboardArgs): Promise<Leaderboard
 }
 
 /**
- * Pace leaderboard: ranks users by their fastest qualifying mile split in the
- * active period. Only counts splits >= 0.95 mi with split_pace > 0 — same
- * threshold the PR / best_split_time stats use, so the values match what
- * users see on their own profile.
+ * Pace leaderboard: ranks users by their fastest *completed* mile split in
+ * the active period. The 0.999 distance floor (vs the legacy 0.95 used by
+ * badges / dailyChallenge) excludes the trailing partial split that
+ * SplitCalculator emits with an extrapolated per-mile pace — otherwise
+ * someone who only ran half a mile at "7:00/mi pace" would show up.
  */
 async function getPaceLeaderboard(args: LeaderboardArgs): Promise<LeaderboardPage> {
 	const { period, userId, limit, offset } = args;
@@ -421,7 +422,7 @@ async function getPaceLeaderboard(args: LeaderboardArgs): Promise<LeaderboardPag
 	const ids = await rankingUserIds(userId);
 
 	const params: any[] = [ids];
-	const wheres: string[] = [`w.user_id = ANY($1::text[])`, `ws.split_distance >= 0.95`, `ws.split_pace > 0`];
+	const wheres: string[] = [`w.user_id = ANY($1::text[])`, `ws.split_distance >= 0.999`, `ws.split_pace > 0`];
 	let dateParamIndex: number | null = null;
 	if (startDate) {
 		params.push(startDate);
@@ -512,7 +513,7 @@ async function getCurrentUserPaceEntry(
 
 	// Viewer's best pace in the window.
 	const myParams: any[] = [userId];
-	const myWheres: string[] = [`w.user_id = $1`, `ws.split_distance >= 0.95`, `ws.split_pace > 0`];
+	const myWheres: string[] = [`w.user_id = $1`, `ws.split_distance >= 0.999`, `ws.split_pace > 0`];
 	if (startDate) {
 		myParams.push(startDate);
 		myWheres.push(`w.local_date >= $${myParams.length}`);
@@ -530,7 +531,7 @@ async function getCurrentUserPaceEntry(
 	// Rank = 1 + count of friends-or-self whose best pace is strictly lower
 	// (faster). RANK semantics with ties match getPaceLeaderboard.
 	const rankParams: any[] = [myValue, ids];
-	const rankWheres: string[] = [`w.user_id = ANY($2::text[])`, `ws.split_distance >= 0.95`, `ws.split_pace > 0`];
+	const rankWheres: string[] = [`w.user_id = ANY($2::text[])`, `ws.split_distance >= 0.999`, `ws.split_pace > 0`];
 	if (startDate) {
 		rankParams.push(startDate);
 		rankWheres.push(`w.local_date >= $${rankParams.length}`);
