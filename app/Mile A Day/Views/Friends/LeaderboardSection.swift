@@ -4,7 +4,7 @@ import SwiftUI
 
 @Observable
 final class LeaderboardViewModel {
-    var metric: LeaderboardMetric = .miles {
+    var metric: LeaderboardMetric = .milesRan {
         didSet { if oldValue != metric { refresh() } }
     }
     var period: LeaderboardPeriod = .week {
@@ -221,7 +221,7 @@ struct LeaderboardSection: View {
 
     private var notRankedCard: some View {
         HStack(spacing: MADTheme.Spacing.md) {
-            Image(systemName: vm.metric == .streak ? "flame" : "figure.run")
+            Image(systemName: vm.metric.iconName)
                 .font(.system(size: 22, weight: .bold))
                 .foregroundColor(.white.opacity(0.35))
             VStack(alignment: .leading, spacing: 2) {
@@ -229,7 +229,7 @@ struct LeaderboardSection: View {
                     .font(.system(size: 10, weight: .heavy, design: .rounded))
                     .tracking(1.2)
                     .foregroundColor(.white.opacity(0.45))
-                Text(vm.metric == .streak ? "Start a streak to appear on the board." : "Log a run for \(vm.period.displayName.lowercased()) to climb the board.")
+                Text(notRankedMessage)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
             }
@@ -253,7 +253,7 @@ struct LeaderboardSection: View {
     private var filterChips: some View {
         HStack(spacing: 8) {
             metricChip
-            if vm.metric == .miles {
+            if vm.metric.usesPeriod {
                 periodChip
             }
             Spacer()
@@ -264,14 +264,11 @@ struct LeaderboardSection: View {
         Menu {
             Picker("Metric", selection: Binding(get: { vm.metric }, set: { vm.metric = $0 })) {
                 ForEach(LeaderboardMetric.allCases) { m in
-                    Label(m.displayName, systemImage: m == .miles ? "figure.run" : "flame.fill").tag(m)
+                    Label(m.displayName, systemImage: m.iconName).tag(m)
                 }
             }
         } label: {
-            chipLabel(
-                icon: vm.metric == .miles ? "figure.run" : "flame.fill",
-                text: vm.metric.displayName
-            )
+            chipLabel(icon: vm.metric.iconName, text: vm.metric.shortName)
         }
     }
 
@@ -425,7 +422,7 @@ struct LeaderboardSection: View {
 
     private var emptyState: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
-            Image(systemName: vm.metric == .streak ? "flame" : "figure.run")
+            Image(systemName: vm.metric.iconName)
                 .font(.system(size: 32))
                 .foregroundColor(.white.opacity(0.25))
             Text(emptyStateMessage)
@@ -440,7 +437,18 @@ struct LeaderboardSection: View {
     private var emptyStateMessage: String {
         switch vm.metric {
         case .streak: return "None of your friends have an active streak yet."
-        case .miles: return "None of your friends have logged miles for this period."
+        case .milesRan: return "None of your friends have logged miles for this period."
+        case .milesTotal: return "None of your friends have logged any miles yet."
+        case .pace: return "No qualifying mile splits in this period yet."
+        }
+    }
+
+    private var notRankedMessage: String {
+        switch vm.metric {
+        case .streak: return "Start a streak to appear on the board."
+        case .milesRan: return "Log a run for \(vm.period.displayName.lowercased()) to climb the board."
+        case .milesTotal: return "Log a run to appear on the board."
+        case .pace: return "Run a mile in \(vm.period.displayName.lowercased()) to set a pace."
         }
     }
 
@@ -657,8 +665,10 @@ struct LeaderboardSection: View {
 
     private var filterSubtitle: String {
         switch vm.metric {
-        case .miles:
+        case .milesRan, .pace:
             return "\(vm.period.displayName) · Friends"
+        case .milesTotal:
+            return "All-time · Friends"
         case .streak:
             return "Current streak · Friends"
         }
@@ -666,7 +676,8 @@ struct LeaderboardSection: View {
 
     private var metricUnitText: String {
         switch vm.metric {
-        case .miles: return "MILES"
+        case .milesRan, .milesTotal: return "MILES"
+        case .pace: return "MIN/MI"
         case .streak: return "DAYS"
         }
     }
@@ -678,16 +689,17 @@ struct LeaderboardSection: View {
         return entry.fullName
     }
 
-    /// Sub-line shown beneath the handle in list rows.
-    /// For the miles metric we omit total miles (it's already the primary value
-    /// on the right), keeping just the best pace. For streak we show both.
+    /// Sub-line shown beneath the handle in list rows. Skips whichever stat is
+    /// already shown as the primary value on the right, to avoid duplication.
     private func statsSubtitle(_ entry: LeaderboardEntry) -> String? {
         let paceText = formatPace(entry.period_best_pace)
+        let milesText = entry.period_miles.map { formatMiles($0) }
         switch vm.metric {
-        case .miles:
+        case .milesRan, .milesTotal:
             return paceText.map { "Best mile · \($0)" }
+        case .pace:
+            return milesText.map { "\($0) this \(vm.period.displayName.lowercased())" }
         case .streak:
-            let milesText = entry.period_miles.map { formatMiles($0) }
             let joined = [milesText, paceText].compactMap { $0 }.joined(separator: " · ")
             return joined.isEmpty ? nil : joined
         }
@@ -697,11 +709,13 @@ struct LeaderboardSection: View {
     /// "X.X mi · 8:32/mi". Falls back gracefully when either stat is missing.
     private func podiumStatsSubtitle(_ entry: LeaderboardEntry) -> String? {
         let paceText = formatPace(entry.period_best_pace)
+        let milesText = entry.period_miles.map { formatMiles($0) }
         switch vm.metric {
-        case .miles:
+        case .milesRan, .milesTotal:
             return paceText
+        case .pace:
+            return milesText
         case .streak:
-            let milesText = entry.period_miles.map { formatMiles($0) }
             let joined = [milesText, paceText].compactMap { $0 }.joined(separator: " · ")
             return joined.isEmpty ? nil : joined
         }
@@ -722,9 +736,15 @@ struct LeaderboardSection: View {
 
     private func formatValue(_ value: Double, metric: LeaderboardMetric) -> String {
         switch metric {
-        case .miles:
+        case .milesRan, .milesTotal:
             if value >= 100 { return String(format: "%.0f", value) }
             return String(format: "%.1f", value)
+        case .pace:
+            // Pace is stored as seconds/mile; render as m:ss without the /mi
+            // suffix here since the unit label below the value already says MIN/MI.
+            guard value > 0, value.isFinite else { return "—" }
+            let total = Int(value.rounded())
+            return String(format: "%d:%02d", total / 60, total % 60)
         case .streak:
             return "\(Int(value))"
         }

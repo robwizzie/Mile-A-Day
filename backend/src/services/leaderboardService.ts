@@ -2,7 +2,13 @@ import { PostgresService } from './DbService.js';
 
 const db = PostgresService.getInstance();
 
-export type LeaderboardMetric = 'miles' | 'streak';
+/**
+ * Leaderboard metric options. `miles_ran` (period-scoped total) is the default;
+ * `miles_total` is the same aggregation forced to all-time; `pace` ranks users
+ * by fastest mile in the period (ascending — lower is better); `streak` reads
+ * the precomputed users.current_streak column.
+ */
+export type LeaderboardMetric = 'miles_ran' | 'miles_total' | 'pace' | 'streak';
 export type LeaderboardPeriod = 'today' | 'week' | 'month' | 'year' | 'all';
 
 export interface LeaderboardEntry {
@@ -380,8 +386,194 @@ async function getCurrentUserMilesEntry(
 }
 
 export async function getLeaderboard(args: LeaderboardArgs): Promise<LeaderboardPage> {
-	if (args.metric === 'streak') return getStreakLeaderboard(args);
-	return getMilesLeaderboard(args);
+	switch (args.metric) {
+		case 'streak':
+			return getStreakLeaderboard(args);
+		case 'pace':
+			return getPaceLeaderboard(args);
+		case 'miles_total':
+			// Controller already forces period='all' for miles_total, but pin it
+			// here too so a direct caller can't accidentally scope it.
+			return getMilesLeaderboard({ ...args, period: 'all' });
+		case 'miles_ran':
+		default:
+			return getMilesLeaderboard(args);
+	}
+}
+
+/**
+ * Pace leaderboard: ranks users by their fastest qualifying mile split in the
+ * active period. Only counts splits >= 0.95 mi with split_pace > 0 — same
+ * threshold the PR / best_split_time stats use, so the values match what
+ * users see on their own profile.
+ */
+async function getPaceLeaderboard(args: LeaderboardArgs): Promise<LeaderboardPage> {
+	const { period, userId, limit, offset } = args;
+	const startDate = periodStartDate(period);
+	const ids = await rankingUserIds(userId);
+
+	const params: any[] = [ids];
+	const wheres: string[] = [`w.user_id = ANY($1::text[])`, `ws.split_distance >= 0.95`, `ws.split_pace > 0`];
+	let dateParamIndex: number | null = null;
+	if (startDate) {
+		params.push(startDate);
+		dateParamIndex = params.length;
+		wheres.push(`w.local_date >= $${dateParamIndex}`);
+	}
+	const whereSql = `WHERE ${wheres.join(' AND ')}`;
+	const milesDateClause = dateParamIndex !== null ? `AND w.local_date >= $${dateParamIndex}` : '';
+
+	const countQuery = `
+		SELECT COUNT(*)::int AS total FROM (
+			SELECT w.user_id
+			FROM workout_splits ws
+			JOIN workouts w ON w.workout_id = ws.workout_id
+			${whereSql}
+			GROUP BY w.user_id
+		) t
+	`;
+	const totalRow = await db.query(countQuery, params);
+	const total_count: number = totalRow[0]?.total ?? 0;
+
+	params.push(limit);
+	const limitParamIndex = params.length;
+	params.push(offset);
+	const offsetParamIndex = params.length;
+
+	const pageQuery = `
+		WITH bests AS (
+			SELECT w.user_id, MIN(ws.split_pace)::float AS value
+			FROM workout_splits ws
+			JOIN workouts w ON w.workout_id = ws.workout_id
+			${whereSql}
+			GROUP BY w.user_id
+		)
+		SELECT
+			u.user_id,
+			u.username,
+			u.first_name,
+			u.last_name,
+			u.profile_image_url,
+			b.value,
+			COALESCE((
+				SELECT SUM(w.distance)::float
+				FROM workouts w
+				WHERE w.user_id = u.user_id
+				  ${milesDateClause}
+			), 0)::float AS period_miles,
+			b.value AS period_best_pace,
+			RANK() OVER (ORDER BY b.value ASC)::int AS rank
+		FROM bests b
+		JOIN users u ON u.user_id = b.user_id
+		ORDER BY b.value ASC, u.user_id ASC
+		LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex}
+	`;
+	const pageRows = await db.query(pageQuery, params);
+
+	const entries: LeaderboardEntry[] = pageRows.map((r: any) => ({
+		rank: r.rank,
+		user_id: r.user_id,
+		username: r.username ?? null,
+		first_name: r.first_name ?? null,
+		last_name: r.last_name ?? null,
+		profile_image_url: r.profile_image_url ?? null,
+		value: Number(r.value) || 0,
+		period_miles: Number(r.period_miles) || 0,
+		period_best_pace: r.period_best_pace != null ? Number(r.period_best_pace) : null,
+		is_current_user: r.user_id === userId
+	}));
+
+	const current_user_entry = await getCurrentUserPaceEntry(userId, ids, startDate, entries);
+
+	return {
+		entries,
+		total_count,
+		has_more: offset + entries.length < total_count,
+		current_user_entry
+	};
+}
+
+async function getCurrentUserPaceEntry(
+	userId: string,
+	ids: string[],
+	startDate: string | null,
+	pageEntries: LeaderboardEntry[]
+): Promise<LeaderboardEntry | null> {
+	const inPage = pageEntries.find(e => e.is_current_user);
+	if (inPage) return inPage;
+
+	// Viewer's best pace in the window.
+	const myParams: any[] = [userId];
+	const myWheres: string[] = [`w.user_id = $1`, `ws.split_distance >= 0.95`, `ws.split_pace > 0`];
+	if (startDate) {
+		myParams.push(startDate);
+		myWheres.push(`w.local_date >= $${myParams.length}`);
+	}
+	const myRow = await db.query(
+		`SELECT MIN(ws.split_pace)::float AS value
+		 FROM workout_splits ws
+		 JOIN workouts w ON w.workout_id = ws.workout_id
+		 WHERE ${myWheres.join(' AND ')}`,
+		myParams
+	);
+	const myValue: number | null = myRow[0]?.value != null ? Number(myRow[0].value) : null;
+	if (myValue == null || !(myValue > 0)) return null;
+
+	// Rank = 1 + count of friends-or-self whose best pace is strictly lower
+	// (faster). RANK semantics with ties match getPaceLeaderboard.
+	const rankParams: any[] = [myValue, ids];
+	const rankWheres: string[] = [`w.user_id = ANY($2::text[])`, `ws.split_distance >= 0.95`, `ws.split_pace > 0`];
+	if (startDate) {
+		rankParams.push(startDate);
+		rankWheres.push(`w.local_date >= $${rankParams.length}`);
+	}
+	const rankRow = await db.query(
+		`SELECT COUNT(*)::int + 1 AS rank FROM (
+			SELECT w.user_id
+			FROM workout_splits ws
+			JOIN workouts w ON w.workout_id = ws.workout_id
+			WHERE ${rankWheres.join(' AND ')}
+			GROUP BY w.user_id
+			HAVING MIN(ws.split_pace) < $1
+		) t`,
+		rankParams
+	);
+	const rank: number = rankRow[0]?.rank ?? 1;
+
+	// Period miles for the sub-line.
+	const milesParams: any[] = [userId];
+	const milesWheres: string[] = [`w.user_id = $1`];
+	if (startDate) {
+		milesParams.push(startDate);
+		milesWheres.push(`w.local_date >= $${milesParams.length}`);
+	}
+	const milesRow = await db.query(
+		`SELECT COALESCE(SUM(w.distance), 0)::float AS miles
+		 FROM workouts w
+		 WHERE ${milesWheres.join(' AND ')}`,
+		milesParams
+	);
+	const periodMiles: number = Number(milesRow[0]?.miles ?? 0);
+
+	const userRow = await db.query(
+		`SELECT user_id, username, first_name, last_name, profile_image_url FROM users WHERE user_id = $1`,
+		[userId]
+	);
+	const u = userRow[0];
+	if (!u) return null;
+
+	return {
+		rank,
+		user_id: u.user_id,
+		username: u.username ?? null,
+		first_name: u.first_name ?? null,
+		last_name: u.last_name ?? null,
+		profile_image_url: u.profile_image_url ?? null,
+		value: myValue,
+		period_miles: periodMiles,
+		period_best_pace: myValue,
+		is_current_user: true
+	};
 }
 
 /**

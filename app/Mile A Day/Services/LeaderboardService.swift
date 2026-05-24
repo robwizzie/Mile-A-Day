@@ -3,14 +3,46 @@ import Foundation
 // MARK: - Filter Enums
 
 enum LeaderboardMetric: String, CaseIterable, Identifiable {
-    case miles
+    case milesRan = "miles_ran"
+    case milesTotal = "miles_total"
+    case pace
     case streak
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .miles: return "Miles"
+        case .milesRan: return "Miles · Ran"
+        case .milesTotal: return "Miles · Total"
+        case .pace: return "Pace"
         case .streak: return "Streak"
+        }
+    }
+
+    /// Short label used in chips where space is tight.
+    var shortName: String {
+        switch self {
+        case .milesRan: return "Miles · Ran"
+        case .milesTotal: return "Miles · Total"
+        case .pace: return "Pace"
+        case .streak: return "Streak"
+        }
+    }
+
+    /// SF Symbol matching this metric — used in the chip + Menu picker.
+    var iconName: String {
+        switch self {
+        case .milesRan, .milesTotal: return "figure.run"
+        case .pace: return "stopwatch.fill"
+        case .streak: return "flame.fill"
+        }
+    }
+
+    /// True when the period chip should be shown for this metric.
+    /// Streak and miles_total are inherently all-time.
+    var usesPeriod: Bool {
+        switch self {
+        case .milesRan, .pace: return true
+        case .milesTotal, .streak: return false
         }
     }
 }
