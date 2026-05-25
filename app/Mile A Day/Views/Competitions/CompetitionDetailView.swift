@@ -39,6 +39,12 @@ struct CompetitionDetailView: View {
     // Hero count-up animation
     @State var heroAnimated = false
 
+    // Main tabbed card (Today's Race / Standings / Flex)
+    @State var selectedMainTab: CompetitionMainTab = .standings
+
+    // Collapsible Timeline + Rules at the bottom
+    @State var showCompDetails: Bool = false
+
     var body: some View {
         ZStack {
             MADTheme.Colors.appBackgroundGradient
@@ -47,14 +53,11 @@ struct CompetitionDetailView: View {
             GeometryReader { proxy in
                 ScrollView(.vertical, showsIndicators: true) {
                     VStack(spacing: MADTheme.Spacing.lg) {
-                        // Unified premium header across all states
-                        premiumHero
-
-                        // Always-visible Timeline (start/end/remaining) + Rules cards
-                        // so users can read the comp at a glance no matter the state.
-                        timelineCard
-
-                        quickRulesCard
+                        // Compact single-row info strip replaces the tall premium
+                        // hero. Name lives in the nav title already, so we only
+                        // show status, type, allowed activities, interval, and
+                        // remaining time here.
+                        CompetitionCompactInfoStrip(competition: competition)
 
                         // Status-specific content (leaderboard / podium / participants etc.)
                         switch competition.status {
@@ -65,6 +68,11 @@ struct CompetitionDetailView: View {
                         case .finished:
                             finishedContent
                         }
+
+                        // Timeline + Rules collapsed at the bottom — returning
+                        // users already know the format, so this stays hidden by
+                        // default and only expands on tap.
+                        collapsibleCompetitionDetails
                     }
                     .padding(MADTheme.Spacing.md)
                     .padding(.bottom, MADTheme.Spacing.xxl)
@@ -127,121 +135,54 @@ struct CompetitionDetailView: View {
         }
     }
 
-    // MARK: - Premium Hero
-    /// Unified header used across every status. Big gradient icon disc + name +
-    /// status pill + activities, sized identically for lobby / active / finished
-    /// so the page feels consistent regardless of which state the comp is in.
-    private var premiumHero: some View {
-        let typeColors = competition.type.gradient.map { Color(hex: $0) }
-        let primaryColor = typeColors.first ?? MADTheme.Colors.madRed
-
-        return VStack(spacing: 14) {
-            // Icon disc with subtle pulse for active
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [primaryColor.opacity(0.35), primaryColor.opacity(0.0)],
-                            center: .center,
-                            startRadius: 20,
-                            endRadius: 70
-                        )
-                    )
-                    .frame(width: 120, height: 120)
-
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: typeColors,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 76, height: 76)
-                    .overlay(
-                        Circle()
-                            .strokeBorder(Color.white.opacity(0.25), lineWidth: 1.5)
-                    )
-                    .shadow(color: primaryColor.opacity(0.45), radius: 14, x: 0, y: 6)
-
-                Image(systemName: competition.type.icon)
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundColor(.white)
-                    .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
-            }
-
-            // Name
-            Text(competition.competition_name)
-                .font(.system(size: 26, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
+    // MARK: - Collapsible Competition Details
+    /// Wraps the Timeline + Rules cards in a tap-to-expand container. Hidden by
+    /// default since most returning users already know how the comp works; the
+    /// compact info strip at the top covers the at-a-glance info.
+    private var collapsibleCompetitionDetails: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showCompDetails.toggle()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 12, weight: .heavy))
+                        .foregroundColor(.white.opacity(0.45))
+                    Text("Timeline & Rules")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundColor(.white.opacity(0.35))
+                        .rotationEffect(.degrees(showCompDetails ? 180 : 0))
+                }
                 .padding(.horizontal, MADTheme.Spacing.md)
-
-            // Status + type pills (inline)
-            HStack(spacing: 8) {
-                // Type chip
-                HStack(spacing: 5) {
-                    Text(competition.type.displayName.uppercased())
-                        .font(.system(size: 11, weight: .black, design: .rounded))
-                        .tracking(1.2)
-                        .foregroundColor(primaryColor)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule().fill(primaryColor.opacity(0.18))
-                )
-                .overlay(
-                    Capsule().strokeBorder(primaryColor.opacity(0.4), lineWidth: 1)
-                )
-
-                // Status chip
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(competition.status.color)
-                        .frame(width: 6, height: 6)
-                    Text(competition.status.displayName.uppercased())
-                        .font(.system(size: 11, weight: .black, design: .rounded))
-                        .tracking(1.2)
-                        .foregroundColor(competition.status.color)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule().fill(competition.status.color.opacity(0.18))
-                )
-                .overlay(
-                    Capsule().strokeBorder(competition.status.color.opacity(0.4), lineWidth: 1)
-                )
-
-                if competition.isWinner {
-                    HStack(spacing: 5) {
-                        Image(systemName: "crown.fill")
-                            .font(.system(size: 10, weight: .black))
-                        Text("WINNER")
-                            .font(.system(size: 11, weight: .black, design: .rounded))
-                            .tracking(1.2)
-                    }
-                    .foregroundColor(.yellow)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Capsule().fill(Color.yellow.opacity(0.18)))
-                    .overlay(Capsule().strokeBorder(Color.yellow.opacity(0.5), lineWidth: 1))
-                }
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
 
-            // Type description (one-liner so users instantly know how this comp works)
-            Text(competition.type.description)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.6))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, MADTheme.Spacing.lg)
+            if showCompDetails {
+                VStack(spacing: MADTheme.Spacing.md) {
+                    timelineCard
+                    quickRulesCard
+                }
+                .padding(.horizontal, MADTheme.Spacing.sm)
+                .padding(.bottom, MADTheme.Spacing.md)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .padding(.top, MADTheme.Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
+                )
+        )
     }
 
     // MARK: - Timeline Card

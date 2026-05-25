@@ -414,7 +414,7 @@ struct FriendsListView: View {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 sectionHeader(
                     title: "CHEER THEM ON",
-                    trailing: "\(incomplete.count) mid-mile"
+                    trailing: ""
                 )
                 VStack(spacing: 6) {
                     ForEach(incomplete) { friend in

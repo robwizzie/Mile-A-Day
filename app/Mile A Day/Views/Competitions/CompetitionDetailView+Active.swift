@@ -6,29 +6,15 @@ import HealthKit
 extension CompetitionDetailView {
 
     // MARK: - Active Content
-    // Activities + time-remaining + rules are now in the unified Timeline / Quick
-    // Rules cards above this section, so the dropdown is gone and the hero focuses
-    // exclusively on the *user's* personal status.
+    // The detail view is now centered on a tabbed card (Today's Race /
+    // Standings / Flex) that hosts the existing per-mode views without
+    // duplicating logic. Above the tabbed card: the user's own past-7-day
+    // ring strip (Apple-Fitness style) — taps drill into a per-day sheet.
     var activeContent: some View {
         VStack(spacing: MADTheme.Spacing.xl) {
-            // 1. Personal status hero
-            heroStatusSection
+            CompetitionMyDailyRings(competition: competition)
 
-            // 2. Flex section (always visible)
-            flexSection
-
-            // 3. Enhanced leaderboard (podium + rows)
-            enhancedLeaderboard
-
-            // 4. Mode-specific content. Streaks intentionally has no extra section
-            // — the leaderboard's DailyActivityCalendar already covers per-user
-            // progress + life status, so a second calendar would be redundant.
-            if competition.type == .race {
-                raceProgressView
-            } else if competition.type != .streaks {
-                intervalNavigator
-                intervalContent
-            }
+            mainTabbedCard
         }
         .overlay(alignment: .top) {
             if let feedback = actionFeedback {
@@ -38,62 +24,19 @@ extension CompetitionDetailView {
                     .zIndex(10)
             }
         }
-    }
-
-    // MARK: - Hero Status Section
-    var heroStatusSection: some View {
-        let currentUser = competition.users.first(where: { $0.user_id == UserDefaults.standard.string(forKey: "backendUserId") })
-        let todayKey = intervalKey(for: Date())
-        let todayDistance = currentUser?.intervals?[todayKey] ?? 0
-        let goal = competition.options.goal
-        let gradientColors = competition.type.gradient.map { Color(hex: $0) }
-
-        return VStack(spacing: MADTheme.Spacing.md) {
-            // Type-specific hero content
-            switch competition.type {
-            case .streaks:
-                streakHeroContent(user: currentUser, todayDistance: todayDistance, goal: goal, gradientColors: gradientColors)
-            case .clash:
-                clashHeroContent(user: currentUser, todayDistance: todayDistance, todayKey: todayKey, gradientColors: gradientColors)
-            case .apex:
-                apexHeroContent(user: currentUser, todayDistance: todayDistance, todayKey: todayKey, gradientColors: gradientColors)
-            case .targets:
-                targetsHeroContent(user: currentUser, todayDistance: todayDistance, goal: goal, gradientColors: gradientColors)
-            case .race:
-                raceHeroContent(user: currentUser, goal: goal, gradientColors: gradientColors)
-            }
-
-            // Activities + time-remaining are surfaced by the unified Quick Rules
-            // and Timeline cards above. The hero stays focused on personal status.
-        }
-        .frame(maxWidth: .infinity)
-        .padding(MADTheme.Spacing.lg)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .stroke(
-                            LinearGradient(
-                                colors: gradientColors.map { $0.opacity(0.3) },
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 1
-                        )
-                )
-        )
         .onAppear {
-            heroAnimated = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                withAnimation(.easeOut(duration: 0.8)) {
-                    heroAnimated = true
-                }
+            // Pick the right default tab per mode the first time this view
+            // appears. After that, respect whatever the user selected.
+            if selectedMainTab == .standings {
+                selectedMainTab = CompetitionDetailView.defaultMainTab(for: competition.type)
             }
         }
     }
 
-    // MARK: - Hero Content Per Type
+    // MARK: - Hero Content Per Type (legacy helpers used as @ViewBuilder
+    // fragments by other surfaces — keep them defined but referenced from
+    // mainTabbedCard's standings tab if needed. Currently inlined via the
+    // motivation callout, so these aren't on the hot path.
 
     func streakHeroContent(user: CompetitionUser?, todayDistance: Double, goal: Double, gradientColors: [Color]) -> some View {
         let streak = Int(user?.score ?? 0)
@@ -531,50 +474,4 @@ extension CompetitionDetailView {
         .padding(.top, 8)
     }
 
-    // MARK: - Collapsible Settings Dropdown
-    var settingsDropdown: some View {
-        VStack(spacing: 0) {
-            // Tappable header
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    showSettings.toggle()
-                }
-            } label: {
-                HStack {
-                    Image(systemName: "gearshape.fill")
-                        .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.4))
-                    Text("Competition Details")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.5))
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.25))
-                        .rotationEffect(.degrees(showSettings ? 90 : 0))
-                }
-                .padding(MADTheme.Spacing.md)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if showSettings {
-                Divider()
-                    .background(Color.white.opacity(0.1))
-                    .padding(.horizontal, MADTheme.Spacing.md)
-
-                infoContent
-                    .padding(MADTheme.Spacing.lg)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(.ultraThinMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
-                )
-        )
-    }
 }

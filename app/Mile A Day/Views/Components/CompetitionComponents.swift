@@ -102,6 +102,12 @@ struct CompetitionCard: View {
             VStack(alignment: .leading, spacing: 14) {
                 cardHeader
                 statChipsRow
+                // Today's progress at a glance — answers "where am I right
+                // now vs the field" without tapping in. Only on active comps;
+                // lobby/scheduled/finished cards skip this row.
+                if competition.status == .active {
+                    todayProgressRow
+                }
                 // Rivalry hint — shown inline when the viewer is within
                 // striking distance of overtaking the next person above
                 // them. Tightly scoped to active comps with comparison-based
@@ -288,6 +294,126 @@ struct CompetitionCard: View {
             }
         }
         .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+    }
+
+    // MARK: - Today's Progress Row
+    /// At-a-glance "your today vs the field" row for active comps. Shows the
+    /// current user's miles today and how they stack against the daily leader
+    /// (clash/apex) or the goal (streaks/targets). Mode-specific phrasing.
+    @ViewBuilder
+    private var todayProgressRow: some View {
+        let currentUserId = UserDefaults.standard.string(forKey: "backendUserId")
+        let me = competition.users.first(where: { $0.user_id == currentUserId })
+        let todayKey = CompetitionCard.todayIntervalKey(for: competition)
+        let myToday = me?.intervals?[todayKey] ?? 0
+        let unit = competition.options.unit.shortDisplayName
+        let goal = competition.options.goal
+
+        switch competition.type {
+        case .clash, .apex:
+            let opponents = competition.users.filter { $0.invite_status == .accepted && $0.user_id != currentUserId }
+            let leader = opponents.max(by: { ($0.intervals?[todayKey] ?? 0) < ($1.intervals?[todayKey] ?? 0) })
+            let leaderToday = leader?.intervals?[todayKey] ?? 0
+            todayProgressBubble(
+                myToday: myToday,
+                otherLabel: leader.map { "Leader: \($0.displayName) \(String(format: "%.2f", leaderToday)) \(unit)" }
+                    ?? "No opponents yet",
+                gap: myToday - leaderToday,
+                unit: unit,
+                primaryEmoji: "⚡",
+                accent: leader == nil ? .white.opacity(0.4) :
+                    (myToday >= leaderToday && myToday > 0 ? .green : .orange)
+            )
+        case .targets:
+            let hit = myToday >= goal
+            let remaining = max(0, goal - myToday)
+            todayProgressBubble(
+                myToday: myToday,
+                otherLabel: hit
+                    ? "Target hit"
+                    : "\(String(format: "%.2f", remaining)) \(unit) to goal",
+                gap: hit ? 1 : 0,
+                unit: unit,
+                primaryEmoji: "🎯",
+                accent: hit ? .green : .orange
+            )
+        case .streaks:
+            let hit = myToday >= goal
+            let lives = me?.remaining_lives ?? competition.streakLives
+            let remaining = max(0, goal - myToday)
+            todayProgressBubble(
+                myToday: myToday,
+                otherLabel: hit
+                    ? "Streak safe · \(lives) \(lives == 1 ? "life" : "lives")"
+                    : "\(String(format: "%.2f", remaining)) \(unit) left · \(lives) \(lives == 1 ? "life" : "lives")",
+                gap: hit ? 1 : 0,
+                unit: unit,
+                primaryEmoji: "🔥",
+                accent: hit ? .green : .orange
+            )
+        case .race:
+            let total = me?.score ?? 0
+            let pct = goal > 0 ? min(100, Int((total / goal) * 100)) : 0
+            todayProgressBubble(
+                myToday: total,
+                otherLabel: "\(pct)% · +\(String(format: "%.2f", myToday)) today",
+                gap: 0,
+                unit: unit,
+                primaryEmoji: "🏁",
+                accent: total >= goal ? .green : .orange
+            )
+        }
+    }
+
+    private func todayProgressBubble(myToday: Double, otherLabel: String, gap: Double, unit: String, primaryEmoji: String, accent: Color) -> some View {
+        HStack(spacing: 8) {
+            Text(primaryEmoji)
+                .font(.system(size: 14))
+
+            Text("You: \(String(format: "%.2f", myToday)) \(unit)")
+                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+
+            Text("·")
+                .font(.system(size: 12, weight: .heavy))
+                .foregroundColor(.white.opacity(0.3))
+
+            Text(otherLabel)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundColor(accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            Capsule()
+                .fill(accent.opacity(0.08))
+                .overlay(Capsule().strokeBorder(accent.opacity(0.25), lineWidth: 1))
+        )
+    }
+
+    /// Build the interval key for "today" using the comp's interval setting,
+    /// matching the backend's bucketing logic. Static so it can be referenced
+    /// from any view scope without crossing actor boundaries.
+    static func todayIntervalKey(for competition: Competition) -> String {
+        let cal = Calendar.current
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        let now = Date()
+        switch competition.options.interval ?? .day {
+        case .day:
+            return formatter.string(from: cal.startOfDay(for: now))
+        case .week:
+            return competition.weeklyIntervalKey(for: now)
+        case .month:
+            var comps = cal.dateComponents([.year, .month], from: now)
+            comps.day = 1
+            let start = cal.date(from: comps) ?? now
+            return formatter.string(from: start)
+        }
     }
 
     // MARK: - Rivalry Hint Row
@@ -843,6 +969,11 @@ struct CompetitionLeaderboardRow: View {
     let isCurrentUser: Bool
     /// Total streak lives for the competition. Ignored outside streak competitions.
     var totalLives: Int = 0
+    /// Optional callback fired when the MANUAL badge is tapped. Hosts use this
+    /// to surface a sheet explaining which workouts were manually entered.
+    var onManualTap: (() -> Void)? = nil
+
+    @State private var showingManualInfo = false
 
     private var isEliminated: Bool {
         guard competitionType == .streaks, totalLives > 0 else { return false }
@@ -863,7 +994,7 @@ struct CompetitionLeaderboardRow: View {
         let score = user.score ?? 0
         switch competitionType {
         case .streaks:
-            return "\(Int(score)) day\(Int(score) == 1 ? "" : "s")"
+            return "\(Int(score))d"
         case .apex, .race:
             return String(format: "%.1f %@", score, unit.shortDisplayName)
         case .targets, .clash:
@@ -918,10 +1049,15 @@ struct CompetitionLeaderboardRow: View {
                 )
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: MADTheme.Spacing.xs) {
+                // Name row — only the YOU/OUT badges live inline here. MANUAL
+                // moved to its own dedicated slot near the right so a wide
+                // badge cluster can't push the name into an ugly wrap.
+                HStack(spacing: 5) {
                     Text(user.displayName)
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
                         .foregroundColor(.white.opacity(isEliminated ? 0.4 : 1.0))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
 
                     if isCurrentUser {
                         Text("YOU")
@@ -940,27 +1076,18 @@ struct CompetitionLeaderboardRow: View {
                             .padding(.vertical, 1)
                             .background(Capsule().fill(Color.red.opacity(0.4)))
                     }
-
-                    if user.has_manual_workouts == true {
-                        HStack(spacing: 2) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 7))
-                            Text("MANUAL")
-                                .font(.system(size: 7, weight: .bold, design: .rounded))
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Color.orange))
-                    }
                 }
 
-                // Lives indicator for streaks - clean heart icons instead of dots
-                if competitionType == .streaks && totalLives > 0, let lives = user.remaining_lives {
+                // Lives indicator for streaks — tighter spacing so the row
+                // doesn't read as two columns of hearts. Eliminated users
+                // skip the row entirely.
+                if competitionType == .streaks && totalLives > 0,
+                   let lives = user.remaining_lives,
+                   !isEliminated {
                     HStack(spacing: 2) {
                         ForEach(0..<min(totalLives, 6), id: \.self) { i in
                             Image(systemName: i < lives ? "heart.fill" : "heart")
-                                .font(.system(size: 7))
+                                .font(.system(size: 8))
                                 .foregroundColor(i < lives ? .red : .white.opacity(0.15))
                         }
                         if totalLives > 6 {
@@ -972,10 +1099,35 @@ struct CompetitionLeaderboardRow: View {
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            // Score with icon
-            HStack(spacing: 4) {
+            // MANUAL indicator — tap-actionable. Renders as a small tappable
+            // pill so users know what it means; hosts can wire `onManualTap`
+            // to open a sheet listing this user's manual workouts.
+            if user.has_manual_workouts == true {
+                Button {
+                    if let action = onManualTap {
+                        action()
+                    } else {
+                        showingManualInfo = true
+                    }
+                } label: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.orange)
+                        .frame(width: 22, height: 22)
+                        .background(
+                            Circle()
+                                .fill(Color.orange.opacity(0.15))
+                                .overlay(Circle().strokeBorder(Color.orange.opacity(0.45), lineWidth: 1))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Score — locked to a single line so the column never wraps
+            // mid-word (e.g. "377 days" → "37 7 days").
+            HStack(spacing: 3) {
                 if competitionType == .streaks {
                     Image(systemName: "flame.fill")
                         .font(.system(size: 11))
@@ -984,10 +1136,16 @@ struct CompetitionLeaderboardRow: View {
                 Text(scoreText)
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(isEliminated ? 0.4 : 0.9))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
 
         }
         .padding(MADTheme.Spacing.md)
+        .sheet(isPresented: $showingManualInfo) {
+            ManualWorkoutsInfoSheet(user: user)
+                .presentationDetents([.fraction(0.4), .medium])
+        }
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                 .fill(Color.white.opacity(isCurrentUser ? 0.08 : (rank == 1 ? 0.04 : 0.0)))
@@ -1004,6 +1162,100 @@ struct CompetitionLeaderboardRow: View {
                 )
         )
         .opacity(isEliminated ? 0.6 : 1.0)
+    }
+
+}
+
+// MARK: - Manual Workouts Info Sheet
+/// Surfaces the list of manually-entered workouts for one user, with the
+/// reason they're flagged. Reached by tapping the orange ⚠ on a leaderboard
+/// row. Read-only — manual flag is a server-side property.
+struct ManualWorkoutsInfoSheet: View {
+    let user: CompetitionUser
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack {
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                HStack {
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 24))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 36))
+                        .foregroundStyle(LinearGradient(colors: [.orange, .yellow], startPoint: .top, endPoint: .bottom))
+
+                    Text("Manual workouts")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+
+                    Text("\(user.displayName) has logged at least one workout manually in this competition.")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    infoRow(
+                        icon: "questionmark.circle.fill",
+                        title: "Why does this matter?",
+                        body: "Manual entries can't be verified by HealthKit so they're flagged for transparency."
+                    )
+                    infoRow(
+                        icon: "checkmark.shield.fill",
+                        title: "Still counts",
+                        body: "Manual workouts still contribute to scores — the badge is informational only."
+                    )
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+
+                Spacer()
+            }
+        }
+    }
+
+    private func infoRow(icon: String, title: String, body: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundColor(.orange)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Text(body)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
     }
 }
 

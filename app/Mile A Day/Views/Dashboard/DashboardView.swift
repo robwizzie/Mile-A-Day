@@ -45,7 +45,7 @@ struct DashboardView: View {
     /// Competition opened directly from a Dashboard rivalry-hint row. Sheet
     /// presentation, not a tab switch — keeps the user on Dashboard in the
     /// back stack so dismiss returns them to where they tapped.
-    @State private var rivalryDeepLinkCompetition: Competition?
+    @AppStorage("competitionsCollapsed") private var competitionsCollapsed: Bool = false
 
     /// User preference: "chart" (line chart) or "streak" (streak card)
     @AppStorage("weekViewStyle") private var weekViewStyle: String = "streak"
@@ -408,16 +408,6 @@ struct DashboardView: View {
                 )
                 .presentationDetents([.height(300)])
                     }
-            // Rivalry deep-link sheet — tapping a "close to passing" row on
-            // the dashboard opens that specific competition.
-            .sheet(item: $rivalryDeepLinkCompetition) { competition in
-                NavigationStack {
-                    CompetitionDetailView(
-                        competition: competition,
-                        competitionService: competitionService
-                    )
-                }
-            }
             .sheet(isPresented: $showInstructions) {
                 InstructionsView()
             }
@@ -817,8 +807,10 @@ struct DashboardView: View {
             todayProgressSection
             // Cross-comp rivalries — surface "you're X behind Y in [comp]"
             // hints from every active competition so users see all their
-            // close-pass opportunities in one place.
-            rivalriesSection
+            // The competitions dropdown (activeCompetitionSection) replaces
+            // the standalone "Close to Passing" tile — each comp card now
+            // surfaces its own focus signal, so a separate rivalries section
+            // would just duplicate information.
             dailyChallengeSection
             friendActivitySection
             activeCompetitionSection
@@ -831,101 +823,6 @@ struct DashboardView: View {
         .clipped() // Prevent content overflow from causing horizontal jitter
     }
 
-    /// Aggregated rivalry hints across all the viewer's active competitions.
-    /// Each row shows: competition name, "you're X behind {avatar} Name",
-    /// and tapping a row deep-links into that competition. Hidden when
-    /// there are no close-pass opportunities.
-    @ViewBuilder
-    private var rivalriesSection: some View {
-        let hints: [(Competition, RivalryHint)] = competitionService.competitions
-            .compactMap { comp in
-                guard let hint = comp.rivalryHint else { return nil }
-                return (comp, hint)
-            }
-            .sorted { $0.1.gap < $1.1.gap }   // smallest gap first — most actionable
-
-        if !hints.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "flame.fill")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(
-                            LinearGradient(colors: [.orange, .yellow], startPoint: .top, endPoint: .bottom)
-                        )
-                    Text("CLOSE TO PASSING")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
-                        .tracking(1.2)
-                        .foregroundColor(.white.opacity(0.6))
-                    Spacer()
-                }
-
-                VStack(spacing: 6) {
-                    ForEach(Array(hints.prefix(3)), id: \.0.competition_id) { (comp, hint) in
-                        rivalryDashboardRow(competition: comp, hint: hint)
-                    }
-                }
-            }
-            .padding(MADTheme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                    .fill(Color.orange.opacity(0.08))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                            .strokeBorder(Color.orange.opacity(0.25), lineWidth: 1)
-                    )
-            )
-        }
-    }
-
-    private func rivalryDashboardRow(competition: Competition, hint: RivalryHint) -> some View {
-        Button {
-            // Present the comp detail directly as a sheet from Dashboard —
-            // taking the user straight to the comp they tapped instead of
-            // dumping them on the Compete tab and making them find it again.
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            rivalryDeepLinkCompetition = competition
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "arrow.up.right.circle.fill")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(
-                        LinearGradient(colors: [.orange, .yellow], startPoint: .top, endPoint: .bottom)
-                    )
-
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
-                        Text(hint.gapText)
-                            .font(.system(size: 13, weight: .heavy, design: .rounded))
-                            .foregroundColor(.orange)
-                        // Suffix copy is kind-aware — "from passing X" for
-                        // cumulative comps, "from today's clash win vs X"
-                        // for the daily clash race.
-                        Text(hint.actionSuffix)
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.85))
-                            .lineLimit(1)
-                    }
-                    Text(competition.competition_name)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.5))
-                        .lineLimit(1)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.white.opacity(0.4))
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.white.opacity(0.04))
-            )
-        }
-        .buttonStyle(.plain)
-    }
 
     @ViewBuilder
     private var inProgressBannerSection: some View {
@@ -1028,12 +925,47 @@ struct DashboardView: View {
     }
 
     // MARK: - Active Competition Section
+    /// Surfaces every active competition the user is in, sorted by "what
+    /// needs your attention right now" — streak-at-risk and tight clash
+    /// races bubble to the top, comfortable leads fall to the bottom. Each
+    /// row is a rich focus card showing today's actionable status so the
+    /// user can decide where to put their next mile without tapping in.
+    ///
+    /// Wrapped in the shared `DashboardCollapsibleSection` so users who
+    /// don't want a tall comp stack on the dashboard can fold it away.
+    /// Collapse state persists via @AppStorage.
 
     @ViewBuilder
     private var activeCompetitionSection: some View {
-        let activeCompetitions = competitionService.competitions.filter { $0.status == .active }
-        if let competition = activeCompetitions.first {
-            ActiveCompetitionBannerCard(competition: competition)
+        let active = competitionService.competitions.filter { $0.status == .active }
+        if !active.isEmpty {
+            let backendUserId = UserDefaults.standard.string(forKey: "backendUserId")
+            let sorted = active.sorted { a, b in
+                let fa = TodayFocus.compute(for: a, currentUserId: backendUserId)
+                let fb = TodayFocus.compute(for: b, currentUserId: backendUserId)
+                if fa.level.sortKey != fb.level.sortKey {
+                    return fa.level.sortKey < fb.level.sortKey
+                }
+                // Tie-break: earlier-ending competition first (more time
+                // pressure makes it more relevant today).
+                let endA = a.endDateFormatted ?? .distantFuture
+                let endB = b.endDateFormatted ?? .distantFuture
+                return endA < endB
+            }
+
+            DashboardCollapsibleSection(
+                title: sorted.count == 1
+                    ? "Your Competitions"
+                    : "Your Competitions (\(sorted.count))",
+                icon: "trophy.fill",
+                isCollapsed: $competitionsCollapsed
+            ) {
+                VStack(spacing: 12) {
+                    ForEach(sorted, id: \.competition_id) { comp in
+                        ActiveCompetitionBannerCard(competition: comp)
+                    }
+                }
+            }
         }
     }
 

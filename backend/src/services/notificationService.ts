@@ -432,6 +432,17 @@ export async function checkStreaksBroken(): Promise<void> {
  * Check if a workout upload caused a lead change in any active competition.
  * Only for clash, apex, and race modes where there's a clear leader.
  *
+ * Three notification paths fire from this function:
+ *   1. Uploader took 1st → "You're in first!" (self) + "X took the lead" (others)
+ *   2. Previous 1st-place holder was dethroned by this upload → "X passed you
+ *      for 1st" sent to them with the gap distance.
+ *   3. (Future) Any user whose rank dropped due to this upload.
+ *
+ * Path 2 reads each user's previous rank from `competition_users.last_known_rank`,
+ * compares to the freshly-computed rank, and notifies any user who went from
+ * 1st to anywhere else. Ranks are then written back so the next upload's
+ * comparison is fresh.
+ *
  * `notifiedRecipients` is shared with sibling checks (e.g. checkCompetitionMilestones)
  * for a single workout-upload trigger so the same recipient is not spammed across
  * multiple shared competitions.
@@ -465,59 +476,126 @@ export async function checkLeadChanges(userId: string, notifiedRecipients?: Map<
 				const fullComp = await getCompetition(comp.id);
 				if (!fullComp) continue;
 
-				const scores = await getUserScores(fullComp);
 				const acceptedUsers = fullComp.users.filter((u: CompetitionUser) => u.invite_status === 'accepted');
 				if (acceptedUsers.length < 2) continue;
 
-				// Find the current leader
-				let maxScore = -1;
-				let leaderId: string | null = null;
-				let isTied = false;
+				// Snapshot previous (cached) ranks BEFORE we recompute. Users
+				// with NULL cache values are treated as "no known prior" — we
+				// won't fire dethrone notifications until they've been
+				// indexed at least once.
+				const cachedRows = await db.query<{ user_id: string; last_known_rank: number | null; last_known_score: number | null }>(
+					`SELECT user_id, last_known_rank, last_known_score
+					FROM competition_users
+					WHERE competition_id = $1 AND invite_status = 'accepted'`,
+					[comp.id]
+				);
+				const previousRank = new Map<string, number | null>();
+				for (const row of cachedRows) {
+					previousRank.set(row.user_id, row.last_known_rank);
+				}
 
-				for (const u of acceptedUsers) {
-					const score = scores[u.user_id]?.score ?? 0;
-					if (score > maxScore) {
-						maxScore = score;
-						leaderId = u.user_id;
-						isTied = false;
-					} else if (score === maxScore) {
-						isTied = true;
+				// Compute current scores + ranks.
+				const scores = await getUserScores(fullComp);
+				const ranked = [...acceptedUsers]
+					.map(u => ({
+						user_id: u.user_id,
+						displayName: (u as any).username || u.user_id,
+						score: scores[u.user_id]?.score ?? 0
+					}))
+					.sort((a, b) => b.score - a.score);
+
+				const newRankByUser = new Map<string, number>();
+				const newScoreByUser = new Map<string, number>();
+				ranked.forEach((r, idx) => {
+					newRankByUser.set(r.user_id, idx + 1);
+					newScoreByUser.set(r.user_id, r.score);
+				});
+
+				const newLeader = ranked[0];
+				const isTied = ranked.length >= 2 && ranked[0].score === ranked[1].score;
+				const leaderId = isTied ? null : newLeader?.user_id ?? null;
+				const maxScore = newLeader?.score ?? 0;
+
+				// ── Path 1: uploader just took the lead.
+				if (leaderId === userId && !isTied && maxScore > 0) {
+					const milestoneKey = `lead_change_${comp.id}_${userId}_${today}`;
+					const claimed = await db.query(
+						`INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)
+						ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
+						[milestoneKey, comp.id, userId]
+					);
+					if (claimed.length > 0) {
+						for (const u of acceptedUsers) {
+							if (u.user_id === userId) continue;
+							const shouldSend = await shouldSendNotification(u.user_id, null, 'competition_milestone');
+							if (!shouldSend) continue;
+							if (!tryReserveRecipientSlot(notifiedRecipients, u.user_id)) continue;
+
+							sendPush(u.user_id, {
+								title: 'Lead change!',
+								body: `${username} just took the lead in ${fullComp.competition_name}!`,
+								type: 'competition_milestone',
+								data: { competition_id: fullComp.id }
+							}).catch(err => console.error('[Push] lead change error:', err.message));
+						}
+
+						sendPush(userId, {
+							title: "You're in first!",
+							body: `You just took the lead in ${fullComp.competition_name}! Keep it up!`,
+							type: 'competition_milestone',
+							data: { competition_id: fullComp.id }
+						}).catch(err => console.error('[Push] lead self error:', err.message));
 					}
 				}
 
-				// Only notify if this user just took the lead (not tied)
-				if (leaderId !== userId || isTied || maxScore <= 0) continue;
-
-				const milestoneKey = `lead_change_${comp.id}_${userId}_${today}`;
-				const claimed = await db.query(
-					`INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)
-					ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
-					[milestoneKey, comp.id, userId]
-				);
-				if (claimed.length === 0) continue;
-
-				// Notify all other participants
+				// ── Path 2: someone WAS the leader and isn't anymore.
+				// Find users whose cached rank was 1 and whose new rank > 1.
+				// In most cases this is exactly one user; we still loop to be
+				// safe against odd cached state from a prior tie.
 				for (const u of acceptedUsers) {
+					const prior = previousRank.get(u.user_id);
+					const fresh = newRankByUser.get(u.user_id) ?? acceptedUsers.length;
+					if (prior !== 1 || fresh <= 1) continue;
+					// Don't notify the user who took the lead themselves.
 					if (u.user_id === userId) continue;
+
+					const dethroneKey = `lead_lost_${comp.id}_${u.user_id}_${today}`;
+					const claimed = await db.query(
+						`INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)
+						ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
+						[dethroneKey, comp.id, u.user_id]
+					);
+					if (claimed.length === 0) continue;
+
 					const shouldSend = await shouldSendNotification(u.user_id, null, 'competition_milestone');
 					if (!shouldSend) continue;
 					if (!tryReserveRecipientSlot(notifiedRecipients, u.user_id)) continue;
 
+					const newLeaderScore = newScoreByUser.get(leaderId ?? '') ?? 0;
+					const myScore = newScoreByUser.get(u.user_id) ?? 0;
+					const gap = newLeaderScore - myScore;
+					const unitText = formatGapForType(fullComp.type, gap);
+
 					sendPush(u.user_id, {
-						title: 'Lead change!',
-						body: `${username} just took the lead in ${fullComp.competition_name}!`,
+						title: 'You lost 1st!',
+						body: `${username} passed you in ${fullComp.competition_name}. They're ${unitText} ahead — go take it back!`,
 						type: 'competition_milestone',
-						data: { competition_id: fullComp.id }
-					}).catch(err => console.error('[Push] lead change error:', err.message));
+						data: { competition_id: fullComp.id, kind: 'lead_lost' }
+					}).catch(err => console.error('[Push] lead lost error:', err.message));
 				}
 
-				// Also notify the user who took the lead
-				sendPush(userId, {
-					title: "You're in first!",
-					body: `You just took the lead in ${fullComp.competition_name}! Keep it up!`,
-					type: 'competition_milestone',
-					data: { competition_id: fullComp.id }
-				}).catch(err => console.error('[Push] lead self error:', err.message));
+				// ── Persist the new ranks so the next upload's comparison
+				// has fresh values. One UPDATE per user; could be batched
+				// later if the row count grows.
+				for (const [uid, rank] of newRankByUser.entries()) {
+					const score = newScoreByUser.get(uid) ?? 0;
+					await db.query(
+						`UPDATE competition_users
+						SET last_known_rank = $1, last_known_score = $2, last_rank_updated_at = NOW()
+						WHERE competition_id = $3 AND user_id = $4`,
+						[rank, score, comp.id, uid]
+					);
+				}
 			} catch (err: any) {
 				console.error(`[Notifications] Lead change error for comp ${comp.id}:`, err.message);
 			}
@@ -525,6 +603,346 @@ export async function checkLeadChanges(userId: string, notifiedRecipients?: Map<
 	} catch (err: any) {
 		console.error('[Notifications] Error in checkLeadChanges:', err.message);
 	}
+}
+
+/** Format a score gap for user-facing notification text, mode-aware. */
+function formatGapForType(type: string, gap: number): string {
+	if (gap <= 0) return '0';
+	switch (type) {
+		case 'clash':
+		case 'targets': {
+			const pts = Math.max(1, Math.round(gap));
+			return `${pts} ${pts === 1 ? 'pt' : 'pts'}`;
+		}
+		case 'apex':
+		case 'race':
+		default:
+			return `${gap.toFixed(2)} mi`;
+	}
+}
+
+// ─── End-of-Interval Per-User Recap Notifications ─────────────────
+// These run from the midnight cron. Each function targets one kind of
+// per-user event (streak life lost, target missed, interval recap), and
+// all use the same `milestone_notifications` table for idempotency.
+
+/** ISO date string for yesterday in America/New_York (matches workouts.local_date format). */
+function yesterdayLocalDate(): string {
+	const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+	const y = new Date(Date.now() - 24 * 60 * 60 * 1000);
+	return formatter.format(y);
+}
+
+/** ISO date string for today in America/New_York. */
+function todayLocalDate(): string {
+	const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+	return formatter.format(new Date());
+}
+
+/**
+ * Cron: detect users in streak competitions who missed yesterday's goal and
+ * therefore just lost a life. Sends each affected user a single push per
+ * (competition, day) pair. Skipped for users who are already eliminated
+ * (remaining_lives <= 0 before yesterday) so we don't keep nagging them.
+ *
+ * Streaks are independent per user, so no "leader" comparison is needed —
+ * we just look at each accepted user's yesterday miles vs the comp goal.
+ */
+export async function checkStreakLifeLoss(): Promise<void> {
+	try {
+		const activeStreaks = await db.query<Competition & { id: string }>(
+			`SELECT c.*
+			FROM competitions c
+			WHERE c.type = 'streaks'
+				AND c.start_date IS NOT NULL
+				AND c.start_date <= NOW()
+				AND c.winner IS NULL
+				AND (c.end_date IS NULL OR c.end_date > NOW())`
+		);
+
+		if (activeStreaks.length === 0) return;
+		const yesterday = yesterdayLocalDate();
+
+		for (const comp of activeStreaks) {
+			try {
+				const fullComp = await getCompetition(comp.id);
+				if (!fullComp) continue;
+				const goal = fullComp.options.goal ?? 1.0;
+				const totalLives = fullComp.options.lives ?? (fullComp.options.first_to > 0 ? fullComp.options.first_to : 0);
+				if (totalLives === 0) continue;
+
+				const accepted = fullComp.users.filter((u: CompetitionUser) => u.invite_status === 'accepted');
+				if (accepted.length === 0) continue;
+
+				// Per-user yesterday miles via the comp's interval window. For
+				// streaks the interval is almost always daily; if not, we map
+				// to yesterday's day key directly since getUserScores already
+				// includes per-interval breakdowns.
+				const scores = await getUserScores(fullComp);
+
+				for (const u of accepted) {
+					const remaining = scores[u.user_id]?.remaining_lives ?? totalLives;
+					// Skip users who were already out — they don't lose another life.
+					if (remaining <= 0) continue;
+
+					const yesterdayMiles = scores[u.user_id]?.intervals?.[yesterday] ?? 0;
+					if (yesterdayMiles >= goal) continue; // hit the goal — streak safe
+
+					const livesAfter = Math.max(0, remaining - 1);
+					const milestoneKey = `streak_life_lost_${comp.id}_${u.user_id}_${yesterday}`;
+					const claimed = await db.query(
+						`INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)
+						ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
+						[milestoneKey, comp.id, u.user_id]
+					);
+					if (claimed.length === 0) continue;
+
+					const shouldSend = await shouldSendNotification(u.user_id, null, 'competition_milestone');
+					if (!shouldSend) continue;
+
+					const title = livesAfter === 0 ? "You're out!" : 'Life lost';
+					const body = livesAfter === 0
+						? `You missed yesterday's mile in ${fullComp.competition_name} and are out of lives.`
+						: `You missed yesterday's mile in ${fullComp.competition_name} — ${livesAfter} ${livesAfter === 1 ? 'life' : 'lives'} left.`;
+
+					sendPush(u.user_id, {
+						title,
+						body,
+						type: 'competition_milestone',
+						data: { competition_id: comp.id, kind: 'streak_life_lost', lives_remaining: String(livesAfter) }
+					}).catch(err => console.error('[Push] streak life lost error:', err.message));
+				}
+			} catch (err: any) {
+				console.error(`[Notifications] Streak life check error for comp ${comp.id}:`, err.message);
+			}
+		}
+	} catch (err: any) {
+		console.error('[Notifications] Error in checkStreakLifeLoss:', err.message);
+	}
+}
+
+/**
+ * Cron: detect users in targets competitions who missed the just-ended
+ * interval's goal. One push per (user, comp, interval) pair. Daily-interval
+ * comps are the primary use case — weekly/monthly fire on their respective
+ * rollover days (detected in `intervalJustEnded`).
+ */
+export async function checkTargetMissed(): Promise<void> {
+	try {
+		const activeTargets = await db.query<Competition & { id: string }>(
+			`SELECT c.*
+			FROM competitions c
+			WHERE c.type = 'targets'
+				AND c.start_date IS NOT NULL
+				AND c.start_date <= NOW()
+				AND c.winner IS NULL
+				AND (c.end_date IS NULL OR c.end_date > NOW())`
+		);
+
+		if (activeTargets.length === 0) return;
+
+		for (const comp of activeTargets) {
+			try {
+				const fullComp = await getCompetition(comp.id);
+				if (!fullComp) continue;
+				const intervalSetting = fullComp.options.interval ?? 'day';
+				if (!intervalJustEnded(intervalSetting, fullComp.start_date)) continue;
+
+				const goal = fullComp.options.goal ?? 1.0;
+				const accepted = fullComp.users.filter((u: CompetitionUser) => u.invite_status === 'accepted');
+				if (accepted.length === 0) continue;
+
+				const scores = await getUserScores(fullComp);
+				const recentKey = lastIntervalKey(intervalSetting, fullComp.start_date);
+
+				// Build the "who hit" list for inclusion in the notification body.
+				const hitNames: string[] = [];
+				const userMiles: Record<string, number> = {};
+				for (const u of accepted) {
+					const m = scores[u.user_id]?.intervals?.[recentKey] ?? 0;
+					userMiles[u.user_id] = m;
+					if (m >= goal) hitNames.push((u as any).username || 'Someone');
+				}
+
+				for (const u of accepted) {
+					if (userMiles[u.user_id] >= goal) continue;
+					const milestoneKey = `target_missed_${comp.id}_${u.user_id}_${recentKey}`;
+					const claimed = await db.query(
+						`INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)
+						ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
+						[milestoneKey, comp.id, u.user_id]
+					);
+					if (claimed.length === 0) continue;
+
+					const shouldSend = await shouldSendNotification(u.user_id, null, 'competition_milestone');
+					if (!shouldSend) continue;
+
+					const periodLabel = intervalSetting === 'day' ? "yesterday's"
+						: intervalSetting === 'week' ? "last week's"
+						: "last month's";
+					const hitBody = hitNames.length > 0
+						? `${hitNames.slice(0, 3).join(', ')}${hitNames.length > 3 ? ` and ${hitNames.length - 3} more` : ''} hit the target.`
+						: 'No one hit the target.';
+
+					sendPush(u.user_id, {
+						title: `🎯 Missed ${periodLabel} target`,
+						body: `You didn't hit the goal in ${fullComp.competition_name}. ${hitBody}`,
+						type: 'competition_milestone',
+						data: { competition_id: comp.id, kind: 'target_missed' }
+					}).catch(err => console.error('[Push] target missed error:', err.message));
+				}
+			} catch (err: any) {
+				console.error(`[Notifications] Target missed check error for comp ${comp.id}:`, err.message);
+			}
+		}
+	} catch (err: any) {
+		console.error('[Notifications] Error in checkTargetMissed:', err.message);
+	}
+}
+
+/**
+ * Cron: end-of-interval recap. Tells each user "yesterday's results are in
+ * for X of your competitions" — single grouped push per user covering every
+ * comp whose interval just ended.
+ *
+ * Avoids spam by:
+ *   - One milestone_notifications row per (user, day) — never sends twice.
+ *   - Only fires for comps where the interval ACTUALLY just ended (daily on
+ *     every midnight; weekly on the day after the last day of a week of
+ *     comp; monthly on the 1st).
+ *
+ * Should run AFTER streak/target/lead checks so the user opens the app to
+ * a single recap rather than a stream of individual updates.
+ */
+export async function notifyIntervalResults(): Promise<void> {
+	try {
+		const activeComps = await db.query<Competition & { id: string }>(
+			`SELECT c.*
+			FROM competitions c
+			WHERE c.start_date IS NOT NULL
+				AND c.start_date <= NOW()
+				AND c.winner IS NULL
+				AND (c.end_date IS NULL OR c.end_date > NOW())`
+		);
+		if (activeComps.length === 0) return;
+
+		const today = todayLocalDate();
+		// Map user_id → list of comp names whose interval just ended for them.
+		const recapsByUser = new Map<string, string[]>();
+		// Map user_id → first comp_id so the push can deep-link sensibly.
+		const firstCompByUser = new Map<string, string>();
+
+		for (const comp of activeComps) {
+			const intervalSetting = comp.options?.interval ?? 'day';
+			if (!intervalJustEnded(intervalSetting, comp.start_date)) continue;
+
+			const accepted = await db.query<{ user_id: string }>(
+				`SELECT user_id FROM competition_users
+				WHERE competition_id = $1 AND invite_status = 'accepted'`,
+				[comp.id]
+			);
+
+			for (const { user_id } of accepted) {
+				const list = recapsByUser.get(user_id) ?? [];
+				list.push(comp.competition_name);
+				recapsByUser.set(user_id, list);
+				if (!firstCompByUser.has(user_id)) firstCompByUser.set(user_id, comp.id);
+			}
+		}
+
+		for (const [userId, compNames] of recapsByUser.entries()) {
+			const milestoneKey = `interval_recap_${userId}_${today}`;
+			const claimed = await db.query(
+				`INSERT INTO milestone_notifications (milestone_key, user_id) VALUES ($1, $2)
+				ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
+				[milestoneKey, userId]
+			);
+			if (claimed.length === 0) continue;
+
+			const shouldSend = await shouldSendNotification(userId, null, 'competition_milestone');
+			if (!shouldSend) continue;
+
+			const title = '📊 Yesterday\'s results are in';
+			const body = compNames.length === 1
+				? `Open ${compNames[0]} to see how everyone finished.`
+				: `Results are in for ${compNames.length} of your competitions — see who won.`;
+
+			sendPush(userId, {
+				title,
+				body,
+				type: 'competition_milestone',
+				data: {
+					kind: 'interval_recap',
+					comp_count: String(compNames.length),
+					competition_id: firstCompByUser.get(userId) ?? ''
+				}
+			}).catch(err => console.error('[Push] interval recap error:', err.message));
+		}
+	} catch (err: any) {
+		console.error('[Notifications] Error in notifyIntervalResults:', err.message);
+	}
+}
+
+/**
+ * True when the given interval setting just rolled over between yesterday
+ * and today in America/New_York. Daily comps roll every night; weekly comps
+ * roll only when yesterday was the last day of a comp-anchored week; monthly
+ * comps roll only on the 1st of a calendar month.
+ */
+function intervalJustEnded(interval: string | undefined, startDate: string | null | undefined): boolean {
+	if (interval === 'day' || !interval) return true;
+
+	const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+	const todayStr = formatter.format(new Date());
+	const today = new Date(todayStr + 'T00:00:00Z');
+
+	if (interval === 'month') {
+		// today.getUTCDate() reads the day-of-month of an ISO date — for the
+		// midnight-ET date string we just built that's the local day-of-month.
+		return today.getUTCDate() === 1;
+	}
+
+	if (interval === 'week') {
+		if (!startDate) return false;
+		const start = new Date(startDate);
+		const startMs = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+		const todayMs = today.getTime();
+		const daysSinceStart = Math.round((todayMs - startMs) / (24 * 60 * 60 * 1000));
+		// A new week begins every 7 days after the anchor day.
+		return daysSinceStart > 0 && daysSinceStart % 7 === 0;
+	}
+
+	return false;
+}
+
+/**
+ * ISO date string for the interval that JUST ended. For daily comps that's
+ * yesterday; for weekly/monthly it's the start date of the prior window so
+ * it can be looked up in `intervals[]`.
+ */
+function lastIntervalKey(interval: string | undefined, startDate: string | null | undefined): string {
+	if (interval === 'day' || !interval) return yesterdayLocalDate();
+
+	const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+
+	if (interval === 'month') {
+		const now = new Date();
+		const prior = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+		return formatter.format(prior);
+	}
+
+	if (interval === 'week' && startDate) {
+		const start = new Date(startDate);
+		const startMs = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate());
+		const todayStr = formatter.format(new Date());
+		const todayMs = new Date(todayStr + 'T00:00:00Z').getTime();
+		const daysSinceStart = Math.round((todayMs - startMs) / (24 * 60 * 60 * 1000));
+		const priorWeekStartDays = daysSinceStart - 7;
+		const priorWeekStartMs = startMs + priorWeekStartDays * 24 * 60 * 60 * 1000;
+		return formatter.format(new Date(priorWeekStartMs));
+	}
+
+	return yesterdayLocalDate();
 }
 
 // ─── End-of-Day Tie Detection (Clash Mode) ─────────────────────────

@@ -1,6 +1,13 @@
 import cron from 'node-cron';
 import { flushBatchedNotifications, cleanupNotificationLogs } from '../services/pushNotificationService.js';
-import { checkCompetitionsEndingSoon, checkStreaksBroken, checkClashTies } from '../services/notificationService.js';
+import {
+	checkCompetitionsEndingSoon,
+	checkStreaksBroken,
+	checkClashTies,
+	checkStreakLifeLoss,
+	checkTargetMissed,
+	notifyIntervalResults
+} from '../services/notificationService.js';
 import { sendPendingDailyReminders } from '../services/dailyReminderService.js';
 
 export function startNotificationCron(): void {
@@ -38,16 +45,50 @@ export function startNotificationCron(): void {
 		}
 	);
 
-	// Check for broken streaks at 12:05 AM ET (after midnight competition resolution)
+	// Check for broken streaks at 12:05 AM ET (after midnight competition resolution).
+	// In the same slot we also run the competition-streak life-loss check and the
+	// targets-missed check, which all share the "just rolled over to a new day" trigger.
 	cron.schedule(
 		'5 0 * * *',
 		async () => {
-			console.log('[CRON] Checking for broken streaks...');
+			console.log('[CRON] Checking for broken streaks + competition life/target loss...');
 			try {
 				await checkStreaksBroken();
-				console.log('[CRON] Streak broken check complete.');
+				console.log('[CRON] Personal streak broken check complete.');
 			} catch (error: any) {
 				console.error('[CRON] Error checking broken streaks:', error.message);
+			}
+			try {
+				await checkStreakLifeLoss();
+				console.log('[CRON] Competition streak life-loss check complete.');
+			} catch (error: any) {
+				console.error('[CRON] Error checking streak life loss:', error.message);
+			}
+			try {
+				await checkTargetMissed();
+				console.log('[CRON] Target-missed check complete.');
+			} catch (error: any) {
+				console.error('[CRON] Error checking target missed:', error.message);
+			}
+		},
+		{
+			timezone: 'America/New_York'
+		}
+	);
+
+	// Interval recap: fires 5 minutes after the life/target jobs so the
+	// individual misses-and-life-losses arrive first and the recap reads as
+	// a single "see how everyone finished" follow-up. Groups across all of
+	// a user's comps so heavy users don't get flooded.
+	cron.schedule(
+		'10 0 * * *',
+		async () => {
+			console.log('[CRON] Sending interval recap notifications...');
+			try {
+				await notifyIntervalResults();
+				console.log('[CRON] Interval recap complete.');
+			} catch (error: any) {
+				console.error('[CRON] Error sending interval recap:', error.message);
 			}
 		},
 		{

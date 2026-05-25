@@ -1213,6 +1213,11 @@ struct CompetitionInviteBanner: View {
 
 // MARK: - Active Competition Banner Card
 
+/// Dashboard preview tile for one active competition. Designed to answer
+/// "which comp do I focus on right now?" — leads with today's actionable
+/// status (behind by X mi, life at risk, target hit, etc.) rather than the
+/// cumulative rank. Cumulative rank still appears as a small chip so the
+/// user knows where they stand overall.
 struct ActiveCompetitionBannerCard: View {
     let competition: Competition
     @EnvironmentObject var competitionService: CompetitionService
@@ -1234,84 +1239,41 @@ struct ActiveCompetitionBannerCard: View {
         return rankedUsers.firstIndex(where: { $0.user_id == userId }).map { $0 + 1 }
     }
 
+    private var me: CompetitionUser? {
+        guard let userId = currentUserId else { return nil }
+        return competition.users.first(where: { $0.user_id == userId })
+    }
+
     private var typeGradientColors: [Color] {
-        let hexStrings = competition.type.gradient
-        return hexStrings.map { Color(hex: $0) }
+        competition.type.gradient.map { Color(hex: $0) }
+    }
+
+    /// Today's interval key — matches the comp's interval setting so weekly /
+    /// monthly comps still show the current period's bucket.
+    private var todayKey: String {
+        CompetitionCard.todayIntervalKey(for: competition)
+    }
+
+    private var myToday: Double {
+        me?.intervals?[todayKey] ?? 0
+    }
+
+    private var focus: TodayFocus {
+        TodayFocus.compute(for: competition, currentUserId: currentUserId)
     }
 
     var body: some View {
         Button {
             showDetail = true
         } label: {
-            HStack(spacing: 14) {
-                // Competition type icon
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: typeGradientColors,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 44, height: 44)
-
-                    Image(systemName: competition.type.icon)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(.white)
-                }
-
-                // Competition info
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(competition.competition_name)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-
-                    HStack(spacing: 8) {
-                        // Type pill
-                        Text(competition.type.displayName)
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
-                            .foregroundColor(typeGradientColors.first ?? .green)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill((typeGradientColors.first ?? .green).opacity(0.15))
-                            )
-
-                        // Participants
-                        HStack(spacing: 3) {
-                            Image(systemName: "person.2.fill")
-                                .font(.system(size: 10))
-                            Text("\(competition.acceptedUsersCount)")
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
-                        }
-                        .foregroundColor(.secondary)
-                    }
-                }
-
-                Spacer()
-
-                // Rank badge
-                if let rank = currentUserRank {
-                    VStack(spacing: 2) {
-                        Text(rankOrdinal(rank))
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .foregroundColor(rankColor(rank))
-
-                        Text("of \(rankedUsers.count)")
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                topRow
+                Divider()
+                    .background(Color.white.opacity(0.06))
+                bottomRow
             }
-            .padding(16)
-            .liquidGlassCard()
+            .padding(14)
+            .liquidGlassCard(accentColor: focus.level.color)
         }
         .buttonStyle(PlainButtonStyle())
         .sheet(isPresented: $showDetail) {
@@ -1321,23 +1283,261 @@ struct ActiveCompetitionBannerCard: View {
         }
     }
 
-    private func rankOrdinal(_ rank: Int) -> String {
-        let suffix: String
-        switch rank {
-        case 1: suffix = "st"
-        case 2: suffix = "nd"
-        case 3: suffix = "rd"
-        default: suffix = "th"
+    private var topRow: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: typeGradientColors,
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 40, height: 40)
+
+                Image(systemName: competition.type.icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(competition.competition_name)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+
+                HStack(spacing: 6) {
+                    Text(competition.type.displayName.uppercased())
+                        .font(.system(size: 9, weight: .black, design: .rounded))
+                        .tracking(0.8)
+                        .foregroundColor(typeGradientColors.first ?? .green)
+
+                    if let interval = competition.options.interval {
+                        Text("·")
+                            .foregroundColor(.secondary.opacity(0.5))
+                        Text(interval.displayName)
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundColor(.secondary)
+                    }
+
+                    if let rank = currentUserRank {
+                        Text("·")
+                            .foregroundColor(.secondary.opacity(0.5))
+                        Text("\(rankOrdinal(rank)) of \(rankedUsers.count)")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundColor(rank == 1 ? .yellow : .secondary)
+                    }
+                }
+            }
+
+            Spacer(minLength: 6)
+
+            urgencyPill
         }
-        return "\(rank)\(suffix)"
     }
 
-    private func rankColor(_ rank: Int) -> Color {
+    private var urgencyPill: some View {
+        HStack(spacing: 4) {
+            Image(systemName: focus.pillIcon)
+                .font(.system(size: 9, weight: .heavy))
+            Text(focus.pill)
+                .font(.system(size: 9, weight: .black, design: .rounded))
+                .tracking(0.7)
+        }
+        .foregroundColor(focus.level.color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            Capsule()
+                .fill(focus.level.color.opacity(0.15))
+                .overlay(Capsule().strokeBorder(focus.level.color.opacity(0.4), lineWidth: 1))
+        )
+        .lineLimit(1)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var bottomRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: focus.level.iconBackground)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(focus.level.color)
+                .frame(width: 18)
+
+            Text(focus.detail)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.primary.opacity(0.85))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 4)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func fmt(_ value: Double) -> String {
+        String(format: "%.2f", value)
+    }
+
+    private func rankOrdinal(_ rank: Int) -> String {
         switch rank {
-        case 1: return .yellow
-        case 2: return Color(white: 0.75)
-        case 3: return .brown
-        default: return .secondary
+        case 1: return "1st"
+        case 2: return "2nd"
+        case 3: return "3rd"
+        default: return "\(rank)th"
+        }
+    }
+}
+
+/// Lightweight value type carrying everything the banner needs to render the
+/// "today focus" portion. Built fresh per body evaluation, so it's free.
+struct TodayFocus {
+    let level: UrgencyLevel
+    let pill: String
+    let pillIcon: String
+    let detail: String
+
+    /// Mode-specific status that answers "what should I do today?". Used by
+    /// the dashboard banner for rendering AND by the dashboard list sort.
+    /// Extracted to a static so the sort doesn't need to spin up a View.
+    static func compute(for competition: Competition, currentUserId: String?) -> TodayFocus {
+        let me = competition.users.first(where: { $0.user_id == currentUserId })
+        let todayKey = CompetitionCard.todayIntervalKey(for: competition)
+        let myToday = me?.intervals?[todayKey] ?? 0
+        let unit = competition.options.unit.shortDisplayName
+        let goal = competition.options.goal
+
+        switch competition.type {
+        case .clash, .apex:
+            let opponents = competition.users.filter { $0.invite_status == .accepted && $0.user_id != currentUserId }
+            let leader = opponents.max(by: { ($0.intervals?[todayKey] ?? 0) < ($1.intervals?[todayKey] ?? 0) })
+            let leaderToday = leader?.intervals?[todayKey] ?? 0
+
+            if leader == nil || (leaderToday == 0 && myToday == 0) {
+                return TodayFocus(
+                    level: .neutral,
+                    pill: "NO ACTIVITY YET",
+                    pillIcon: "figure.run",
+                    detail: "Be the first to put miles on the board today."
+                )
+            }
+            let diff = myToday - leaderToday
+            if diff >= 0 && myToday > 0 {
+                return TodayFocus(
+                    level: .winning,
+                    pill: "LEADING TODAY",
+                    pillIcon: "crown.fill",
+                    detail: "You: \(fmt(myToday)) \(unit) · ahead by \(fmt(diff)) \(unit)"
+                )
+            }
+            let gap = abs(diff)
+            return TodayFocus(
+                level: gap <= 0.5 ? .urgent : .behind,
+                pill: "BEHIND \(fmt(gap)) \(unit.uppercased())",
+                pillIcon: "bolt.fill",
+                detail: "You: \(fmt(myToday)) \(unit) · \(leader?.displayName ?? "Leader"): \(fmt(leaderToday)) \(unit)"
+            )
+
+        case .targets:
+            if myToday >= goal {
+                return TodayFocus(
+                    level: .winning,
+                    pill: "TARGET HIT",
+                    pillIcon: "checkmark.seal.fill",
+                    detail: "+1 point locked in · total \(Int(me?.score ?? 0)) pts"
+                )
+            }
+            let remaining = max(0, goal - myToday)
+            return TodayFocus(
+                level: remaining <= goal * 0.25 ? .urgent : .behind,
+                pill: "\(fmt(remaining)) \(unit.uppercased()) TO GO",
+                pillIcon: "target",
+                detail: "\(fmt(myToday)) / \(competition.options.goalFormatted) \(unit) — hit it for the point"
+            )
+
+        case .streaks:
+            let lives = me?.remaining_lives ?? competition.streakLives
+            let streakDays = Int(me?.score ?? 0)
+
+            if myToday >= goal {
+                return TodayFocus(
+                    level: .winning,
+                    pill: "STREAK SAFE",
+                    pillIcon: "flame.fill",
+                    detail: "\(streakDays)-day streak · \(lives) \(lives == 1 ? "life" : "lives") in the bank"
+                )
+            }
+            let remaining = max(0, goal - myToday)
+            let isUrgent = lives <= 1
+            return TodayFocus(
+                level: isUrgent ? .urgent : .behind,
+                pill: isUrgent ? "1 LIFE LEFT" : "\(fmt(remaining)) \(unit.uppercased()) LEFT",
+                pillIcon: "flame.fill",
+                detail: isUrgent
+                    ? "Miss today's \(competition.options.goalFormatted) \(unit) and you're out."
+                    : "\(fmt(remaining)) \(unit) to keep the \(streakDays)-day streak"
+            )
+
+        case .race:
+            let total = me?.score ?? 0
+            let pct = goal > 0 ? min(100, Int((total / goal) * 100)) : 0
+            if total >= goal {
+                return TodayFocus(
+                    level: .winning,
+                    pill: "FINISHED",
+                    pillIcon: "flag.checkered",
+                    detail: "You crossed the finish line · \(fmt(total)) \(unit)"
+                )
+            }
+            let remaining = max(0, goal - total)
+            return TodayFocus(
+                level: pct >= 80 ? .urgent : .behind,
+                pill: "\(pct)% TO GO",
+                pillIcon: "flag.checkered",
+                detail: "+\(fmt(myToday)) today · \(fmt(remaining)) \(unit) left to finish"
+            )
+        }
+    }
+
+    private static func fmt(_ value: Double) -> String {
+        String(format: "%.2f", value)
+    }
+}
+
+enum UrgencyLevel {
+    case urgent       // act now — life at risk / behind by tiny gap
+    case behind       // behind but not critical
+    case neutral      // no activity yet today
+    case winning      // already done / leading
+
+    var color: Color {
+        switch self {
+        case .urgent:   return Color(red: 1.00, green: 0.45, blue: 0.30)
+        case .behind:   return .orange
+        case .neutral:  return .gray
+        case .winning:  return .green
+        }
+    }
+
+    var iconBackground: String {
+        switch self {
+        case .urgent:   return "exclamationmark.circle.fill"
+        case .behind:   return "arrow.up.circle.fill"
+        case .neutral:  return "circle.dashed"
+        case .winning:  return "checkmark.circle.fill"
+        }
+    }
+
+    /// Lower = more urgent. Drives dashboard sort order.
+    var sortKey: Int {
+        switch self {
+        case .urgent:   return 0
+        case .behind:   return 1
+        case .neutral:  return 2
+        case .winning:  return 3
         }
     }
 }
