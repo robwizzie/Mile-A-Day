@@ -3,10 +3,10 @@ import { PostgresService } from './DbService.js';
 const db = PostgresService.getInstance();
 
 /**
- * Leaderboard metric options. `miles_ran` (period-scoped total) is the default;
- * `miles_total` is the same aggregation forced to all-time; `pace` ranks users
- * by fastest mile in the period (ascending — lower is better); `streak` reads
- * the precomputed users.current_streak column.
+ * Leaderboard metric options. `miles_ran` (period-scoped, running workouts only)
+ * is the default; `miles_total` is the same aggregation but includes walks +
+ * runs; `pace` ranks users by fastest mile in the period (ascending — lower is
+ * better); `streak` reads the precomputed users.current_streak column.
  */
 export type LeaderboardMetric = 'miles_ran' | 'miles_total' | 'pace' | 'streak';
 export type LeaderboardPeriod = 'today' | 'week' | 'month' | 'year' | 'all';
@@ -56,13 +56,19 @@ export function clampOffset(raw: number | undefined): number {
 
 /**
  * Start date (inclusive, ISO date string) for a period. `all` returns null —
- * caller should omit the date WHERE clause entirely. Rolling windows ending
- * today: 'today' = just today, 'week' = last 7 days, 'month' = 30, 'year' = 365.
+ * caller should omit the date WHERE clause entirely. 'today' = just today,
+ * 'week' = the current Sunday–Saturday calendar week (UTC; so today if today
+ * is Sunday), 'month' = trailing 30 days, 'year' = trailing 365.
  */
 function periodStartDate(period: LeaderboardPeriod): string | null {
 	if (period === 'all') return null;
-	const days = period === 'today' ? 1 : period === 'week' ? 7 : period === 'month' ? 30 : 365;
 	const d = new Date();
+	if (period === 'week') {
+		// getUTCDay(): 0=Sun..6=Sat — back up to most recent Sunday.
+		d.setUTCDate(d.getUTCDate() - d.getUTCDay());
+		return d.toISOString().slice(0, 10);
+	}
+	const days = period === 'today' ? 1 : period === 'month' ? 30 : 365;
 	d.setUTCDate(d.getUTCDate() - (days - 1));
 	return d.toISOString().slice(0, 10);
 }
@@ -220,14 +226,17 @@ async function getMilesLeaderboard(args: LeaderboardArgs): Promise<LeaderboardPa
 	const { metric, period, userId, limit, offset } = args;
 	const startDate = periodStartDate(period);
 	const ids = await rankingUserIds(userId);
-	// miles_ran counts running workouts only; miles_total includes walks + runs.
-	// The sub-line best-pace stays unfiltered so it matches the user's
-	// fastest-mile PR shown elsewhere (a walk would never win the MIN anyway).
+	// miles_ran counts running workouts only; miles_total counts runs + walks
+	// (explicit IN list — guards against any future workout_type values being
+	// folded in by accident). The sub-line best-pace stays unfiltered so it
+	// matches the user's fastest-mile PR shown elsewhere.
 	const runOnly = metric === 'miles_ran';
+	const runOrWalk = metric === 'miles_total';
 
 	const params: any[] = [ids];
 	const wheres: string[] = [`w.user_id = ANY($1::text[])`];
 	if (runOnly) wheres.push(`w.workout_type = 'running'`);
+	else if (runOrWalk) wheres.push(`w.workout_type IN ('running', 'walking')`);
 	let dateParamIndex: number | null = null;
 	if (startDate) {
 		params.push(startDate);
@@ -299,7 +308,7 @@ async function getMilesLeaderboard(args: LeaderboardArgs): Promise<LeaderboardPa
 		is_current_user: r.user_id === userId
 	}));
 
-	const current_user_entry = await getCurrentUserMilesEntry(userId, ids, startDate, runOnly, entries);
+	const current_user_entry = await getCurrentUserMilesEntry(userId, ids, startDate, runOnly, runOrWalk, entries);
 
 	return {
 		entries,
@@ -314,6 +323,7 @@ async function getCurrentUserMilesEntry(
 	ids: string[],
 	startDate: string | null,
 	runOnly: boolean,
+	runOrWalk: boolean,
 	pageEntries: LeaderboardEntry[]
 ): Promise<LeaderboardEntry | null> {
 	const inPage = pageEntries.find(e => e.is_current_user);
@@ -322,6 +332,7 @@ async function getCurrentUserMilesEntry(
 	const params: any[] = [userId];
 	const wheres: string[] = [`w.user_id = $1`];
 	if (runOnly) wheres.push(`w.workout_type = 'running'`);
+	else if (runOrWalk) wheres.push(`w.workout_type IN ('running', 'walking')`);
 	if (startDate) {
 		params.push(startDate);
 		wheres.push(`w.local_date >= $${params.length}`);
@@ -339,6 +350,7 @@ async function getCurrentUserMilesEntry(
 	const rankParams: any[] = [myValue, ids];
 	const rankInnerWheres: string[] = [`w.user_id = ANY($2::text[])`];
 	if (runOnly) rankInnerWheres.push(`w.workout_type = 'running'`);
+	else if (runOrWalk) rankInnerWheres.push(`w.workout_type IN ('running', 'walking')`);
 	if (startDate) {
 		rankParams.push(startDate);
 		rankInnerWheres.push(`w.local_date >= $${rankParams.length}`);
@@ -400,9 +412,6 @@ export async function getLeaderboard(args: LeaderboardArgs): Promise<Leaderboard
 		case 'pace':
 			return getPaceLeaderboard(args);
 		case 'miles_total':
-			// Controller already forces period='all' for miles_total, but pin it
-			// here too so a direct caller can't accidentally scope it.
-			return getMilesLeaderboard({ ...args, period: 'all' });
 		case 'miles_ran':
 		default:
 			return getMilesLeaderboard(args);

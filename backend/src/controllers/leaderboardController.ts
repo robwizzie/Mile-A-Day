@@ -25,10 +25,10 @@ export async function getLeaderboardHandler(req: AuthenticatedRequest, res: Resp
 		});
 	}
 
-	// Normalize legacy "miles" alias and force period=all for inherently
-	// all-time metrics (streak, miles_total) — keeps the service contract clean.
+	// Normalize legacy "miles" alias and force period=all for streak (the only
+	// inherently all-time metric). miles_total is period-scoped like miles_ran.
 	const metric: LeaderboardMetric = metricRaw === 'miles' ? 'miles_ran' : (metricRaw as LeaderboardMetric);
-	const period: LeaderboardPeriod = metric === 'streak' || metric === 'miles_total' ? 'all' : (periodRaw as LeaderboardPeriod);
+	const period: LeaderboardPeriod = metric === 'streak' ? 'all' : (periodRaw as LeaderboardPeriod);
 	const limit = clampLimit(Number(req.query.limit));
 	const offset = clampOffset(Number(req.query.offset));
 

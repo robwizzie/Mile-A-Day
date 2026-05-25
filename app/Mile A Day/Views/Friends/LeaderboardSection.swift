@@ -437,8 +437,8 @@ struct LeaderboardSection: View {
     private var emptyStateMessage: String {
         switch vm.metric {
         case .streak: return "None of your friends have an active streak yet."
-        case .milesRan: return "None of your friends have logged miles for this period."
-        case .milesTotal: return "None of your friends have logged any miles yet."
+        case .milesRan: return "None of your friends have logged runs for this period."
+        case .milesTotal: return "None of your friends have logged runs or walks for this period."
         case .pace: return "No qualifying mile splits in this period yet."
         }
     }
@@ -447,7 +447,7 @@ struct LeaderboardSection: View {
         switch vm.metric {
         case .streak: return "Start a streak to appear on the board."
         case .milesRan: return "Log a run for \(vm.period.displayName.lowercased()) to climb the board."
-        case .milesTotal: return "Log a run to appear on the board."
+        case .milesTotal: return "Log a run or walk for \(vm.period.displayName.lowercased()) to climb the board."
         case .pace: return "Run a mile in \(vm.period.displayName.lowercased()) to set a pace."
         }
     }
@@ -665,10 +665,8 @@ struct LeaderboardSection: View {
 
     private var filterSubtitle: String {
         switch vm.metric {
-        case .milesRan, .pace:
+        case .milesRan, .milesTotal, .pace:
             return "\(vm.period.displayName) · Friends"
-        case .milesTotal:
-            return "All-time · Friends"
         case .streak:
             return "Current streak · Friends"
         }

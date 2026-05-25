@@ -38,11 +38,11 @@ enum LeaderboardMetric: String, CaseIterable, Identifiable {
     }
 
     /// True when the period chip should be shown for this metric.
-    /// Streak and miles_total are inherently all-time.
+    /// Streak is the only inherently all-time metric.
     var usesPeriod: Bool {
         switch self {
-        case .milesRan, .pace: return true
-        case .milesTotal, .streak: return false
+        case .milesRan, .milesTotal, .pace: return true
+        case .streak: return false
         }
     }
 }
