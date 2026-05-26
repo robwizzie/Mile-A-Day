@@ -24,7 +24,8 @@ export async function runSilentSyncPushFanout(): Promise<{ users: number; pushes
 }
 
 export function startSilentSyncCron(): void {
-	// 4x daily at 8am, 12pm, 4pm, 8pm ET.
+	// 8am, 12pm, 4pm, 8pm, and 11:45pm ET. The 11:45pm run flushes late-evening
+	// workouts before midnight competition resolution / end-of-day tie checks.
 	cron.schedule(
 		'0 8,12,16,20 * * *',
 		async () => {
@@ -39,5 +40,19 @@ export function startSilentSyncCron(): void {
 		{ timezone: 'America/New_York' }
 	);
 
-	console.log('Silent sync push cron scheduled (8am, 12pm, 4pm, 8pm ET).');
+	cron.schedule(
+		'45 23 * * *',
+		async () => {
+			console.log('[CRON] Pre-midnight silent sync push fanout starting...');
+			try {
+				const { users, pushes } = await runSilentSyncPushFanout();
+				console.log(`[CRON] Pre-midnight silent sync fanout complete: ${users} users, ${pushes} pushes`);
+			} catch (err: any) {
+				console.error('[CRON] Pre-midnight silent sync fanout failed:', err.message);
+			}
+		},
+		{ timezone: 'America/New_York' }
+	);
+
+	console.log('Silent sync push cron scheduled (8am, 12pm, 4pm, 8pm, 11:45pm ET).');
 }

@@ -3,7 +3,6 @@ import { flushBatchedNotifications, cleanupNotificationLogs } from '../services/
 import {
 	checkCompetitionsEndingSoon,
 	checkStreaksBroken,
-	checkClashTies,
 	checkStreakLifeLoss,
 	checkTargetMissed,
 	notifyIntervalResults
@@ -96,23 +95,6 @@ export function startNotificationCron(): void {
 		}
 	);
 
-	// Check for clash ties at 11:55 PM ET (end of day)
-	cron.schedule(
-		'55 23 * * *',
-		async () => {
-			console.log('[CRON] Checking for clash ties...');
-			try {
-				await checkClashTies();
-				console.log('[CRON] Clash tie check complete.');
-			} catch (error: any) {
-				console.error('[CRON] Error checking clash ties:', error.message);
-			}
-		},
-		{
-			timezone: 'America/New_York'
-		}
-	);
-
 	// Every hour at :00 — fire daily "mile still waiting" reminders to users whose
 	// current local hour matches their configured reminder hour and who haven't
 	// completed today's mile. Per-user TZ filtering is in the SQL.
@@ -143,5 +125,5 @@ export function startNotificationCron(): void {
 		}
 	);
 
-	console.log('Notification cron jobs scheduled (hourly daily-reminder + 12:05 AM, 3 AM, 10 AM, 6 PM, 11:55 PM ET).');
+	console.log('Notification cron jobs scheduled (hourly daily-reminder + 12:05 AM, 3 AM, 10 AM, 6 PM ET).');
 }
