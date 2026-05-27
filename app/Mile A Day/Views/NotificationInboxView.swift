@@ -12,6 +12,7 @@ struct NotificationInboxView: View {
     @State private var selectedCompetition: Competition?
     @State private var hypedRowIds: Set<String> = []
     @State private var hypeToast: String?
+    @State private var hypesRemaining: Int?
 
     /// Active category filter. `all` shows everything; the others narrow
     /// the feed to a related cluster of notification types so users can
@@ -79,6 +80,26 @@ struct NotificationInboxView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
+            if let remaining = hypesRemaining {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "hands.clap.fill")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("\(remaining) left")
+                            .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    }
+                    .foregroundColor(remaining > 0 ? .orange : .white.opacity(0.4))
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(
+                        Capsule().fill(remaining > 0 ? Color.orange.opacity(0.15) : Color.white.opacity(0.06))
+                            .overlay(Capsule().strokeBorder(
+                                remaining > 0 ? Color.orange.opacity(0.35) : Color.white.opacity(0.10),
+                                lineWidth: 1
+                            ))
+                    )
+                }
+            }
             if unreadCount > 0 {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Read All") {
@@ -423,7 +444,24 @@ struct NotificationInboxView: View {
     }
 
     private func canShowHypeButton(_ notification: InAppNotification) -> Bool {
-        hypeAffordance(for: notification) != nil
+        guard hypeAffordance(for: notification) != nil else { return false }
+        return isFromTodayOrYesterday(notification.created_at)
+    }
+
+    /// Hype affordance is restricted to events from today or yesterday by
+    /// local calendar date — not a rolling 48-hour window. Matches the
+    /// "Today" / "Yesterday" buckets users already see in the feed.
+    private func isFromTodayOrYesterday(_ dateString: String) -> Bool {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var date = formatter.date(from: dateString)
+        if date == nil {
+            formatter.formatOptions = [.withInternetDateTime]
+            date = formatter.date(from: dateString)
+        }
+        guard let d = date else { return false }
+        let cal = Calendar.current
+        return cal.isDateInToday(d) || cal.isDateInYesterday(d)
     }
 
     /// True when this row has already been hyped (server-side flag or local optimistic).
@@ -442,13 +480,14 @@ struct NotificationInboxView: View {
 
         Task {
             do {
-                _ = try await HypeService.sendHype(targetUserId: targetId, context: context)
-                // Success — stay greyed out.
+                let response = try await HypeService.sendHype(targetUserId: targetId, context: context)
+                await MainActor.run { hypesRemaining = response.hypes_remaining }
             } catch APIError.conflict {
                 // Already hyped server-side; stay greyed out, no toast.
             } catch APIError.rateLimited(let msg) {
                 await MainActor.run {
                     hypedRowIds.remove(notification.id)
+                    hypesRemaining = 0
                     showHypeToast(msg.isEmpty ? "You're out of hypes today" : msg)
                 }
             } catch APIError.badRequest(let msg) {
@@ -474,11 +513,12 @@ struct NotificationInboxView: View {
     /// Retry against an older backend that hasn't deployed the context-aware hype yet.
     private func fallbackHype(_ notification: InAppNotification, targetId: String) async {
         do {
-            _ = try await HypeService.sendHype(targetUserId: targetId)
-            // Stay greyed out.
+            let response = try await HypeService.sendHype(targetUserId: targetId)
+            await MainActor.run { hypesRemaining = response.hypes_remaining }
         } catch APIError.rateLimited(let msg) {
             await MainActor.run {
                 hypedRowIds.remove(notification.id)
+                hypesRemaining = 0
                 showHypeToast(msg.isEmpty ? "You're out of hypes today" : msg)
             }
         } catch {
@@ -731,6 +771,16 @@ struct NotificationInboxView: View {
             }
         } catch {
             await MainActor.run { isLoading = false }
+        }
+        await loadHypeStatus()
+    }
+
+    private func loadHypeStatus() async {
+        do {
+            let status = try await HypeService.status()
+            await MainActor.run { hypesRemaining = status.hypes_remaining }
+        } catch {
+            // Non-fatal — pill just stays hidden.
         }
     }
 
