@@ -412,19 +412,23 @@ struct ManualWorkoutEntryView: View {
         errorMessage = nil
 
         do {
-            try await workoutService.uploadManualWorkout(
-                distance: distance,
-                duration: totalDuration,
-                date: workoutDate,
-                workoutType: workoutType
-            )
-
+            // Write to HealthKit first so we can reuse its UUID as the backend
+            // workout_id. Without this, the later HK sync would insert a second
+            // row with a different UUID and double-count the miles.
             let hkType: HKWorkoutActivityType = workoutType == "running" ? .running : .walking
-            await workoutService.writeManualWorkoutToHealthKit(
+            let hkUUID = await workoutService.writeManualWorkoutToHealthKit(
                 distance: distance,
                 duration: totalDuration,
                 date: workoutDate,
                 workoutType: hkType
+            )
+
+            try await workoutService.uploadManualWorkout(
+                distance: distance,
+                duration: totalDuration,
+                date: workoutDate,
+                workoutType: workoutType,
+                workoutId: hkUUID ?? UUID().uuidString
             )
 
             WorkoutIndex.clear()

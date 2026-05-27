@@ -322,17 +322,19 @@ class WorkoutService: ObservableObject {
     // MARK: - Manual Workout Upload
 
     /// Upload a manually entered workout to the backend
+    /// - Parameter workoutId: Optional pre-generated workout ID. Pass the HealthKit UUID
+    ///   here when the workout was also written to HealthKit, so the later sync
+    ///   dedupes via `ON CONFLICT (workout_id)` instead of creating a second row.
     func uploadManualWorkout(
         distance: Double,
         duration: TimeInterval,
         date: Date,
-        workoutType: String
+        workoutType: String,
+        workoutId: String = UUID().uuidString
     ) async throws {
         guard let currentUserId = getCurrentUserId() else {
             throw WorkoutServiceError.notAuthenticated
         }
-
-        let workoutId = UUID().uuidString
 
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
@@ -369,13 +371,15 @@ class WorkoutService: ObservableObject {
         )
     }
 
-    /// Write a manual workout to HealthKit for Apple Health sync
+    /// Write a manual workout to HealthKit for Apple Health sync.
+    /// Returns the HealthKit-assigned UUID so the caller can use it as the
+    /// backend workout_id (prevents double-counting when sync re-ingests it).
     func writeManualWorkoutToHealthKit(
         distance: Double,
         duration: TimeInterval,
         date: Date,
         workoutType: HKWorkoutActivityType
-    ) async {
+    ) async -> String? {
         let configuration = HKWorkoutConfiguration()
         configuration.activityType = workoutType
         configuration.locationType = .outdoor
@@ -401,13 +405,15 @@ class WorkoutService: ObservableObject {
             try await builder.endCollection(at: endDate)
             guard let finishedWorkout = try await builder.finishWorkout() else {
                 print("[WorkoutService] ❌ finishWorkout returned nil")
-                return
+                return nil
             }
             ManualWorkoutRegistry.markManual(finishedWorkout.uuid.uuidString)
             print("[WorkoutService] ✅ Wrote manual workout to HealthKit and registered UUID: \(finishedWorkout.uuid.uuidString)")
             print("[WorkoutService] Registry now has \(UserDefaults.standard.stringArray(forKey: "com.mileaday.manualWorkoutIds")?.count ?? 0) manual IDs")
+            return finishedWorkout.uuid.uuidString
         } catch {
             print("[WorkoutService] ❌ Failed to write to HealthKit: \(error.localizedDescription)")
+            return nil
         }
     }
 
