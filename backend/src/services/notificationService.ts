@@ -1,7 +1,7 @@
 import { PostgresService } from './DbService.js';
 import { sendPush, sendOrQueueCompetitionNotification } from './pushNotificationService.js';
 import { shouldSendNotification, filterRecipientsForNotification } from './notificationSettingsService.js';
-import { getCompetition, getUserScores } from './competitionService.js';
+import { getCompetition, getCurrentInterval, getUserScores } from './competitionService.js';
 import { Competition, CompetitionUser } from '../types/competitions.js';
 import { getActiveStreak, getTodayMiles, getTodayStats } from './workoutService.js';
 
@@ -459,7 +459,7 @@ export async function checkLeadChanges(userId: string, notifiedRecipients?: Map<
 				AND c.start_date <= NOW()
 				AND c.winner IS NULL
 				AND (c.end_date IS NULL OR c.end_date > NOW())
-				AND c.type IN ('clash', 'apex', 'race')`,
+				AND c.type IN ('clash', 'apex', 'race', 'targets')`,
 			[userId]
 		);
 
@@ -467,9 +467,6 @@ export async function checkLeadChanges(userId: string, notifiedRecipients?: Map<
 
 		const [user] = await db.query('SELECT username FROM users WHERE user_id = $1', [userId]);
 		const username = user?.username || 'Someone';
-
-		const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
-		const today = formatter.format(new Date());
 
 		for (const comp of activeComps) {
 			try {
@@ -483,7 +480,11 @@ export async function checkLeadChanges(userId: string, notifiedRecipients?: Map<
 				// with NULL cache values are treated as "no known prior" — we
 				// won't fire dethrone notifications until they've been
 				// indexed at least once.
-				const cachedRows = await db.query<{ user_id: string; last_known_rank: number | null; last_known_score: number | null }>(
+				const cachedRows = await db.query<{
+					user_id: string;
+					last_known_rank: number | null;
+					last_known_score: number | null;
+				}>(
 					`SELECT user_id, last_known_rank, last_known_score
 					FROM competition_users
 					WHERE competition_id = $1 AND invite_status = 'accepted'`,
@@ -513,12 +514,24 @@ export async function checkLeadChanges(userId: string, notifiedRecipients?: Map<
 
 				const newLeader = ranked[0];
 				const isTied = ranked.length >= 2 && ranked[0].score === ranked[1].score;
-				const leaderId = isTied ? null : newLeader?.user_id ?? null;
+				const leaderId = isTied ? null : (newLeader?.user_id ?? null);
 				const maxScore = newLeader?.score ?? 0;
 
+				// Per-interval dedup key. For race/apex (no interval option),
+				// getCurrentInterval falls through to a daily key — fine, since
+				// those comps don't reset and the previousRank guard below
+				// prevents re-firing once you're already leading.
+				const intervalKey = getCurrentInterval(new Date(), fullComp.options.interval, fullComp.start_date);
+
 				// ── Path 1: uploader just took the lead.
-				if (leaderId === userId && !isTied && maxScore > 0) {
-					const milestoneKey = `lead_change_${comp.id}_${userId}_${today}`;
+				// Only fire if they weren't already the leader going into this
+				// upload — otherwise "you just took the lead" is a lie. NULL
+				// prior (never indexed) counts as "not previously leader" so
+				// the very first upload can still notify.
+				const uploaderPrevRank = previousRank.get(userId);
+				const uploaderWasAlreadyLeader = uploaderPrevRank === 1;
+				if (leaderId === userId && !isTied && maxScore > 0 && !uploaderWasAlreadyLeader) {
+					const milestoneKey = `lead_change_${comp.id}_${userId}_${intervalKey}`;
 					const claimed = await db.query(
 						`INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)
 						ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
@@ -559,7 +572,7 @@ export async function checkLeadChanges(userId: string, notifiedRecipients?: Map<
 					// Don't notify the user who took the lead themselves.
 					if (u.user_id === userId) continue;
 
-					const dethroneKey = `lead_lost_${comp.id}_${u.user_id}_${today}`;
+					const dethroneKey = `lead_lost_${comp.id}_${u.user_id}_${intervalKey}`;
 					const claimed = await db.query(
 						`INSERT INTO milestone_notifications (milestone_key, competition_id, user_id) VALUES ($1, $2, $3)
 						ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
@@ -701,9 +714,10 @@ export async function checkStreakLifeLoss(): Promise<void> {
 					if (!shouldSend) continue;
 
 					const title = livesAfter === 0 ? "You're out!" : 'Life lost';
-					const body = livesAfter === 0
-						? `You missed yesterday's mile in ${fullComp.competition_name} and are out of lives.`
-						: `You missed yesterday's mile in ${fullComp.competition_name} — ${livesAfter} ${livesAfter === 1 ? 'life' : 'lives'} left.`;
+					const body =
+						livesAfter === 0
+							? `You missed yesterday's mile in ${fullComp.competition_name} and are out of lives.`
+							: `You missed yesterday's mile in ${fullComp.competition_name} — ${livesAfter} ${livesAfter === 1 ? 'life' : 'lives'} left.`;
 
 					sendPush(u.user_id, {
 						title,
@@ -777,12 +791,12 @@ export async function checkTargetMissed(): Promise<void> {
 					const shouldSend = await shouldSendNotification(u.user_id, null, 'competition_milestone');
 					if (!shouldSend) continue;
 
-					const periodLabel = intervalSetting === 'day' ? "yesterday's"
-						: intervalSetting === 'week' ? "last week's"
-						: "last month's";
-					const hitBody = hitNames.length > 0
-						? `${hitNames.slice(0, 3).join(', ')}${hitNames.length > 3 ? ` and ${hitNames.length - 3} more` : ''} hit the target.`
-						: 'No one hit the target.';
+					const periodLabel =
+						intervalSetting === 'day' ? "yesterday's" : intervalSetting === 'week' ? "last week's" : "last month's";
+					const hitBody =
+						hitNames.length > 0
+							? `${hitNames.slice(0, 3).join(', ')}${hitNames.length > 3 ? ` and ${hitNames.length - 3} more` : ''} hit the target.`
+							: 'No one hit the target.';
 
 					sendPush(u.user_id, {
 						title: `🎯 Missed ${periodLabel} target`,
@@ -862,10 +876,11 @@ export async function notifyIntervalResults(): Promise<void> {
 			const shouldSend = await shouldSendNotification(userId, null, 'competition_milestone');
 			if (!shouldSend) continue;
 
-			const title = '📊 Yesterday\'s results are in';
-			const body = compNames.length === 1
-				? `Open ${compNames[0]} to see how everyone finished.`
-				: `Results are in for ${compNames.length} of your competitions — see who won.`;
+			const title = "📊 Yesterday's results are in";
+			const body =
+				compNames.length === 1
+					? `Open ${compNames[0]} to see how everyone finished.`
+					: `Results are in for ${compNames.length} of your competitions — see who won.`;
 
 			sendPush(userId, {
 				title,

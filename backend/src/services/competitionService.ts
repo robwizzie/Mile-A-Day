@@ -523,7 +523,7 @@ export async function getUserScores(
 	return userData;
 }
 
-function getCurrentInterval(
+export function getCurrentInterval(
 	currentDate: Date | string | number,
 	interval?: 'day' | 'week' | 'month',
 	startDate?: string | null
