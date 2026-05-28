@@ -2,7 +2,7 @@ import Foundation
 import UIKit
 
 class ProfileImageService {
-    private static let baseURL = "https://mad.mindgoblin.tech"
+    private static let baseURL = AppConfig.baseURL
 
     struct UploadResponse: Codable {
         let success: Bool

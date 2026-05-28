@@ -477,7 +477,7 @@ struct DeveloperSettingsView: View {
         await MainActor.run { isSendingNotification = true; notificationResult = nil }
 
         do {
-            let url = URL(string: "https://mad.mindgoblin.tech/dev/test-notification")!
+            let url = URL(string: "\(AppConfig.baseURL)/dev/test-notification")!
             var request = URLRequest(url: url)
             request.httpMethod = "POST"
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")

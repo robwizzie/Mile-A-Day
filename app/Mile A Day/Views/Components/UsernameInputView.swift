@@ -297,7 +297,7 @@ struct RequirementRow: View {
 // MARK: - Username Service
 
 class UsernameService {
-    private static let backendURL = "https://mad.mindgoblin.tech"
+    private static let backendURL = AppConfig.baseURL
     
     static func checkAvailability(_ username: String) async throws -> Bool {
         guard let url = URL(string: "\(backendURL)/users/check-username?username=\(username)") else {

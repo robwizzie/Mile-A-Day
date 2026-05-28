@@ -2,7 +2,7 @@ import Foundation
 
 /// Centralized API client with automatic token refresh
 class APIClient {
-    private static let baseURL = "https://mad.mindgoblin.tech"
+    private static let baseURL = AppConfig.baseURL
     
     /// Shared instance for accessing UserManager
     private static var userManager: UserManager? {

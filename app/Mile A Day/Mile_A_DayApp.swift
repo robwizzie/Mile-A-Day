@@ -25,6 +25,9 @@ struct Mile_A_DayApp: App {
         WindowGroup {
             RootView()
                 .preferredColorScheme(.dark)
+                .task {
+                    await verifyAppleCredentialIfNeeded()
+                }
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
                     // Schedule background refresh when app enters background
                     MADBackgroundService.shared.appDidEnterBackground()
@@ -32,6 +35,9 @@ struct Mile_A_DayApp: App {
                 .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
                     // Handle app returning to foreground
                     MADBackgroundService.shared.appWillEnterForeground()
+                    // Re-check Apple Sign In credential — if the user revoked
+                    // access while the app was backgrounded, sign them out.
+                    Task { await verifyAppleCredentialIfNeeded() }
                     // Register for push notifications (handles first-time + token rotation)
                     if AppStateManager.shared.isAuthenticated {
                         Task {
@@ -51,6 +57,24 @@ struct Mile_A_DayApp: App {
                         )
                     }
                 }
+        }
+    }
+
+    /// Apple requires Sign in with Apple apps to detect when the user has
+    /// revoked their credential (Settings → Apple ID → Password & Security
+    /// → Apps Using Apple ID → Mile A Day → Stop Using). If revoked, sign
+    /// them out so they're returned to the auth screen on next launch.
+    private func verifyAppleCredentialIfNeeded() async {
+        guard AppStateManager.shared.isAuthenticated,
+              let appleId = UserManager.shared.currentUser.appleId,
+              !appleId.isEmpty
+        else { return }
+
+        let isValid = await AppleSignInManager.isCredentialValid(forUserID: appleId)
+        if !isValid {
+            await MainActor.run {
+                AppStateManager.shared.signOut()
+            }
         }
     }
 }

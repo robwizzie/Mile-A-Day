@@ -2,7 +2,7 @@ import Foundation
 
 /// Service for refreshing access tokens using refresh tokens
 class TokenRefreshService {
-    private static let baseURL = "https://mad.mindgoblin.tech"
+    private static let baseURL = AppConfig.baseURL
     
     /// Response from refresh endpoint
     struct RefreshResponse: Codable {
