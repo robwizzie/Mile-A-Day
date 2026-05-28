@@ -37,7 +37,7 @@ function formatPace(secondsPerMile: number): string {
  * Only sends once per day per user, and respects friend notification settings.
  * Caps at 5 friend notifications to avoid spam.
  */
-export async function notifyFriendsOfMileCompletion(userId: string): Promise<void> {
+export async function notifyFriendsOfMileCompletion(userId: string): Promise<boolean> {
 	try {
 		// Atomically claim this notification slot (prevents race condition duplicates)
 		const today = new Date().toISOString().split('T')[0];
@@ -48,11 +48,11 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<voi
 			[userId, today]
 		);
 
-		if (claimed.length === 0) return; // Already sent today
+		if (claimed.length === 0) return false; // Already sent today
 
 		// Get user info
 		const [user] = await db.query('SELECT username FROM users WHERE user_id = $1', [userId]);
-		if (!user) return;
+		if (!user) return false;
 
 		// Friends (bidirectional accepted)
 		const friendRows = await db.query<{ friend_id: string }>(
@@ -85,7 +85,7 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<voi
 		// Cap: up to 5 friends + up to 5 unique co-participants = max 10 recipients
 		const recipients = [...friendIds.slice(0, 5), ...coParticipantIds.slice(0, 5)];
 
-		if (recipients.length === 0) return;
+		if (recipients.length === 0) return true;
 
 		const title = `${user.username} got their mile in!`;
 
@@ -122,8 +122,119 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<voi
 		if (allowedRecipients.length > 0) {
 			console.log(`[Notifications] Sent mile completion to ${allowedRecipients.length} recipients of ${user.username}`);
 		}
+		return true;
 	} catch (err: any) {
 		console.error('[Notifications] Error notifying friends of mile completion:', err.message);
+		return false;
+	}
+}
+
+/**
+ * Notify friends when a user logs an additional run/walk after they've already
+ * completed their daily mile. Dedup'd per workout via milestone_notifications.
+ */
+export async function notifyFriendsOfExtraWorkout(userId: string, workoutId: string): Promise<void> {
+	try {
+		const [workout] = await db.query<{
+			workout_type: string;
+			distance: number | string;
+			total_duration: number | string;
+		}>(
+			`SELECT workout_type, distance, total_duration
+			FROM workouts
+			WHERE user_id = $1 AND workout_id = $2`,
+			[userId, workoutId]
+		);
+		if (!workout) return;
+
+		const type = workout.workout_type;
+		if (type !== 'running' && type !== 'walking') return;
+
+		const distance = Number(workout.distance);
+		const duration = Number(workout.total_duration);
+		if (!(distance > 0)) return;
+
+		// Atomically claim per-workout slot to avoid re-firing on re-upload.
+		const milestoneKey = `extra_workout:${workoutId}`;
+		const claimed = await db.query(
+			`INSERT INTO milestone_notifications (milestone_key, user_id) VALUES ($1, $2)
+			ON CONFLICT (milestone_key) DO NOTHING
+			RETURNING id`,
+			[milestoneKey, userId]
+		);
+		if (claimed.length === 0) return;
+
+		const [user] = await db.query('SELECT username FROM users WHERE user_id = $1', [userId]);
+		if (!user) return;
+
+		// Same recipient pool as mile-completion: friends + active-competition co-participants.
+		const friendRows = await db.query<{ friend_id: string }>(
+			`SELECT friend_id FROM friendships
+			WHERE user_id = $1 AND status = 'accepted'`,
+			[userId]
+		);
+		const compRows = await db.query<{ user_id: string }>(
+			`SELECT DISTINCT cu_other.user_id
+			FROM competition_users cu_self
+			JOIN competition_users cu_other ON cu_other.competition_id = cu_self.competition_id
+			JOIN competitions c ON c.id = cu_self.competition_id
+			WHERE cu_self.user_id = $1
+				AND cu_other.user_id <> $1
+				AND cu_self.invite_status = 'accepted'
+				AND cu_other.invite_status = 'accepted'
+				AND c.start_date IS NOT NULL
+				AND c.start_date <= NOW()
+				AND c.winner IS NULL
+				AND (c.end_date IS NULL OR c.end_date > NOW())`,
+			[userId]
+		);
+		const friendIds = friendRows.map(r => r.friend_id);
+		const friendSet = new Set(friendIds);
+		const coParticipantIds = compRows.map(r => r.user_id).filter(id => !friendSet.has(id));
+		const recipients = [...friendIds.slice(0, 5), ...coParticipantIds.slice(0, 5)];
+		if (recipients.length === 0) return;
+
+		// Best pace for THIS workout: min split pace where split is ~full mile,
+		// else workout average if the workout itself is ~full mile.
+		let bestPace: number | null = null;
+		const [paceRow] = await db.query<{ pace: number | string | null }>(
+			`SELECT MIN(split_pace) AS pace
+			FROM workout_splits
+			WHERE workout_id = $1 AND split_distance >= 0.95 AND split_pace > 0`,
+			[workoutId]
+		);
+		if (paceRow?.pace != null) bestPace = Number(paceRow.pace);
+		if (bestPace == null && distance >= 0.95 && duration > 0) {
+			bestPace = duration / distance;
+		}
+
+		const todayMiles = await getTodayMiles(userId);
+
+		const activity = type === 'running' ? 'run' : 'walk';
+		const title = `${user.username} completed a ${activity}`;
+		const parts = [formatMiles(distance), formatDuration(duration)];
+		if (bestPace != null && bestPace > 0) parts.push(`best pace ${formatPace(bestPace)}`);
+		if (todayMiles > 0) parts.push(`${formatMiles(Number(todayMiles))} today`);
+		const body = parts.join(' · ');
+
+		const allowedRecipients = await filterRecipientsForNotification(recipients, userId, 'friend_activity');
+		for (const recipientId of allowedRecipients) {
+			sendPush(recipientId, {
+				title,
+				body,
+				type: 'friend_activity',
+				category: 'FRIEND_ACTIVITY',
+				data: { user_id: userId, kind: 'extra_workout', workout_id: workoutId }
+			}).catch(err => console.error('[Push] Error sending extra workout:', err.message));
+		}
+
+		if (allowedRecipients.length > 0) {
+			console.log(
+				`[Notifications] Sent extra workout (${activity}) to ${allowedRecipients.length} recipients of ${user.username}`
+			);
+		}
+	} catch (err: any) {
+		console.error('[Notifications] Error notifying friends of extra workout:', err.message);
 	}
 }
 
