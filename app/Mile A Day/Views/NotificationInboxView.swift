@@ -82,19 +82,22 @@ struct NotificationInboxView: View {
         .toolbar {
             if let remaining = hypesRemaining {
                 ToolbarItem(placement: .navigationBarLeading) {
+                    let depleted = remaining <= 0
+                    let tint: Color = depleted ? .white.opacity(0.55) : .orange
                     HStack(spacing: 4) {
                         Image(systemName: "hands.clap.fill")
-                            .font(.system(size: 10, weight: .bold))
-                        Text("\(remaining) left")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("\(remaining)/\(HypeService.dailyLimit)")
                             .font(.system(size: 12, weight: .heavy, design: .rounded))
+                            .monospacedDigit()
                     }
-                    .foregroundColor(remaining > 0 ? .orange : .white.opacity(0.4))
+                    .foregroundColor(tint)
                     .padding(.horizontal, 9)
                     .padding(.vertical, 5)
                     .background(
-                        Capsule().fill(remaining > 0 ? Color.orange.opacity(0.15) : Color.white.opacity(0.06))
+                        Capsule().fill(depleted ? Color.white.opacity(0.08) : Color.orange.opacity(0.15))
                             .overlay(Capsule().strokeBorder(
-                                remaining > 0 ? Color.orange.opacity(0.35) : Color.white.opacity(0.10),
+                                depleted ? Color.white.opacity(0.18) : Color.orange.opacity(0.35),
                                 lineWidth: 1
                             ))
                     )

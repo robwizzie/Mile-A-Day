@@ -22,6 +22,9 @@ struct HypeContext {
 /// Sends and queries hype state. Stateless; safe to call from anywhere
 /// including the notification action handler.
 enum HypeService {
+    /// Mirrors `HYPE_DAILY_LIMIT` in backend/src/services/hypeService.ts.
+    static let dailyLimit = 3
+
     static func sendHype(targetUserId: String) async throws -> HypeResponse {
         struct Body: Encodable { let target_user_id: String }
         let bodyData = try JSONEncoder().encode(Body(target_user_id: targetUserId))
