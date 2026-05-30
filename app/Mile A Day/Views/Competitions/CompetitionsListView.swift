@@ -18,6 +18,8 @@ struct CompetitionsListView: View {
     @State private var competitionToEdit: Competition?
     @State private var actionError: String?
 
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
         VStack(spacing: 0) {
             MADTabHeader(
@@ -96,14 +98,23 @@ struct CompetitionsListView: View {
             Text(actionError ?? "")
         }
         .task {
-            if competitionService.competitions.isEmpty && competitionService.invites.isEmpty {
-                await competitionService.refreshAllData()
-            }
-            trophyService.updateTrophies(from: competitionService.competitions)
             // Handle cold-launch deep link
             if MADNotificationService.shared.pendingNotificationType == "competition_invite" {
                 selectedTab = 1
                 MADNotificationService.shared.pendingNotificationType = nil
+            }
+        }
+        .onAppear {
+            Task {
+                await competitionService.refreshAllData()
+                trophyService.updateTrophies(from: competitionService.competitions)
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            Task {
+                await competitionService.refreshAllData()
+                trophyService.updateTrophies(from: competitionService.competitions)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
