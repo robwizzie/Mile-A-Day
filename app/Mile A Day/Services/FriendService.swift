@@ -13,7 +13,7 @@ class FriendService: ObservableObject {
     @Published var errorMessage: String?
     
     // MARK: - Private Properties
-    private let baseURL = "https://mad.mindgoblin.tech"
+    private let baseURL = AppConfig.baseURL
     private var authToken: String?
     
     // MARK: - Initialization

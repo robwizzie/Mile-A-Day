@@ -11,7 +11,7 @@ class WorkoutService: ObservableObject {
     @Published var lastUploadStatus: String?
 
     // MARK: - Private Properties
-    private let baseURL = "https://mad.mindgoblin.tech"
+    private let baseURL = AppConfig.baseURL
     private var authToken: String?
     private let healthStore = HKHealthStore()
 

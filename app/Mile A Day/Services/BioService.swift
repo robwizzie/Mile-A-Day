@@ -1,7 +1,7 @@
 import Foundation
 
 class BioService {
-    private static let backendURL = "https://mad.mindgoblin.tech"
+    private static let backendURL = AppConfig.baseURL
     
     static func updateBio(_ bio: String, userId: String, authToken: String) async throws {
         let endpoint = "/users/\(userId)/bio"

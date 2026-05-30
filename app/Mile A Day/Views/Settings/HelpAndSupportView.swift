@@ -71,7 +71,7 @@ struct HelpAndSupportView: View {
                             .foregroundColor(.secondary)
 
                         Button {
-                            if let url = URL(string: "mailto:support@mileaday.app?subject=Mile%20A%20Day%20Support%20-%20v\(appVersion)") {
+                            if let url = URL(string: "mailto:support@mileaday.run?subject=Mile%20A%20Day%20Support%20-%20v\(appVersion)") {
                                 UIApplication.shared.open(url)
                             }
                         } label: {

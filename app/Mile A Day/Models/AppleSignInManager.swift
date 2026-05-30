@@ -8,7 +8,7 @@ class AppleSignInManager: NSObject, ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
 
-    private let backendURL = "https://mad.mindgoblin.tech"
+    private let backendURL = AppConfig.baseURL
     private var currentDelegate: AppleSignInDelegate?
 
     struct AppleUserProfile {
@@ -35,6 +35,27 @@ class AppleSignInManager: NSObject, ObservableObject {
         let apple_id: String?
         let auth_provider: String?
         let role: String?
+    }
+
+    /// Checks whether the Apple ID credential for the given user is still valid.
+    /// Returns `false` if the user revoked Sign in with Apple in Settings (or
+    /// transferred to a new device and didn't re-auth) so the caller can sign
+    /// them out. Returns `true` for `.authorized` and also for `.transferred`
+    /// (a non-fatal state). Network errors return `true` (fail open — we don't
+    /// want to sign users out because they're offline at launch).
+    static func isCredentialValid(forUserID userID: String) async -> Bool {
+        await withCheckedContinuation { continuation in
+            ASAuthorizationAppleIDProvider().getCredentialState(forUserID: userID) { state, _ in
+                switch state {
+                case .authorized, .transferred:
+                    continuation.resume(returning: true)
+                case .revoked, .notFound:
+                    continuation.resume(returning: false)
+                @unknown default:
+                    continuation.resume(returning: true)
+                }
+            }
+        }
     }
 
     func signIn() async throws -> (AppleUserProfile, BackendAuthResponse) {
@@ -250,11 +271,14 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate,
     }
 
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-            let window = windowScene.windows.first
-        else {
-            fatalError("No window found")
-        }
-        return window
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first(where: { $0.isKeyWindow })
+            ?? UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap { $0.windows }
+                .first
+        return window ?? ASPresentationAnchor()
     }
 }

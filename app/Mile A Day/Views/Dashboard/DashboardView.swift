@@ -958,11 +958,18 @@ struct DashboardView: View {
                     ? "Your Competitions"
                     : "Your Competitions (\(sorted.count))",
                 icon: "trophy.fill",
-                isCollapsed: $competitionsCollapsed
+                isCollapsed: $competitionsCollapsed,
+                unified: true
             ) {
-                VStack(spacing: 12) {
-                    ForEach(sorted, id: \.competition_id) { comp in
-                        ActiveCompetitionBannerCard(competition: comp)
+                VStack(spacing: 0) {
+                    ForEach(Array(sorted.enumerated()), id: \.element.competition_id) { index, comp in
+                        ActiveCompetitionBannerCard(competition: comp, embedded: true)
+                        if index < sorted.count - 1 {
+                            Rectangle()
+                                .fill(Color.white.opacity(0.06))
+                                .frame(height: 0.5)
+                                .padding(.horizontal, 6)
+                        }
                     }
                 }
             }

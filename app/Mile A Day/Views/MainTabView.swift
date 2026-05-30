@@ -15,47 +15,49 @@ struct MainTabView: View {
     @State private var showNotificationInbox = false
 
     var body: some View {
-        // iOS 26: Use native TabView for automatic Liquid Glass
         TabView(selection: $selectedTab) {
-            Tab("Dashboard", systemImage: "house.fill", value: 0) {
-                NavigationStack {
-                    // Bell + inbox routing moved into DashboardView itself
-                    // so it can live inside the new MADTabHeader (consistent
-                    // with Friends / Compete / Profile). MainTabView still
-                    // owns the count for cross-tab triggers via
-                    // `notificationInboxBridge`.
-                    DashboardView(
-                        healthManager: healthManager,
-                        userManager: userManager,
-                        unreadNotificationCount: $unreadNotificationCount,
-                        showNotificationInbox: $showNotificationInbox
-                    )
-                        .environmentObject(notificationService)
-                        .environmentObject(competitionService)
-                        .environmentObject(friendService)
-                }
+            NavigationStack {
+                DashboardView(
+                    healthManager: healthManager,
+                    userManager: userManager,
+                    unreadNotificationCount: $unreadNotificationCount,
+                    showNotificationInbox: $showNotificationInbox
+                )
+                    .environmentObject(notificationService)
+                    .environmentObject(competitionService)
+                    .environmentObject(friendService)
             }
-            
-            Tab("Compete", systemImage: "trophy.fill", value: 1) {
-                NavigationStack {
-                    CompetitionsView(competitionService: competitionService)
-                }
+            .tabItem {
+                Label("Dashboard", systemImage: "house.fill")
             }
+            .tag(0)
+
+            NavigationStack {
+                CompetitionsView(competitionService: competitionService)
+            }
+            .tabItem {
+                Label("Compete", systemImage: "trophy.fill")
+            }
+            .tag(1)
             .badge(competitionService.invites.count)
 
-            Tab("Friends", systemImage: "person.2.fill", value: 2) {
-                NavigationStack {
-                    FriendsListView(friendService: friendService)
-                }
+            NavigationStack {
+                FriendsListView(friendService: friendService)
             }
+            .tabItem {
+                Label("Friends", systemImage: "person.2.fill")
+            }
+            .tag(2)
             .badge(friendService.friendRequests.count)
-            
-            Tab("Profile", systemImage: "person.fill", value: 3) {
-                NavigationStack {
-                    ProfileView(userManager: userManager, healthManager: healthManager)
-                        .environment(\.appStateManager, appStateManager)
-                }
+
+            NavigationStack {
+                ProfileView(userManager: userManager, healthManager: healthManager)
+                    .environment(\.appStateManager, appStateManager)
             }
+            .tabItem {
+                Label("Profile", systemImage: "person.fill")
+            }
+            .tag(3)
         }
         .tint(MADTheme.Colors.madRed)
         .onAppear {

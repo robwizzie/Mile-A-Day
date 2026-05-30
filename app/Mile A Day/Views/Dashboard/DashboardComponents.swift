@@ -1220,6 +1220,7 @@ struct CompetitionInviteBanner: View {
 /// user knows where they stand overall.
 struct ActiveCompetitionBannerCard: View {
     let competition: Competition
+    var embedded: Bool = false
     @EnvironmentObject var competitionService: CompetitionService
     @Environment(\.colorScheme) var colorScheme
     @State private var showDetail = false
@@ -1266,14 +1267,26 @@ struct ActiveCompetitionBannerCard: View {
         Button {
             showDetail = true
         } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                topRow
-                Divider()
-                    .background(Color.white.opacity(0.06))
-                bottomRow
+            if embedded {
+                VStack(alignment: .leading, spacing: 10) {
+                    topRow
+                    Divider()
+                        .background(Color.white.opacity(0.06))
+                    bottomRow
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 6)
+                .contentShape(Rectangle())
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    topRow
+                    Divider()
+                        .background(Color.white.opacity(0.06))
+                    bottomRow
+                }
+                .padding(14)
+                .liquidGlassCard(accentColor: focus.level.color)
             }
-            .padding(14)
-            .liquidGlassCard(accentColor: focus.level.color)
         }
         .buttonStyle(PlainButtonStyle())
         .sheet(isPresented: $showDetail) {
@@ -1548,65 +1561,122 @@ struct DashboardCollapsibleSection<Content: View>: View {
     let title: String
     let icon: String
     @Binding var isCollapsed: Bool
+    var unified: Bool = false
     @ViewBuilder let content: () -> Content
     @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
+        if unified {
+            unifiedLayout
+        } else {
+            separatedLayout
+        }
+    }
+
+    private var headerRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.secondary)
+
+            Text(title)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .foregroundColor(.primary)
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary)
+                .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+        }
+        .padding(.vertical, 14)
+        .padding(.horizontal, 16)
+        .contentShape(Rectangle())
+    }
+
+    private var separatedLayout: some View {
         VStack(spacing: 0) {
-            // Header button
             Button {
                 withAnimation(.easeInOut(duration: 0.25)) {
                     isCollapsed.toggle()
                 }
             } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: icon)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.secondary)
+                headerRow
+                    .background(
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(.ultraThinMaterial)
 
-                    Text(title)
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .foregroundColor(.primary)
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .rotationEffect(.degrees(isCollapsed ? 0 : 90))
-                }
-                .padding(.vertical, 14)
-                .padding(.horizontal, 16)
-                .background(
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(.ultraThinMaterial)
-
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(colorScheme == .dark ? 0.15 : 0.25),
-                                        Color.clear
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 1
-                            )
-                    }
-                )
-                .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white.opacity(colorScheme == .dark ? 0.15 : 0.25),
+                                            Color.clear
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    lineWidth: 1
+                                )
+                        }
+                    )
+                    .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
             }
             .buttonStyle(PlainButtonStyle())
 
-            // Content
             if !isCollapsed {
                 content()
                     .padding(.top, 8)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+    }
+
+    private var unifiedLayout: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    isCollapsed.toggle()
+                }
+            } label: {
+                headerRow
+            }
+            .buttonStyle(PlainButtonStyle())
+
+            if !isCollapsed {
+                Rectangle()
+                    .fill(Color.white.opacity(colorScheme == .dark ? 0.08 : 0.12))
+                    .frame(height: 0.5)
+
+                content()
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 10)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.15 : 0.25),
+                                Color.clear
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
+        )
+        .shadow(color: .black.opacity(0.05), radius: 4, x: 0, y: 2)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 

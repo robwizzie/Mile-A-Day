@@ -63,7 +63,7 @@ class WorkoutSyncService: ObservableObject {
     @Published var errorMessage: String?
 
     // MARK: - Private Properties
-    private let baseURL = "https://mad.mindgoblin.tech"
+    private let baseURL = AppConfig.baseURL
     private let batchSize = 50
     private let maxRetries = 3
     private let retryDelay: TimeInterval = 2.0  // seconds
