@@ -25,46 +25,49 @@ class APIClient {
         body: Data? = nil,
         responseType: T.Type
     ) async throws -> T {
-        // Step 1: Check if access token exists
         guard let accessToken = getAccessToken() else {
             print("[APIClient] ❌ No access token, signing out")
             signOutUser()
             throw APIError.notAuthenticated
         }
 
-        // Step 2: Check if access token is expired
+        // Proactive refresh if our local JWT-exp check says the token is expired
+        // (or expiring within the buffer window). Goes through the single-flight
+        // coordinator so a flurry of parallel calls only triggers one refresh.
         if TokenUtils.isTokenExpired(accessToken) {
-            print("[APIClient] 🔄 Access token expired, refreshing...")
+            print("[APIClient] 🔄 Access token expired locally, refreshing...")
+            let refreshed = try await refreshOrSignOut()
+            return try await makeRequestWith401Recovery(
+                endpoint: endpoint,
+                method: method,
+                body: body,
+                accessToken: refreshed,
+                responseType: responseType
+            )
+        }
 
-            // Step 3: Check if refresh token exists
-            guard let refreshToken = getRefreshToken() else {
-                print("[APIClient] ❌ No refresh token available, signing out")
-                signOutUser()
-                throw APIError.notAuthenticated
-            }
+        return try await makeRequestWith401Recovery(
+            endpoint: endpoint,
+            method: method,
+            body: body,
+            accessToken: accessToken,
+            responseType: responseType
+        )
+    }
 
-            // Step 4: Refresh tokens
-            do {
-                let (newAccessToken, newRefreshToken) = try await TokenRefreshService.refreshAccessToken(refreshToken: refreshToken)
-
-                // Step 5: Update stored tokens
-                updateTokens(accessToken: newAccessToken, refreshToken: newRefreshToken)
-
-                // Use new access token for the request
-                return try await makeRequest(
-                    endpoint: endpoint,
-                    method: method,
-                    body: body,
-                    accessToken: newAccessToken,
-                    responseType: responseType
-                )
-            } catch {
-                print("[APIClient] ❌ Token refresh failed, signing out: \(error)")
-                signOutUser()
-                throw APIError.tokenRefreshFailed
-            }
-        } else {
-            // Token is valid, proceed with request
+    /// Runs the request and, if the server returns 401 (token revoked, clock
+    /// skew on our JWT-exp check, family-revocation that the local exp didn't
+    /// catch), attempts exactly one refresh-and-retry before signing out. This
+    /// closes the gap where the local JWT was "valid" by `exp` but the backend
+    /// had already invalidated it.
+    private static func makeRequestWith401Recovery<T: Decodable>(
+        endpoint: String,
+        method: HTTPMethod,
+        body: Data?,
+        accessToken: String,
+        responseType: T.Type
+    ) async throws -> T {
+        do {
             return try await makeRequest(
                 endpoint: endpoint,
                 method: method,
@@ -72,6 +75,45 @@ class APIClient {
                 accessToken: accessToken,
                 responseType: responseType
             )
+        } catch APIError.unauthorized {
+            print("[APIClient] 🔄 Got 401 from server — attempting one refresh+retry")
+            let refreshed = try await refreshOrSignOut()
+            // Single retry. If this 401s again, we surface unauthorized and
+            // sign out — no infinite loop.
+            do {
+                return try await makeRequest(
+                    endpoint: endpoint,
+                    method: method,
+                    body: body,
+                    accessToken: refreshed,
+                    responseType: responseType
+                )
+            } catch APIError.unauthorized {
+                print("[APIClient] ❌ Still 401 after refresh, signing out")
+                signOutUser()
+                throw APIError.unauthorized
+            }
+        }
+    }
+
+    /// Refreshes via the single-flight coordinator, persists the new tokens,
+    /// and returns the new access token. On any failure (no refresh token,
+    /// refresh rejected by backend, network), signs the user out and rethrows
+    /// as `APIError.tokenRefreshFailed` so callers see a consistent error.
+    private static func refreshOrSignOut() async throws -> String {
+        guard let refreshToken = getRefreshToken() else {
+            print("[APIClient] ❌ No refresh token available, signing out")
+            signOutUser()
+            throw APIError.notAuthenticated
+        }
+        do {
+            let (newAccessToken, newRefreshToken) = try await TokenRefreshService.refreshAccessToken(refreshToken: refreshToken)
+            updateTokens(accessToken: newAccessToken, refreshToken: newRefreshToken)
+            return newAccessToken
+        } catch {
+            print("[APIClient] ❌ Token refresh failed, signing out: \(error)")
+            signOutUser()
+            throw APIError.tokenRefreshFailed
         }
     }
     
@@ -167,11 +209,11 @@ class APIClient {
     // MARK: - Token Management Helpers
     
     private static func getAccessToken() -> String? {
-        return UserDefaults.standard.string(forKey: "authToken")
+        return TokenStore.accessToken
     }
-    
+
     private static func getRefreshToken() -> String? {
-        return UserDefaults.standard.string(forKey: "refreshToken")
+        return TokenStore.refreshToken
     }
     
     private static func updateTokens(accessToken: String, refreshToken: String) {

@@ -35,6 +35,11 @@ struct Mile_A_DayApp: App {
                     // Register for push notifications (handles first-time + token rotation)
                     if AppStateManager.shared.isAuthenticated {
                         Task {
+                            // Proactively refresh the access token if it's within
+                            // 1 day of expiry. This avoids first-request races on
+                            // cold start (where the token check passes but the
+                            // server has the token marked stale).
+                            await refreshTokenIfNeededOnForeground()
                             await MADNotificationService.shared.requestAuthorization()
                             MADNotificationService.shared.registerForRemoteNotifications()
                             await MADNotificationService.shared.syncDailyReminderPrefsToBackend()
@@ -52,5 +57,24 @@ struct Mile_A_DayApp: App {
                     }
                 }
         }
+    }
+}
+
+/// On foreground, refresh the access token if it's within 1 day of expiry.
+/// 30-day access tokens mean this rarely fires, but it ensures the first
+/// post-foreground API call doesn't race a stale token against the server.
+@MainActor
+private func refreshTokenIfNeededOnForeground() async {
+    guard let access = TokenStore.accessToken else { return }
+    // 86_400s = 1 day buffer — refresh if expiring within this window.
+    guard TokenUtils.isTokenExpired(access, bufferSeconds: 86_400) else { return }
+    guard let refresh = TokenStore.refreshToken else { return }
+    do {
+        let (newAccess, newRefresh) = try await TokenRefreshService.refreshAccessToken(refreshToken: refresh)
+        UserManager.shared.setTokens(accessToken: newAccess, refreshToken: newRefresh)
+        MADWatchBridge.shared.pushSnapshotIfReady()
+        print("[Mile_A_DayApp] ✅ Foreground token refresh succeeded")
+    } catch {
+        print("[Mile_A_DayApp] ⚠️ Foreground token refresh failed: \(error). Will rely on next request to retry/sign out.")
     }
 }

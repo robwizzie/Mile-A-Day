@@ -12,8 +12,6 @@ class UserManager: ObservableObject {
     private let userDefaults = UserDefaults.standard
     private let currentUserKey = "currentUser"
     private let friendsKey = "friends"
-    private let authTokenKey = "authToken"
-    private let refreshTokenKey = "refreshToken"
     
     init() {
         // Load or create a new user
@@ -25,11 +23,10 @@ class UserManager: ObservableObject {
             self.currentUser = User(name: "You")
         }
         
-        // Load auth token
-        self.authToken = userDefaults.string(forKey: authTokenKey)
-        
-        // Load refresh token
-        self.refreshToken = userDefaults.string(forKey: refreshTokenKey)
+        // Load tokens from Keychain (falls back to UserDefaults legacy mirror
+        // on first read after upgrade, then promotes the value into Keychain).
+        self.authToken = TokenStore.accessToken
+        self.refreshToken = TokenStore.refreshToken
         
         // Initialize widget data store with current values
         #if !os(watchOS)
@@ -84,15 +81,8 @@ class UserManager: ObservableObject {
             userDefaults.set(encoded, forKey: friendsKey)
         }
         
-        // Save auth token
-        if let token = authToken {
-            userDefaults.set(token, forKey: authTokenKey)
-        }
-        
-        // Save refresh token
-        if let token = refreshToken {
-            userDefaults.set(token, forKey: refreshTokenKey)
-        }
+        // Tokens are persisted via TokenStore (Keychain + UserDefaults mirror)
+        // at the point they're set, so saveUserData() no longer writes them.
         
         // Save privacy settings
         if let privacyEncoded = try? JSONEncoder().encode(currentUser.privacySettings) {
@@ -142,12 +132,15 @@ class UserManager: ObservableObject {
             saveAppleProfileImage(profileImage)
         }
         
-        // Store auth token
+        // Persist tokens via the canonical Keychain-backed store (also mirrors
+        // to UserDefaults for legacy readers).
         authToken = backendResponse.accessToken
-        
-        // Store refresh token
         refreshToken = backendResponse.refreshToken
-        
+        TokenStore.setTokens(
+            accessToken: backendResponse.accessToken,
+            refreshToken: backendResponse.refreshToken
+        )
+
         // Store backend user ID in UserDefaults for FriendService
         UserDefaults.standard.set(backendResponse.user.user_id, forKey: "backendUserId")
         
@@ -176,6 +169,16 @@ class UserManager: ObservableObject {
     
     // Sign out
     func signOut() {
+        // Fire-and-forget server-side revocation so the refresh token can't
+        // be reused even if it's leaked. We must capture the value BEFORE we
+        // clear local state.
+        let tokenToRevoke = TokenStore.refreshToken
+        if let rt = tokenToRevoke, !rt.isEmpty {
+            Task.detached {
+                await Self.revokeRefreshTokenOnBackend(rt)
+            }
+        }
+
         currentUser.appleId = nil
         currentUser.email = nil
         currentUser.authProvider = .guest
@@ -183,12 +186,24 @@ class UserManager: ObservableObject {
         currentUser.authToken = nil
         authToken = nil
         refreshToken = nil
-        
-        // Clear stored tokens
-        userDefaults.removeObject(forKey: authTokenKey)
-        userDefaults.removeObject(forKey: refreshTokenKey)
-        
+
+        // Clear stored tokens (Keychain + legacy UserDefaults mirror).
+        TokenStore.clear()
+
         saveUserData()
+    }
+
+    /// Best-effort POST to /auth/logout. Failure is fine — local state is
+    /// already wiped — but a successful call lets the backend mark the
+    /// refresh token revoked so it can't be replayed.
+    private static func revokeRefreshTokenOnBackend(_ refreshToken: String) async {
+        guard let url = URL(string: "https://mad.mindgoblin.tech/auth/logout") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 10
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["refreshToken": refreshToken])
+        _ = try? await URLSession.shared.data(for: request)
     }
     
     /// Permanently deletes the user's account on the backend, then clears all local state.
@@ -225,16 +240,15 @@ class UserManager: ObservableObject {
     func setTokens(accessToken: String, refreshToken: String) {
         self.authToken = accessToken
         self.refreshToken = refreshToken
-        userDefaults.set(accessToken, forKey: authTokenKey)
-        userDefaults.set(refreshToken, forKey: refreshTokenKey)
+        TokenStore.setTokens(accessToken: accessToken, refreshToken: refreshToken)
     }
-    
+
     func getAccessToken() -> String? {
-        return authToken ?? userDefaults.string(forKey: authTokenKey)
+        return TokenStore.accessToken
     }
-    
+
     func getRefreshToken() -> String? {
-        return refreshToken ?? userDefaults.string(forKey: refreshTokenKey)
+        return TokenStore.refreshToken
     }
     
     // Update user stats from HealthKit data
