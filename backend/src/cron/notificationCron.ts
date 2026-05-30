@@ -5,52 +5,43 @@ import {
 	checkStreaksBroken,
 	checkStreakLifeLoss,
 	checkTargetMissed,
-	notifyIntervalResults
+	notifyIntervalResults,
+	checkClashTies
 } from '../services/notificationService.js';
 import { sendPendingDailyReminders } from '../services/dailyReminderService.js';
 
 export function startNotificationCron(): void {
-	// Flush batched competition start/finish notifications at 10 AM ET
+	// All "overnight result" notifications fire together at 9 AM ET so users
+	// aren't woken at midnight. This covers:
+	//   - flushBatchedNotifications: drains competition_finished pushes queued
+	//     by the midnight resolveExpiredCompetitions job (via
+	//     sendOrQueueCompetitionNotification's quiet-hours queue)
+	//   - checkClashTies: end-of-day tie detection (was midnight)
+	//   - checkStreaksBroken + checkStreakLifeLoss + checkTargetMissed: yesterday-
+	//     was-a-miss notifications (was 12:05 AM)
+	//   - notifyIntervalResults: yesterday-recap digest (was 12:10 AM)
+	//
+	// Order: tie/streak/target/recap pushes are sent directly (not queued),
+	// so we run flushBatchedNotifications first to clear the midnight queue,
+	// then the result-detection jobs in the same order they ran overnight.
+	// User-triggered notifications (mile finished, nudges, flexes, hypes) are
+	// unchanged and continue to send immediately.
 	cron.schedule(
-		'0 10 * * *',
+		'0 9 * * *',
 		async () => {
-			console.log('[CRON] Flushing batched notifications...');
+			console.log('[CRON] 9 AM overnight notification batch starting...');
 			try {
 				await flushBatchedNotifications();
 				console.log('[CRON] Batched notification flush complete.');
 			} catch (error: any) {
 				console.error('[CRON] Error flushing notifications:', error.message);
 			}
-		},
-		{
-			timezone: 'America/New_York'
-		}
-	);
-
-	// Check for competitions ending tomorrow at 6 PM ET
-	cron.schedule(
-		'0 18 * * *',
-		async () => {
-			console.log('[CRON] Checking competitions ending soon...');
 			try {
-				await checkCompetitionsEndingSoon();
-				console.log('[CRON] Ending soon check complete.');
+				await checkClashTies();
+				console.log('[CRON] Clash tie check complete.');
 			} catch (error: any) {
-				console.error('[CRON] Error checking ending soon:', error.message);
+				console.error('[CRON] Error checking clash ties:', error.message);
 			}
-		},
-		{
-			timezone: 'America/New_York'
-		}
-	);
-
-	// Check for broken streaks at 12:05 AM ET (after midnight competition resolution).
-	// In the same slot we also run the competition-streak life-loss check and the
-	// targets-missed check, which all share the "just rolled over to a new day" trigger.
-	cron.schedule(
-		'5 0 * * *',
-		async () => {
-			console.log('[CRON] Checking for broken streaks + competition life/target loss...');
 			try {
 				await checkStreaksBroken();
 				console.log('[CRON] Personal streak broken check complete.');
@@ -69,25 +60,28 @@ export function startNotificationCron(): void {
 			} catch (error: any) {
 				console.error('[CRON] Error checking target missed:', error.message);
 			}
+			try {
+				await notifyIntervalResults();
+				console.log('[CRON] Interval recap complete.');
+			} catch (error: any) {
+				console.error('[CRON] Error sending interval recap:', error.message);
+			}
 		},
 		{
 			timezone: 'America/New_York'
 		}
 	);
 
-	// Interval recap: fires 5 minutes after the life/target jobs so the
-	// individual misses-and-life-losses arrive first and the recap reads as
-	// a single "see how everyone finished" follow-up. Groups across all of
-	// a user's comps so heavy users don't get flooded.
+	// Check for competitions ending tomorrow at 6 PM ET
 	cron.schedule(
-		'10 0 * * *',
+		'0 18 * * *',
 		async () => {
-			console.log('[CRON] Sending interval recap notifications...');
+			console.log('[CRON] Checking competitions ending soon...');
 			try {
-				await notifyIntervalResults();
-				console.log('[CRON] Interval recap complete.');
+				await checkCompetitionsEndingSoon();
+				console.log('[CRON] Ending soon check complete.');
 			} catch (error: any) {
-				console.error('[CRON] Error sending interval recap:', error.message);
+				console.error('[CRON] Error checking ending soon:', error.message);
 			}
 		},
 		{
@@ -125,5 +119,5 @@ export function startNotificationCron(): void {
 		}
 	);
 
-	console.log('Notification cron jobs scheduled (hourly daily-reminder + 12:05 AM, 3 AM, 10 AM, 6 PM ET).');
+	console.log('Notification cron jobs scheduled (hourly daily-reminder + 3 AM, 9 AM, 6 PM ET).');
 }

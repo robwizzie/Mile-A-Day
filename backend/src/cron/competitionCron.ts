@@ -1,8 +1,14 @@
 import cron from 'node-cron';
 import { resolveExpiredCompetitions } from '../services/competitionService.js';
-import { checkClashTies } from '../services/notificationService.js';
 
 export function startCompetitionCron(): void {
+	// Competition resolution itself runs at midnight ET so finished comps
+	// transition state on the correct calendar day. The user-visible
+	// "competition_finished" pushes that fall out of this are already routed
+	// through sendOrQueueCompetitionNotification, which queues them during
+	// quiet hours and they get flushed by the 9 AM notification cron.
+	// Clash tie detection moved to the 9 AM notification cron alongside the
+	// other overnight-result notifications.
 	cron.schedule(
 		'0 0 * * *',
 		async () => {
@@ -13,20 +19,11 @@ export function startCompetitionCron(): void {
 			} catch (error: any) {
 				console.error('[CRON] Error resolving competitions:', error.message);
 			}
-
-			// Run end-of-day tie detection AFTER resolution so scores reflect the
-			// just-finished day. Resolved comps self-suppress via the winner check.
-			try {
-				await checkClashTies();
-				console.log('[CRON] Clash tie check complete.');
-			} catch (error: any) {
-				console.error('[CRON] Error checking clash ties:', error.message);
-			}
 		},
 		{
 			timezone: 'America/New_York'
 		}
 	);
 
-	console.log('Competition cron job scheduled (midnight ET, includes tie check).');
+	console.log('Competition cron job scheduled (midnight ET).');
 }
