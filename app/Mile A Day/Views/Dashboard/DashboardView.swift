@@ -789,6 +789,7 @@ struct DashboardView: View {
                             .fill(isSelected ? Color.white.opacity(0.15) : Color.clear)
                     )
                 }
+                .buttonStyle(.plain)
             }
         }
         .padding(3)
