@@ -86,11 +86,17 @@ export async function getTodaysCompletion(userId: string, localDate: string): Pr
 export async function evaluateChallengesForBatch(userId: string, newWorkoutIds: string[]): Promise<NewChallengeCompletion[]> {
 	if (newWorkoutIds.length === 0) return [];
 
+	// Daily challenges are awarded only for *today's* workouts. Historical
+	// uploads (e.g. backfilling a week of HealthKit data) must not retroactively
+	// unlock past days' challenges.
+	const todayLocalDate = await getUserTodayLocalDate(userId);
+	if (!todayLocalDate) return [];
+
 	const dateRows = await db.query<{ local_date: string }>(
 		`SELECT DISTINCT local_date::text AS local_date
 		FROM workouts
-		WHERE user_id = $1 AND workout_id = ANY($2::text[])`,
-		[userId, newWorkoutIds]
+		WHERE user_id = $1 AND workout_id = ANY($2::text[]) AND local_date = $3::date`,
+		[userId, newWorkoutIds, todayLocalDate]
 	);
 
 	const completions: NewChallengeCompletion[] = [];
@@ -99,6 +105,26 @@ export async function evaluateChallengesForBatch(userId: string, newWorkoutIds: 
 		if (completion) completions.push(completion);
 	}
 	return completions;
+}
+
+/**
+ * The user's "today" expressed as a local-date string (YYYY-MM-DD), derived
+ * from their most recent workout's timezone offset. Falls back to UTC if the
+ * user has no workouts yet (in which case they have nothing to backfill anyway).
+ */
+async function getUserTodayLocalDate(userId: string): Promise<string | null> {
+	const rows = await db.query<{ local_date: string }>(
+		`SELECT to_char(
+			(now() AT TIME ZONE 'UTC') +
+			COALESCE(
+				(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
+				0
+			) * INTERVAL '1 minute',
+			'YYYY-MM-DD'
+		) AS local_date`,
+		[userId]
+	);
+	return rows[0]?.local_date ?? null;
 }
 
 export async function evaluateForDay(
