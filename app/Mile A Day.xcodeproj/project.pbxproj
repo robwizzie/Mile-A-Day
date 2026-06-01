@@ -112,6 +112,7 @@
 				Models/WorkoutProcessor.swift,
 				Models/WorkoutSplit.swift,
 				Models/YearlyMilestoneInfo.swift,
+				Services/TokenStore.swift,
 				Utils/SplitCalculator.swift,
 			);
 			target = B20E1DC32ED544BB0041BC19 /* Mile A Day Watch Watch App */;
