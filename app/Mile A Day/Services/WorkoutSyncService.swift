@@ -78,10 +78,58 @@ class WorkoutSyncService: ObservableObject {
     private let lastSyncedWorkoutDateKey = "lastSyncedWorkoutDate"
     private let uploadedWorkoutIdsKey = "uploadedWorkoutIds"
     private let pendingUploadQueueKey = "pendingUploadQueue"
+    private let initialSyncStartedKey = "MAD_InitialSyncStarted"
 
     // MARK: - Initialization
     private init() {
         self.lastSyncDate = UserDefaults.standard.object(forKey: lastSyncedWorkoutDateKey) as? Date
+    }
+
+    // MARK: - Initial Sync Resume State
+
+    /// True if an initial sync was started but never marked complete.
+    /// Used on app launch/foreground to auto-resume after a crash or force-quit.
+    func isInitialSyncIncomplete() -> Bool {
+        let started = UserDefaults.standard.bool(forKey: initialSyncStartedKey)
+        return started && lastSyncDate == nil
+    }
+
+    /// Should the initial sync run? True for genuine first-time users AND
+    /// for users whose initial sync was interrupted last session.
+    func shouldRunInitialSync() -> Bool {
+        return isFirstTimeSync()
+    }
+
+    private func markInitialSyncStarted() {
+        UserDefaults.standard.set(true, forKey: initialSyncStartedKey)
+    }
+
+    private func clearInitialSyncStarted() {
+        UserDefaults.standard.removeObject(forKey: initialSyncStartedKey)
+    }
+
+    // MARK: - Background Initial Sync
+
+    /// Fire-and-forget initial sync that updates `currentProgress` as it runs.
+    /// Safe to call repeatedly — no-ops if a sync is already in flight or has completed.
+    func startInitialSyncIfNeeded() {
+        guard shouldRunInitialSync() else { return }
+        guard !isSyncing else { return }
+
+        // Claim the slot synchronously on the main actor to prevent a second
+        // call from spawning a parallel sync before the Task body runs.
+        isSyncing = true
+
+        Task { [weak self] in
+            guard let self else { return }
+            // performInitialSyncInternal will set isSyncing=true again (no-op)
+            // and clear it when done.
+            await self.performInitialSyncInternal(progressHandler: { progress in
+                Task { @MainActor in
+                    self.currentProgress = progress
+                }
+            })
+        }
     }
 
     // MARK: - Public API
@@ -90,6 +138,12 @@ class WorkoutSyncService: ObservableObject {
     /// Returns an async stream of progress updates
     func performInitialSync() -> AsyncStream<SyncProgress> {
         return AsyncStream { continuation in
+            guard !self.isSyncing else {
+                print("[WorkoutSyncService] ⚠️ Sync already in progress")
+                continuation.finish()
+                return
+            }
+            self.isSyncing = true
             Task {
                 await self.performInitialSyncInternal(progressHandler: { progress in
                     continuation.yield(progress)
@@ -162,22 +216,22 @@ class WorkoutSyncService: ObservableObject {
         UserDefaults.standard.removeObject(forKey: lastSyncedWorkoutDateKey)
         UserDefaults.standard.removeObject(forKey: uploadedWorkoutIdsKey)
         UserDefaults.standard.removeObject(forKey: pendingUploadQueueKey)
+        UserDefaults.standard.removeObject(forKey: initialSyncStartedKey)
         lastSyncDate = nil
+        currentProgress = nil
         print("[WorkoutSyncService] 🗑️ Sync state reset")
     }
 
     // MARK: - Private Methods
 
-    /// Internal initial sync with progress handler
+    /// Internal initial sync with progress handler.
+    /// Callers MUST guard against concurrent invocations — this routine assumes
+    /// it owns the sync slot and unconditionally sets `isSyncing`.
     private func performInitialSyncInternal(progressHandler: @escaping (SyncProgress) -> Void) async
     {
-        guard !isSyncing else {
-            print("[WorkoutSyncService] ⚠️ Sync already in progress")
-            return
-        }
-
         isSyncing = true
         errorMessage = nil
+        markInitialSyncStarted()
 
         do {
             // Phase 1: Fetch all workouts from HealthKit
@@ -192,16 +246,29 @@ class WorkoutSyncService: ObservableObject {
             )
             progressHandler(progress)
 
-            let allWorkouts = try await fetchAllWorkoutsFromHealthKit()
-            print("[WorkoutSyncService] 📥 Fetched \(allWorkouts.count) workouts from HealthKit")
+            let fetchedWorkouts = try await fetchAllWorkoutsFromHealthKit()
+            print("[WorkoutSyncService] 📥 Fetched \(fetchedWorkouts.count) workouts from HealthKit")
+
+            // Skip anything we've already uploaded in a previous (interrupted) run.
+            let uploadedIds = getUploadedWorkoutIds()
+            let allWorkouts = fetchedWorkouts.filter { !uploadedIds.contains($0.uuid.uuidString) }
+            let alreadyUploaded = fetchedWorkouts.count - allWorkouts.count
+            if alreadyUploaded > 0 {
+                print("[WorkoutSyncService] ⏭️ Resuming — \(alreadyUploaded) workouts already uploaded")
+            }
 
             guard !allWorkouts.isEmpty else {
+                // Either no workouts in HealthKit or everything's already uploaded.
+                if let latest = fetchedWorkouts.first {
+                    updateLastSyncDate(latest.endDate)
+                }
+                clearInitialSyncStarted()
                 progress = SyncProgress(
                     phase: .complete,
-                    fetchedCount: 0,
-                    totalToFetch: 0,
-                    uploadedCount: 0,
-                    totalToUpload: 0,
+                    fetchedCount: fetchedWorkouts.count,
+                    totalToFetch: fetchedWorkouts.count,
+                    uploadedCount: fetchedWorkouts.count,
+                    totalToUpload: fetchedWorkouts.count,
                     currentBatch: 0,
                     totalBatches: 0
                 )
@@ -262,10 +329,12 @@ class WorkoutSyncService: ObservableObject {
                 }
             }
 
-            // Update last sync date
-            if let latestWorkout = allWorkouts.first {
+            // Update last sync date — prefer the newest endDate across everything we know about
+            // (including workouts that were already uploaded in a previous interrupted run).
+            if let latestWorkout = fetchedWorkouts.first {
                 updateLastSyncDate(latestWorkout.endDate)
             }
+            clearInitialSyncStarted()
 
             // Complete
             progress = SyncProgress(

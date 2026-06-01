@@ -15,7 +15,6 @@ class AppStateManager: ObservableObject {
         case usernameSetup
         case welcome
         case healthAccess
-        case workoutSync
         case main
     }
     
@@ -91,11 +90,10 @@ class AppStateManager: ObservableObject {
                     if self.isHealthKitAuthorized() {
                         // Returning user with everything set up
                         self.userDefaults.set(true, forKey: self.hasCompletedFullSetupKey)
-                        if WorkoutSyncService.shared.isFirstTimeSync() {
-                            self.currentState = .workoutSync
-                        } else {
-                            self.currentState = .main
-                        }
+                        self.currentState = .main
+                        // Initial sync (if needed) runs in the background — user can
+                        // continue using the app while workouts upload.
+                        WorkoutSyncService.shared.startInitialSyncIfNeeded()
                     } else {
                         self.currentState = .healthAccess
                     }
@@ -130,24 +128,13 @@ class AppStateManager: ObservableObject {
 
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
-                if WorkoutSyncService.shared.isFirstTimeSync() {
-                    self.currentState = .workoutSync
-                } else {
-                    self.currentState = .main
-                }
+                self.currentState = .main
+                // Initial sync runs in the background — non-blocking.
+                WorkoutSyncService.shared.startInitialSyncIfNeeded()
             }
         }
     }
 
-    /// Complete workout sync and move to main app
-    func completeWorkoutSync() {
-        DispatchQueue.main.async {
-            withAnimation(MADTheme.Animation.standard) {
-                self.currentState = .main
-            }
-        }
-    }
-    
     /// Sign out user (for testing purposes)
     func signOut() {
         // Unregister device token before signing out

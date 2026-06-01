@@ -60,9 +60,15 @@ struct MainTabView: View {
             .tag(3)
         }
         .tint(MADTheme.Colors.madRed)
+        .safeAreaInset(edge: .bottom) {
+            SyncStatusBanner()
+        }
         .onAppear {
             initializeApp()
             handlePendingNotification()
+            // Resume the initial workout sync if it never completed in a
+            // previous session (e.g. user force-quit the app mid-upload).
+            WorkoutSyncService.shared.startInitialSyncIfNeeded()
         }
         .task {
             await competitionService.refreshAllData()

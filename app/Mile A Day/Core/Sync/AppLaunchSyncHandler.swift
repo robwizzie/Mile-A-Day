@@ -41,6 +41,14 @@ class AppLaunchSyncHandler: ObservableObject {
             return
         }
 
+        // First-time / interrupted initial sync runs in the background and is
+        // surfaced via SyncStatusBanner — never modal.
+        if syncService.shouldRunInitialSync() {
+            print("[AppLaunchSyncHandler] Resuming initial sync in background")
+            syncService.startInitialSyncIfNeeded()
+            return
+        }
+
         print("[AppLaunchSyncHandler] Checking for new workouts to sync...")
 
         do {
