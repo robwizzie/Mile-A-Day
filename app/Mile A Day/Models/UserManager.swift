@@ -429,6 +429,24 @@ class UserManager: ObservableObject {
                 currentUser.badges = fetched
                 saveUserData()
 
+                // First sync after sign-up/install: avoid spamming a celebration
+                // for every retroactively-awarded badge. Show one summary instead.
+                let isInitialSync = !hasCompletedInitialBadgeSync
+                if isInitialSync {
+                    hasCompletedInitialBadgeSync = true
+                    if !fetched.isEmpty {
+                        let count = fetched.count
+                        CelebrationManager.shared.addCelebration(
+                            .milestone(
+                                title: "Badges Unlocked!",
+                                description: "You've earned \(count) badge\(count == 1 ? "" : "s"). Check out the Badges tab to see them all.",
+                                icon: "rosette"
+                            )
+                        )
+                    }
+                    return
+                }
+
                 // Decide whether a yearly headline celebration is owed BEFORE we
                 // queue any badge celebrations. If yes, suppress the matching
                 // 365/730/etc. badge popups so they don't pile on top.
@@ -457,6 +475,11 @@ class UserManager: ObservableObject {
     /// `-1` is the uninitialized sentinel so existing users with mid-year streaks aren't
     /// retroactively flooded with year-1/2/3 animations on first launch with this feature.
     @AppStorage("lastCelebratedYearMilestoneStreak") private var lastCelebratedYearMilestoneStreak: Int = -1
+
+    /// Set once after the first successful server badge fetch for this install.
+    /// Used to suppress the flood of per-badge celebrations on fresh sign-up —
+    /// a single summary popup is shown instead.
+    @AppStorage("hasCompletedInitialBadgeSync") private var hasCompletedInitialBadgeSync: Bool = false
 
     /// Returns true if a yearly celebration was queued.
     @discardableResult
