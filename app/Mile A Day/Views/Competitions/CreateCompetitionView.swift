@@ -267,7 +267,7 @@ struct CreateCompetitionView: View {
                     targetsUseFirstTo = false
                     firstTo = 10          // Default "first to 10 points"
                 case .race:
-                    goal = 26.2           // Marathon
+                    goal = 20.0
                     hasEndDate = false
                 }
             }
@@ -293,7 +293,7 @@ struct CreateCompetitionView: View {
                     case .streaks, .targets:
                         goal = 1.0
                     case .race:
-                        goal = 26.2
+                        goal = 20.0
                     case .apex, .clash:
                         break
                     }
