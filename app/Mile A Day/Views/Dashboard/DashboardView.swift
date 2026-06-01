@@ -518,11 +518,15 @@ struct DashboardView: View {
         Task {
             do {
                 let stats = try await workoutService.getUserStats(userId: userId)
-                print("[Dashboard] 📡 Backend best_split_time = \(stats.bestSplitTimeSeconds?.description ?? "nil") sec/mi")
-                if let bestSplitSeconds = stats.bestSplitTimeSeconds, bestSplitSeconds > 0 {
-                    let paceMinutesPerMile = bestSplitSeconds / 60.0
-                    print("[Dashboard] ✅ Updating fastest pace from backend → \(paceMinutesPerMile) min/mi")
-                    await MainActor.run {
+                print("[Dashboard] 📡 Backend best_split_time = \(stats.bestSplitTimeSeconds?.description ?? "nil") sec/mi, streak = \(stats.streak)")
+                await MainActor.run {
+                    // Rescue the streak on first login / before HealthKit indexes locally.
+                    // updateStreakFromBackend only raises the value, so it can't clobber a
+                    // higher HealthKit-computed streak from a later refresh.
+                    userManager.updateStreakFromBackend(stats.streak)
+                    if let bestSplitSeconds = stats.bestSplitTimeSeconds, bestSplitSeconds > 0 {
+                        let paceMinutesPerMile = bestSplitSeconds / 60.0
+                        print("[Dashboard] ✅ Updating fastest pace from backend → \(paceMinutesPerMile) min/mi")
                         userManager.updateFastestPaceFromBackend(paceMinutesPerMile)
                     }
                 }

@@ -286,6 +286,18 @@ class UserManager: ObservableObject {
         saveUserData()
     }
 
+    // Set streak from backend. On first login (or before HealthKit is authorized /
+    // indexed), the local retroactive streak is 0 even when the backend has a real
+    // value. Apply the backend streak so the dashboard doesn't render "0 day streak"
+    // for users whose history lives in the backend. HealthKit's notification path
+    // will still overwrite via updateUserWithHealthKitData() once it computes.
+    func updateStreakFromBackend(_ streak: Int) {
+        guard streak > currentUser.streak else { return }
+        currentUser.streak = streak
+        WidgetDataStore.save(streak: streak)
+        saveUserData()
+    }
+
     // Legacy method for backward compatibility
     func completeRun(miles: Double) {
         currentUser.updateStreak(miles: miles)
