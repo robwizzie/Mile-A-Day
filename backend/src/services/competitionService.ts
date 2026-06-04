@@ -683,6 +683,40 @@ export async function resolveExpiredCompetitions(): Promise<void> {
 	}
 }
 
+// Returns the last calendar date whose interval is fully complete as of `todayStr`
+// (i.e. the day before the current interval begins). Early-resolution scoring always
+// excludes the in-progress current interval, so a competition that resolves at the
+// midnight cron must record THIS as its end_date — not the resolution day itself.
+// Otherwise, once the calendar advances past the resolution day, live score recomputes
+// (getUserScores via getCompetition) fold the resolution day back in as a now-complete
+// interval and retroactively change the standings (e.g. a non-winner gaining a phantom
+// point for the day after the competition was already decided).
+export function lastCompletedIntervalEnd(
+	todayStr: string,
+	interval: 'day' | 'week' | 'month' | undefined,
+	startDate: string
+): string {
+	const [ty, tm, td] = todayStr.split('-').map(Number);
+	const todayMs = Date.UTC(ty, tm - 1, td);
+
+	let currentIntervalStartMs: number;
+	if (interval === 'week' && /^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+		// Weekly windows are anchored to start_date (see getCurrentInterval).
+		const [sy, sm, sd] = startDate.split('-').map(Number);
+		const startMs = Date.UTC(sy, sm - 1, sd);
+		const weekIndex = Math.floor((todayMs - startMs) / 86400000 / 7);
+		currentIntervalStartMs = startMs + weekIndex * 7 * 86400000;
+	} else if (interval === 'month') {
+		currentIntervalStartMs = Date.UTC(ty, tm - 1, 1);
+	} else {
+		currentIntervalStartMs = todayMs; // daily (default)
+	}
+
+	const pad = (n: number) => String(n).padStart(2, '0');
+	const d = new Date(currentIntervalStartMs - 86400000);
+	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
 async function resolveIfComplete(competition: Competition, now: Date, todayStr: string): Promise<void> {
 	let shouldResolve = false;
 	let computedEndDate: string | null = null;
@@ -698,7 +732,7 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 		const durationMs = competition.options.duration_hours * 60 * 60 * 1000;
 		if (now.getTime() >= startMs + durationMs) {
 			shouldResolve = true;
-			computedEndDate = todayStr;
+			computedEndDate = lastCompletedIntervalEnd(todayStr, competition.options.interval, competition.start_date);
 		}
 	}
 
@@ -712,7 +746,7 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 			const maxScore = Math.max(...scoreValues.map(s => s.score));
 			if (maxScore >= competition.options.first_to) {
 				shouldResolve = true;
-				computedEndDate = todayStr;
+				computedEndDate = lastCompletedIntervalEnd(todayStr, competition.options.interval, competition.start_date!);
 			}
 		}
 	}
@@ -727,7 +761,7 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 			const soleSurvivor = scoreValues.length > 1 && survivors.length === 1;
 			if (allEliminated || soleSurvivor) {
 				shouldResolve = true;
-				computedEndDate = todayStr;
+				computedEndDate = lastCompletedIntervalEnd(todayStr, competition.options.interval, competition.start_date!);
 			}
 		}
 	}
@@ -738,7 +772,7 @@ async function resolveIfComplete(competition: Competition, now: Date, todayStr: 
 		for (const data of Object.values(scores)) {
 			if (data.score >= competition.options.goal) {
 				shouldResolve = true;
-				computedEndDate = todayStr;
+				computedEndDate = lastCompletedIntervalEnd(todayStr, competition.options.interval, competition.start_date!);
 				break;
 			}
 		}

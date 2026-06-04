@@ -28,6 +28,10 @@ globs: backend/**
 3. Add route in `routes/` (wire to controller)
 4. If new route file, register in `server.ts` (before or after `authenticateToken` depending on auth needs)
 
+## Competition Resolution
+- Standings are recomputed LIVE on every read (`getUserScores` in `getCompetition`) — even for finished comps. So a competition's stored `end_date` directly bounds which days count (scoring includes `local_date <= end_date`; `local_date` = workout START date in user tz).
+- When resolving EARLY (target/goal/duration hit, not a preset end_date), set `end_date` to the last COMPLETED interval (`lastCompletedIntervalEnd`), NOT the resolution day. Resolution scoring excludes the current interval, so stamping `end_date = todayStr` makes the live recompute fold that day back in once the calendar advances → phantom points/placement drift.
+
 ## ESM Reminder
 All imports MUST end with `.js` extension:
 ```typescript
