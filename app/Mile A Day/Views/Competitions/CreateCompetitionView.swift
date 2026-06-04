@@ -177,17 +177,14 @@ struct CreateCompetitionView: View {
                             durationSection
                         }
 
-                        // Extra space so content is never hidden behind the fixed bottom button
-                        Spacer(minLength: 100)
                     }
                     .padding(.horizontal, MADTheme.Spacing.md)
                     .padding(.top, MADTheme.Spacing.md)
                     .padding(.bottom, MADTheme.Spacing.md)
                 }
-
-                // Send Invite Button (Fixed at bottom)
-                VStack {
-                    Spacer()
+                // Pin the button to the bottom and inset the scroll content by its
+                // height so it can never overlap the last section on small screens.
+                .safeAreaInset(edge: .bottom) {
                     sendInviteButton
                         .padding(.horizontal, MADTheme.Spacing.lg)
                         .padding(.bottom, MADTheme.Spacing.lg)
@@ -609,7 +606,7 @@ struct CreateCompetitionView: View {
                 .padding(.horizontal, MADTheme.Spacing.sm)
 
                 // Goal picker with +/- buttons
-                HStack(spacing: MADTheme.Spacing.xl) {
+                HStack(spacing: MADTheme.Spacing.md) {
                     // Minus button
                     Button {
                         let stepValue: Double = unit == .steps ? 1000 : 1
@@ -632,8 +629,6 @@ struct CreateCompetitionView: View {
                     }
                     .buttonStyle(ScaleButtonStyle())
 
-                    Spacer()
-
                     // Goal display with text input
                     VStack(spacing: 8) {
                         TextField("", value: $goal, format: .number)
@@ -641,8 +636,9 @@ struct CreateCompetitionView: View {
                             .multilineTextAlignment(.center)
                             .font(.system(size: 56, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
-                            .frame(minWidth: 100)
-                            .fixedSize(horizontal: true, vertical: false)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                            .frame(maxWidth: .infinity)
                             .onChange(of: goal) { oldValue, newValue in
                                 let minimum: Double = unit == .steps ? 1 : 0.1
                                 if newValue < minimum {
@@ -654,8 +650,6 @@ struct CreateCompetitionView: View {
                             .font(MADTheme.Typography.title2)
                             .foregroundColor(.white.opacity(0.7))
                     }
-
-                    Spacer()
 
                     // Plus button
                     Button {
