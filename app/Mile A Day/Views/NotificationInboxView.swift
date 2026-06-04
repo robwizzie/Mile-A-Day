@@ -81,26 +81,17 @@ struct NotificationInboxView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
             if let remaining = hypesRemaining {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    let depleted = remaining <= 0
-                    let tint: Color = depleted ? .white.opacity(0.55) : .orange
-                    HStack(spacing: 4) {
-                        Image(systemName: "hands.clap.fill")
-                            .font(.system(size: 11, weight: .bold))
-                        Text("\(remaining)/\(HypeService.dailyLimit)")
-                            .font(.system(size: 12, weight: .heavy, design: .rounded))
-                            .monospacedDigit()
+                // iOS 26 wraps toolbar items in a shared glass capsule; hiding it
+                // stops the orange pill from rendering inside a second system pill.
+                if #available(iOS 26.0, *) {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        HypePill(remaining: remaining)
                     }
-                    .foregroundColor(tint)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 5)
-                    .background(
-                        Capsule().fill(depleted ? Color.white.opacity(0.08) : Color.orange.opacity(0.15))
-                            .overlay(Capsule().strokeBorder(
-                                depleted ? Color.white.opacity(0.18) : Color.orange.opacity(0.35),
-                                lineWidth: 1
-                            ))
-                    )
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        HypePill(remaining: remaining)
+                    }
                 }
             }
             if unreadCount > 0 {
@@ -846,6 +837,42 @@ struct NotificationInboxView: View {
                 unreadCount = 0
             }
         }
+    }
+}
+
+/// Toolbar pill showing how many hypes the user has left today.
+/// Reads "👏 N left" and dims to grey once the daily allowance is spent.
+private struct HypePill: View {
+    let remaining: Int
+
+    private var depleted: Bool { remaining <= 0 }
+    private var tint: Color { depleted ? .white.opacity(0.55) : .orange }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "hands.clap.fill")
+                .font(.system(size: 11, weight: .bold))
+            Text("\(remaining) left")
+                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .fixedSize()
+        .foregroundColor(tint)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(pillBackground)
+    }
+
+    private var pillBackground: some View {
+        Capsule()
+            .fill(depleted ? Color.white.opacity(0.08) : Color.orange.opacity(0.15))
+            .overlay(
+                Capsule().strokeBorder(
+                    depleted ? Color.white.opacity(0.18) : Color.orange.opacity(0.35),
+                    lineWidth: 1
+                )
+            )
     }
 }
 
