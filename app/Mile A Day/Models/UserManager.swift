@@ -294,7 +294,9 @@ class UserManager: ObservableObject {
     func updateStreakFromBackend(_ streak: Int) {
         guard streak > currentUser.streak else { return }
         currentUser.streak = streak
+        #if !os(watchOS)
         WidgetDataStore.save(streak: streak)
+        #endif
         saveUserData()
     }
 
