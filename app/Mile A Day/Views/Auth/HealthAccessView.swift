@@ -85,7 +85,7 @@ struct HealthAccessView: View {
                                     .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                     .scaleEffect(0.8)
                             } else {
-                                Text(wasDenied ? "Open Settings" : "Allow Health Access")
+                                Text(wasDenied ? "Open Settings" : "Continue")
                                     .font(MADTheme.Typography.headline)
                                     .fontWeight(.semibold)
                             }

@@ -694,7 +694,7 @@ struct DashboardView: View {
                 Button {
                     healthManager.requestAuthorization { _ in }
                 } label: {
-                    Text("Enable")
+                    Text("Continue")
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                         .padding(.horizontal, 14)
