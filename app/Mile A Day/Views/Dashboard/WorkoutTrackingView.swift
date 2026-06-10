@@ -34,6 +34,7 @@ struct WorkoutTrackingView: View {
     @State private var showEndWorkoutError = false // Show error alert when end fails
     @State private var endWorkoutErrorMessage = "" // Error message for end workout failure
     @State private var endWorkoutTimeoutTask: DispatchWorkItem? // Timeout for end workout flow
+    @State private var trackingMetricsHeight: CGFloat = 0 // Measured height of the scrollable metrics area
     @State private var workoutSession: HKWorkoutSession?
     @State private var workoutBuilder: HKWorkoutBuilder?
     @State private var workoutActivity: Activity<WorkoutActivityAttributes>?
@@ -207,40 +208,83 @@ struct WorkoutTrackingView: View {
     // MARK: - Active Tracking
 
     private var activeTrackingContent: some View {
-        VStack(spacing: 40) {
-            HStack {
-                Button(action: { dismiss() }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "chevron.left")
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                        Text("Dashboard")
-                            .font(.body)
-                            .fontWeight(.medium)
+        // The two controls a user can never lose access to — the back button and,
+        // critically, the Stop Workout button — are PINNED outside the scroll area
+        // so they're always on screen regardless of device size or Dynamic Type.
+        // Only the metrics in the middle scroll if they can't all fit, so nobody
+        // ever has to scroll to find how to end their workout.
+        GeometryReader { screen in
+            VStack(spacing: 0) {
+                HStack {
+                    Button(action: { dismiss() }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.left")
+                                .font(.title3)
+                                .fontWeight(.semibold)
+                            Text("Dashboard")
+                                .font(.body)
+                                .fontWeight(.medium)
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
                     }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
+                    Spacer()
                 }
-                Spacer()
+                .padding(.top, 16)
+
+                // Scrollable metrics. The inner stack is pinned to at least the
+                // viewport height (measured below) so the metrics stay vertically
+                // centered when they fit, but collapse the Spacers and scroll when
+                // they don't — without ever pushing the Stop button off-screen.
+                // Spacing and ring size adapt to the screen height so compact
+                // devices fit without scrolling while large ones keep the airy look.
+                ScrollView {
+                    VStack(spacing: metricSpacing(for: screen.size.height)) {
+                        Spacer(minLength: 0)
+
+                        distanceDisplay
+
+                        progressRing(diameter: ringDiameter(for: screen.size.height))
+
+                        timeDisplay
+
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: trackingMetricsHeight)
+                    // Keep scrolled content from butting up against the pinned button.
+                    .padding(.bottom, 8)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { trackingMetricsHeight = geo.size.height }
+                            .onChange(of: geo.size.height) { _, newValue in
+                                trackingMetricsHeight = newValue
+                            }
+                    }
+                )
+
+                stopButton
             }
-            .padding(.top, 16)
-
-            Spacer()
-
-            distanceDisplay
-
-            progressRing
-
-            timeDisplay
-
-            Spacer()
-
-            stopButton
         }
         .opacity(showCompletion || showPreviousProgress ? 0 : 1)
         .overlay(previousProgressOverlay)
         .overlay(goalCompletionOverlay)
+    }
+
+    /// Vertical spacing between the metric blocks, tightened on shorter screens.
+    private func metricSpacing(for screenHeight: CGFloat) -> CGFloat {
+        guard screenHeight > 0 else { return 40 }
+        return screenHeight < 700 ? 24 : 40
+    }
+
+    /// Progress-ring diameter, scaled to the screen so it shrinks on small devices
+    /// (down to 150pt) and caps at the original 200pt on larger ones.
+    private func ringDiameter(for screenHeight: CGFloat) -> CGFloat {
+        guard screenHeight > 0 else { return 200 }
+        return min(200, max(150, screenHeight * 0.26))
     }
 
     // MARK: - Tracking Sub-Views
@@ -274,11 +318,11 @@ struct WorkoutTrackingView: View {
         }
     }
 
-    private var progressRing: some View {
+    private func progressRing(diameter: CGFloat) -> some View {
         ZStack {
             Circle()
                 .stroke(Color.white.opacity(0.2), lineWidth: 12)
-                .frame(width: 200, height: 200)
+                .frame(width: diameter, height: diameter)
 
             Circle()
                 .trim(from: 0, to: progress)
@@ -290,7 +334,7 @@ struct WorkoutTrackingView: View {
                     ),
                     style: StrokeStyle(lineWidth: 12, lineCap: .round)
                 )
-                .frame(width: 200, height: 200)
+                .frame(width: diameter, height: diameter)
                 .rotationEffect(.degrees(-90))
                 .animation(.easeOut(duration: 0.5), value: progress)
 
