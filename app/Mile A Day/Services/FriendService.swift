@@ -9,6 +9,10 @@ class FriendService: ObservableObject {
     @Published var friends: [BackendUser] = []
     @Published var friendRequests: [BackendUser] = []
     @Published var sentRequests: [BackendUser] = []
+    /// Today-status (completed mile, miles, nudged) per friend id. Lives here —
+    /// not in view @State — so every refresh trigger (app foreground, tab switch,
+    /// push, pull-to-refresh) updates the same data all friend rows read.
+    @Published var nudgeStatuses: [String: NudgeStatusResponse] = [:]
     @Published var isLoading = false
     @Published var errorMessage: String?
     
@@ -343,7 +347,7 @@ class FriendService: ObservableObject {
     func refreshAllData() async {
         isLoading = true
         errorMessage = nil
-        
+
         do {
             // Run all operations concurrently
             try await withThrowingTaskGroup(of: Void.self) { group in
@@ -356,16 +360,38 @@ class FriendService: ObservableObject {
                 group.addTask {
                     try await self.loadSentRequests()
                 }
-                
+
                 // Wait for all tasks to complete
                 for try await _ in group {}
             }
-            
+
+            // Nudge statuses need the fresh friend list, so fetch them after
+            // the group. Without this, friend rows showed stale "Nudge"/progress
+            // state until the Friends view's own one-shot task happened to run.
+            await refreshNudgeStatuses()
+
+        } catch is CancellationError {
+            // The hosting view was torn down mid-refresh (e.g. pull-to-refresh
+            // interrupted). Keep existing data; don't surface an error.
         } catch {
             errorMessage = error.localizedDescription
         }
-        
+
         isLoading = false
+    }
+
+    /// Re-fetch today-status for all current friends into `nudgeStatuses`.
+    func refreshNudgeStatuses() async {
+        let friendIds = friends.map { $0.user_id }
+        guard !friendIds.isEmpty else {
+            nudgeStatuses = [:]
+            return
+        }
+        do {
+            nudgeStatuses = try await checkNudgeStatusBatch(friendIds: friendIds)
+        } catch {
+            print("[FriendService] ❌ refreshNudgeStatuses failed: \(error)")
+        }
     }
     
     /// Get current user ID from UserDefaults
