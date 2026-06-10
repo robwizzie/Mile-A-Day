@@ -25,7 +25,10 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        self.todayChallenge = nil
+        // Restore the last server snapshot so the dashboard has a challenge to show
+        // immediately (and offline) instead of a loading placeholder until the
+        // network round-trip completes.
+        loadTodaySnapshot()
     }
 
     // MARK: - ChallengeServiceProtocol (sync)
@@ -78,7 +81,9 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
     // MARK: - Async refreshers
 
     /// Fetch today's challenge + progress + completion status for the given user.
-    func refreshToday(userId: String) async {
+    /// Transient failures (timeouts, flaky connections) are retried twice with
+    /// backoff so a single dropped request doesn't strand the dashboard card.
+    func refreshToday(userId: String, attempt: Int = 0) async {
         do {
             let response: TodayResponseDTO = try await APIClient.fancyFetch(
                 endpoint: "/users/\(userId)/challenges/today",
@@ -97,7 +102,11 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
                 NotificationCenter.default.post(name: ChallengeService.changedNotification, object: nil)
             }
         } catch {
-            print("[RemoteChallengeService] refreshToday failed: \(error)")
+            print("[RemoteChallengeService] refreshToday failed (attempt \(attempt + 1)): \(error)")
+            if attempt < 2 {
+                try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 2_000_000_000)
+                await refreshToday(userId: userId, attempt: attempt + 1)
+            }
         }
     }
 
@@ -153,6 +162,30 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         if let data = try? encoder.encode(response) {
             defaults.set(data, forKey: todayKey)
         }
+    }
+
+    /// Restore the last `/challenges/today` response, but only if it's still for
+    /// today's local date — yesterday's challenge must never masquerade as today's.
+    private func loadTodaySnapshot() {
+        guard let data = defaults.data(forKey: todayKey) else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let response = try? decoder.decode(TodayResponseDTO.self, from: data),
+              response.localDate == Self.currentLocalDateString() else { return }
+        todayChallenge = response.challenge.toDailyChallenge()
+        todayProgress = response.progress
+        todayCompleted = response.completed
+        todayLocalDate = response.localDate
+        tomorrowChallenge = response.tomorrowChallenge?.toDailyChallenge()
+        tomorrowLocalDate = response.tomorrowLocalDate
+    }
+
+    private static func currentLocalDateString() -> String {
+        let fmt = DateFormatter()
+        fmt.calendar = Calendar(identifier: .gregorian)
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        return fmt.string(from: Date())
     }
 
     private static func parseYmd(_ s: String) -> Date? {
