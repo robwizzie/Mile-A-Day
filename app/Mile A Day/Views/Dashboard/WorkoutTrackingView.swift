@@ -34,6 +34,7 @@ struct WorkoutTrackingView: View {
     @State private var showEndWorkoutError = false // Show error alert when end fails
     @State private var endWorkoutErrorMessage = "" // Error message for end workout failure
     @State private var endWorkoutTimeoutTask: DispatchWorkItem? // Timeout for end workout flow
+    @State private var trackingMetricsHeight: CGFloat = 0 // Measured height of the scrollable metrics area
     @State private var workoutSession: HKWorkoutSession?
     @State private var workoutBuilder: HKWorkoutBuilder?
     @State private var workoutActivity: Activity<WorkoutActivityAttributes>?
@@ -207,33 +208,36 @@ struct WorkoutTrackingView: View {
     // MARK: - Active Tracking
 
     private var activeTrackingContent: some View {
-        // Wrap the tracking UI in a ScrollView so every element — most importantly
-        // the Stop Workout button — stays reachable regardless of screen size or
-        // Dynamic Type. The inner stack is pinned to at least the available height,
-        // so on roomy screens it keeps the spread-out look (Spacers expand), but
-        // when the content is taller than the screen the Spacers collapse and the
-        // whole thing scrolls instead of clipping the button off-screen.
-        GeometryReader { proxy in
+        // The two controls a user can never lose access to — the back button and,
+        // critically, the Stop Workout button — are PINNED outside the scroll area
+        // so they're always on screen regardless of device size or Dynamic Type.
+        // Only the metrics in the middle scroll if they can't all fit, so nobody
+        // ever has to scroll to find how to end their workout.
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: { dismiss() }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Text("Dashboard")
+                            .font(.body)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                }
+                Spacer()
+            }
+            .padding(.top, 16)
+
+            // Scrollable metrics. The inner stack is pinned to at least the
+            // viewport height (measured below) so the metrics stay vertically
+            // centered when they fit, but collapse the Spacers and scroll when
+            // they don't — without ever pushing the Stop button off-screen.
             ScrollView {
                 VStack(spacing: 40) {
-                    HStack {
-                        Button(action: { dismiss() }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "chevron.left")
-                                    .font(.title3)
-                                    .fontWeight(.semibold)
-                                Text("Dashboard")
-                                    .font(.body)
-                                    .fontWeight(.medium)
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 12)
-                        }
-                        Spacer()
-                    }
-                    .padding(.top, 16)
-
                     Spacer(minLength: 0)
 
                     distanceDisplay
@@ -243,12 +247,21 @@ struct WorkoutTrackingView: View {
                     timeDisplay
 
                     Spacer(minLength: 0)
-
-                    stopButton
                 }
-                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                .frame(maxWidth: .infinity, minHeight: trackingMetricsHeight)
             }
             .scrollBounceBehavior(.basedOnSize)
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { trackingMetricsHeight = geo.size.height }
+                        .onChange(of: geo.size.height) { _, newValue in
+                            trackingMetricsHeight = newValue
+                        }
+                }
+            )
+
+            stopButton
         }
         .opacity(showCompletion || showPreviousProgress ? 0 : 1)
         .overlay(previousProgressOverlay)
