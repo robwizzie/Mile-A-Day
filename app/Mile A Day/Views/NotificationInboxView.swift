@@ -94,18 +94,11 @@ struct NotificationInboxView: View {
                     }
                 }
             }
-            if unreadCount > 0 {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Read All") {
-                        markAllRead()
-                    }
-                    .foregroundColor(MADTheme.Colors.madRed)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                }
-            }
         }
         .task {
             await loadNotifications()
+            // Opening the inbox counts as reading — no "Read All" button needed.
+            autoMarkAllRead()
         }
         .refreshable {
             await loadNotifications()
@@ -818,24 +811,15 @@ struct NotificationInboxView: View {
         }
     }
 
-    private func markAllRead() {
+    /// Opening the inbox counts as reading everything: clear the server-side
+    /// unread state and the badge immediately, but leave this session's local
+    /// `is_read` flags untouched so freshly-arrived rows keep their "new"
+    /// highlight while the user is actually looking at them.
+    private func autoMarkAllRead() {
+        guard unreadCount > 0 else { return }
+        unreadCount = 0
         Task {
             try? await friendService.markAllNotificationsRead()
-            await MainActor.run {
-                notifications = notifications.map { n in
-                    InAppNotification(
-                        id: n.id, title: n.title, body: n.body,
-                        type: n.type, data: n.data, is_read: true,
-                        created_at: n.created_at,
-                        hype_target_user_id: n.hype_target_user_id,
-                        hype_context_type: n.hype_context_type,
-                        hype_context_id: n.hype_context_id,
-                        hype_context_label: n.hype_context_label,
-                        is_hyped: n.is_hyped
-                    )
-                }
-                unreadCount = 0
-            }
         }
     }
 }

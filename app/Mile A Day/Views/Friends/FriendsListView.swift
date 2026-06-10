@@ -135,12 +135,16 @@ struct FriendsListView: View {
     // MARK: - Custom header (title + search + requests-with-badge)
 
     private var friendsHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
+        // Matches MADTabHeader: center-aligned with a 26pt title so the icon
+        // buttons sit level with the text on every tab.
+        HStack(alignment: .center) {
             Text("Friends")
-                .font(.system(size: 30, weight: .heavy, design: .rounded))
+                .font(.system(size: 26, weight: .heavy, design: .rounded))
                 .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
 
-            Spacer()
+            Spacer(minLength: MADTheme.Spacing.sm)
 
             HStack(spacing: 8) {
                 headerCircleButton(systemImage: "magnifyingglass") {
