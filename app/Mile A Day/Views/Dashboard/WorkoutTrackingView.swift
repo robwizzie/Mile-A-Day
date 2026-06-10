@@ -207,36 +207,48 @@ struct WorkoutTrackingView: View {
     // MARK: - Active Tracking
 
     private var activeTrackingContent: some View {
-        VStack(spacing: 40) {
-            HStack {
-                Button(action: { dismiss() }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "chevron.left")
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                        Text("Dashboard")
-                            .font(.body)
-                            .fontWeight(.medium)
+        // Wrap the tracking UI in a ScrollView so every element — most importantly
+        // the Stop Workout button — stays reachable regardless of screen size or
+        // Dynamic Type. The inner stack is pinned to at least the available height,
+        // so on roomy screens it keeps the spread-out look (Spacers expand), but
+        // when the content is taller than the screen the Spacers collapse and the
+        // whole thing scrolls instead of clipping the button off-screen.
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 40) {
+                    HStack {
+                        Button(action: { dismiss() }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "chevron.left")
+                                    .font(.title3)
+                                    .fontWeight(.semibold)
+                                Text("Dashboard")
+                                    .font(.body)
+                                    .fontWeight(.medium)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                        }
+                        Spacer()
                     }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
+                    .padding(.top, 16)
+
+                    Spacer(minLength: 0)
+
+                    distanceDisplay
+
+                    progressRing
+
+                    timeDisplay
+
+                    Spacer(minLength: 0)
+
+                    stopButton
                 }
-                Spacer()
+                .frame(maxWidth: .infinity, minHeight: proxy.size.height)
             }
-            .padding(.top, 16)
-
-            Spacer()
-
-            distanceDisplay
-
-            progressRing
-
-            timeDisplay
-
-            Spacer()
-
-            stopButton
+            .scrollBounceBehavior(.basedOnSize)
         }
         .opacity(showCompletion || showPreviousProgress ? 0 : 1)
         .overlay(previousProgressOverlay)
