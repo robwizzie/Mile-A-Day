@@ -68,6 +68,21 @@ class UserManager: ObservableObject {
                 await ChallengeService.refresh(userId: userId)
             }
         }
+
+        // Initial historical sync finished: absorb every retroactively-awarded
+        // badge into local state WITHOUT celebrations, then arm celebrations
+        // for badges earned from here on.
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name("MAD_InitialSyncCompleted"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task {
+                await self.refreshBadgesFromServer()
+                await MainActor.run { self.hasCompletedInitialBadgeSync = true }
+            }
+        }
         #endif
     }
     
@@ -437,26 +452,27 @@ class UserManager: ObservableObject {
         do {
             let dtos = try await BadgeAPIService.fetchUserBadges(userId: userId)
             let fetched = dtos.map { $0.toBadge() }
-            let existingIds = Set(currentUser.badges.map { $0.id })
 
             await MainActor.run {
+                // Capture inside MainActor.run so concurrent refreshes can't
+                // diff against a stale badge list and re-celebrate everything.
+                let existingIds = Set(currentUser.badges.map { $0.id })
                 currentUser.badges = fetched
                 saveUserData()
 
-                // First sync after sign-up/install: avoid spamming a celebration
-                // for every retroactively-awarded badge. Show one summary instead.
-                let isInitialSync = !hasCompletedInitialBadgeSync
-                if isInitialSync {
-                    hasCompletedInitialBadgeSync = true
-                    if !fetched.isEmpty {
-                        let count = fetched.count
-                        CelebrationManager.shared.addCelebration(
-                            .milestone(
-                                title: "Badges Unlocked!",
-                                description: "You've earned \(count) badge\(count == 1 ? "" : "s"). Check out the Badges tab to see them all.",
-                                icon: "rosette"
-                            )
-                        )
+                // Badges awarded retroactively during initial setup are absorbed
+                // silently — no celebrations. The flag is normally flipped by the
+                // MAD_InitialSyncCompleted handler (after the historical workout
+                // upload finishes), never mid-sync, so per-batch refreshes during
+                // the initial sync can't leak individual unlock popups.
+                if !hasCompletedInitialBadgeSync {
+                    // Fallback for installs whose initial sync already finished in
+                    // an earlier session (so the completion notification will never
+                    // fire): absorb the current badge set silently and arm
+                    // celebrations for badges earned from here on.
+                    let sync = WorkoutSyncService.shared
+                    if !sync.isFirstTimeSync(), !sync.isInitialSyncIncomplete(), !sync.isSyncing {
+                        hasCompletedInitialBadgeSync = true
                     }
                     return
                 }
@@ -490,9 +506,12 @@ class UserManager: ObservableObject {
     /// retroactively flooded with year-1/2/3 animations on first launch with this feature.
     @AppStorage("lastCelebratedYearMilestoneStreak") private var lastCelebratedYearMilestoneStreak: Int = -1
 
-    /// Set once after the first successful server badge fetch for this install.
-    /// Used to suppress the flood of per-badge celebrations on fresh sign-up —
-    /// a single summary popup is shown instead.
+    /// Armed only AFTER the initial historical workout sync completes (via the
+    /// MAD_InitialSyncCompleted handler in init). While false, refreshBadgesFromServer
+    /// absorbs fetched badges silently — badges retroactively awarded during initial
+    /// setup must never show unlock celebrations. Do NOT set this from the fetch
+    /// path itself: an early fetch (e.g. MainTabView's retroactive check) racing the
+    /// batched initial upload is exactly what caused the one-by-one badge flood.
     @AppStorage("hasCompletedInitialBadgeSync") private var hasCompletedInitialBadgeSync: Bool = false
 
     /// Returns true if a yearly celebration was queued.

@@ -108,6 +108,16 @@ class WorkoutSyncService: ObservableObject {
         UserDefaults.standard.removeObject(forKey: initialSyncStartedKey)
     }
 
+    /// Signals that the initial (historical) sync finished. UserManager uses this
+    /// to absorb retroactively-awarded badges WITHOUT celebrations — only badges
+    /// earned after this point get unlock popups.
+    private func postInitialSyncCompleted() {
+        NotificationCenter.default.post(
+            name: Notification.Name("MAD_InitialSyncCompleted"),
+            object: nil
+        )
+    }
+
     // MARK: - Background Initial Sync
 
     /// Fire-and-forget initial sync that updates `currentProgress` as it runs.
@@ -263,6 +273,7 @@ class WorkoutSyncService: ObservableObject {
                     updateLastSyncDate(latest.endDate)
                 }
                 clearInitialSyncStarted()
+                postInitialSyncCompleted()
                 progress = SyncProgress(
                     phase: .complete,
                     fetchedCount: fetchedWorkouts.count,
@@ -335,6 +346,7 @@ class WorkoutSyncService: ObservableObject {
                 updateLastSyncDate(latestWorkout.endDate)
             }
             clearInitialSyncStarted()
+            postInitialSyncCompleted()
 
             // Complete
             progress = SyncProgress(
