@@ -1,5 +1,5 @@
 import { PostgresService } from './DbService.js';
-import { hasUnlimitedActions } from './privilegedUsers.js';
+import { hasUnlimitedHypes } from './privilegedUsers.js';
 import { START_OF_TODAY_ET_SQL, START_OF_TOMORROW_ET_SQL } from './dailyResetTime.js';
 
 const db = PostgresService.getInstance();
@@ -25,7 +25,7 @@ export async function getDailyHypeCount(senderId: string): Promise<number> {
  * Privileged users bypass the cap.
  */
 export async function canHype(senderId: string): Promise<boolean> {
-	if (hasUnlimitedActions(senderId)) return true;
+	if (await hasUnlimitedHypes(senderId)) return true;
 	const count = await getDailyHypeCount(senderId);
 	return count < HYPE_DAILY_LIMIT;
 }
@@ -50,7 +50,7 @@ export async function logHypeIfUnderLimit(
 	targetId: string,
 	context?: HypeContext
 ): Promise<{ id: string } | null> {
-	const unlimited = hasUnlimitedActions(senderId);
+	const unlimited = await hasUnlimitedHypes(senderId);
 
 	if (context) {
 		const sql = unlimited
@@ -113,7 +113,7 @@ export async function hasHypedContext(
  * Returns null if they have spare capacity right now.
  */
 export async function getHypeResetsAt(senderId: string): Promise<string | null> {
-	if (hasUnlimitedActions(senderId)) return null;
+	if (await hasUnlimitedHypes(senderId)) return null;
 	const count = await getDailyHypeCount(senderId);
 	if (count < HYPE_DAILY_LIMIT) return null;
 
