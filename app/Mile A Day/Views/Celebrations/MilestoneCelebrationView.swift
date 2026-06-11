@@ -122,6 +122,8 @@ struct MilestoneCelebrationView: View {
                             .font(.system(size: 38, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                             .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.6)
                             .shadow(color: .black.opacity(0.3), radius: 10, x: 0, y: 5)
                             .padding(.horizontal)
 
@@ -130,6 +132,7 @@ struct MilestoneCelebrationView: View {
                             .font(.system(size: 18, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.9))
                             .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, MADTheme.Spacing.xl)
                     }
                     .transition(.scale.combined(with: .opacity))
@@ -166,7 +169,7 @@ struct MilestoneCelebrationView: View {
 
                 // Safe area spacing for bottom (tab bar + home indicator)
                 Spacer()
-                    .frame(height: 100)
+                    .frame(height: 56)
             }
         }
         .ignoresSafeArea()

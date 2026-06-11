@@ -62,12 +62,14 @@ extension HealthKitManager {
             self.updateCalendarWithTimezoneCorrectedData(correctedWorkoutsByDay: correctedWorkoutsByDay)
         }
 
-        // Calculate current streak
+        // Calculate current streak. Set lookup keeps the walk-back O(1) per
+        // day — Array.contains made a 365-day streak do 365 linear scans.
+        let qualifyingDaySet = Set(daysWithQualifyingWorkouts)
         var currentStreak = 0
         var checkDate = today
 
         // Check if today has qualifying workouts
-        if daysWithQualifyingWorkouts.contains(today) {
+        if qualifyingDaySet.contains(today) {
             currentStreak += 1
         }
 
@@ -75,7 +77,7 @@ extension HealthKitManager {
         checkDate = calendar.date(byAdding: .day, value: -1, to: today)!
 
         while true {
-            if daysWithQualifyingWorkouts.contains(checkDate) {
+            if qualifyingDaySet.contains(checkDate) {
                 currentStreak += 1
                 checkDate = calendar.date(byAdding: .day, value: -1, to: checkDate)!
             } else {

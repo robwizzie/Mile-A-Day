@@ -71,7 +71,7 @@ struct GoalCompletedCelebrationView: View {
 
                             // Flame
                             FlameAnimationView(isIgnited: $showFlame, size: 120)
-                                .frame(height: 220)
+                                .frame(height: min(220, geo.size.height * 0.30))
                                 .opacity(showFlame ? 1.0 : 0.0)
 
                             // Weekday calendar
@@ -97,7 +97,7 @@ struct GoalCompletedCelebrationView: View {
 
                             Spacer(minLength: 20)
                         }
-                        .frame(minHeight: geo.size.height * 0.65)
+                        .frame(minHeight: geo.size.height * (geo.size.height < 700 ? 0.52 : 0.65))
 
                         // BELOW-FOLD: stats, motivation, buttons
                         VStack(spacing: 16) {
@@ -127,7 +127,7 @@ struct GoalCompletedCelebrationView: View {
                                     .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
 
-                            Spacer(minLength: 120)
+                            Spacer(minLength: 40)
                         }
                         .padding(.horizontal, 24)
                         .padding(.top, 8)
@@ -266,11 +266,14 @@ struct GoalCompletedCelebrationView: View {
                         .foregroundColor(.white)
                         .contentTransition(.numericText())
                         .shadow(color: MADTheme.Colors.madRed.opacity(0.5), radius: 8, x: 0, y: 4)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
 
                     Text("day streak!")
                         .font(.system(size: 22, weight: .bold, design: .rounded))
                         .foregroundColor(.white.opacity(0.9))
                         .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                        .minimumScaleFactor(0.7)
                 }
                 .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
@@ -353,6 +356,8 @@ struct GoalCompletedCelebrationView: View {
                 Text(value)
                     .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 Text(unit)
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.6))
@@ -427,11 +432,15 @@ struct GoalCompletedCelebrationView: View {
                 .font(.system(size: 22, weight: .black, design: .rounded))
                 .tracking(2)
                 .foregroundColor(.white)
+                .lineLimit(2)
+                .minimumScaleFactor(0.7)
+                .multilineTextAlignment(.center)
 
             Text(milestone.majorSubtitle)
                 .font(.system(size: 15, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.85))
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
@@ -522,6 +531,7 @@ struct GoalCompletedCelebrationView: View {
                 .font(.system(size: 14, weight: .regular, design: .rounded))
                 .foregroundColor(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
         }
         .padding(.horizontal, 8)

@@ -120,6 +120,9 @@ struct MainTabView: View {
                 selectedTab = tab
             }
         }
+        .onReceive(competitionService.$competitions) { competitions in
+            syncCompetitionWidget(competitions)
+        }
         .onChange(of: selectedTab) { _, newTab in
             // TabView keeps tab views alive, so their onAppear/.task don't re-fire
             // on tab switches — without this, Compete/Friends showed whatever was
@@ -244,6 +247,56 @@ struct MainTabView: View {
     private func syncWidgetData() {
         WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles)
         WidgetDataStore.save(streak: userManager.currentUser.streak)
+    }
+
+    /// Mirror the most urgent active competition into the App Group for the
+    /// Competition widget — same focus/sort logic as the dashboard cards.
+    private func syncCompetitionWidget(_ competitions: [Competition]) {
+        let active = competitions.filter { $0.status == .active }
+        guard !active.isEmpty else {
+            WidgetDataStore.clearCompetitionSummary()
+            return
+        }
+
+        let userId = UserDefaults.standard.string(forKey: "backendUserId")
+        guard let top = active.min(by: { a, b in
+            TodayFocus.compute(for: a, currentUserId: userId).level.sortKey
+                < TodayFocus.compute(for: b, currentUserId: userId).level.sortKey
+        }) else { return }
+
+        let focus = TodayFocus.compute(for: top, currentUserId: userId)
+
+        let ranked = top.users
+            .filter { $0.invite_status == .accepted }
+            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        var rankText = ""
+        if let uid = userId, let index = ranked.firstIndex(where: { $0.user_id == uid }) {
+            let rank = index + 1
+            let ordinal: String
+            switch rank {
+            case 1: ordinal = "1st"
+            case 2: ordinal = "2nd"
+            case 3: ordinal = "3rd"
+            default: ordinal = "\(rank)th"
+            }
+            rankText = "\(ordinal) of \(ranked.count)"
+        }
+
+        let urgency: String
+        switch focus.level {
+        case .urgent: urgency = "urgent"
+        case .behind: urgency = "behind"
+        case .neutral: urgency = "neutral"
+        case .winning: urgency = "winning"
+        }
+
+        WidgetDataStore.save(
+            competitionName: top.competition_name,
+            pill: focus.pill,
+            detail: focus.detail,
+            rankText: rankText,
+            urgency: urgency
+        )
     }
 }
 

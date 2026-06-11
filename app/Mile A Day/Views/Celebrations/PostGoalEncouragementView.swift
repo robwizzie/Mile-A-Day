@@ -49,12 +49,12 @@ struct PostGoalEncouragementView: View {
                                 ZStack {
                                     // Glow behind star
                                     Image(systemName: "star.circle.fill")
-                                        .font(.system(size: 90))
+                                        .font(.system(size: geo.size.height < 700 ? 72 : 90))
                                         .foregroundStyle(.orange.opacity(0.4))
                                         .blur(radius: 12)
 
                                     Image(systemName: "star.circle.fill")
-                                        .font(.system(size: 90))
+                                        .font(.system(size: geo.size.height < 700 ? 72 : 90))
                                         .foregroundStyle(
                                             LinearGradient(
                                                 colors: [.yellow, .orange],
@@ -74,6 +74,8 @@ struct PostGoalEncouragementView: View {
                                     Text(String(format: "%.2f", stats.todaysDistance))
                                         .font(.system(size: 56, weight: .black, design: .rounded))
                                         .foregroundColor(.white)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.5)
                                     Text("mi today")
                                         .font(.system(size: 20, weight: .bold, design: .rounded))
                                         .foregroundColor(.white.opacity(0.8))
@@ -90,11 +92,14 @@ struct PostGoalEncouragementView: View {
                                         .font(.system(size: 34, weight: .black, design: .rounded))
                                         .foregroundColor(.white)
                                         .shadow(color: .orange.opacity(0.3), radius: 8)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.6)
 
                                     Text("You're going above and beyond!")
                                         .font(.system(size: 17, weight: .medium, design: .rounded))
                                         .foregroundColor(.white.opacity(0.8))
                                         .multilineTextAlignment(.center)
+                                        .fixedSize(horizontal: false, vertical: true)
 
                                     if stats.percentOver > 0 {
                                         Text("+\(Int(stats.percentOver))% over goal")
@@ -118,7 +123,7 @@ struct PostGoalEncouragementView: View {
 
                             Spacer(minLength: 20)
                         }
-                        .frame(minHeight: geo.size.height * 0.55)
+                        .frame(minHeight: geo.size.height * (geo.size.height < 700 ? 0.45 : 0.55))
 
                         // BELOW-FOLD: workout details + button
                         VStack(spacing: 16) {
@@ -172,7 +177,7 @@ struct PostGoalEncouragementView: View {
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
 
-                            Spacer(minLength: 120)
+                            Spacer(minLength: 40)
                         }
                         .padding(.horizontal, 24)
                         .padding(.top, 8)
@@ -269,6 +274,8 @@ struct PostGoalEncouragementView: View {
             Text(value)
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
             Text(label)
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.5))

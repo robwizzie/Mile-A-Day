@@ -8,6 +8,8 @@ struct StreakCountEntry: TimelineEntry {
     let isGoalCompleted: Bool
     let isAtRisk: Bool
     let timeUntilReset: String?
+    /// Sun–Sat goal-completion flags for the current week (empty when unknown).
+    var weekCompletions: [Bool] = []
 }
 
 struct StreakCountProvider: TimelineProvider {
@@ -63,14 +65,15 @@ struct StreakCountProvider: TimelineProvider {
         let timeUntilReset = calculateTimeUntilReset(isCompleted: isGoalCompleted)
                 
         let entry = StreakCountEntry(
-            date: Date(), 
-            streak: streak, 
-            liveProgress: progress, 
+            date: Date(),
+            streak: streak,
+            liveProgress: progress,
             isGoalCompleted: isGoalCompleted,
             isAtRisk: isAtRisk,
-            timeUntilReset: timeUntilReset
+            timeUntilReset: timeUntilReset,
+            weekCompletions: WidgetDataStore.loadWeekCompletions()
         )
-        
+
         // Refresh more frequently if streak is at risk
         let refreshInterval: TimeInterval = isAtRisk ? 1800 : 3600 // 30 minutes if at risk, 1 hour otherwise
 
@@ -119,6 +122,8 @@ struct StreakCountWidgetEntryView: View {
                     RectangularStreakView(entry: entry)
                 case .accessoryInline:
                     InlineStreakView(entry: entry)
+                case .systemMedium:
+                    MediumStreakView(entry: entry)
                 default:
                     HomeScreenStreakView(entry: entry)
                 }
@@ -127,8 +132,113 @@ struct StreakCountWidgetEntryView: View {
             }
         }
     }
-    
+
     @Environment(\.widgetFamily) var widgetFamily
+}
+
+// MARK: - Medium (flame + streak on the left, week dots on the right)
+
+struct MediumStreakView: View {
+    let entry: StreakCountEntry
+
+    private static let dayLetters = ["S", "M", "T", "W", "T", "F", "S"]
+
+    private var todayIndex: Int {
+        Calendar.current.component(.weekday, from: entry.date) - 1
+    }
+
+    var body: some View {
+        HStack(spacing: 16) {
+            // Streak block
+            VStack(spacing: 4) {
+                ZStack {
+                    Circle()
+                        .stroke(Color.gray.opacity(0.2), lineWidth: 4)
+                        .frame(width: 72, height: 72)
+
+                    Circle()
+                        .trim(from: 0, to: entry.liveProgress)
+                        .stroke(entry.streakColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                        .frame(width: 72, height: 72)
+                        .rotationEffect(.degrees(-90))
+
+                    VStack(spacing: 0) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(entry.streakColor)
+                        Text("\(entry.streak)")
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundColor(entry.streakColor)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                    }
+                }
+
+                Text(entry.streak == 1 ? "day streak" : "day streak")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundColor(.secondary)
+            }
+
+            // Week dots
+            VStack(alignment: .leading, spacing: 8) {
+                Text(entry.isGoalCompleted ? "Mile done — streak safe" : "This week")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(entry.isGoalCompleted ? .green : .primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                HStack(spacing: 6) {
+                    ForEach(0..<7, id: \.self) { index in
+                        let completed = index < entry.weekCompletions.count ? entry.weekCompletions[index] : false
+                        let isToday = index == todayIndex
+                        let isFuture = index > todayIndex
+
+                        VStack(spacing: 3) {
+                            Text(Self.dayLetters[index])
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundColor(.secondary)
+
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        completed ? Color.green.opacity(0.85) :
+                                        isFuture ? Color.gray.opacity(0.12) :
+                                        Color.gray.opacity(0.25)
+                                    )
+                                    .frame(width: 20, height: 20)
+
+                                if completed {
+                                    Image(systemName: "figure.run")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
+
+                                if isToday {
+                                    Circle()
+                                        .stroke(entry.streakColor, lineWidth: 1.5)
+                                        .frame(width: 24, height: 24)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
+                    HStack(spacing: 3) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 8))
+                        Text(timeRemaining)
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .lineLimit(1)
+                    }
+                    .foregroundColor(.red)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+    }
 }
 
 // MARK: - Enhanced Widget Views Matching Dashboard
@@ -354,7 +464,7 @@ struct StreakCountWidget: Widget {
         }
         .configurationDisplayName("Streak Count")
         .description("See your current streak with live progress updates.")
-        .supportedFamilies([.systemSmall, .accessoryCircular, .accessoryRectangular, .accessoryInline])
+        .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline])
     }
 }
 

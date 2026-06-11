@@ -64,6 +64,16 @@ struct DashboardView: View {
     /// Navigation state for badges view from celebration
     @State private var navigateToBadgesFromCelebration = false
 
+    /// First-run spotlight tour state. The flag persists so the tour only
+    /// auto-plays once; users can revisit the guide from Help & Support.
+    @AppStorage("hasSeenDashboardTour") private var hasSeenDashboardTour = false
+    /// Shared with InstructionsBanner. Existing users (who already dismissed
+    /// the banner) shouldn't get a first-run tour after an app update, and a
+    /// completed tour supersedes the banner.
+    @AppStorage("hasSeenInstructions") private var hasSeenInstructions = false
+    @State private var showDashboardTour = false
+    @State private var tourStep = 0
+
 
     /// Build goal completion stats for the celebration
     private func buildGoalCompletionStats() -> GoalCompletionStats {
@@ -271,6 +281,7 @@ struct DashboardView: View {
                 title: "Mile A Day",
                 actions: dashboardHeaderActions
             )
+            .tourAnchor(.actions)
 
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 0) {
@@ -294,6 +305,7 @@ struct DashboardView: View {
 
                     // Week view: user can toggle between chart and dots
                     weekViewSection
+                        .tourAnchor(.week)
                         .padding(.top, 8)
                         .padding(.bottom, 8)
 
@@ -313,6 +325,28 @@ struct DashboardView: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .background(MADTheme.Colors.appBackgroundGradient)
+        // First-run spotlight tour — resolves the tagged sections' bounds and
+        // dims everything else. Sits above dashboard content but below sheets.
+        .overlayPreferenceValue(DashboardTourAnchorKey.self) { anchors in
+            if showDashboardTour {
+                GeometryReader { proxy in
+                    DashboardTourOverlay(
+                        anchors: anchors,
+                        proxy: proxy,
+                        stepIndex: $tourStep
+                    ) {
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            showDashboardTour = false
+                        }
+                        hasSeenDashboardTour = true
+                        // The tour covers everything the banner says.
+                        hasSeenInstructions = true
+                    }
+                }
+                .transition(.opacity)
+                .zIndex(50)
+            }
+        }
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $showNotificationInbox) {
             NotificationInboxView(competitionService: competitionService) { newCount in
@@ -371,6 +405,22 @@ struct DashboardView: View {
                 hasActiveWorkout = active
                 if active {
                     showWorkoutView = true
+                }
+
+                // First-run tour: wait a beat for layout to settle, and stand
+                // down if a celebration or the workout tracker is on screen —
+                // the flag stays unset so the tour tries again next visit.
+                if !hasSeenDashboardTour && !hasSeenInstructions && healthManager.isAuthorized {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                        if !hasSeenDashboardTour,
+                           !celebrationManager.isShowingCelebration,
+                           !showWorkoutView {
+                            tourStep = 0
+                            withAnimation(.easeIn(duration: 0.3)) {
+                                showDashboardTour = true
+                            }
+                        }
+                    }
                 }
             }
             // Self-cleaning replacements for the old NotificationCenter.addObserver
@@ -464,9 +514,26 @@ struct DashboardView: View {
         let state = currentState
         WidgetDataStore.save(todayMiles: state.distance, goal: state.goal)
         WidgetDataStore.save(streak: userManager.currentUser.streak)
+        WidgetDataStore.save(weekCompletions: currentWeekCompletions())
+        // No blanket reloadAllTimelines() here: the store reloads the right
+        // widget kinds itself and skips no-op writes, which preserves the
+        // per-day widget reload budget iOS enforces.
+    }
 
-        // Force widget updates
-        WidgetCenter.shared.reloadAllTimelines()
+    /// Sun–Sat goal-completion flags for the current week, for the medium
+    /// streak widget's week-dots row.
+    private func currentWeekCompletions() -> [Bool] {
+        let calendar = Calendar.current
+        let today = Date()
+        let weekday = calendar.component(.weekday, from: today)
+        guard let startOfWeek = calendar.date(
+            byAdding: .day, value: -(weekday - 1), to: calendar.startOfDay(for: today)
+        ) else { return [] }
+
+        return (0..<7).map { offset in
+            guard let day = calendar.date(byAdding: .day, value: offset, to: startOfWeek) else { return false }
+            return healthManager.dailyMileGoals[calendar.startOfDay(for: day)] ?? false
+        }
     }
 
     private func applyHealthDataToUserManager() {
@@ -801,6 +868,7 @@ struct DashboardView: View {
             competitionInvitesSection
             instructionsSection
             todayProgressSection
+                .tourAnchor(.progress)
             // Cross-comp rivalries — surface "you're X behind Y in [comp]"
             // hints from every active competition so users see all their
             // The competitions dropdown (activeCompetitionSection) replaces
@@ -808,6 +876,7 @@ struct DashboardView: View {
             // surfaces its own focus signal, so a separate rivalries section
             // would just duplicate information.
             dailyChallengeSection
+                .tourAnchor(.challenge)
             friendActivitySection
             activeCompetitionSection
             stepsAndBadgesSection
