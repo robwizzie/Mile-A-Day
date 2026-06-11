@@ -120,6 +120,22 @@ struct MainTabView: View {
                 selectedTab = tab
             }
         }
+        .onChange(of: selectedTab) { _, newTab in
+            // TabView keeps tab views alive, so their onAppear/.task don't re-fire
+            // on tab switches — without this, Compete/Friends showed whatever was
+            // fetched at launch until the app was backgrounded or killed. These
+            // refreshes are silent: views keep content on screen while data swaps in.
+            Task {
+                switch newTab {
+                case 1:
+                    await competitionService.refreshAllData()
+                case 2:
+                    await friendService.refreshAllData()
+                default:
+                    break
+                }
+            }
+        }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 Task {

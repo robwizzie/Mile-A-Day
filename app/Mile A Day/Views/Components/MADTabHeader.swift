@@ -47,18 +47,26 @@ struct MADTabHeader: View {
     }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
+        // Center alignment: baseline-aligning the 38pt icon circles against the
+        // big title pushed the buttons below the title's visual line. Centering
+        // keeps title and buttons level at any text size.
+        HStack(alignment: .center) {
             Text(title)
-                .font(.system(size: 30, weight: .heavy, design: .rounded))
+                .font(.system(size: 26, weight: .heavy, design: .rounded))
                 .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
 
-            Spacer()
+            Spacer(minLength: MADTheme.Spacing.sm)
 
             HStack(spacing: 8) {
                 ForEach(actions) { action in
                     headerButton(action)
                 }
             }
+            // Buttons keep their intrinsic size; the title scales down first,
+            // so the two sides can never compress into each other or overlap.
+            .fixedSize()
         }
         .padding(.horizontal, MADTheme.Spacing.md)
         .padding(.top, MADTheme.Spacing.sm)

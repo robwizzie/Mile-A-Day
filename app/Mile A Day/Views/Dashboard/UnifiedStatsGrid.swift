@@ -12,6 +12,7 @@ struct UnifiedStatsGrid: View {
     @State private var statsData: (totalMiles: Double, mostMiles: Double, fastestPace: TimeInterval, streakDays: Int) = (0.0, 0.0, 0.0, 0)
     @State private var hasLoadedOnce = false
     @State private var isCalculating = false
+    @State private var recomputeInFlight = false
     @State private var showFastestPaceDetail = false
     @State private var showMostMilesDetail = false
     @State private var showTotalMilesDetail = false
@@ -336,13 +337,22 @@ struct UnifiedStatsGrid: View {
     }
 
     private func calculateCurrentStreakStats() {
-        // Show cached data immediately to avoid content shift
+        // Show cached data immediately — and treat it as loaded. Previously the
+        // cache was applied but isCalculating stayed true, so the cards hid the
+        // value behind a spinner until the HealthKit recompute (which can take
+        // many seconds) finished. Cached-then-corrected beats spinner-then-value.
         let cached = healthManager.cachedCurrentStreakStats
         if cached.streakDays > 0 && !hasLoadedOnce {
             statsData = cached
+            hasLoadedOnce = true
         }
 
         isCalculating = !hasLoadedOnce
+
+        // One recompute at a time — onAppear / retroactiveStreak / statsType
+        // changes can all fire this, and each recompute is expensive.
+        guard !recomputeInFlight else { return }
+        recomputeInFlight = true
 
         DispatchQueue.global(qos: .userInitiated).async {
             let stats = healthManager.calculateCurrentStreakStats()
@@ -351,6 +361,7 @@ struct UnifiedStatsGrid: View {
                 self.statsData = stats
                 self.isCalculating = false
                 self.hasLoadedOnce = true
+                self.recomputeInFlight = false
             }
         }
     }

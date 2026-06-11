@@ -164,7 +164,11 @@ struct CompetitionsListView: View {
     // MARK: - Competitions Tab
     private var competitionsTab: some View {
         Group {
-            if competitionService.isLoading {
+            // Skeletons only while we have nothing to show. Keying on isLoading
+            // alone swapped the live List out on every background refresh — which
+            // also cancelled pull-to-refresh mid-flight (the List hosting
+            // .refreshable was destroyed), leaving stale data until app restart.
+            if competitionService.competitions.isEmpty && !competitionService.hasLoadedOnce {
                 loadingView
             } else if competitionService.competitions.isEmpty {
                 CompetitionEmptyStateView(
@@ -474,7 +478,8 @@ struct CompetitionsListView: View {
     // MARK: - Invites Tab
     private var invitesTab: some View {
         Group {
-            if competitionService.isLoading {
+            // Same cold-start-only skeleton rule as competitionsTab.
+            if competitionService.invites.isEmpty && !competitionService.hasLoadedOnce {
                 loadingView
             } else if competitionService.invites.isEmpty {
                 CompetitionEmptyStateView(

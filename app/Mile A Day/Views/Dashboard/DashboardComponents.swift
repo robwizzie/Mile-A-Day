@@ -705,7 +705,10 @@ struct DailyChallengeCard: View {
                 placeholderCard
             }
         }
-        .task {
+        // task(id:) re-runs when backendUserId changes. A plain .task fires once on
+        // appear — if the profile hadn't loaded yet at that instant it bailed on the
+        // guard and never fetched, leaving the card on "Loading…" forever.
+        .task(id: userManager.currentUser.backendUserId) {
             guard let userId = userManager.currentUser.backendUserId else { return }
             await ChallengeService.refresh(userId: userId)
             refreshFromService()
@@ -714,6 +717,9 @@ struct DailyChallengeCard: View {
             refreshFromService()
         }
         .onAppear {
+            // Pick up any cached challenge state immediately (the service restores
+            // today's snapshot from UserDefaults) instead of waiting on the network.
+            refreshFromService()
             // Subtle pulse on the icon when not completed — draws the eye without being annoying.
             iconPulse = true
         }

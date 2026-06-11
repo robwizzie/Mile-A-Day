@@ -25,8 +25,10 @@ struct FriendsListView: View {
     @State private var showingUnfriendAlert = false
     @State private var userToUnfriend: BackendUser?
 
-    // Nudge state
-    @State private var nudgeStatuses: [String: NudgeStatusResponse] = [:]
+    // Nudge state. Statuses live on FriendService (published) so every refresh
+    // path — including app-foreground and tab-switch refreshes that don't go
+    // through this view — keeps the rows current.
+    private var nudgeStatuses: [String: NudgeStatusResponse] { friendService.nudgeStatuses }
     @State private var nudgingFriendId: String?
     @State private var nudgeFeedback: NudgeFeedback?
     @State private var bellShakeIds: Set<String> = []
@@ -108,8 +110,8 @@ struct FriendsListView: View {
             await loadMyRank()
         }
         .refreshable {
+            // refreshAllData re-fetches nudge statuses internally.
             await friendService.refreshAllData()
-            await loadNudgeStatuses()
             await loadMyRank()
         }
         .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
@@ -133,12 +135,16 @@ struct FriendsListView: View {
     // MARK: - Custom header (title + search + requests-with-badge)
 
     private var friendsHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
+        // Matches MADTabHeader: center-aligned with a 26pt title so the icon
+        // buttons sit level with the text on every tab.
+        HStack(alignment: .center) {
             Text("Friends")
-                .font(.system(size: 30, weight: .heavy, design: .rounded))
+                .font(.system(size: 26, weight: .heavy, design: .rounded))
                 .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
 
-            Spacer()
+            Spacer(minLength: MADTheme.Spacing.sm)
 
             HStack(spacing: 8) {
                 headerCircleButton(systemImage: "magnifyingglass") {
@@ -819,17 +825,7 @@ struct FriendsListView: View {
 
     // MARK: - Nudge Methods
     private func loadNudgeStatuses() async {
-        let friendIds = friendService.friends.map { $0.user_id }
-        guard !friendIds.isEmpty else { return }
-
-        do {
-            let statuses = try await friendService.checkNudgeStatusBatch(friendIds: friendIds)
-            await MainActor.run {
-                self.nudgeStatuses = statuses
-            }
-        } catch {
-            print("[FriendsList] ❌ loadNudgeStatuses failed: \(error)")
-        }
+        await friendService.refreshNudgeStatuses()
     }
 
     private func handleNudge(_ friend: BackendUser) {
@@ -840,9 +836,9 @@ struct FriendsListView: View {
                 await MainActor.run {
                     nudgingFriendId = nil
                     FlexNudgeTracker.markFriendNudgeSent(friendId: friend.user_id)
-                    // Update local status — preserve existing miles/completion
-                    let existing = nudgeStatuses[friend.user_id]
-                    nudgeStatuses[friend.user_id] = NudgeStatusResponse(
+                    // Optimistic update on the shared service state — preserve existing miles/completion
+                    let existing = friendService.nudgeStatuses[friend.user_id]
+                    friendService.nudgeStatuses[friend.user_id] = NudgeStatusResponse(
                         can_nudge: false,
                         has_completed_mile: existing?.has_completed_mile ?? false,
                         already_nudged_today: true,

@@ -102,10 +102,12 @@ struct RootView: View {
             UINavigationBar.appearance().tintColor = UIColor(MADTheme.Colors.madRed)
             UINavigationBar.appearance().isTranslucent = true
             
-            // Tab bar for older iOS
+            // Tab bar for older iOS. Use the system's standard blurred background —
+            // a fully transparent bar (configureWithTransparentBackground + .clear)
+            // renders the tab icons directly on top of scrolling content with no
+            // backdrop, which looks broken on every pre-26 device.
             let tabBarAppearance = UITabBarAppearance()
-            tabBarAppearance.configureWithTransparentBackground()
-            tabBarAppearance.backgroundColor = .clear
+            tabBarAppearance.configureWithDefaultBackground()
             
             tabBarAppearance.stackedLayoutAppearance.normal.iconColor = UIColor(MADTheme.Colors.secondaryText)
             tabBarAppearance.stackedLayoutAppearance.normal.titleTextAttributes = [

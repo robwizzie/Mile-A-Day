@@ -9,6 +9,10 @@ class CompetitionService: ObservableObject {
     @Published var competitions: [Competition] = []
     @Published var invites: [Competition] = []
     @Published var isLoading = false
+    /// True once at least one refresh has completed (success or failure, but not
+    /// cancellation). Views use this to show skeletons only on the true cold
+    /// start instead of swapping live content out on every background refresh.
+    @Published private(set) var hasLoadedOnce = false
     @Published var errorMessage: String?
 
     // MARK: - Private Properties
@@ -424,9 +428,14 @@ class CompetitionService: ObservableObject {
                 // Wait for all tasks to complete
                 for try await _ in group {}
             }
+            hasLoadedOnce = true
 
+        } catch is CancellationError {
+            // The hosting view was torn down mid-refresh. Keep existing data and
+            // don't mark loaded — the next refresh trigger completes the job.
         } catch {
             errorMessage = error.localizedDescription
+            hasLoadedOnce = true
         }
 
         isLoading = false
