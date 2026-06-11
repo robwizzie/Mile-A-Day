@@ -280,6 +280,81 @@ export async function updateCompetitionInvite(
 	return updatedUserStatus;
 }
 
+/**
+ * Auto-start a competition once every invite has been answered 'accepted'.
+ * Called after an invite acceptance. Mirrors the manual Start button: the
+ * competition begins at midnight ET (start_date = tomorrow's ET date) and
+ * end_date is derived from options.duration_hours when set.
+ *
+ * No-ops unless: not yet started/scheduled (start_date IS NULL), every
+ * competition_users row is 'accepted' (a pending OR declined invite blocks
+ * auto-start — the owner can still start manually), and >= 2 participants.
+ * The UPDATE is guarded with `start_date IS NULL` so concurrent accepts
+ * can't double-start or double-notify.
+ *
+ * Returns true if this call started the competition.
+ */
+export async function autoStartIfAllAccepted(competitionId: string): Promise<boolean> {
+	const [comp] = await db.query<{
+		start_date: string | null;
+		competition_name: string;
+		options: CompetitionOptions | null;
+		accepted_count: number;
+		unanswered_count: number;
+	}>(
+		`SELECT c.start_date, c.competition_name, c.options,
+			COUNT(*) FILTER (WHERE cu.invite_status = 'accepted')::int AS accepted_count,
+			COUNT(*) FILTER (WHERE cu.invite_status <> 'accepted')::int AS unanswered_count
+		FROM competitions c
+		JOIN competition_users cu ON cu.competition_id = c.id
+		WHERE c.id = $1
+		GROUP BY c.id`,
+		[competitionId]
+	);
+
+	if (!comp || comp.start_date || comp.unanswered_count > 0 || comp.accepted_count < 2) {
+		return false;
+	}
+
+	// Start at midnight ET tomorrow so the first official day is a full day
+	// for everyone — same computation as the manual start in startComp().
+	const todayET = getTodayET();
+	const [y, m, d] = todayET.split('-').map(Number);
+	const tomorrowUTC = new Date(Date.UTC(y, m - 1, d + 1));
+	const startDate = tomorrowUTC.toISOString().split('T')[0];
+
+	let endDate: string | null = null;
+	if (comp.options?.duration_hours) {
+		const end = new Date(tomorrowUTC.getTime() + comp.options.duration_hours * 60 * 60 * 1000);
+		endDate = end.toISOString().split('T')[0];
+	}
+
+	const updated = await db.query(
+		`UPDATE competitions
+		SET start_date = $2, end_date = COALESCE($3::date, end_date)
+		WHERE id = $1 AND start_date IS NULL
+		RETURNING id`,
+		[competitionId, startDate, endDate]
+	);
+	if (updated.length === 0) return false; // lost a race with another accept/manual start
+
+	// Unlike the manual start, nobody clicked a button — notify ALL participants.
+	const participants = await db.query<{ user_id: string }>(
+		`SELECT user_id FROM competition_users WHERE competition_id = $1 AND invite_status = 'accepted'`,
+		[competitionId]
+	);
+	for (const participant of participants) {
+		sendOrQueueCompetitionNotification(
+			participant.user_id,
+			'competition_started',
+			competitionId,
+			comp.competition_name
+		).catch(err => console.error('[Push] Error sending competition auto-start notification:', err.message));
+	}
+
+	return true;
+}
+
 interface UpdateCompetitionParams {
 	competitionId: string;
 	competition_name?: string;

@@ -11,7 +11,8 @@ import {
 	updateCompetition,
 	deleteCompetition,
 	removeUserFromCompetition,
-	getTodayET
+	getTodayET,
+	autoStartIfAllAccepted
 } from '../services/competitionService.js';
 import { getUser } from '../services/userService.js';
 import { CompetitionUser } from '../types/competitions.js';
@@ -67,9 +68,7 @@ export async function startComp(req: AuthenticatedRequest, res: Response) {
 		}
 
 		// Need at least 2 accepted participants
-		const acceptedCount = competition.users.filter(
-			(u: CompetitionUser) => u.invite_status === 'accepted'
-		).length;
+		const acceptedCount = competition.users.filter((u: CompetitionUser) => u.invite_status === 'accepted').length;
 
 		if (acceptedCount < 2) {
 			return res.status(400).json({
@@ -343,6 +342,12 @@ export function getCompInviteHandler(status: 'accepted' | 'declined') {
 					type: 'competition_accepted',
 					data: { competition_id: competitionId }
 				}).catch(err => console.error('[Push] Error sending competition accepted notification:', err.message));
+
+				// Auto-start once everyone invited has accepted (starts at midnight
+				// ET, same as the manual Start button)
+				if (await autoStartIfAllAccepted(competitionId)) {
+					return res.status(200).json({ competition: await getCompetition(competitionId) });
+				}
 			}
 
 			res.status(200).json({ competition });
