@@ -73,7 +73,13 @@ struct StreakCountProvider: TimelineProvider {
         
         // Refresh more frequently if streak is at risk
         let refreshInterval: TimeInterval = isAtRisk ? 1800 : 3600 // 30 minutes if at risk, 1 hour otherwise
-        let nextRefresh = Date().addingTimeInterval(refreshInterval)
+
+        // Cap the sleep at the next midnight so the "completed today" state
+        // resets at the day boundary even if the app is never opened.
+        let intervalRefresh = Date().addingTimeInterval(refreshInterval)
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        let nextMidnight = Calendar.current.date(byAdding: .day, value: 1, to: startOfToday) ?? intervalRefresh
+        let nextRefresh = min(intervalRefresh, nextMidnight)
         completion(Timeline(entries: [entry], policy: .after(nextRefresh)))
     }
     
@@ -276,9 +282,10 @@ struct InlineStreakView: View {
 
 struct HomeScreenStreakView: View {
     let entry: StreakCountEntry
-    @State private var animateProgress = false
-    @State private var animateAtRisk = false
-    
+
+    // WidgetKit renders this view statically — .onAppear-driven @State
+    // animation never plays, which left the progress ring drawn at 0.
+    // Render the real progress value directly instead.
     var body: some View {
         VStack(spacing: 4) {
             ZStack {
@@ -292,20 +299,18 @@ struct HomeScreenStreakView: View {
                         )
                     )
                     .frame(width: 90, height: 90)
-                    .scaleEffect(animateAtRisk ? 1.05 : 1.0)
-                
+
                 // Live progress ring
                 Circle()
                     .stroke(Color.gray.opacity(0.2), lineWidth: 4)
                     .frame(width: 100, height: 100)
-                
+
                 Circle()
-                    .trim(from: 0, to: animateProgress ? entry.liveProgress : 0)
+                    .trim(from: 0, to: entry.liveProgress)
                     .stroke(entry.streakColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                     .frame(width: 100, height: 100)
                     .rotationEffect(.degrees(-90))
-                    .animation(.easeInOut(duration: 0.8), value: animateProgress)
-                
+
                 // Streak number in center
                 VStack(spacing: 2) {
                     // At-risk warning icon
@@ -313,20 +318,19 @@ struct HomeScreenStreakView: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.caption2)
                             .foregroundColor(.red)
-                            .scaleEffect(animateAtRisk ? 1.2 : 1.0)
                     }
-                    
+
                     Text("\(entry.streak)")
                         .font(.system(size: entry.isAtRisk ? 28 : 32, weight: .bold, design: .rounded))
                         .foregroundColor(entry.streakColor)
-                    
+
                     Text(entry.streak == 1 ? "day" : "days")
                         .font(.caption)
                         .fontWeight(.medium)
                         .foregroundColor(entry.streakColor.opacity(0.8))
                 }
             }
-            
+
             // Time remaining below the circle if at risk
             if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
                 Text(timeRemaining)
@@ -337,16 +341,6 @@ struct HomeScreenStreakView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear {
-            animateProgress = true
-            
-            // Start pulsing animation for at-risk streaks
-            if entry.isAtRisk {
-                withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
-                    animateAtRisk = true
-                }
-            }
-        }
     }
 }
 

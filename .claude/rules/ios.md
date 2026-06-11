@@ -23,6 +23,8 @@ globs: app/**
   - `HealthKitManager.swift` (core)
   - `+DataFetching.swift`, `+PersonalRecords.swift`, `+StreakCalculation.swift`, `+WorkoutIndex.swift`
 - Workout sync: HealthKit -> WorkoutProcessor -> WorkoutSyncService -> Backend API
+- HealthKit queries ERROR when the device is locked (protected data). Never treat a query error as "0 miles" — only a successful empty result is a real zero. Writing 0 on error randomly reset widgets.
+- WidgetKit renders statically: `.onAppear`-driven `@State` animations never play in widget views — render entry values directly. `WidgetDataStore` data is day-stamped; `load()` returns zeros for a stale day, and saves skip no-op writes (widget reloads are budgeted per day).
 
 ## Key Patterns
 - Use `@Observable` (iOS 17+ Observation framework) for new view models.

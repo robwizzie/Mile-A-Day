@@ -46,8 +46,14 @@ struct TodayProgressProvider: TimelineProvider {
         
         // Refresh every minute for incomplete goals, every 15 minutes for completed goals
         let refreshInterval: TimeInterval = data.streakCompleted ? 900 : 60 // 1min incomplete, 15min completed
-        
-        let nextRefresh = Date().addingTimeInterval(refreshInterval)
+
+        // Never sleep past midnight: WidgetDataStore.load() zeroes out data
+        // from a previous day, so rebuilding right at the day boundary makes
+        // the widget reset to 0.00 mi without the app being opened.
+        let intervalRefresh = Date().addingTimeInterval(refreshInterval)
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        let nextMidnight = Calendar.current.date(byAdding: .day, value: 1, to: startOfToday) ?? intervalRefresh
+        let nextRefresh = min(intervalRefresh, nextMidnight)
         let timeline = Timeline(entries: [entry], policy: .after(nextRefresh))
         completion(timeline)
     }

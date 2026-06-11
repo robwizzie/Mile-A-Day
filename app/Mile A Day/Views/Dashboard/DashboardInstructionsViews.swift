@@ -25,29 +25,44 @@ struct InstructionsBanner: View {
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
 
-                        Text("Start a run in-app or log workouts from Apple Fitness. Tap the ")
-                            + Text(Image(systemName: "info.circle"))
-                                .foregroundColor(.white.opacity(0.7))
-                            + Text(" icon anytime for help.")
+                        Text("Start a run in-app or log workouts from Apple Fitness — everything syncs automatically.")
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.7))
                 }
 
-                Button {
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        hasSeenInstructions = true
+                HStack(spacing: 10) {
+                    Button {
+                        showInstructions = true
+                    } label: {
+                        Text("Show me how")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                Capsule()
+                                    .fill(MADTheme.Colors.madRed.opacity(0.8))
+                            )
                     }
-                } label: {
-                    Text("Got it!")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(
-                            Capsule()
-                                .fill(MADTheme.Colors.madRed.opacity(0.8))
-                        )
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            hasSeenInstructions = true
+                        }
+                    } label: {
+                        Text("Got it!")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.85))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                Capsule()
+                                    .fill(Color.white.opacity(0.10))
+                                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                            )
+                    }
                 }
             }
             .padding(16)

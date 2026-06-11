@@ -273,8 +273,7 @@ struct UnifiedStatsGrid: View {
             GoalSettingSheet(
                 currentGoal: user.goalMiles,
                 onSave: { newGoal in
-                    // Note: This will need to be handled by the parent view
-                    // since we don't have access to userManager here
+                    userManager.setDailyGoal(miles: newGoal)
                 }
             )
             .presentationDetents([.height(300)])

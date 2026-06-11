@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct HelpAndSupportView: View {
+    @State private var showGettingStarted = false
+
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
     }
@@ -16,6 +18,36 @@ struct HelpAndSupportView: View {
 
             ScrollView {
                 VStack(spacing: MADTheme.Spacing.lg) {
+                    // Getting Started guide — the same walkthrough first-time
+                    // users see on the dashboard, re-openable any time.
+                    Button {
+                        showGettingStarted = true
+                    } label: {
+                        HStack(spacing: MADTheme.Spacing.sm) {
+                            Image(systemName: "figure.run.circle.fill")
+                                .font(.system(size: 22, weight: .semibold))
+                                .foregroundStyle(MADTheme.Colors.redGradient)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Getting Started Guide")
+                                    .font(MADTheme.Typography.headline)
+                                    .foregroundColor(.primary)
+                                Text("How streaks, syncing, and medals work")
+                                    .font(MADTheme.Typography.caption)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(MADTheme.Spacing.md)
+                        .madLiquidGlass()
+                    }
+                    .buttonStyle(ScaleButtonStyle())
+
                     // FAQ Section
                     VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
                         HStack(spacing: MADTheme.Spacing.sm) {
@@ -114,6 +146,9 @@ struct HelpAndSupportView: View {
         .navigationTitle("Help & Support")
         .navigationBarTitleDisplayMode(.large)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .sheet(isPresented: $showGettingStarted) {
+            InstructionsView()
+        }
     }
 
     private func faqItem(question: String, answer: String) -> some View {

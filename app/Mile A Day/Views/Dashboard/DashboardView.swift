@@ -42,6 +42,12 @@ struct DashboardView: View {
     /// Controls presentation of the manual workout entry sheet.
     @State private var showManualWorkoutEntry = false
 
+    /// Cached "is there an active in-progress workout?" flag. Reading
+    /// `InProgressWorkoutStore.load()` decodes the full persisted workout
+    /// (up to thousands of GPS points) — too expensive to do per render,
+    /// so views read this flag and it's refreshed on appear / cover dismiss.
+    @State private var hasActiveWorkout = false
+
     /// Competition opened directly from a Dashboard rivalry-hint row. Sheet
     /// presentation, not a tab switch — keeps the user on Dashboard in the
     /// back stack so dismiss returns them to where they tapped.
@@ -321,6 +327,7 @@ struct DashboardView: View {
                 // When the user dismisses the workout tracker while a workout is still active,
                 // show a compact banner so they can easily resume.
                 let hasActive = InProgressWorkoutStore.load()?.isActive == true
+                hasActiveWorkout = hasActive
                 showInProgressBanner = hasActive
 
                 // If goal was already met, show encouragement for the extra effort
@@ -350,33 +357,6 @@ struct DashboardView: View {
                 // Sync widget data immediately
                 syncWidgetData()
 
-                // PHASE 1: Listen for workout index completion
-                NotificationCenter.default.addObserver(
-                    forName: NSNotification.Name("WorkoutIndexReady"),
-                    object: nil,
-                    queue: .main
-                ) { [weak userManager, weak healthManager] _ in
-                    guard let userManager = userManager, let healthManager = healthManager else { return }
-
-                    print("[Dashboard] 🔔 Workout index ready, updating user data and syncing widgets")
-
-                    // Update user manager with correct streak from index
-                    userManager.updateUserWithHealthKitData(
-                        retroactiveStreak: healthManager.retroactiveStreak,
-                        currentMiles: healthManager.todaysDistance,
-                        totalMiles: healthManager.totalLifetimeMiles,
-                        fastestPace: healthManager.fastestMilePace,
-                        mostMilesInDay: healthManager.mostMilesInOneDay
-                    )
-
-                    // Sync widgets with correct data
-                    WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles)
-                    WidgetDataStore.save(streak: userManager.currentUser.streak)
-                    WidgetCenter.shared.reloadAllTimelines()
-
-                    print("[Dashboard] ✅ User data and widgets updated with streak: \(userManager.currentUser.streak)")
-                }
-
                 // Fetch fastest mile pace from backend database
                 fetchFastestPaceFromBackend()
 
@@ -385,18 +365,24 @@ struct DashboardView: View {
 
                 // If there is a persisted in‑progress workout when the dashboard appears,
                 // automatically surface it so the user can't "lose" their active workout.
-                if let state = InProgressWorkoutStore.load(), state.isActive {
+                // Cache the flag so view bodies don't re-decode the (potentially large)
+                // persisted workout JSON on every render.
+                let active = InProgressWorkoutStore.load()?.isActive == true
+                hasActiveWorkout = active
+                if active {
                     showWorkoutView = true
                 }
-
-                // Listen for Live Activity / deep‑link requests to open the workout.
-                NotificationCenter.default.addObserver(
-                    forName: NSNotification.Name("MAD_OpenWorkoutFromLiveActivity"),
-                    object: nil,
-                    queue: .main
-                ) { _ in
-                    showWorkoutView = true
-                }
+            }
+            // Self-cleaning replacements for the old NotificationCenter.addObserver
+            // calls in onAppear — those registered a fresh observer on every
+            // appearance and never removed them, so each event re-ran the handler
+            // (and reloaded widgets) once per past dashboard visit.
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("WorkoutIndexReady"))) { _ in
+                print("[Dashboard] 🔔 Workout index ready, updating user data and syncing widgets")
+                applyHealthDataToUserManager()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MAD_OpenWorkoutFromLiveActivity"))) { _ in
+                showWorkoutView = true
             }
             .sheet(isPresented: $showGoalSheet) {
                 GoalSettingSheet(
@@ -508,6 +494,11 @@ struct DashboardView: View {
         isRefreshing = true
         healthManager.fetchAllWorkoutData()
         fetchFastestPaceFromBackend()
+        // The HealthKit fetches above are fire-and-forget; hold the
+        // pull-to-refresh spinner briefly so fresh values have a chance to
+        // land before it dismisses — previously it vanished instantly and
+        // looked like the refresh did nothing.
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
         applyHealthDataToUserManager()
         isRefreshing = false
     }
@@ -897,6 +888,7 @@ struct DashboardView: View {
             fastestPace: userManager.currentUser.fastestMilePace,
             mostMiles: healthManager.mostMilesInOneDay,
             totalMiles: healthManager.totalLifetimeMiles,
+            hasActiveWorkout: hasActiveWorkout,
             healthManager: healthManager,
             userManager: userManager,
             showWorkoutView: $showWorkoutView
