@@ -139,7 +139,9 @@ struct UserProfileDetailView: View {
     }
 
     private func loadBadges() async {
-        guard !isCurrentUser() else { return }
+        // Loads for the current user too — tapping your own row (e.g. on the
+        // leaderboard) opens this view, and skipping the load left the Badges
+        // tab on its loading spinner forever.
         // Fetch in parallel but handle each independently — if one endpoint
         // fails the other can still populate, and the section stays visible
         // as long as the catalog loads (the grid needs it to render at all).
@@ -302,13 +304,26 @@ struct UserProfileDetailView: View {
     /// Badge collection — pinned showcase + side-by-side comparison grid.
     @ViewBuilder
     private var badgesTabContent: some View {
-        if hasLoadedBadges && !isCurrentUser() && !catalogBadges.isEmpty {
+        if hasLoadedBadges && !catalogBadges.isEmpty {
             FriendBadgeCompareView(
                 ownerDisplayName: user.username ?? user.displayName,
                 earnedBadges: userBadges,
                 catalogBadges: catalogBadges,
                 viewerEarnedBadgeIds: Set(userManager.currentUser.badges.filter { !$0.isLocked }.map { $0.id })
             )
+        } else if hasLoadedBadges {
+            // Fetches finished but the catalog came back empty (network/API
+            // failure) — say so instead of spinning forever.
+            VStack(spacing: MADTheme.Spacing.md) {
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 28))
+                    .foregroundColor(.white.opacity(0.25))
+                Text("Couldn't load badges")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, MADTheme.Spacing.xl)
         } else {
             VStack(spacing: MADTheme.Spacing.md) {
                 ProgressView().tint(MADTheme.Colors.madRed)

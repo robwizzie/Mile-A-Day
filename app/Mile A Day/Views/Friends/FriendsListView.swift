@@ -22,6 +22,11 @@ struct FriendsListView: View {
     @State private var showingSearch = false
     @State private var showingRequestsSheet = false
     @State private var selectedUser: BackendUser?
+    // Profile to open once the requests sheet finishes dismissing. Presenting
+    // from the sheet's onDismiss (instead of a fixed asyncAfter delay) avoids
+    // the race where the new sheet is silently dropped because the old one is
+    // still animating out.
+    @State private var pendingProfileUser: BackendUser?
     @State private var showingUnfriendAlert = false
     @State private var userToUnfriend: BackendUser?
 
@@ -77,15 +82,18 @@ struct FriendsListView: View {
                 FriendSearchView(friendService: friendService)
             }
         }
-        .sheet(isPresented: $showingRequestsSheet) {
+        .sheet(isPresented: $showingRequestsSheet, onDismiss: {
+            if let user = pendingProfileUser {
+                pendingProfileUser = nil
+                selectedUser = user
+            }
+        }) {
             NavigationStack {
                 FriendRequestsSheet(
                     friendService: friendService,
                     onSelectUser: { user in
+                        pendingProfileUser = user
                         showingRequestsSheet = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                            selectedUser = user
-                        }
                     },
                     onAccept: handleAcceptRequest,
                     onDecline: handleDeclineRequest,

@@ -1030,6 +1030,7 @@ struct FriendActivityStripView: View {
     @State private var activityData: [FriendActivityItem] = []
     @State private var isLoading = true
     @State private var lastFetchDate: Date?
+    @State private var selectedUser: BackendUser?
 
     private var completedCount: Int {
         activityData.filter { $0.completed_today }.count
@@ -1060,13 +1061,23 @@ struct FriendActivityStripView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
                             ForEach(activityData) { friend in
-                                friendActivityAvatar(friend)
+                                Button {
+                                    selectedUser = makeBackendUser(friend)
+                                } label: {
+                                    friendActivityAvatar(friend)
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
                 }
                 .padding(14)
                 .liquidGlassCard()
+            }
+        }
+        .sheet(item: $selectedUser) { user in
+            NavigationStack {
+                UserProfileDetailView(user: user, friendService: friendService)
             }
         }
         .task {
@@ -1076,6 +1087,24 @@ struct FriendActivityStripView: View {
             }
             await loadActivity()
         }
+    }
+
+    /// Build a BackendUser stub from an activity item. UserProfileDetailView
+    /// only reads `username`, `displayName`, `profile_image_url`, `user_id` in
+    /// its render path — same pattern as LeaderboardSection's row taps.
+    private func makeBackendUser(_ friend: FriendActivityItem) -> BackendUser {
+        BackendUser(
+            user_id: friend.user_id,
+            username: friend.username,
+            email: "",
+            first_name: friend.first_name,
+            last_name: friend.last_name,
+            bio: nil,
+            profile_image_url: friend.profile_image_url,
+            apple_id: nil,
+            auth_provider: nil,
+            role: nil
+        )
     }
 
     private func friendActivityAvatar(_ friend: FriendActivityItem) -> some View {
