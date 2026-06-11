@@ -12,7 +12,8 @@ import {
 	getBestSplit,
 	getTodayMiles,
 	updateWorkout as updateWorkoutDb,
-	computePersonalRecords
+	computePersonalRecords,
+	getUserLocalToday
 } from '../services/workoutService.js';
 import { checkRaceCompletions } from '../services/competitionService.js';
 import {
@@ -121,24 +122,30 @@ export async function uploadWorkouts(req: Request, res: Response) {
 		}
 
 		// PR detection: compare pre-upload PRs (excluding this batch) to post-upload PRs.
-		// Fan out one notification per dimension that improved. Fire-and-forget.
+		// Fan out one notification per dimension that improved — but only when the
+		// record was set TODAY (user's local date). Historical imports (e.g. a new
+		// account's initial HealthKit backfill) raise the all-time max too, and
+		// without this guard every backfill batch sprays bogus "new personal best"
+		// pushes at the user's friends. Fire-and-forget.
 		(async () => {
 			try {
-				const [pre, post] = await Promise.all([
+				const [pre, post, userToday] = await Promise.all([
 					computePersonalRecords(userId, uploadedWorkoutIds),
-					computePersonalRecords(userId)
+					computePersonalRecords(userId),
+					getUserLocalToday(userId)
 				]);
 				const lastWorkoutId = uploadedWorkoutIds[uploadedWorkoutIds.length - 1] ?? '';
 
 				if (
 					post.fastestSplitPaceSecMi > 0 &&
-					(pre.fastestSplitPaceSecMi === 0 || post.fastestSplitPaceSecMi < pre.fastestSplitPaceSecMi)
+					(pre.fastestSplitPaceSecMi === 0 || post.fastestSplitPaceSecMi < pre.fastestSplitPaceSecMi) &&
+					post.fastestSplitDate === userToday
 				) {
 					fanOutFriendPersonalBestPush(userId, 'fastest_mile', post.fastestSplitPaceSecMi, lastWorkoutId).catch(err =>
 						console.error('Error fanning out friend_personal_best (fastest_mile):', err.message)
 					);
 				}
-				if (post.mostMilesInOneDay > pre.mostMilesInOneDay) {
+				if (post.mostMilesInOneDay > pre.mostMilesInOneDay && post.bestDayDate === userToday) {
 					fanOutFriendPersonalBestPush(userId, 'most_miles_day', post.mostMilesInOneDay, lastWorkoutId).catch(err =>
 						console.error('Error fanning out friend_personal_best (most_miles_day):', err.message)
 					);

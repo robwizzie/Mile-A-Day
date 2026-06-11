@@ -83,8 +83,12 @@ function dateStringMinus(dateStr: string, days: number): string {
 	return date.toISOString().slice(0, 10);
 }
 
-export async function getActiveStreak(userId: string) {
-	const todayResult = await db.query(
+/**
+ * Today's date (YYYY-MM-DD) in the user's local timezone, derived from the
+ * timezone_offset of their most recent workout (UTC if they have none).
+ */
+export async function getUserLocalToday(userId: string): Promise<string> {
+	const todayResult = await db.query<{ user_today: string }>(
 		`
     SELECT to_char(
       (NOW() + (COALESCE(
@@ -96,7 +100,11 @@ export async function getActiveStreak(userId: string) {
   `,
 		[userId]
 	);
-	const userToday: string = todayResult[0].user_today;
+	return todayResult[0].user_today;
+}
+
+export async function getActiveStreak(userId: string) {
+	const userToday = await getUserLocalToday(userId);
 	const yesterday = dateStringMinus(userToday, 1);
 
 	const qualifyingDaysQuery = `
@@ -477,45 +485,53 @@ export async function updateWorkout(
  * - fastestSplitPaceSecMi: MIN(split_pace) across qualifying splits (>=0.95mi, >0 pace).
  *   0 if the user has no qualifying splits.
  * - mostMilesInOneDay: MAX(SUM(distance) GROUP BY local_date). 0 if no workouts.
+ * - fastestSplitDate / bestDayDate: local_date (YYYY-MM-DD) that set each record,
+ *   null when there is no record. Ties resolve to the most recent date.
  */
 export async function computePersonalRecords(
 	userId: string,
 	excludeWorkoutIds: string[] = []
-): Promise<{ fastestSplitPaceSecMi: number; mostMilesInOneDay: number }> {
+): Promise<{
+	fastestSplitPaceSecMi: number;
+	mostMilesInOneDay: number;
+	fastestSplitDate: string | null;
+	bestDayDate: string | null;
+}> {
 	const exclude = excludeWorkoutIds.length > 0;
+	const excludeClause = exclude ? `AND NOT (w.workout_id = ANY($2::text[]))` : '';
 
-	const paceQuery = exclude
-		? `SELECT MIN(s.split_pace)::text AS min_pace
-		   FROM workout_splits s
-		   JOIN workouts w ON w.workout_id = s.workout_id
-		   WHERE w.user_id = $1
-		       AND s.split_pace > 0
-		       AND s.split_distance >= 0.95
-		       AND NOT (w.workout_id = ANY($2::text[]))`
-		: `SELECT MIN(s.split_pace)::text AS min_pace
-		   FROM workout_splits s
-		   JOIN workouts w ON w.workout_id = s.workout_id
-		   WHERE w.user_id = $1 AND s.split_pace > 0 AND s.split_distance >= 0.95`;
+	const paceQuery = `SELECT s.split_pace::text AS min_pace,
+	       to_char(w.local_date, 'YYYY-MM-DD') AS pace_date
+	   FROM workout_splits s
+	   JOIN workouts w ON w.workout_id = s.workout_id
+	   WHERE w.user_id = $1
+	       AND s.split_pace > 0
+	       AND s.split_distance >= 0.95
+	       ${excludeClause}
+	   ORDER BY s.split_pace ASC, w.local_date DESC
+	   LIMIT 1`;
 
-	const dayQuery = exclude
-		? `SELECT COALESCE(MAX(day_total), 0)::text AS best_day FROM (
-				SELECT SUM(distance) AS day_total FROM workouts
-				WHERE user_id = $1 AND NOT (workout_id = ANY($2::text[]))
-				GROUP BY local_date
-			) t`
-		: `SELECT COALESCE(MAX(day_total), 0)::text AS best_day FROM (
-				SELECT SUM(distance) AS day_total FROM workouts
-				WHERE user_id = $1 GROUP BY local_date
-			) t`;
+	const dayQuery = `SELECT SUM(w.distance)::text AS best_day,
+	       to_char(w.local_date, 'YYYY-MM-DD') AS best_day_date
+	   FROM workouts w
+	   WHERE w.user_id = $1 ${excludeClause}
+	   GROUP BY w.local_date
+	   ORDER BY SUM(w.distance) DESC, w.local_date DESC
+	   LIMIT 1`;
 
 	const params: any[] = exclude ? [userId, excludeWorkoutIds] : [userId];
 
 	const [paceRow, bestDayRow] = await Promise.all([
-		db.query<{ min_pace: string | null }>(paceQuery, params),
-		db.query<{ best_day: string | null }>(dayQuery, params)
+		db.query<{ min_pace: string | null; pace_date: string | null }>(paceQuery, params),
+		db.query<{ best_day: string | null; best_day_date: string | null }>(dayQuery, params)
 	]);
 
 	const fastestSplitPaceSecMi = paceRow[0]?.min_pace ? parseFloat(paceRow[0].min_pace) : 0;
 	const mostMilesInOneDay = parseFloat(bestDayRow[0]?.best_day ?? '0') || 0;
-	return { fastestSplitPaceSecMi, mostMilesInOneDay };
+	return {
+		fastestSplitPaceSecMi,
+		mostMilesInOneDay,
+		fastestSplitDate: paceRow[0]?.pace_date ?? null,
+		bestDayDate: bestDayRow[0]?.best_day_date ?? null
+	};
 }
