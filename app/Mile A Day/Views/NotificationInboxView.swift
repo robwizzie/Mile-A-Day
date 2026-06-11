@@ -94,15 +94,8 @@ struct NotificationInboxView: View {
                     }
                 }
             }
-            if unreadCount > 0 {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Read All") {
-                        markAllRead()
-                    }
-                    .foregroundColor(MADTheme.Colors.madRed)
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                }
-            }
+            // "Read All" button removed — opening the inbox now auto-marks
+            // everything read (see loadNotifications).
         }
         .task {
             await loadNotifications()
@@ -763,6 +756,15 @@ struct NotificationInboxView: View {
                 hasMore = response.notifications.count >= 50
                 isLoading = false
             }
+            // Opening the inbox auto-reads everything on the server. The rows
+            // fetched above still carry is_read=false, so the unread dots stay
+            // visible for this visit — they clear on the next fetch (leave and
+            // come back, or pull-to-refresh). Zeroing unreadCount clears the
+            // bell badge via onUnreadCountChanged.
+            if response.unread_count > 0 {
+                try? await friendService.markAllNotificationsRead()
+                await MainActor.run { unreadCount = 0 }
+            }
         } catch {
             await MainActor.run { isLoading = false }
         }
@@ -818,26 +820,6 @@ struct NotificationInboxView: View {
         }
     }
 
-    private func markAllRead() {
-        Task {
-            try? await friendService.markAllNotificationsRead()
-            await MainActor.run {
-                notifications = notifications.map { n in
-                    InAppNotification(
-                        id: n.id, title: n.title, body: n.body,
-                        type: n.type, data: n.data, is_read: true,
-                        created_at: n.created_at,
-                        hype_target_user_id: n.hype_target_user_id,
-                        hype_context_type: n.hype_context_type,
-                        hype_context_id: n.hype_context_id,
-                        hype_context_label: n.hype_context_label,
-                        is_hyped: n.is_hyped
-                    )
-                }
-                unreadCount = 0
-            }
-        }
-    }
 }
 
 /// Toolbar pill showing how many hypes the user has left today.
