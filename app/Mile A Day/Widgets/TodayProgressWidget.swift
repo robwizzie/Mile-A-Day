@@ -276,12 +276,12 @@ struct TodayProgressWidget: Widget {
         }
         .configurationDisplayName("Today's Progress")
         .description("Track your daily mile progress.")
-        .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline])
+        .supportedFamilies([.systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline])
     }
 }
 
-#Preview(as: .systemSmall) {
+#Preview(as: .systemMedium) {
     TodayProgressWidget()
 } timeline: {
     TodayProgressEntry(date: .now, milesCompleted: 0.2, goal: 1.0, streakCompleted: false, progress: 0.2)
-} 
+}
