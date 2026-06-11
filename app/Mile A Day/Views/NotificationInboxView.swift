@@ -369,7 +369,10 @@ struct NotificationInboxView: View {
             if notification.title.hasPrefix("Streak broken") { return nil }
             guard let targetId = data["user_id"] else { return nil }
             // user_id:YYYY-MM-DD as the dedupe key (one mile per day per user).
-            let dateKey = String(notification.created_at.prefix(10))
+            // Prefer the runner's local_date from the payload — the created_at
+            // fallback is the UTC date, which is off-by-one for evening miles
+            // (e.g. 11pm ET) and collides with the next day's mile.
+            let dateKey = data["local_date"] ?? String(notification.created_at.prefix(10))
             return HypeContext(
                 contextType: "mile",
                 contextId: "\(targetId):\(dateKey)",

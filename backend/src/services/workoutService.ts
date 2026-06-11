@@ -236,6 +236,22 @@ export async function getRecentWorkouts(userId: string, limit: number | null = 1
 	return await db.query(recentWorkoutsQuery, [userId, limit]);
 }
 
+/**
+ * Today's date ('YYYY-MM-DD') in the user's local timezone, derived from their
+ * most recent workout's timezone_offset (matches workouts.local_date format).
+ * Falls back to the server's UTC date if the user has no workouts.
+ */
+export async function getUserLocalDate(userId: string): Promise<string> {
+	const rows = await db.query<{ local_date: string }>(
+		`SELECT (NOW() + (COALESCE(
+			(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
+			0
+		) || ' minutes')::interval)::date::text AS local_date`,
+		[userId]
+	);
+	return rows[0].local_date;
+}
+
 export async function getTodayMiles(userId: string) {
 	// Use the user's timezone offset from their most recent workout to determine
 	// what "today" is in their local time (local_date is stored in user's timezone)

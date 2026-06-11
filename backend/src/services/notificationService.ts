@@ -3,7 +3,7 @@ import { sendPush, sendOrQueueCompetitionNotification } from './pushNotification
 import { shouldSendNotification, filterRecipientsForNotification } from './notificationSettingsService.js';
 import { getCompetition, getCurrentInterval, getUserScores } from './competitionService.js';
 import { Competition, CompetitionUser } from '../types/competitions.js';
-import { getActiveStreak, getTodayMiles, getTodayStats } from './workoutService.js';
+import { getActiveStreak, getTodayMiles, getTodayStats, getUserLocalDate } from './workoutService.js';
 
 const db = PostgresService.getInstance();
 
@@ -109,13 +109,18 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<boo
 		// Pre-filter all recipients in 2 queries instead of 2 per recipient.
 		const allowedRecipients = await filterRecipientsForNotification(recipients, userId, 'friend_activity');
 
+		// The runner's local date — clients use it as the hype dedupe key. Without
+		// it they fall back to the notification's UTC date, which is off-by-one for
+		// evening miles (e.g. 11pm ET) and collides with the next day's mile.
+		const localDate = await getUserLocalDate(userId);
+
 		for (const recipientId of allowedRecipients) {
 			sendPush(recipientId, {
 				title,
 				body,
 				type: 'friend_activity',
 				category: 'FRIEND_ACTIVITY',
-				data: { user_id: userId, kind: 'mile_completed' }
+				data: { user_id: userId, kind: 'mile_completed', local_date: localDate }
 			}).catch(err => console.error('[Push] Error sending friend activity:', err.message));
 		}
 
@@ -218,13 +223,15 @@ export async function notifyFriendsOfExtraWorkout(userId: string, workoutId: str
 		const body = parts.join(' · ');
 
 		const allowedRecipients = await filterRecipientsForNotification(recipients, userId, 'friend_activity');
+		// Runner's local date — hype dedupe key for clients (see mile-completion note).
+		const localDate = await getUserLocalDate(userId);
 		for (const recipientId of allowedRecipients) {
 			sendPush(recipientId, {
 				title,
 				body,
 				type: 'friend_activity',
 				category: 'FRIEND_ACTIVITY',
-				data: { user_id: userId, kind: 'extra_workout', workout_id: workoutId }
+				data: { user_id: userId, kind: 'extra_workout', workout_id: workoutId, local_date: localDate }
 			}).catch(err => console.error('[Push] Error sending extra workout:', err.message));
 		}
 
