@@ -67,7 +67,12 @@ export async function getCloseFriendIds(userId: string): Promise<string[]> {
 
 export async function isCloseFriendOf(ownerId: string, candidateId: string): Promise<boolean> {
 	const rows = await db.query<{ close_friend_id: string }>(
-		`SELECT 1 FROM close_friends WHERE user_id = $1 AND close_friend_id = $2 LIMIT 1`,
+		`SELECT 1 FROM close_friends cf
+		JOIN friendships f ON (
+			(f.user_id = cf.user_id AND f.friend_id = cf.close_friend_id)
+			OR (f.user_id = cf.close_friend_id AND f.friend_id = cf.user_id)
+		) AND f.status = 'accepted'
+		WHERE cf.user_id = $1 AND cf.close_friend_id = $2 LIMIT 1`,
 		[ownerId, candidateId]
 	);
 	return rows.length > 0;
