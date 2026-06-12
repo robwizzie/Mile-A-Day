@@ -1,7 +1,13 @@
 import { PostgresService } from './DbService.js';
 import { sendPush, NotificationType } from './pushNotificationService.js';
 import { filterRecipientsForNotification } from './notificationSettingsService.js';
-import { filterByIncomingAudience, AudienceEventType, AudienceActivity } from './audienceSettingsService.js';
+import {
+	filterByIncomingAudience,
+	resolveAudience,
+	restrictToCloseFriends,
+	AudienceEventType,
+	AudienceActivity
+} from './audienceSettingsService.js';
 import { getFriendActivityRecipientPool } from './notificationService.js';
 import { getUserLocalDate } from './workoutService.js';
 
@@ -19,17 +25,17 @@ export interface PendingRow {
 	created_at: string;
 }
 
-// Map from pending event_type → the NotificationType string the live senders
-// pass to shouldSendNotification / filterRecipientsForNotification. Must mirror
-// what the live fan-outs use exactly.
-const EVENT_TYPE_TO_NOTIFICATION_TYPE: Record<string, NotificationType> = {
-	mile_completed: 'friend_activity',
-	extra_workout: 'friend_activity',
-	workout: 'friend_activity',
-	streak_broken: 'friend_activity',
+// Global notification-preference type passed to filterRecipientsForNotification
+// for non-workout events. Must mirror what the live fan-outs check:
+// personal_best → 'friend_personal_best' (fanOutFriendPersonalBestPush's
+// per-recipient shouldSendNotification), streak_broken → 'friend_activity'
+// (checkStreaksBroken). badge_earned and challenge_completed are deliberately
+// ABSENT — notification_settings has no global pref field for them and the
+// live fan-outs (fanOutFriendBadgePush / fanOutFriendChallengePush) apply no
+// per-recipient pref check, so those events skip filterRecipientsForNotification.
+const PREF_FILTER_TYPE: Record<string, 'friend_personal_best' | 'friend_activity'> = {
 	personal_best: 'friend_personal_best',
-	badge_earned: 'friend_badge_earned',
-	challenge_completed: 'friend_challenge_completed'
+	streak_broken: 'friend_activity'
 };
 
 // Workout-type events use the full friend+competition-participant pool.
@@ -66,16 +72,24 @@ export async function listPending(userId: string): Promise<PendingRow[]> {
 
 export type SendPendingResult =
 	| { ok: true; sent: number }
-	| { ok: false; reason: 'not_found' | 'not_owner' | 'already_processed' | 'expired' };
+	| { ok: false; reason: 'not_found' | 'not_owner' | 'already_processed' | 'expired' | 'audience_blocked' };
 
 /**
- * Confirm and send a pending notification. Validates ownership, checks the
- * row is still valid for today, builds the recipient pool exactly as the live
- * senders do, and sends.
+ * Confirm and send a pending notification.
+ *
+ * Order of operations (race-safe):
+ * 1. Read the row for diagnosis + event metadata (no state change).
+ * 2. Re-check the sender's CURRENT outgoing audience — settings may have
+ *    changed since the row was queued. 'none' refuses without touching the
+ *    row; 'close' caps the effective audience regardless of the request.
+ * 3. Atomic claim: UPDATE ... SET status='sent' WHERE status='pending'.
+ *    Concurrent sends race on this single statement — exactly one wins.
+ * 4. Same-day check AFTER claiming: a stale claimed row is flipped to
+ *    'expired' (claim-then-expire is race-safe; nothing was sent yet).
+ * 5. Build recipients exactly as the live senders do, then send.
  */
 export async function sendPending(userId: string, id: string, audience: 'close' | 'all' = 'all'): Promise<SendPendingResult> {
-	// Fetch the row (ownership + status check).
-	const rows = await db.query<{
+	interface FullRow {
 		id: string;
 		user_id: string;
 		event_type: string;
@@ -84,7 +98,10 @@ export async function sendPending(userId: string, id: string, audience: 'close' 
 		payload: Record<string, any>;
 		local_date: string;
 		status: string;
-	}>(
+	}
+
+	// 1. Read-only fetch for diagnosis + audience metadata.
+	const rows = await db.query<FullRow>(
 		`SELECT id, user_id, event_type, activity_type, workout_id, payload, local_date, status
 		 FROM pending_friend_notifications
 		 WHERE id = $1`,
@@ -92,29 +109,59 @@ export async function sendPending(userId: string, id: string, audience: 'close' 
 	);
 
 	if (rows.length === 0) return { ok: false, reason: 'not_found' };
-	const row = rows[0];
+	const preview = rows[0];
 
-	if (row.user_id !== userId) return { ok: false, reason: 'not_owner' };
+	if (preview.user_id !== userId) return { ok: false, reason: 'not_owner' };
+	if (preview.status !== 'pending') return { ok: false, reason: 'already_processed' };
 
-	if (row.status !== 'pending') return { ok: false, reason: 'already_processed' };
+	const eventType = preview.event_type as AudienceEventType;
+	const activity = (preview.activity_type ?? '') as AudienceActivity;
 
-	// Check same-day validity.
+	// 2. Re-check the sender's CURRENT outgoing audience. The row was queued
+	// under an 'ask' setting that may since have changed.
+	const currentOutgoing = await resolveAudience(userId, 'outgoing', eventType, activity);
+	if (currentOutgoing === 'none') {
+		// Refuse without touching the row — the user can re-enable and retry.
+		return { ok: false, reason: 'audience_blocked' };
+	}
+	// The request can never widen beyond the current setting: current 'close'
+	// forces 'close'; current 'all'/'ask' honors the requested audience.
+	const effectiveAudience: 'close' | 'all' = currentOutgoing === 'close' ? 'close' : audience;
+
+	// 3. Atomic claim — exactly one concurrent send can flip pending → sent.
+	const claimedRows = await db.query<FullRow>(
+		`UPDATE pending_friend_notifications
+		 SET status = 'sent'
+		 WHERE id = $1 AND user_id = $2 AND status = 'pending'
+		 RETURNING id, user_id, event_type, activity_type, workout_id, payload, local_date, status`,
+		[id, userId]
+	);
+
+	if (claimedRows.length === 0) {
+		// Claim failed — re-read for a precise diagnosis (read-only is fine here).
+		const lost = await db.query<{ user_id: string; status: string }>(
+			`SELECT user_id, status FROM pending_friend_notifications WHERE id = $1`,
+			[id]
+		);
+		if (lost.length === 0) return { ok: false, reason: 'not_found' };
+		if (lost[0].user_id !== userId) return { ok: false, reason: 'not_owner' };
+		return { ok: false, reason: 'already_processed' };
+	}
+	const row = claimedRows[0];
+
+	// 4. Same-day check AFTER claiming. Stale claimed row → flip to expired.
 	const localDate = await getUserLocalDate(userId);
 	if (row.local_date !== localDate) {
-		// Mark expired.
 		await db.query(`UPDATE pending_friend_notifications SET status = 'expired' WHERE id = $1`, [id]);
 		return { ok: false, reason: 'expired' };
 	}
 
-	const eventType = row.event_type as AudienceEventType;
-	const activity = (row.activity_type ?? '') as AudienceActivity;
-	const notifType = EVENT_TYPE_TO_NOTIFICATION_TYPE[row.event_type] ?? 'friend_activity';
-
+	// 5. Build recipients exactly as the live senders do.
 	let allowedRecipients: string[];
 
 	if (WORKOUT_EVENT_TYPES.has(row.event_type)) {
 		// Full pool: friends + active-competition co-participants (same as live senders).
-		allowedRecipients = await getFriendActivityRecipientPool(userId, audience, eventType, activity);
+		allowedRecipients = await getFriendActivityRecipientPool(userId, effectiveAudience, eventType, activity);
 	} else {
 		// Non-workout events: friends only (no comp participants).
 		// This mirrors pushNotificationService.ts resolveFriendFanOutRecipients.
@@ -124,19 +171,17 @@ export async function sendPending(userId: string, id: string, audience: 'close' 
 		);
 		let friendIds = friendRows.map(r => r.friend_id);
 
-		if (audience === 'close') {
-			const closeRows = await db.query<{ close_friend_id: string }>(
-				`SELECT close_friend_id FROM close_friends WHERE user_id = $1`,
-				[userId]
-			);
-			const closeSet = new Set(closeRows.map(r => r.close_friend_id));
-			friendIds = friendIds.filter(id => closeSet.has(id));
+		if (effectiveAudience === 'close') {
+			friendIds = await restrictToCloseFriends(userId, friendIds);
 		}
 
 		if (friendIds.length === 0) {
 			allowedRecipients = [];
 		} else {
-			const prefAllowed = await filterRecipientsForNotification(friendIds, userId, notifType as any);
+			// Global-pref filter only for events the live fan-outs actually check
+			// (see PREF_FILTER_TYPE). badge_earned / challenge_completed skip it.
+			const prefType = PREF_FILTER_TYPE[row.event_type];
+			const prefAllowed = prefType ? await filterRecipientsForNotification(friendIds, userId, prefType) : friendIds;
 			allowedRecipients = await filterByIncomingAudience(prefAllowed, userId, eventType, activity);
 		}
 	}
@@ -158,9 +203,7 @@ export async function sendPending(userId: string, id: string, audience: 'close' 
 		);
 	}
 
-	// Mark sent.
-	await db.query(`UPDATE pending_friend_notifications SET status = 'sent' WHERE id = $1`, [id]);
-
+	// Status was already flipped to 'sent' by the atomic claim above.
 	console.log(`[PendingNotif] Sent pending ${row.event_type} for user ${userId} to ${allowedRecipients.length} recipients`);
 
 	return { ok: true, sent: allowedRecipients.length };

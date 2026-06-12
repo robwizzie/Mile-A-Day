@@ -250,6 +250,9 @@ export interface PendingPushPayload {
  * audience 'ask'). The payload is exactly what would have been passed to
  * sendPush; a later confirm endpoint sends it. Dedup'd per
  * (user, event_type, workout_id) while pending via partial unique index.
+ *
+ * Lives here (not pendingNotificationService) to avoid an import cycle through
+ * notificationService, which this module's callers already import.
  */
 export async function queuePendingFriendNotification(
 	userId: string,

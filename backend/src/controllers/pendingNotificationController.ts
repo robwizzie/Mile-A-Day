@@ -41,6 +41,8 @@ export async function sendPendingNotification(req: AuthenticatedRequest, res: Re
 				return res.status(410).json({ error: 'Notification expired — same-day window has passed' });
 			if (result.reason === 'already_processed')
 				return res.status(409).json({ error: 'Notification already sent or dismissed' });
+			if (result.reason === 'audience_blocked')
+				return res.status(409).json({ error: "Your current settings don't allow sending this notification" });
 		}
 		res.status(200).json({ sent: (result as any).sent });
 	} catch (err: any) {

@@ -236,8 +236,9 @@ async function notifyFriendsOfWorkoutEvent(
 			workout_type: string;
 			distance: number | string;
 			total_duration: number | string;
+			local_date: string;
 		}>(
-			`SELECT workout_type, distance, total_duration
+			`SELECT workout_type, distance, total_duration, local_date::text AS local_date
 			FROM workouts
 			WHERE user_id = $1 AND workout_id = $2`,
 			[userId, workoutId]
@@ -250,6 +251,12 @@ async function notifyFriendsOfWorkoutEvent(
 		const distance = Number(workout.distance);
 		const duration = Number(workout.total_duration);
 		if (!(distance > 0)) return;
+
+		// Today-only guard: historical/backfill uploads must not announce old
+		// workouts (and must not claim the milestone slot — a same-day re-upload
+		// of a legitimately-new workout should still be able to fire).
+		const localDate = await getUserLocalDate(userId);
+		if (workout.local_date !== localDate) return;
 
 		// Cross-type guard: a workout already announced under the sibling event
 		// type must not fire again (e.g. a pre-goal 'workout' getting re-uploaded
@@ -299,8 +306,8 @@ async function notifyFriendsOfWorkoutEvent(
 		if (todayMiles > 0) parts.push(`${formatMiles(Number(todayMiles))} today`);
 		const body = parts.join(' · ');
 
-		// Runner's local date — hype dedupe key for clients (see mile-completion note).
-		const localDate = await getUserLocalDate(userId);
+		// Runner's local date (fetched above for the today-only guard) — hype
+		// dedupe key for clients (see mile-completion note).
 		const payload = {
 			title,
 			body,
