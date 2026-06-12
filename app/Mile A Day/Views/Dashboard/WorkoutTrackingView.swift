@@ -34,6 +34,12 @@ struct WorkoutTrackingView: View {
     /// Whether the Live Activity goal-completed alert was already sent (or the
     /// goal was already met before this workout started, so no alert is due).
     @State private var hasSentGoalAlert = false
+    /// Live Activity push throttling — the elapsed clock ticks natively via
+    /// Text(timerInterval:), so pushes are only needed when distance moves.
+    /// Pushing every second exhausted ActivityKit's update budget and the
+    /// system started deferring updates (frozen activity on the lock screen).
+    @State private var lastActivityPushDate: Date = .distantPast
+    @State private var lastPushedDistance: Double = -1
     @State private var showEndWorkoutError = false // Show error alert when end fails
     @State private var endWorkoutErrorMessage = "" // Error message for end workout failure
     @State private var endWorkoutTimeoutTask: DispatchWorkItem? // Timeout for end workout flow
@@ -999,40 +1005,52 @@ struct WorkoutTrackingView: View {
             startLiveActivity()
         }
         if let activity = workoutActivity {
-            let updatedState = WorkoutActivityAttributes.ContentState(
-                distance: freshDistance,
-                totalDailyDistance: freshTotalDaily,
-                elapsedTime: realTimeElapsed,
-                goalDistance: goalDistance,
-                activityType: selectedActivityType == .running ? "Running" : "Walking",
-                timerStartDate: Date().addingTimeInterval(-realTimeElapsed),
-                streak: userManager.currentUser.streak
-            )
-            // staleDate lets the system dim the activity if the app dies and
-            // stops sending updates, instead of showing confident stale data.
-            let content = ActivityContent(state: updatedState, staleDate: Date().addingTimeInterval(180))
-
             // Goal crossed during THIS workout → one celebratory alert update
             // that briefly expands the Dynamic Island / lights up the watch.
             let goalJustCompleted = goalDistance > 0
                 && freshTotalDaily >= goalDistance
                 && !hasSentGoalAlert
-            if goalJustCompleted {
-                hasSentGoalAlert = true
-            }
 
-            Task {
+            // Throttle: push on goal-cross, when distance moved ≥ 0.01 mi, or
+            // every 30s (keeps pace fresh and renews the staleDate). The
+            // elapsed clock needs no pushes at all — it ticks natively.
+            let shouldPush = goalJustCompleted
+                || abs(freshDistance - lastPushedDistance) >= 0.01
+                || Date().timeIntervalSince(lastActivityPushDate) >= 30
+
+            if shouldPush {
                 if goalJustCompleted {
-                    await activity.update(
-                        content,
-                        alertConfiguration: AlertConfiguration(
-                            title: "Mile complete! 🔥",
-                            body: "Your streak is safe for today.",
-                            sound: .default
+                    hasSentGoalAlert = true
+                }
+                lastActivityPushDate = Date()
+                lastPushedDistance = freshDistance
+
+                let updatedState = WorkoutActivityAttributes.ContentState(
+                    distance: freshDistance,
+                    totalDailyDistance: freshTotalDaily,
+                    elapsedTime: realTimeElapsed,
+                    goalDistance: goalDistance,
+                    activityType: selectedActivityType == .running ? "Running" : "Walking",
+                    timerStartDate: Date().addingTimeInterval(-realTimeElapsed),
+                    streak: userManager.currentUser.streak
+                )
+                // staleDate lets the system dim the activity if the app dies and
+                // stops sending updates, instead of showing confident stale data.
+                let content = ActivityContent(state: updatedState, staleDate: Date().addingTimeInterval(180))
+
+                Task {
+                    if goalJustCompleted {
+                        await activity.update(
+                            content,
+                            alertConfiguration: AlertConfiguration(
+                                title: "Mile complete! 🔥",
+                                body: "Your streak is safe for today.",
+                                sound: .default
+                            )
                         )
-                    )
-                } else {
-                    await activity.update(content)
+                    } else {
+                        await activity.update(content)
+                    }
                 }
             }
         }

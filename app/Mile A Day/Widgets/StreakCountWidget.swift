@@ -148,75 +148,73 @@ struct MediumStreakView: View {
     }
 
     var body: some View {
-        HStack(spacing: 16) {
-            // Streak block
-            VStack(spacing: 4) {
-                ZStack {
-                    Circle()
-                        .stroke(Color.gray.opacity(0.2), lineWidth: 4)
-                        .frame(width: 72, height: 72)
-
-                    Circle()
-                        .trim(from: 0, to: entry.liveProgress)
-                        .stroke(entry.streakColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                        .frame(width: 72, height: 72)
-                        .rotationEffect(.degrees(-90))
-
-                    VStack(spacing: 0) {
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 12))
-                            .foregroundColor(entry.streakColor)
-                        Text("\(entry.streak)")
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .foregroundColor(entry.streakColor)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.6)
-                    }
+        HStack(spacing: 18) {
+            // Streak ring
+            MADWidgetRing(
+                progress: entry.liveProgress,
+                size: 84,
+                lineWidth: 7,
+                isComplete: entry.isGoalCompleted
+            ) {
+                VStack(spacing: 0) {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(MADWidgetStyle.orange)
+                    Text("\(entry.streak)")
+                        .font(.system(size: 26, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                    Text(entry.streak == 1 ? "DAY" : "DAYS")
+                        .font(.system(size: 8, weight: .heavy, design: .rounded))
+                        .tracking(1.0)
+                        .foregroundColor(MADWidgetStyle.secondaryText)
                 }
-
-                Text(entry.streak == 1 ? "day streak" : "day streak")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundColor(.secondary)
             }
 
             // Week dots
-            VStack(alignment: .leading, spacing: 8) {
-                Text(entry.isGoalCompleted ? "Mile done — streak safe" : "This week")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(entry.isGoalCompleted ? .green : .primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+            VStack(alignment: .leading, spacing: 9) {
+                MADWidgetLabel(
+                    icon: entry.isGoalCompleted ? "checkmark.seal.fill" : "calendar",
+                    text: entry.isGoalCompleted ? "MILE DONE — STREAK SAFE" : "THIS WEEK",
+                    color: entry.isGoalCompleted ? MADWidgetStyle.green : MADWidgetStyle.red
+                )
 
-                HStack(spacing: 6) {
+                HStack(spacing: 7) {
                     ForEach(0..<7, id: \.self) { index in
                         let completed = index < entry.weekCompletions.count ? entry.weekCompletions[index] : false
                         let isToday = index == todayIndex
                         let isFuture = index > todayIndex
 
-                        VStack(spacing: 3) {
+                        VStack(spacing: 4) {
                             Text(Self.dayLetters[index])
-                                .font(.system(size: 8, weight: .medium))
-                                .foregroundColor(.secondary)
+                                .font(.system(size: 8, weight: .bold, design: .rounded))
+                                .foregroundColor(isToday ? .white : MADWidgetStyle.secondaryText)
 
                             ZStack {
                                 Circle()
                                     .fill(
-                                        completed ? Color.green.opacity(0.85) :
-                                        isFuture ? Color.gray.opacity(0.12) :
-                                        Color.gray.opacity(0.25)
+                                        completed
+                                            ? AnyShapeStyle(LinearGradient(
+                                                colors: [MADWidgetStyle.green, MADWidgetStyle.green.opacity(0.7)],
+                                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                                            : AnyShapeStyle(Color.white.opacity(isFuture ? 0.06 : 0.14))
                                     )
-                                    .frame(width: 20, height: 20)
+                                    .frame(width: 21, height: 21)
 
                                 if completed {
                                     Image(systemName: "figure.run")
-                                        .font(.system(size: 8, weight: .bold))
+                                        .font(.system(size: 9, weight: .bold))
                                         .foregroundColor(.white)
                                 }
 
                                 if isToday {
                                     Circle()
-                                        .stroke(entry.streakColor, lineWidth: 1.5)
-                                        .frame(width: 24, height: 24)
+                                        .stroke(
+                                            entry.isGoalCompleted ? MADWidgetStyle.green : MADWidgetStyle.red,
+                                            lineWidth: 1.8
+                                        )
+                                        .frame(width: 26, height: 26)
                                 }
                             }
                         }
@@ -224,12 +222,13 @@ struct MediumStreakView: View {
                 }
 
                 if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
-                    HStack(spacing: 3) {
+                    HStack(spacing: 4) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 8))
+                            .font(.system(size: 9, weight: .bold))
                         Text(timeRemaining)
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
                             .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                     .foregroundColor(.red)
                 }
@@ -237,7 +236,6 @@ struct MediumStreakView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 4)
     }
 }
 
@@ -394,60 +392,44 @@ struct HomeScreenStreakView: View {
     let entry: StreakCountEntry
 
     // WidgetKit renders this view statically — .onAppear-driven @State
-    // animation never plays, which left the progress ring drawn at 0.
-    // Render the real progress value directly instead.
+    // animation never plays, so the real progress value is drawn directly.
     var body: some View {
-        VStack(spacing: 4) {
-            ZStack {
-                // Background circle
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            gradient: Gradient(colors: [entry.streakColor.opacity(0.3), entry.streakColor.opacity(0.1)]),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 90, height: 90)
-
-                // Live progress ring
-                Circle()
-                    .stroke(Color.gray.opacity(0.2), lineWidth: 4)
-                    .frame(width: 100, height: 100)
-
-                Circle()
-                    .trim(from: 0, to: entry.liveProgress)
-                    .stroke(entry.streakColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                    .frame(width: 100, height: 100)
-                    .rotationEffect(.degrees(-90))
-
-                // Streak number in center
-                VStack(spacing: 2) {
-                    // At-risk warning icon
-                    if entry.isAtRisk {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.caption2)
-                            .foregroundColor(.red)
-                    }
+        VStack(spacing: 6) {
+            MADWidgetRing(
+                progress: entry.liveProgress,
+                size: 92,
+                lineWidth: 7,
+                isComplete: entry.isGoalCompleted
+            ) {
+                VStack(spacing: 0) {
+                    Image(systemName: entry.isAtRisk ? "exclamationmark.triangle.fill" : "flame.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(entry.isAtRisk ? .red : MADWidgetStyle.orange)
 
                     Text("\(entry.streak)")
-                        .font(.system(size: entry.isAtRisk ? 28 : 32, weight: .bold, design: .rounded))
-                        .foregroundColor(entry.streakColor)
+                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
 
-                    Text(entry.streak == 1 ? "day" : "days")
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(entry.streakColor.opacity(0.8))
+                    Text(entry.streak == 1 ? "DAY" : "DAYS")
+                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                        .tracking(1.2)
+                        .foregroundColor(MADWidgetStyle.secondaryText)
                 }
             }
 
-            // Time remaining below the circle if at risk
+            // Status line: countdown when at risk, otherwise streak state
             if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
                 Text(timeRemaining)
-                    .font(.system(size: 10))
-                    .foregroundColor(entry.streakColor.opacity(0.8))
-                    .fontWeight(.medium)
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundColor(.red)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            } else if entry.isGoalCompleted {
+                Text("Streak safe 🔥")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundColor(MADWidgetStyle.green)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -460,7 +442,7 @@ struct StreakCountWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: StreakCountProvider()) { entry in
             StreakCountWidgetEntryView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(for: .widget) { MADWidgetStyle.background }
         }
         .configurationDisplayName("Streak Count")
         .description("See your current streak with live progress updates.")

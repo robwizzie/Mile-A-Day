@@ -74,6 +74,14 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
                         }
                     }
                 }
+                // Keep-alive: pedometer updates are suspended with the app when
+                // the phone locks (CoreMotion batches them until foreground),
+                // which froze the Live Activity for indoor workouts. Running
+                // low-accuracy location updates keeps the app alive via the
+                // `location` background mode; distance from these fixes is
+                // ignored in pedometer mode (see didUpdateLocations).
+                locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+                locationManager.startUpdatingLocation()
             } else {
                 isUsingPedometer = false
                 startGPSTracking()
@@ -87,6 +95,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         if authorizationStatus == .notDetermined {
             requestPermission()
         }
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.startUpdatingLocation()
     }
 
@@ -96,15 +105,20 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
 
         if isUsingPedometer {
             pedometer.stopUpdates()
-        } else {
-            locationManager.stopUpdatingLocation()
         }
+        // Location runs in both modes (distance source for GPS, keep-alive
+        // for pedometer) — always stop it.
+        locationManager.stopUpdatingLocation()
         lastLocation = nil
     }
 
     // MARK: - CLLocationManagerDelegate
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        // In pedometer mode location is only a background keep-alive —
+        // distance comes from CMPedometer and there's no meaningful route.
+        guard !isUsingPedometer else { return }
+
         guard let newLocation = locations.last else { return }
 
         // Only use accurate locations

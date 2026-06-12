@@ -67,8 +67,8 @@ struct CompetitionWidgetEntryView: View {
     private func urgencyColor(_ key: String) -> Color {
         switch key {
         case "urgent":  return Color(red: 1.00, green: 0.45, blue: 0.30)
-        case "behind":  return .orange
-        case "winning": return .green
+        case "behind":  return MADWidgetStyle.orange
+        case "winning": return MADWidgetStyle.green
         default:        return .gray
         }
     }
@@ -77,48 +77,76 @@ struct CompetitionWidgetEntryView: View {
         if let summary = entry.summary {
             let color = summary.isStale ? Color.gray : urgencyColor(summary.urgency)
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "trophy.fill")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.yellow)
+            HStack(spacing: 12) {
+                // Urgency accent bar — same "what needs attention" color
+                // language as the dashboard competition cards.
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(color)
+                    .frame(width: 4)
+                    .padding(.vertical, 2)
 
-                    Text(summary.name)
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 7) {
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.yellow.opacity(0.25), Color.orange.opacity(0.12)],
+                                        startPoint: .top, endPoint: .bottom
+                                    )
+                                )
+                                .frame(width: 26, height: 26)
+                            Image(systemName: "trophy.fill")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(
+                                    LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
+                                )
+                        }
 
-                    Spacer(minLength: 4)
-
-                    if !summary.rankText.isEmpty {
-                        Text(summary.rankText)
-                            .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundColor(.secondary)
+                        Text(summary.name)
+                            .font(.system(size: 15, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
                             .lineLimit(1)
-                    }
-                }
+                            .minimumScaleFactor(0.75)
 
-                HStack(spacing: 4) {
-                    Text(summary.isStale ? "OPEN FOR TODAY'S STANDING" : summary.pill)
-                        .font(.system(size: 10, weight: .black, design: .rounded))
-                        .tracking(0.5)
-                        .foregroundColor(color)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(color.opacity(0.15)))
+                        Spacer(minLength: 4)
+
+                        if !summary.rankText.isEmpty {
+                            Text(summary.rankText)
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .foregroundColor(MADWidgetStyle.secondaryText)
+                                .lineLimit(1)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(Capsule().fill(Color.white.opacity(0.10)))
+                        }
+                    }
+
+                    HStack(spacing: 4) {
+                        Text(summary.isStale ? "OPEN FOR TODAY'S STANDING" : summary.pill)
+                            .font(.system(size: 10, weight: .black, design: .rounded))
+                            .tracking(0.6)
+                            .foregroundColor(color)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .fill(color.opacity(0.16))
+                                    .overlay(Capsule().strokeBorder(color.opacity(0.4), lineWidth: 1))
+                            )
+                        Spacer(minLength: 0)
+                    }
+
+                    Text(summary.isStale ? "Standings shown are from a previous day." : summary.detail)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(MADWidgetStyle.secondaryText)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.85)
+
                     Spacer(minLength: 0)
                 }
-
-                Text(summary.isStale ? "Standings shown are from a previous day." : summary.detail)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.85)
-
-                Spacer(minLength: 0)
             }
             // Tap lands directly on this competition's detail screen.
             .widgetURL(URL(string: "mileaday://competition/\(summary.id)"))
@@ -126,13 +154,13 @@ struct CompetitionWidgetEntryView: View {
             VStack(spacing: 6) {
                 Image(systemName: "trophy")
                     .font(.system(size: 22))
-                    .foregroundColor(.secondary.opacity(0.5))
+                    .foregroundColor(MADWidgetStyle.secondaryText.opacity(0.6))
                 Text("No active competitions")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.primary)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
                 Text("Start one from the Compete tab")
                     .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(MADWidgetStyle.secondaryText)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .widgetURL(URL(string: "mileaday://compete"))
@@ -146,7 +174,7 @@ struct CompetitionWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: CompetitionProvider()) { entry in
             CompetitionWidgetEntryView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(for: .widget) { MADWidgetStyle.background }
         }
         .configurationDisplayName("Competition")
         .description("Your most urgent competition and what to do today.")
