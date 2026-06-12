@@ -8,6 +8,7 @@ import {
 	getFriendsActivityToday
 } from '../controllers/friendshipsController.js';
 import { nudgeFriend, checkNudgeStatus, checkNudgeStatusBatch } from '../controllers/friendNudgeController.js';
+import { listCloseFriends, addCloseFriendHandler, removeCloseFriendHandler } from '../controllers/closeFriendsController.js';
 import { requireSelfAccess } from '../middleware/auth.js';
 
 const router = Router();
@@ -27,5 +28,10 @@ router.delete('/remove', requireSelfAccess('fromUser'), getFriendshipHandler('re
 router.post('/:friendId/nudge', nudgeFriend);
 router.get('/:friendId/nudge-status', checkNudgeStatus);
 router.post('/nudge-status/batch', checkNudgeStatusBatch);
+
+// Close friends routes
+router.get('/close', listCloseFriends);
+router.post('/close/:friendId', addCloseFriendHandler);
+router.delete('/close/:friendId', removeCloseFriendHandler);
 
 export default router;
