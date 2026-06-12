@@ -3,20 +3,25 @@ import {
 	getPreferences,
 	updatePreferences,
 	getFriendSettings,
-	updateFriendSettings,
+	updateFriendSettings
 } from '../controllers/notificationSettingsController.js';
 import {
 	getInAppNotifications,
 	markNotificationRead,
 	markAllRead,
-	getUnreadCount,
+	getUnreadCount
 } from '../controllers/inAppNotificationController.js';
+import { getAudienceSettingsHandler, putAudienceSettingHandler } from '../controllers/audienceSettingsController.js';
 
 const router = Router();
 
 // Global notification preferences
 router.get('/preferences', getPreferences);
 router.put('/preferences', updatePreferences);
+
+// Audience settings (who gets notified / who notifies me)
+router.get('/audience', getAudienceSettingsHandler);
+router.put('/audience', putAudienceSettingHandler);
 
 // Friend-specific notification settings
 router.get('/friends', getFriendSettings);
