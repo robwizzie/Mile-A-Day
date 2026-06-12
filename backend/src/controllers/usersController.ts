@@ -5,7 +5,13 @@ import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
 import hasRequiredKeys from '../utils/hasRequiredKeys.js';
-import { updateUsername, checkUsernameAvailability, updateBio, updateProfileImage } from '../services/userService.js';
+import {
+	updateUsername,
+	checkUsernameAvailability,
+	updateBio,
+	updateProfileImage,
+	getUserCount
+} from '../services/userService.js';
 
 const db = PostgresService.getInstance();
 
@@ -275,6 +281,18 @@ export async function uploadProfileImage(req: Request, res: Response) {
 	} catch (error) {
 		res.status(500).json({
 			error: 'Profile image upload failed',
+			message: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+}
+
+export async function getPublicUserCount(_req: Request, res: Response) {
+	try {
+		const count = await getUserCount();
+		res.json({ count });
+	} catch (error) {
+		res.status(500).json({
+			error: 'Failed to fetch user count',
 			message: error instanceof Error ? error.message : 'Unknown error'
 		});
 	}

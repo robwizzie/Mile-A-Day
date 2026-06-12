@@ -86,3 +86,8 @@ export async function checkUsernameAvailability(username: string): Promise<boole
 	const existingUser = await db.query('SELECT user_id FROM users WHERE username = $1', [username]);
 	return existingUser.length === 0;
 }
+
+export async function getUserCount(): Promise<number> {
+	const results = await db.query('SELECT COUNT(*)::int AS count FROM users');
+	return results[0].count;
+}
