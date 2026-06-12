@@ -32,6 +32,8 @@ const VALID_EVENT_TYPES: ReadonlySet<string> = new Set([
 // Event types for which activity_type rows ('run'/'walk') are valid
 const ACTIVITY_AWARE_EVENTS: ReadonlySet<string> = new Set(['mile_completed', 'extra_workout', 'workout']);
 
+const VALID_AUDIENCES: ReadonlySet<string> = new Set(['none', 'close', 'all', 'ask', 'match_run']);
+
 export type SystemDefaultsMap = {
 	outgoing: Record<AudienceEventType, ResolvedAudience>;
 	incoming: Record<AudienceEventType, ResolvedAudience>;
@@ -258,6 +260,11 @@ export async function setAudienceSetting(
 	// Validate direction
 	if (direction !== 'outgoing' && direction !== 'incoming') {
 		return { validationError: 'direction must be "outgoing" or "incoming"' };
+	}
+
+	// Validate audience value (null = reset is allowed)
+	if (audience !== null && !VALID_AUDIENCES.has(audience)) {
+		return { validationError: `audience must be one of: ${[...VALID_AUDIENCES].join(', ')}` };
 	}
 
 	// Validate event_type

@@ -21,7 +21,7 @@ export async function putAudienceSettingHandler(req: AuthenticatedRequest, res: 
 		}
 
 		// audience: null/undefined/omitted = reset (DELETE row); otherwise must be a valid value
-		const audienceValue = audience === undefined ? null : audience === null ? null : audience;
+		const audienceValue = audience ?? null;
 
 		const result = await setAudienceSetting(req.userId!, direction, event_type, activity_type ?? '', audienceValue);
 
