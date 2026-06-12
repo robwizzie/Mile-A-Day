@@ -9,6 +9,7 @@ import {
 	checkClashTies
 } from '../services/notificationService.js';
 import { sendPendingDailyReminders } from '../services/dailyReminderService.js';
+import { expireStalePendingNotifications } from '../services/pendingNotificationService.js';
 
 export function startNotificationCron(): void {
 	// All "overnight result" notifications fire together at 9 AM ET so users
@@ -99,6 +100,14 @@ export function startNotificationCron(): void {
 			console.log('[CRON] Daily reminder send complete.');
 		} catch (error: any) {
 			console.error('[CRON] Error sending daily reminders:', error.message);
+		}
+
+		// Expire stale pending-friend-notification rows (ask-mode). Lazy expiry on
+		// read already guarantees correctness; this is hygiene to keep the table tidy.
+		try {
+			await expireStalePendingNotifications();
+		} catch (error: any) {
+			console.error('[CRON] Error expiring stale pending notifications:', error.message);
 		}
 	});
 

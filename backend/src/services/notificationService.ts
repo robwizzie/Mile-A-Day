@@ -3,13 +3,14 @@ import { sendPush, sendOrQueueCompetitionNotification } from './pushNotification
 import { shouldSendNotification, filterRecipientsForNotification } from './notificationSettingsService.js';
 import { getCompetition, getCurrentInterval, getUserScores } from './competitionService.js';
 import { Competition, CompetitionUser } from '../types/competitions.js';
-import { getActiveStreak, getTodayMiles, getTodayStats, getUserLocalDate } from './workoutService.js';
+import { getTodayMiles, getTodayStats, getUserLocalDate } from './workoutService.js';
 import {
 	resolveAudience,
 	filterByIncomingAudience,
 	restrictToCloseFriends,
 	queuePendingFriendNotification,
-	AudienceActivity
+	AudienceActivity,
+	AudienceEventType
 } from './audienceSettingsService.js';
 import { getCloseFriendIds } from './closeFriendsService.js';
 
@@ -36,6 +37,69 @@ function formatPace(secondsPerMile: number): string {
 	const m = Math.floor(s / 60);
 	const sec = s % 60;
 	return `${m}:${sec.toString().padStart(2, '0')}/mi`;
+}
+
+// ─── Shared Recipient Pool Helper ──────────────────────────────────
+
+/**
+ * Build the recipient pool for friend-activity notifications:
+ * up to 5 accepted friends + up to 5 active-competition co-participants (deduped).
+ * Applies the sender's outgoing audience ('close' filters to close friends only).
+ * Then applies per-recipient incoming audience filtering.
+ *
+ * For non-workout event types (personal_best, badge_earned, etc.) the pool is
+ * accepted friends only (no competition co-participants).
+ *
+ * Returns the final filtered recipient list. Does NOT apply shouldSendNotification
+ * — callers may add that check if needed (streak_broken path does; workout paths
+ * rely on filterRecipientsForNotification instead).
+ */
+export async function getFriendActivityRecipientPool(
+	userId: string,
+	outgoingAudience: 'close' | 'all',
+	eventType: AudienceEventType,
+	activity: AudienceActivity,
+	includeCompetitionPool = true
+): Promise<string[]> {
+	const friendRows = await db.query<{ friend_id: string }>(
+		`SELECT friend_id FROM friendships WHERE user_id = $1 AND status = 'accepted'`,
+		[userId]
+	);
+
+	let friendIds = friendRows.map(r => r.friend_id);
+	let coParticipantIds: string[] = [];
+
+	if (includeCompetitionPool) {
+		const compRows = await db.query<{ user_id: string }>(
+			`SELECT DISTINCT cu_other.user_id
+			FROM competition_users cu_self
+			JOIN competition_users cu_other ON cu_other.competition_id = cu_self.competition_id
+			JOIN competitions c ON c.id = cu_self.competition_id
+			WHERE cu_self.user_id = $1
+				AND cu_other.user_id <> $1
+				AND cu_self.invite_status = 'accepted'
+				AND cu_other.invite_status = 'accepted'
+				AND c.start_date IS NOT NULL
+				AND c.start_date <= NOW()
+				AND c.winner IS NULL
+				AND (c.end_date IS NULL OR c.end_date > NOW())`,
+			[userId]
+		);
+		const friendSet = new Set(friendIds);
+		coParticipantIds = compRows.map(r => r.user_id).filter(id => !friendSet.has(id));
+	}
+
+	if (outgoingAudience === 'close') {
+		const closeSet = new Set(await getCloseFriendIds(userId));
+		friendIds = friendIds.filter(id => closeSet.has(id));
+		coParticipantIds = coParticipantIds.filter(id => closeSet.has(id));
+	}
+
+	const recipients = [...friendIds.slice(0, 5), ...coParticipantIds.slice(0, 5)];
+	if (recipients.length === 0) return [];
+
+	const prefAllowed = await filterRecipientsForNotification(recipients, userId, 'friend_activity');
+	return filterByIncomingAudience(prefAllowed, userId, eventType, activity);
 }
 
 // ─── Workout Completion Notifications ──────────────────────────────
@@ -123,52 +187,8 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<boo
 			return true;
 		}
 
-		// Friends (bidirectional accepted)
-		const friendRows = await db.query<{ friend_id: string }>(
-			`SELECT friend_id FROM friendships
-			WHERE user_id = $1 AND status = 'accepted'`,
-			[userId]
-		);
-
-		// Active-competition co-participants (other accepted users in the runner's active comps)
-		const compRows = await db.query<{ user_id: string }>(
-			`SELECT DISTINCT cu_other.user_id
-			FROM competition_users cu_self
-			JOIN competition_users cu_other ON cu_other.competition_id = cu_self.competition_id
-			JOIN competitions c ON c.id = cu_self.competition_id
-			WHERE cu_self.user_id = $1
-				AND cu_other.user_id <> $1
-				AND cu_self.invite_status = 'accepted'
-				AND cu_other.invite_status = 'accepted'
-				AND c.start_date IS NOT NULL
-				AND c.start_date <= NOW()
-				AND c.winner IS NULL
-				AND (c.end_date IS NULL OR c.end_date > NOW())`,
-			[userId]
-		);
-
-		let friendIds = friendRows.map(r => r.friend_id);
-		const friendSet = new Set(friendIds);
-		let coParticipantIds = compRows.map(r => r.user_id).filter(id => !friendSet.has(id));
-
-		// 'close' — restrict pool to the sender's close friends (drops co-participants
-		// who aren't close friends, by design). Applied before the caps so close
-		// friends fill the recipient slots.
-		if (outgoing === 'close') {
-			const closeSet = new Set(await getCloseFriendIds(userId));
-			friendIds = friendIds.filter(id => closeSet.has(id));
-			coParticipantIds = coParticipantIds.filter(id => closeSet.has(id));
-		}
-
-		// Cap: up to 5 friends + up to 5 unique co-participants = max 10 recipients
-		const recipients = [...friendIds.slice(0, 5), ...coParticipantIds.slice(0, 5)];
-
-		if (recipients.length === 0) return true;
-
-		// Pre-filter all recipients in 2 queries instead of 2 per recipient.
-		const prefAllowed = await filterRecipientsForNotification(recipients, userId, 'friend_activity');
-		// Recipient-side audience pass (their incoming setting for this event).
-		const allowedRecipients = await filterByIncomingAudience(prefAllowed, userId, 'mile_completed', audienceActivity);
+		const allowedRecipients = await getFriendActivityRecipientPool(userId, outgoing, 'mile_completed', audienceActivity);
+		if (allowedRecipients.length === 0) return true;
 
 		for (const recipientId of allowedRecipients) {
 			sendPush(recipientId, payload).catch(err => console.error('[Push] Error sending friend activity:', err.message));
@@ -296,45 +316,8 @@ async function notifyFriendsOfWorkoutEvent(
 		}
 
 		// Same recipient pool as mile-completion: friends + active-competition co-participants.
-		const friendRows = await db.query<{ friend_id: string }>(
-			`SELECT friend_id FROM friendships
-			WHERE user_id = $1 AND status = 'accepted'`,
-			[userId]
-		);
-		const compRows = await db.query<{ user_id: string }>(
-			`SELECT DISTINCT cu_other.user_id
-			FROM competition_users cu_self
-			JOIN competition_users cu_other ON cu_other.competition_id = cu_self.competition_id
-			JOIN competitions c ON c.id = cu_self.competition_id
-			WHERE cu_self.user_id = $1
-				AND cu_other.user_id <> $1
-				AND cu_self.invite_status = 'accepted'
-				AND cu_other.invite_status = 'accepted'
-				AND c.start_date IS NOT NULL
-				AND c.start_date <= NOW()
-				AND c.winner IS NULL
-				AND (c.end_date IS NULL OR c.end_date > NOW())`,
-			[userId]
-		);
-		let friendIds = friendRows.map(r => r.friend_id);
-		const friendSet = new Set(friendIds);
-		let coParticipantIds = compRows.map(r => r.user_id).filter(id => !friendSet.has(id));
-
-		// 'close' — restrict pool to the sender's close friends (drops co-participants
-		// who aren't close friends, by design). Applied before the caps so close
-		// friends fill the recipient slots.
-		if (outgoing === 'close') {
-			const closeSet = new Set(await getCloseFriendIds(userId));
-			friendIds = friendIds.filter(id => closeSet.has(id));
-			coParticipantIds = coParticipantIds.filter(id => closeSet.has(id));
-		}
-
-		const recipients = [...friendIds.slice(0, 5), ...coParticipantIds.slice(0, 5)];
-		if (recipients.length === 0) return;
-
-		const prefAllowed = await filterRecipientsForNotification(recipients, userId, 'friend_activity');
-		// Recipient-side audience pass (their incoming setting for this event).
-		const allowedRecipients = await filterByIncomingAudience(prefAllowed, userId, eventType, activity);
+		const allowedRecipients = await getFriendActivityRecipientPool(userId, outgoing, eventType, activity);
+		if (allowedRecipients.length === 0) return;
 
 		for (const recipientId of allowedRecipients) {
 			sendPush(recipientId, payload).catch(err =>
