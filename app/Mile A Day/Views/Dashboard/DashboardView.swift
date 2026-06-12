@@ -74,6 +74,10 @@ struct DashboardView: View {
     @State private var showDashboardTour = false
     @State private var tourStep = 0
 
+    /// Getting-started checklist dismissal. The card also auto-hides once all
+    /// items are complete, so this only matters for users who close it early.
+    @AppStorage("gettingStartedDismissed") private var gettingStartedDismissed = false
+
 
     /// Build goal completion stats for the celebration
     private func buildGoalCompletionStats() -> GoalCompletionStats {
@@ -867,6 +871,7 @@ struct DashboardView: View {
             inProgressBannerSection
             competitionInvitesSection
             instructionsSection
+            gettingStartedSection
             todayProgressSection
                 .tourAnchor(.progress)
             // Cross-comp rivalries — surface "you're X behind Y in [comp]"
@@ -925,6 +930,73 @@ struct DashboardView: View {
         InstructionsBanner(
             showInstructions: $showInstructions
         )
+    }
+
+    // MARK: - Getting Started Checklist
+
+    private var gettingStartedItems: [GettingStartedChecklistCard.Item] {
+        [
+            GettingStartedChecklistCard.Item(
+                id: "first-mile",
+                icon: "figure.run",
+                title: "Do your first mile",
+                subtitle: "Run or walk it — any workout counts",
+                isDone: healthManager.totalLifetimeMiles >= 0.95
+                    || userManager.currentUser.streak > 0
+                    || currentState.isCompleted,
+                action: { showWorkoutView = true }
+            ),
+            GettingStartedChecklistCard.Item(
+                id: "add-friend",
+                icon: "person.badge.plus",
+                title: "Add your first friend",
+                subtitle: "Streaks are easier together",
+                isDone: !friendService.friends.isEmpty,
+                action: {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("MAD_SwitchTab"),
+                        object: nil,
+                        userInfo: ["tab": 2]
+                    )
+                }
+            ),
+            GettingStartedChecklistCard.Item(
+                id: "first-medal",
+                icon: "medal.fill",
+                title: "Earn your first medal",
+                subtitle: "Your first mile unlocks one",
+                isDone: userManager.currentUser.badges.contains { !$0.isLocked },
+                action: { navigateToBadgesFromCelebration = true }
+            ),
+            GettingStartedChecklistCard.Item(
+                id: "join-competition",
+                icon: "trophy.fill",
+                title: "Join a competition",
+                subtitle: "Challenge a friend to keep you honest",
+                isDone: !competitionService.competitions.isEmpty,
+                action: {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("MAD_SwitchTab"),
+                        object: nil,
+                        userInfo: ["tab": 1]
+                    )
+                }
+            )
+        ]
+    }
+
+    @ViewBuilder
+    private var gettingStartedSection: some View {
+        let items = gettingStartedItems
+        // Auto-hides for established users (everything done) — only new
+        // users ever see it, and they can dismiss it early.
+        if !gettingStartedDismissed && items.contains(where: { !$0.isDone }) {
+            GettingStartedChecklistCard(items: items) {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    gettingStartedDismissed = true
+                }
+            }
+        }
     }
 
     private var streakSection: some View {

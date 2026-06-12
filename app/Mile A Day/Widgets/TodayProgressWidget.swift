@@ -254,16 +254,40 @@ struct HomeScreenProgressView: View {
                     .fontWeight(.bold)
             }
             
-            // Status or remaining distance
+            // Status row: when the goal isn't done yet, pair the remaining
+            // distance with a Start Mile button that deep-links straight into
+            // the in-app workout tracker. (Widget buttons that should open
+            // the app must be Links — Button(intent:) runs in the background
+            // only.)
             if streakCompleted {
                 Label("Goal Complete!", systemImage: "star.fill")
                     .foregroundColor(.green)
                     .font(.caption)
             } else {
-                let remaining = max(goal - milesCompleted, 0.0)
-                Text(String(format: "%.2f mi to go", remaining))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                HStack {
+                    let remaining = max(goal - milesCompleted, 0.0)
+                    Text(String(format: "%.2f mi to go", remaining))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Spacer()
+
+                    Link(destination: URL(string: "mileaday://workout/start")!) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 10, weight: .bold))
+                            Text("Start Mile")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(Color(red: 217/255, green: 64/255, blue: 63/255))
+                        )
+                    }
+                }
             }
         }
         .padding()

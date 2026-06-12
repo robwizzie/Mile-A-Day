@@ -150,6 +150,7 @@ struct WidgetDataStore {
 
     // MARK: - Competition summary (competition widget)
 
+    private static let compIdKey = "comp_id"
     private static let compNameKey = "comp_name"
     private static let compPillKey = "comp_pill"
     private static let compDetailKey = "comp_detail"
@@ -158,6 +159,7 @@ struct WidgetDataStore {
     private static let compStampKey = "comp_day"
 
     struct CompetitionSummary {
+        let id: String
         let name: String
         let pill: String
         let detail: String
@@ -166,16 +168,18 @@ struct WidgetDataStore {
         let isStale: Bool     // saved on a previous day
     }
 
-    static func save(competitionName: String, pill: String, detail: String, rankText: String, urgency: String) {
+    static func save(competitionId: String, competitionName: String, pill: String, detail: String, rankText: String, urgency: String) {
         guard let defaults = UserDefaults(suiteName: suiteName) else { return }
         let stamp = dayStamp()
-        if defaults.string(forKey: compNameKey) == competitionName,
+        if defaults.string(forKey: compIdKey) == competitionId,
+           defaults.string(forKey: compNameKey) == competitionName,
            defaults.string(forKey: compPillKey) == pill,
            defaults.string(forKey: compDetailKey) == detail,
            defaults.string(forKey: compRankKey) == rankText,
            defaults.string(forKey: compStampKey) == stamp {
             return
         }
+        defaults.set(competitionId, forKey: compIdKey)
         defaults.set(competitionName, forKey: compNameKey)
         defaults.set(pill, forKey: compPillKey)
         defaults.set(detail, forKey: compDetailKey)
@@ -190,6 +194,7 @@ struct WidgetDataStore {
     static func clearCompetitionSummary() {
         guard let defaults = UserDefaults(suiteName: suiteName),
               defaults.string(forKey: compNameKey) != nil else { return }
+        defaults.removeObject(forKey: compIdKey)
         defaults.removeObject(forKey: compNameKey)
         defaults.removeObject(forKey: compPillKey)
         defaults.removeObject(forKey: compDetailKey)
@@ -207,6 +212,7 @@ struct WidgetDataStore {
             return nil
         }
         return CompetitionSummary(
+            id: defaults.string(forKey: compIdKey) ?? "",
             name: name,
             pill: defaults.string(forKey: compPillKey) ?? "",
             detail: defaults.string(forKey: compDetailKey) ?? "",

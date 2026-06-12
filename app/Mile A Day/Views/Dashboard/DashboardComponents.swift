@@ -1590,6 +1590,111 @@ enum UrgencyLevel {
     }
 }
 
+// MARK: - Getting Started Checklist
+
+/// New-user activation card: four first-session goals with live completion
+/// ticks. Each row deep-links to the place where the action happens. The
+/// card hides itself once every item is done (or the user dismisses it), so
+/// established users never see it.
+struct GettingStartedChecklistCard: View {
+    struct Item: Identifiable {
+        let id: String
+        let icon: String
+        let title: String
+        let subtitle: String
+        let isDone: Bool
+        let action: () -> Void
+    }
+
+    let items: [Item]
+    let onDismiss: () -> Void
+
+    private var completedCount: Int {
+        items.filter(\.isDone).count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "checklist")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(
+                        LinearGradient(colors: [MADTheme.Colors.madRed, .orange], startPoint: .top, endPoint: .bottom)
+                    )
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Getting Started")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+                    Text("\(completedCount) of \(items.count) done")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.secondary)
+                        .padding(6)
+                        .background(Circle().fill(Color.white.opacity(0.08)))
+                }
+                .buttonStyle(.plain)
+            }
+
+            VStack(spacing: 0) {
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    Button(action: item.action) {
+                        HStack(spacing: 12) {
+                            Image(systemName: item.isDone ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 20))
+                                .foregroundColor(item.isDone ? .green : .secondary.opacity(0.5))
+
+                            Image(systemName: item.icon)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(item.isDone ? .secondary : MADTheme.Colors.madRed)
+                                .frame(width: 22)
+
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.title)
+                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                                    .foregroundColor(.primary)
+                                    .strikethrough(item.isDone, color: .secondary)
+                                Text(item.subtitle)
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .foregroundColor(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer()
+
+                            if !item.isDone {
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 10)
+                        .contentShape(Rectangle())
+                        .opacity(item.isDone ? 0.6 : 1.0)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(item.isDone)
+
+                    if index < items.count - 1 {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.06))
+                            .frame(height: 0.5)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .liquidGlassCard()
+    }
+}
+
 // MARK: - Dashboard Collapsible Section
 
 struct DashboardCollapsibleSection<Content: View>: View {

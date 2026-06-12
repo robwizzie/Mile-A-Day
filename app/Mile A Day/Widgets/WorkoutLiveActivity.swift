@@ -8,13 +8,74 @@ struct WorkoutActivityAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         var distance: Double // Current workout distance in miles
         var totalDailyDistance: Double // Total for the day
-        var elapsedTime: TimeInterval // Time in seconds
+        var elapsedTime: TimeInterval // Time in seconds (fallback display)
         var goalDistance: Double
         var activityType: String // "Running" or "Walking"
+        /// Anchor for the system-rendered, self-ticking timer
+        /// (`Text(timerInterval:)`). Set to now − elapsedTime on each update so
+        /// the clock keeps running smoothly between activity updates instead
+        /// of freezing at the last pushed value.
+        var timerStartDate: Date? = nil
+        /// Current streak, for the goal-completed celebration copy.
+        var streak: Int = 0
     }
 
     var startTime: Date
     var goalDistance: Double
+}
+
+// MARK: - Shared helpers
+
+private extension WorkoutActivityAttributes.ContentState {
+    var dailyProgress: Double {
+        guard goalDistance > 0 else { return 0 }
+        return min(totalDailyDistance / goalDistance, 1.0)
+    }
+
+    var isGoalComplete: Bool {
+        goalDistance > 0 && totalDailyDistance >= goalDistance
+    }
+
+    /// Current pace in seconds per mile, when there's enough distance to be meaningful.
+    var paceSecondsPerMile: TimeInterval? {
+        guard distance > 0.05 else { return nil }
+        return elapsedTime / distance
+    }
+
+    var paceText: String? {
+        guard let pace = paceSecondsPerMile, pace.isFinite, pace < 3600 else { return nil }
+        let minutes = Int(pace) / 60
+        let seconds = Int(pace) % 60
+        return String(format: "%d:%02d /mi", minutes, seconds)
+    }
+}
+
+/// Self-ticking elapsed-time text: rendered by the system from the anchor
+/// date, so it advances every second with no activity updates. Falls back to
+/// the last pushed static value when no anchor is available.
+private struct LiveTimerText: View {
+    let state: WorkoutActivityAttributes.ContentState
+    var font: Font
+    var alignment: TextAlignment = .trailing
+
+    var body: some View {
+        Group {
+            if let start = state.timerStartDate {
+                Text(timerInterval: start...Date.distantFuture, countsDown: false)
+            } else {
+                Text(staticTime)
+            }
+        }
+        .font(font)
+        .monospacedDigit()
+        .multilineTextAlignment(alignment)
+    }
+
+    private var staticTime: String {
+        let minutes = Int(state.elapsedTime) / 60
+        let seconds = Int(state.elapsedTime) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
 }
 
 // MARK: - Live Activity Widget
@@ -52,10 +113,19 @@ struct WorkoutLiveActivity: Widget {
                             .font(.caption2)
                             .foregroundColor(.white.opacity(0.6))
 
-                        Text(formatTime(context.state.elapsedTime))
-                            .font(.system(size: 20, weight: .semibold, design: .rounded))
-                            .foregroundColor(.white)
-                            .monospacedDigit()
+                        LiveTimerText(
+                            state: context.state,
+                            font: .system(size: 20, weight: .semibold, design: .rounded)
+                        )
+                        .foregroundColor(.white)
+                        .frame(maxWidth: 70, alignment: .trailing)
+
+                        if let pace = context.state.paceText {
+                            Text(pace)
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundColor(.white.opacity(0.7))
+                                .monospacedDigit()
+                        }
                     }
                 }
 
@@ -86,39 +156,71 @@ struct WorkoutLiveActivity: Widget {
                         }
                         .frame(height: 8)
 
-                        // Stats row
-                        HStack {
-                            if context.state.totalDailyDistance > context.state.distance {
-                                Text("Daily: \(String(format: "%.2f", context.state.totalDailyDistance)) mi")
+                        // Stats row — flips to a celebration line once the
+                        // daily goal is in the bank.
+                        if context.state.isGoalComplete {
+                            HStack(spacing: 4) {
+                                Image(systemName: "flame.fill")
+                                    .font(.caption2)
+                                    .foregroundColor(.green)
+                                Text(context.state.streak > 0
+                                     ? "Mile done — streak safe at day \(context.state.streak)!"
+                                     : "Mile done — streak safe!")
+                                    .font(.caption2)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.green)
+                                Spacer()
+                            }
+                        } else {
+                            HStack {
+                                if context.state.totalDailyDistance > context.state.distance {
+                                    Text("Daily: \(String(format: "%.2f", context.state.totalDailyDistance)) mi")
+                                        .font(.caption2)
+                                        .foregroundColor(.white.opacity(0.7))
+                                }
+
+                                Spacer()
+
+                                Text("Goal: \(String(format: "%.2f", context.state.goalDistance)) mi")
                                     .font(.caption2)
                                     .foregroundColor(.white.opacity(0.7))
                             }
-
-                            Spacer()
-
-                            Text("Goal: \(String(format: "%.2f", context.state.goalDistance)) mi")
-                                .font(.caption2)
-                                .foregroundColor(.white.opacity(0.7))
                         }
                     }
                     .padding(.horizontal, 12)
                 }
             } compactLeading: {
-                // Compact leading (left side of Dynamic Island)
-                Image(systemName: context.state.activityType == "Running" ? "figure.run" : "figure.walk")
+                // Compact leading (left side of Dynamic Island) — flips to a
+                // green flame the moment the daily mile is done.
+                Image(systemName: context.state.isGoalComplete
+                      ? "flame.fill"
+                      : (context.state.activityType == "Running" ? "figure.run" : "figure.walk"))
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(context.state.isGoalComplete ? .green : .white)
             } compactTrailing: {
-                // Compact trailing (right side of Dynamic Island)
-                Text(formatTime(context.state.elapsedTime))
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
-                    .monospacedDigit()
+                // Compact trailing — the question mid-mile is "how close am
+                // I?", so show daily progress, not the clock (time lives in
+                // the expanded view).
+                if context.state.isGoalComplete {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.green)
+                } else {
+                    ProgressView(value: context.state.dailyProgress)
+                        .progressViewStyle(.circular)
+                        .tint(Color(red: 0.9, green: 0.3, blue: 0.3))
+                }
             } minimal: {
                 // Minimal (when multiple Live Activities are active)
-                Image(systemName: context.state.activityType == "Running" ? "figure.run" : "figure.walk")
-                    .font(.system(size: 12))
-                    .foregroundColor(.white)
+                if context.state.isGoalComplete {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.green)
+                } else {
+                    ProgressView(value: context.state.dailyProgress)
+                        .progressViewStyle(.circular)
+                        .tint(Color(red: 0.9, green: 0.3, blue: 0.3))
+                }
             }
         }
     }
@@ -194,10 +296,19 @@ struct WorkoutLiveActivityView: View {
                         .font(.caption2)
                         .foregroundColor(.white.opacity(0.6))
 
-                    Text(formatTime(context.state.elapsedTime))
-                        .font(.system(size: 24, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
-                        .monospacedDigit()
+                    LiveTimerText(
+                        state: context.state,
+                        font: .system(size: 24, weight: .semibold, design: .rounded)
+                    )
+                    .foregroundColor(.white)
+                    .frame(maxWidth: 90, alignment: .trailing)
+
+                    if let pace = context.state.paceText {
+                        Text(pace)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.7))
+                            .monospacedDigit()
+                    }
                 }
 
                 // Progress ring

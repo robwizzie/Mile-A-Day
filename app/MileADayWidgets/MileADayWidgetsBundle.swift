@@ -34,6 +34,7 @@ struct CompetitionProvider: TimelineProvider {
         CompetitionEntry(
             date: Date(),
             summary: WidgetDataStore.CompetitionSummary(
+                id: "",
                 name: "Summer Clash",
                 pill: "BEHIND 0.40 MI",
                 detail: "You: 0.60 mi · Leader: 1.00 mi",
@@ -119,6 +120,8 @@ struct CompetitionWidgetEntryView: View {
 
                 Spacer(minLength: 0)
             }
+            // Tap lands directly on this competition's detail screen.
+            .widgetURL(URL(string: "mileaday://competition/\(summary.id)"))
         } else {
             VStack(spacing: 6) {
                 Image(systemName: "trophy")
@@ -132,6 +135,7 @@ struct CompetitionWidgetEntryView: View {
                     .foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .widgetURL(URL(string: "mileaday://compete"))
         }
     }
 }

@@ -55,11 +55,38 @@ struct Mile_A_DayApp: App {
                 }
                 .onOpenURL { url in
                     // Handle deep links from Live Activities / widgets
-                    if url.scheme == "mileaday", url.host == "workout" {
+                    guard url.scheme == "mileaday" else { return }
+                    switch url.host {
+                    case "workout":
+                        // Covers mileaday://workout (Live Activity tap) and
+                        // mileaday://workout/start (widget Start Mile button)
                         NotificationCenter.default.post(
                             name: NSNotification.Name("MAD_OpenWorkoutFromLiveActivity"),
                             object: nil
                         )
+                    case "compete":
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("MAD_SwitchTab"),
+                            object: nil,
+                            userInfo: ["tab": 1]
+                        )
+                    case "competition":
+                        // mileaday://competition/<id> — land on that comp's detail
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("MAD_SwitchTab"),
+                            object: nil,
+                            userInfo: ["tab": 1]
+                        )
+                        let id = url.lastPathComponent
+                        if !id.isEmpty, id != "competition" {
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("MAD_OpenCompetition"),
+                                object: nil,
+                                userInfo: ["competitionId": id]
+                            )
+                        }
+                    default:
+                        break
                     }
                 }
         }

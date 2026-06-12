@@ -31,6 +31,9 @@ struct WorkoutTrackingView: View {
     @State private var showRecap = false
     @State private var showStopConfirmation = false // Confirmation before ending workout
     @State private var isStopping = false // Prevents double-stop and shows "Ending..." UI
+    /// Whether the Live Activity goal-completed alert was already sent (or the
+    /// goal was already met before this workout started, so no alert is due).
+    @State private var hasSentGoalAlert = false
     @State private var showEndWorkoutError = false // Show error alert when end fails
     @State private var endWorkoutErrorMessage = "" // Error message for end workout failure
     @State private var endWorkoutTimeoutTask: DispatchWorkItem? // Timeout for end workout flow
@@ -950,8 +953,16 @@ struct WorkoutTrackingView: View {
             totalDailyDistance: totalDailyDistance,
             elapsedTime: realTimeElapsed,
             goalDistance: goalDistance,
-            activityType: selectedActivityType == .running ? "Running" : "Walking"
+            activityType: selectedActivityType == .running ? "Running" : "Walking",
+            timerStartDate: Date().addingTimeInterval(-realTimeElapsed),
+            streak: userManager.currentUser.streak
         )
+
+        // If the goal was already met before this workout (post-goal extra
+        // miles), don't fire the "mile complete" island alert mid-session.
+        if goalDistance > 0 && totalDailyDistance >= goalDistance {
+            hasSentGoalAlert = true
+        }
 
         do {
             let activity = try Activity.request(
@@ -993,10 +1004,36 @@ struct WorkoutTrackingView: View {
                 totalDailyDistance: freshTotalDaily,
                 elapsedTime: realTimeElapsed,
                 goalDistance: goalDistance,
-                activityType: selectedActivityType == .running ? "Running" : "Walking"
+                activityType: selectedActivityType == .running ? "Running" : "Walking",
+                timerStartDate: Date().addingTimeInterval(-realTimeElapsed),
+                streak: userManager.currentUser.streak
             )
+            // staleDate lets the system dim the activity if the app dies and
+            // stops sending updates, instead of showing confident stale data.
+            let content = ActivityContent(state: updatedState, staleDate: Date().addingTimeInterval(180))
+
+            // Goal crossed during THIS workout → one celebratory alert update
+            // that briefly expands the Dynamic Island / lights up the watch.
+            let goalJustCompleted = goalDistance > 0
+                && freshTotalDaily >= goalDistance
+                && !hasSentGoalAlert
+            if goalJustCompleted {
+                hasSentGoalAlert = true
+            }
+
             Task {
-                await activity.update(ActivityContent(state: updatedState, staleDate: nil))
+                if goalJustCompleted {
+                    await activity.update(
+                        content,
+                        alertConfiguration: AlertConfiguration(
+                            title: "Mile complete! 🔥",
+                            body: "Your streak is safe for today.",
+                            sound: .default
+                        )
+                    )
+                } else {
+                    await activity.update(content)
+                }
             }
         }
 
@@ -1023,12 +1060,16 @@ struct WorkoutTrackingView: View {
         let freshTotalDaily = startingDistance + freshDistance
         let realTimeElapsed = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
 
+        // Final state: no timerStartDate, so the ended activity shows the
+        // frozen final time instead of a clock that keeps ticking.
         let finalState = WorkoutActivityAttributes.ContentState(
             distance: freshDistance,
             totalDailyDistance: freshTotalDaily,
             elapsedTime: realTimeElapsed,
             goalDistance: goalDistance,
-            activityType: selectedActivityType == .running ? "Running" : "Walking"
+            activityType: selectedActivityType == .running ? "Running" : "Walking",
+            timerStartDate: nil,
+            streak: userManager.currentUser.streak
         )
 
         // Capture the ID before clearing the reference so the orphan cleanup can exclude it

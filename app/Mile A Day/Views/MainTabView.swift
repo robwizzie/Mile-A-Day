@@ -291,6 +291,7 @@ struct MainTabView: View {
         }
 
         WidgetDataStore.save(
+            competitionId: top.competition_id,
             competitionName: top.competition_name,
             pill: focus.pill,
             detail: focus.detail,
