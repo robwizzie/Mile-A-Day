@@ -17,10 +17,6 @@ export async function addCloseFriendHandler(req: AuthenticatedRequest, res: Resp
 	const userId = req.userId!;
 	const { friendId } = req.params;
 
-	if (!friendId) {
-		return res.status(400).json({ error: 'friendId is required' });
-	}
-
 	if (userId === friendId) {
 		return res.status(400).json({ error: 'You cannot add yourself to close friends' });
 	}
@@ -40,15 +36,8 @@ export async function removeCloseFriendHandler(req: AuthenticatedRequest, res: R
 	const userId = req.userId!;
 	const { friendId } = req.params;
 
-	if (!friendId) {
-		return res.status(400).json({ error: 'friendId is required' });
-	}
-
 	try {
 		const result = await removeCloseFriend(userId, friendId);
-		if ('error' in result) {
-			return res.status(400).json(result);
-		}
 		res.json(result);
 	} catch (err: any) {
 		res.status(500).json({ error: err.message });
