@@ -100,7 +100,8 @@ function resolveFromRows(
 			}
 			// match_run on non-walk row → continue cascade
 		} else if (exact === 'ask' && direction === 'incoming') {
-			// 'ask' illegal for incoming — continue cascade
+			// 'ask' is illegal for incoming — treat as permissive
+			return 'all';
 		} else {
 			return exact as ResolvedAudience;
 		}
@@ -112,7 +113,8 @@ function resolveFromRows(
 		if (eventLevel === 'match_run') {
 			// match_run shouldn't be on event-level row with '' activity, treat as invalid → continue
 		} else if (eventLevel === 'ask' && direction === 'incoming') {
-			// continue cascade
+			// 'ask' is illegal for incoming — treat as permissive
+			return 'all';
 		} else {
 			return eventLevel as ResolvedAudience;
 		}
@@ -124,7 +126,8 @@ function resolveFromRows(
 		if (global === 'match_run') {
 			// invalid for global row → continue
 		} else if (global === 'ask' && direction === 'incoming') {
-			// continue
+			// 'ask' is illegal for incoming — treat as permissive
+			return 'all';
 		} else {
 			return global as ResolvedAudience;
 		}
@@ -198,10 +201,7 @@ export async function filterByIncomingAudience(
 		const closeRows = await db.query<{ user_id: string }>(
 			`SELECT cf.user_id
 			 FROM close_friends cf
-			 JOIN friendships f ON (
-			   (f.user_id = cf.user_id AND f.friend_id = cf.close_friend_id)
-			   OR (f.user_id = cf.close_friend_id AND f.friend_id = cf.user_id)
-			 ) AND f.status = 'accepted'
+			 JOIN friendships f ON f.user_id = cf.user_id AND f.friend_id = cf.close_friend_id AND f.status = 'accepted'
 			 WHERE cf.user_id = ANY($1::text[])
 			   AND cf.close_friend_id = $2`,
 			[closeRecipients, senderId]
