@@ -156,34 +156,44 @@ export async function sendPending(userId: string, id: string, audience: 'close' 
 		return { ok: false, reason: 'expired' };
 	}
 
-	// 5. Build recipients exactly as the live senders do.
+	// 5. Build recipients exactly as the live senders do. If anything past the
+	// claim throws, revert the row to 'pending' so the user can retry —
+	// otherwise the claim would consume the notification with nothing sent.
 	let allowedRecipients: string[];
-
-	if (WORKOUT_EVENT_TYPES.has(row.event_type)) {
-		// Full pool: friends + active-competition co-participants (same as live senders).
-		allowedRecipients = await getFriendActivityRecipientPool(userId, effectiveAudience, eventType, activity);
-	} else {
-		// Non-workout events: friends only (no comp participants).
-		// This mirrors pushNotificationService.ts resolveFriendFanOutRecipients.
-		const friendRows = await db.query<{ friend_id: string }>(
-			`SELECT friend_id FROM friendships WHERE user_id = $1 AND status = 'accepted'`,
-			[userId]
-		);
-		let friendIds = friendRows.map(r => r.friend_id);
-
-		if (effectiveAudience === 'close') {
-			friendIds = await restrictToCloseFriends(userId, friendIds);
-		}
-
-		if (friendIds.length === 0) {
-			allowedRecipients = [];
+	try {
+		if (WORKOUT_EVENT_TYPES.has(row.event_type)) {
+			// Full pool: friends + active-competition co-participants (same as live senders).
+			allowedRecipients = await getFriendActivityRecipientPool(userId, effectiveAudience, eventType, activity);
 		} else {
-			// Global-pref filter only for events the live fan-outs actually check
-			// (see PREF_FILTER_TYPE). badge_earned / challenge_completed skip it.
-			const prefType = PREF_FILTER_TYPE[row.event_type];
-			const prefAllowed = prefType ? await filterRecipientsForNotification(friendIds, userId, prefType) : friendIds;
-			allowedRecipients = await filterByIncomingAudience(prefAllowed, userId, eventType, activity);
+			// Non-workout events: friends only (no comp participants).
+			// This mirrors pushNotificationService.ts resolveFriendFanOutRecipients.
+			const friendRows = await db.query<{ friend_id: string }>(
+				`SELECT friend_id FROM friendships WHERE user_id = $1 AND status = 'accepted'`,
+				[userId]
+			);
+			let friendIds = friendRows.map(r => r.friend_id);
+
+			if (effectiveAudience === 'close') {
+				friendIds = await restrictToCloseFriends(userId, friendIds);
+			}
+
+			if (friendIds.length === 0) {
+				allowedRecipients = [];
+			} else {
+				// Global-pref filter only for events the live fan-outs actually check
+				// (see PREF_FILTER_TYPE). badge_earned / challenge_completed skip it.
+				const prefType = PREF_FILTER_TYPE[row.event_type];
+				const prefAllowed = prefType ? await filterRecipientsForNotification(friendIds, userId, prefType) : friendIds;
+				allowedRecipients = await filterByIncomingAudience(prefAllowed, userId, eventType, activity);
+			}
 		}
+	} catch (err) {
+		await db
+			.query(`UPDATE pending_friend_notifications SET status = 'pending' WHERE id = $1 AND status = 'sent'`, [id])
+			.catch(rollbackErr =>
+				console.error('[PendingNotif] Failed to revert claim after error:', rollbackErr.message)
+			);
+		throw err;
 	}
 
 	// Build push payload from stored JSONB. Cast type to NotificationType so
