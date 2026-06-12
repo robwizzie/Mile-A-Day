@@ -4,6 +4,14 @@ import { shouldSendNotification, filterRecipientsForNotification } from './notif
 import { getCompetition, getCurrentInterval, getUserScores } from './competitionService.js';
 import { Competition, CompetitionUser } from '../types/competitions.js';
 import { getActiveStreak, getTodayMiles, getTodayStats, getUserLocalDate } from './workoutService.js';
+import {
+	resolveAudience,
+	filterByIncomingAudience,
+	restrictToCloseFriends,
+	queuePendingFriendNotification,
+	AudienceActivity
+} from './audienceSettingsService.js';
+import { getCloseFriendIds } from './closeFriendsService.js';
 
 const db = PostgresService.getInstance();
 
@@ -54,6 +62,67 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<boo
 		const [user] = await db.query('SELECT username FROM users WHERE user_id = $1', [userId]);
 		if (!user) return false;
 
+		// The runner's local date — clients use it as the hype dedupe key. Without
+		// it they fall back to the notification's UTC date, which is off-by-one for
+		// evening miles (e.g. 11pm ET) and collides with the next day's mile.
+		const localDate = await getUserLocalDate(userId);
+
+		// Activity for audience resolution: the workout that completed the mile —
+		// approximated as today's most recent running/walking workout. Default 'run'.
+		const [recentWorkout] = await db.query<{ workout_id: string; workout_type: string }>(
+			`SELECT workout_id, workout_type
+			FROM workouts
+			WHERE user_id = $1 AND local_date = $2 AND workout_type IN ('running', 'walking')
+			ORDER BY device_end_date DESC
+			LIMIT 1`,
+			[userId, localDate]
+		);
+		const audienceActivity: AudienceActivity = recentWorkout?.workout_type === 'walking' ? 'walk' : 'run';
+
+		// Outgoing audience (dedupe slot is already claimed above, so 'none'/'ask'
+		// won't refire later).
+		const outgoing = await resolveAudience(userId, 'outgoing', 'mile_completed', audienceActivity);
+		if (outgoing === 'none') return true;
+
+		const title = `${user.username} got their mile in!`;
+
+		// Build a stat-line body. If stats fail or are degenerate, fall back to
+		// the generic body so the notification still goes out.
+		const FALLBACK_BODY = 'Your friend just completed their daily mile. Time to lace up!';
+		let body = FALLBACK_BODY;
+		try {
+			const stats = await getTodayStats(userId);
+			if (stats.miles > 0) {
+				const parts = [formatMiles(stats.miles), formatDuration(stats.durationSeconds)];
+				if (stats.bestSplitPaceSecMi != null && stats.bestSplitPaceSecMi > 0) {
+					parts.push(`best pace ${formatPace(stats.bestSplitPaceSecMi)}`);
+				}
+				body = parts.join(' · ');
+			}
+		} catch (err: any) {
+			console.error('[Notifications] Error building mile completion stats body, using fallback:', err.message);
+		}
+
+		const payload = {
+			title,
+			body,
+			type: 'friend_activity' as const,
+			category: 'FRIEND_ACTIVITY',
+			data: { user_id: userId, kind: 'mile_completed', local_date: localDate }
+		};
+
+		// 'ask' — queue for the sender's explicit confirmation instead of sending.
+		if (outgoing === 'ask') {
+			await queuePendingFriendNotification(
+				userId,
+				'mile_completed',
+				audienceActivity,
+				recentWorkout?.workout_id ?? null,
+				payload
+			);
+			return true;
+		}
+
 		// Friends (bidirectional accepted)
 		const friendRows = await db.query<{ friend_id: string }>(
 			`SELECT friend_id FROM friendships
@@ -78,50 +147,31 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<boo
 			[userId]
 		);
 
-		const friendIds = friendRows.map(r => r.friend_id);
+		let friendIds = friendRows.map(r => r.friend_id);
 		const friendSet = new Set(friendIds);
-		const coParticipantIds = compRows.map(r => r.user_id).filter(id => !friendSet.has(id));
+		let coParticipantIds = compRows.map(r => r.user_id).filter(id => !friendSet.has(id));
+
+		// 'close' — restrict pool to the sender's close friends (drops co-participants
+		// who aren't close friends, by design). Applied before the caps so close
+		// friends fill the recipient slots.
+		if (outgoing === 'close') {
+			const closeSet = new Set(await getCloseFriendIds(userId));
+			friendIds = friendIds.filter(id => closeSet.has(id));
+			coParticipantIds = coParticipantIds.filter(id => closeSet.has(id));
+		}
 
 		// Cap: up to 5 friends + up to 5 unique co-participants = max 10 recipients
 		const recipients = [...friendIds.slice(0, 5), ...coParticipantIds.slice(0, 5)];
 
 		if (recipients.length === 0) return true;
 
-		const title = `${user.username} got their mile in!`;
-
-		// Build a stat-line body. If stats fail or are degenerate, fall back to
-		// the generic body so the notification still goes out.
-		const FALLBACK_BODY = 'Your friend just completed their daily mile. Time to lace up!';
-		let body = FALLBACK_BODY;
-		try {
-			const stats = await getTodayStats(userId);
-			if (stats.miles > 0) {
-				const parts = [formatMiles(stats.miles), formatDuration(stats.durationSeconds)];
-				if (stats.bestSplitPaceSecMi != null && stats.bestSplitPaceSecMi > 0) {
-					parts.push(`best pace ${formatPace(stats.bestSplitPaceSecMi)}`);
-				}
-				body = parts.join(' · ');
-			}
-		} catch (err: any) {
-			console.error('[Notifications] Error building mile completion stats body, using fallback:', err.message);
-		}
-
 		// Pre-filter all recipients in 2 queries instead of 2 per recipient.
-		const allowedRecipients = await filterRecipientsForNotification(recipients, userId, 'friend_activity');
-
-		// The runner's local date — clients use it as the hype dedupe key. Without
-		// it they fall back to the notification's UTC date, which is off-by-one for
-		// evening miles (e.g. 11pm ET) and collides with the next day's mile.
-		const localDate = await getUserLocalDate(userId);
+		const prefAllowed = await filterRecipientsForNotification(recipients, userId, 'friend_activity');
+		// Recipient-side audience pass (their incoming setting for this event).
+		const allowedRecipients = await filterByIncomingAudience(prefAllowed, userId, 'mile_completed', audienceActivity);
 
 		for (const recipientId of allowedRecipients) {
-			sendPush(recipientId, {
-				title,
-				body,
-				type: 'friend_activity',
-				category: 'FRIEND_ACTIVITY',
-				data: { user_id: userId, kind: 'mile_completed', local_date: localDate }
-			}).catch(err => console.error('[Push] Error sending friend activity:', err.message));
+			sendPush(recipientId, payload).catch(err => console.error('[Push] Error sending friend activity:', err.message));
 		}
 
 		if (allowedRecipients.length > 0) {
@@ -139,6 +189,28 @@ export async function notifyFriendsOfMileCompletion(userId: string): Promise<boo
  * completed their daily mile. Dedup'd per workout via milestone_notifications.
  */
 export async function notifyFriendsOfExtraWorkout(userId: string, workoutId: string): Promise<void> {
+	return notifyFriendsOfWorkoutEvent(userId, workoutId, 'extra_workout');
+}
+
+/**
+ * Notify friends of a run/walk uploaded BEFORE the daily mile goal is met
+ * (and that didn't complete it). Opt-in: the system default outgoing audience
+ * for 'workout' is 'none', so nothing sends unless the user enables it.
+ */
+export async function notifyFriendsOfWorkout(userId: string, workoutId: string): Promise<void> {
+	return notifyFriendsOfWorkoutEvent(userId, workoutId, 'workout');
+}
+
+/**
+ * Shared implementation for the per-workout friend notifications
+ * ('extra_workout' post-goal, 'workout' pre-goal). Dedup'd per workout via
+ * milestone_notifications key `${eventType}:${workoutId}`.
+ */
+async function notifyFriendsOfWorkoutEvent(
+	userId: string,
+	workoutId: string,
+	eventType: 'extra_workout' | 'workout'
+): Promise<void> {
 	try {
 		const [workout] = await db.query<{
 			workout_type: string;
@@ -159,8 +231,15 @@ export async function notifyFriendsOfExtraWorkout(userId: string, workoutId: str
 		const duration = Number(workout.total_duration);
 		if (!(distance > 0)) return;
 
+		// Cross-type guard: a workout already announced under the sibling event
+		// type must not fire again (e.g. a pre-goal 'workout' getting re-uploaded
+		// after the mile is complete would otherwise also fire as 'extra_workout').
+		const siblingKey = `${eventType === 'workout' ? 'extra_workout' : 'workout'}:${workoutId}`;
+		const [sibling] = await db.query(`SELECT 1 FROM milestone_notifications WHERE milestone_key = $1`, [siblingKey]);
+		if (sibling) return;
+
 		// Atomically claim per-workout slot to avoid re-firing on re-upload.
-		const milestoneKey = `extra_workout:${workoutId}`;
+		const milestoneKey = `${eventType}:${workoutId}`;
 		const claimed = await db.query(
 			`INSERT INTO milestone_notifications (milestone_key, user_id) VALUES ($1, $2)
 			ON CONFLICT (milestone_key) DO NOTHING
@@ -169,8 +248,52 @@ export async function notifyFriendsOfExtraWorkout(userId: string, workoutId: str
 		);
 		if (claimed.length === 0) return;
 
+		const activity = type === 'running' ? 'run' : 'walk';
+
+		// Outgoing audience (dedupe slot is already claimed, so 'none'/'ask' won't refire).
+		const outgoing = await resolveAudience(userId, 'outgoing', eventType, activity);
+		if (outgoing === 'none') return;
+
 		const [user] = await db.query('SELECT username FROM users WHERE user_id = $1', [userId]);
 		if (!user) return;
+
+		// Best pace for THIS workout: min split pace where split is ~full mile,
+		// else workout average if the workout itself is ~full mile.
+		let bestPace: number | null = null;
+		const [paceRow] = await db.query<{ pace: number | string | null }>(
+			`SELECT MIN(split_pace) AS pace
+			FROM workout_splits
+			WHERE workout_id = $1 AND split_distance >= 0.95 AND split_pace > 0`,
+			[workoutId]
+		);
+		if (paceRow?.pace != null) bestPace = Number(paceRow.pace);
+		if (bestPace == null && distance >= 0.95 && duration > 0) {
+			bestPace = duration / distance;
+		}
+
+		const todayMiles = await getTodayMiles(userId);
+
+		const title = `${user.username} completed a ${activity}`;
+		const parts = [formatMiles(distance), formatDuration(duration)];
+		if (bestPace != null && bestPace > 0) parts.push(`best pace ${formatPace(bestPace)}`);
+		if (todayMiles > 0) parts.push(`${formatMiles(Number(todayMiles))} today`);
+		const body = parts.join(' · ');
+
+		// Runner's local date — hype dedupe key for clients (see mile-completion note).
+		const localDate = await getUserLocalDate(userId);
+		const payload = {
+			title,
+			body,
+			type: 'friend_activity' as const,
+			category: 'FRIEND_ACTIVITY',
+			data: { user_id: userId, kind: eventType, workout_id: workoutId, local_date: localDate }
+		};
+
+		// 'ask' — queue for the sender's explicit confirmation instead of sending.
+		if (outgoing === 'ask') {
+			await queuePendingFriendNotification(userId, eventType, activity, workoutId, payload);
+			return;
+		}
 
 		// Same recipient pool as mile-completion: friends + active-competition co-participants.
 		const friendRows = await db.query<{ friend_id: string }>(
@@ -193,55 +316,39 @@ export async function notifyFriendsOfExtraWorkout(userId: string, workoutId: str
 				AND (c.end_date IS NULL OR c.end_date > NOW())`,
 			[userId]
 		);
-		const friendIds = friendRows.map(r => r.friend_id);
+		let friendIds = friendRows.map(r => r.friend_id);
 		const friendSet = new Set(friendIds);
-		const coParticipantIds = compRows.map(r => r.user_id).filter(id => !friendSet.has(id));
+		let coParticipantIds = compRows.map(r => r.user_id).filter(id => !friendSet.has(id));
+
+		// 'close' — restrict pool to the sender's close friends (drops co-participants
+		// who aren't close friends, by design). Applied before the caps so close
+		// friends fill the recipient slots.
+		if (outgoing === 'close') {
+			const closeSet = new Set(await getCloseFriendIds(userId));
+			friendIds = friendIds.filter(id => closeSet.has(id));
+			coParticipantIds = coParticipantIds.filter(id => closeSet.has(id));
+		}
+
 		const recipients = [...friendIds.slice(0, 5), ...coParticipantIds.slice(0, 5)];
 		if (recipients.length === 0) return;
 
-		// Best pace for THIS workout: min split pace where split is ~full mile,
-		// else workout average if the workout itself is ~full mile.
-		let bestPace: number | null = null;
-		const [paceRow] = await db.query<{ pace: number | string | null }>(
-			`SELECT MIN(split_pace) AS pace
-			FROM workout_splits
-			WHERE workout_id = $1 AND split_distance >= 0.95 AND split_pace > 0`,
-			[workoutId]
-		);
-		if (paceRow?.pace != null) bestPace = Number(paceRow.pace);
-		if (bestPace == null && distance >= 0.95 && duration > 0) {
-			bestPace = duration / distance;
-		}
+		const prefAllowed = await filterRecipientsForNotification(recipients, userId, 'friend_activity');
+		// Recipient-side audience pass (their incoming setting for this event).
+		const allowedRecipients = await filterByIncomingAudience(prefAllowed, userId, eventType, activity);
 
-		const todayMiles = await getTodayMiles(userId);
-
-		const activity = type === 'running' ? 'run' : 'walk';
-		const title = `${user.username} completed a ${activity}`;
-		const parts = [formatMiles(distance), formatDuration(duration)];
-		if (bestPace != null && bestPace > 0) parts.push(`best pace ${formatPace(bestPace)}`);
-		if (todayMiles > 0) parts.push(`${formatMiles(Number(todayMiles))} today`);
-		const body = parts.join(' · ');
-
-		const allowedRecipients = await filterRecipientsForNotification(recipients, userId, 'friend_activity');
-		// Runner's local date — hype dedupe key for clients (see mile-completion note).
-		const localDate = await getUserLocalDate(userId);
 		for (const recipientId of allowedRecipients) {
-			sendPush(recipientId, {
-				title,
-				body,
-				type: 'friend_activity',
-				category: 'FRIEND_ACTIVITY',
-				data: { user_id: userId, kind: 'extra_workout', workout_id: workoutId, local_date: localDate }
-			}).catch(err => console.error('[Push] Error sending extra workout:', err.message));
+			sendPush(recipientId, payload).catch(err =>
+				console.error(`[Push] Error sending ${eventType} notification:`, err.message)
+			);
 		}
 
 		if (allowedRecipients.length > 0) {
 			console.log(
-				`[Notifications] Sent extra workout (${activity}) to ${allowedRecipients.length} recipients of ${user.username}`
+				`[Notifications] Sent ${eventType} (${activity}) to ${allowedRecipients.length} recipients of ${user.username}`
 			);
 		}
 	} catch (err: any) {
-		console.error('[Notifications] Error notifying friends of extra workout:', err.message);
+		console.error(`[Notifications] Error notifying friends of ${eventType}:`, err.message);
 	}
 }
 
@@ -510,23 +617,42 @@ export async function checkStreaksBroken(): Promise<void> {
 				);
 				if (claimed.length === 0) continue;
 
+				// Outgoing audience (milestone slot already claimed, so 'none'/'ask' won't refire).
+				const outgoing = await resolveAudience(user_id, 'outgoing', 'streak_broken', '');
+				if (outgoing === 'none') continue;
+
+				const payload = {
+					title: 'Streak broken!',
+					body: `${username}'s ${streakLength}-day streak just ended. Send them some encouragement!`,
+					type: 'friend_activity' as const,
+					data: { user_id, kind: 'streak_broken' }
+				};
+
+				// 'ask' — queue for the user's explicit confirmation instead of sending.
+				if (outgoing === 'ask') {
+					await queuePendingFriendNotification(user_id, 'streak_broken', '', null, payload);
+					continue;
+				}
+
 				// Notify their friends
 				const friends = await db.query(`SELECT friend_id FROM friendships WHERE user_id = $1 AND status = 'accepted'`, [
 					user_id
 				]);
 
+				let friendIds = friends.map((r: any) => r.friend_id as string);
+				if (outgoing === 'close') {
+					friendIds = await restrictToCloseFriends(user_id, friendIds);
+				}
+				// Recipient-side audience pass (their incoming setting for this event).
+				friendIds = await filterByIncomingAudience(friendIds, user_id, 'streak_broken', '');
+
 				let sentCount = 0;
-				for (const { friend_id } of friends) {
+				for (const friend_id of friendIds) {
 					if (sentCount >= 10) break;
 					const shouldSend = await shouldSendNotification(friend_id, user_id, 'friend_activity');
 					if (!shouldSend) continue;
 
-					sendPush(friend_id, {
-						title: 'Streak broken!',
-						body: `${username}'s ${streakLength}-day streak just ended. Send them some encouragement!`,
-						type: 'friend_activity',
-						data: { user_id, kind: 'streak_broken' }
-					}).catch(err => console.error('[Push] streak broken error:', err.message));
+					sendPush(friend_id, payload).catch(err => console.error('[Push] streak broken error:', err.message));
 					sentCount++;
 				}
 

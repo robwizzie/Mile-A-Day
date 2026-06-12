@@ -19,6 +19,7 @@ import { checkRaceCompletions } from '../services/competitionService.js';
 import {
 	notifyFriendsOfMileCompletion,
 	notifyFriendsOfExtraWorkout,
+	notifyFriendsOfWorkout,
 	checkCompetitionMilestones,
 	checkLeadChanges
 } from '../services/notificationService.js';
@@ -90,6 +91,19 @@ export async function uploadWorkouts(req: Request, res: Response) {
 								console.error('Error notifying extra workout:', err.message)
 							);
 						}
+					}
+				}
+			} else {
+				// Daily mile NOT yet met — pre-goal workout notifications. Opt-in:
+				// the default outgoing audience for 'workout' is 'none', so this
+				// sends nothing unless the user enabled it. The workout that later
+				// completes the mile takes the >= 1.0 branch (mile_completed only),
+				// so the two never double-fire for the same workout.
+				for (const w of req.body as Workout[]) {
+					if (w.workoutType === 'running' || w.workoutType === 'walking') {
+						notifyFriendsOfWorkout(userId, w.workoutId).catch(err =>
+							console.error('Error notifying pre-goal workout:', err.message)
+						);
 					}
 				}
 			}

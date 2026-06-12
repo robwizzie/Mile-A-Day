@@ -1,4 +1,6 @@
 import { PostgresService } from './DbService.js';
+import { getCloseFriendIds } from './closeFriendsService.js';
+import { getUserLocalDate } from './workoutService.js';
 
 const db = PostgresService.getInstance();
 
@@ -219,6 +221,50 @@ export async function filterByIncomingAudience(
 		// 'ask' resolved to incoming falls back to 'all' in resolveFromRows, but defensive:
 		return true;
 	});
+}
+
+// ─── Outgoing-audience helpers for senders ───────────────────────────
+
+/**
+ * Restrict a recipient pool to the sender's close friends (for outgoing
+ * audience 'close'). Recipients not on the sender's close list — including
+ * competition co-participants who aren't close friends — are dropped.
+ */
+export async function restrictToCloseFriends(senderId: string, recipientIds: string[]): Promise<string[]> {
+	if (recipientIds.length === 0) return [];
+	const closeSet = new Set(await getCloseFriendIds(senderId));
+	return recipientIds.filter(id => closeSet.has(id));
+}
+
+/** Push payload shape stored for pending ('ask') friend notifications. */
+export interface PendingPushPayload {
+	title: string;
+	body: string;
+	type: string;
+	category?: string;
+	data?: Record<string, string>;
+}
+
+/**
+ * Queue a friend notification for explicit sender confirmation (outgoing
+ * audience 'ask'). The payload is exactly what would have been passed to
+ * sendPush; a later confirm endpoint sends it. Dedup'd per
+ * (user, event_type, workout_id) while pending via partial unique index.
+ */
+export async function queuePendingFriendNotification(
+	userId: string,
+	eventType: AudienceEventType,
+	activity: AudienceActivity,
+	workoutId: string | null,
+	payload: PendingPushPayload
+): Promise<void> {
+	const localDate = await getUserLocalDate(userId);
+	await db.query(
+		`INSERT INTO pending_friend_notifications (user_id, event_type, activity_type, workout_id, payload, local_date)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 ON CONFLICT (user_id, event_type, workout_id) WHERE workout_id IS NOT NULL AND status = 'pending' DO NOTHING`,
+		[userId, eventType, activity, workoutId, JSON.stringify(payload), localDate]
+	);
 }
 
 // ─── getAudienceSettings ─────────────────────────────────────────────
