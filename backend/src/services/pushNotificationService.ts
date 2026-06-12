@@ -638,12 +638,15 @@ export async function fireBadgeEarnedPush(userId: string, badge: BadgeEarnedPayl
 async function resolveFriendFanOutRecipients(
 	senderId: string,
 	eventType: AudienceEventType,
-	payload: PushPayload
+	payload: PushPayload,
+	workoutId: string | null = null
 ): Promise<string[] | null> {
 	const outgoing = await resolveAudience(senderId, 'outgoing', eventType, '');
 	if (outgoing === 'none') return null;
 	if (outgoing === 'ask') {
-		await queuePendingFriendNotification(senderId, eventType, '', null, payload);
+		// Pass workoutId when available so the partial unique index dedupes
+		// re-queued pendings (e.g. PR re-detection on a same-day re-upload).
+		await queuePendingFriendNotification(senderId, eventType, '', workoutId, payload);
 		return null;
 	}
 
@@ -731,7 +734,7 @@ export async function fanOutFriendPersonalBestPush(
 		}
 	};
 
-	const friendIds = await resolveFriendFanOutRecipients(senderId, 'personal_best', payload);
+	const friendIds = await resolveFriendFanOutRecipients(senderId, 'personal_best', payload, workoutId);
 	if (!friendIds || friendIds.length === 0) return;
 
 	for (const friendId of friendIds) {
