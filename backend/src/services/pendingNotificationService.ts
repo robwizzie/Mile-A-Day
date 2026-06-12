@@ -112,6 +112,7 @@ export async function sendPending(userId: string, id: string, audience: 'close' 
 	const preview = rows[0];
 
 	if (preview.user_id !== userId) return { ok: false, reason: 'not_owner' };
+	if (preview.status === 'expired') return { ok: false, reason: 'expired' };
 	if (preview.status !== 'pending') return { ok: false, reason: 'already_processed' };
 
 	const eventType = preview.event_type as AudienceEventType;
@@ -145,6 +146,7 @@ export async function sendPending(userId: string, id: string, audience: 'close' 
 		);
 		if (lost.length === 0) return { ok: false, reason: 'not_found' };
 		if (lost[0].user_id !== userId) return { ok: false, reason: 'not_owner' };
+		if (lost[0].status === 'expired') return { ok: false, reason: 'expired' };
 		return { ok: false, reason: 'already_processed' };
 	}
 	const row = claimedRows[0];
