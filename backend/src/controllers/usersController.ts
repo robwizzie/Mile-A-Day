@@ -10,7 +10,8 @@ import {
 	checkUsernameAvailability,
 	updateBio,
 	updateProfileImage,
-	getUserCount
+	getUserCount,
+	getPublicStreak
 } from '../services/userService.js';
 
 const db = PostgresService.getInstance();
@@ -293,6 +294,21 @@ export async function getPublicUserCount(_req: Request, res: Response) {
 	} catch (error) {
 		res.status(500).json({
 			error: 'Failed to fetch user count',
+			message: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+}
+
+export async function getPublicUserStreak(req: Request, res: Response) {
+	try {
+		const result = await getPublicStreak(req.params.username);
+		if (!result) {
+			return res.status(404).json({ error: 'Not found' });
+		}
+		res.json(result);
+	} catch (error) {
+		res.status(500).json({
+			error: 'Failed to fetch streak',
 			message: error instanceof Error ? error.message : 'Unknown error'
 		});
 	}

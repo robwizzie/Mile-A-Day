@@ -87,6 +87,24 @@ export async function checkUsernameAvailability(username: string): Promise<boole
 	return existingUser.length === 0;
 }
 
+/**
+ * Usernames whose streak is exposed on the public, unauthenticated API.
+ * Users must opt in (e.g. for embedding on a personal site) — never expose
+ * everyone's streak publicly.
+ */
+const PUBLIC_STREAK_USERNAMES = new Set(['dave']);
+
+export async function getPublicStreak(username: string): Promise<{ username: string; current_streak: number } | null> {
+	const normalized = username.toLowerCase();
+	if (!PUBLIC_STREAK_USERNAMES.has(normalized)) return null;
+
+	const results = await db.query(
+		'SELECT username, current_streak::int AS current_streak FROM users WHERE LOWER(username) = $1',
+		[normalized]
+	);
+	return results[0] ?? null;
+}
+
 export async function getUserCount(): Promise<number> {
 	const results = await db.query('SELECT COUNT(*)::int AS count FROM users');
 	return results[0].count;

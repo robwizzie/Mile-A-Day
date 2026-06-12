@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getPublicUserCount } from '../controllers/usersController.js';
+import { getPublicUserCount, getPublicUserStreak } from '../controllers/usersController.js';
 
 const router = Router();
 
@@ -11,5 +11,7 @@ router.use((_req, res, next) => {
 });
 
 router.get('/user-count', getPublicUserCount);
+// Streaks are public only for allowlisted usernames (see PUBLIC_STREAK_USERNAMES)
+router.get('/streak/:username', getPublicUserStreak);
 
 export default router;
