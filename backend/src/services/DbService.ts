@@ -1,4 +1,6 @@
 import { Pool, QueryResultRow, types } from 'pg';
+import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
+import * as schema from '../db/drizzle/schema.js';
 
 // Return DATE columns (OID 1082) as 'YYYY-MM-DD' strings instead of JS Date objects.
 // JS Date is local-midnight and causes TZ confusion; the backend treats these columns as strings.
@@ -12,6 +14,7 @@ type QueryConfig = {
 export class PostgresService {
 	private static instance: PostgresService;
 	private pool: Pool;
+	private drizzleDb: NodePgDatabase<typeof schema>;
 
 	private constructor() {
 		this.pool = new Pool({
@@ -27,6 +30,16 @@ export class PostgresService {
 			console.error('Unexpected error on idle client', err);
 			process.exit(1);
 		});
+
+		// Drizzle ORM shares the SAME pool as the raw-SQL helpers below, so the
+		// ORM and existing `query()`/`transaction()` calls draw from one set of
+		// connections. Use `.orm` for new typed queries; raw SQL stays valid.
+		this.drizzleDb = drizzle({ client: this.pool, schema, casing: 'snake_case' });
+	}
+
+	/** Typed Drizzle ORM client backed by the shared pool. */
+	public get orm(): NodePgDatabase<typeof schema> {
+		return this.drizzleDb;
 	}
 
 	public static getInstance(): PostgresService {
@@ -63,3 +76,10 @@ export class PostgresService {
 		await this.pool.end();
 	}
 }
+
+// Convenience handles for new ORM-based code:
+//   import { db, schema } from '../services/DbService.js';
+//   const rows = await db.select().from(schema.users).where(eq(schema.users.userId, id));
+// Backed by the singleton's shared pool. Existing raw-SQL call sites are unaffected.
+export const db = PostgresService.getInstance().orm;
+export { schema };
