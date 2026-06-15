@@ -54,15 +54,24 @@ export function clampOffset(raw: number | undefined): number {
 	return Math.floor(raw);
 }
 
+// Day boundaries roll over at US Eastern midnight (matching competition
+// resolution), NOT UTC — otherwise 'today'/'week' would reset hours early for
+// every user. en-CA gives a YYYY-MM-DD format.
+const ET_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' });
+
 /**
  * Start date (inclusive, ISO date string) for a period. `all` returns null —
  * caller should omit the date WHERE clause entirely. 'today' = just today,
- * 'week' = the current Sunday–Saturday calendar week (UTC; so today if today
- * is Sunday), 'month' = trailing 30 days, 'year' = trailing 365.
+ * 'week' = the current Sunday–Saturday calendar week (so today if today is
+ * Sunday), 'month' = trailing 30 days, 'year' = trailing 365. Boundaries are
+ * anchored to the current US Eastern calendar date.
  */
 function periodStartDate(period: LeaderboardPeriod): string | null {
 	if (period === 'all') return null;
-	const d = new Date();
+	// Anchor on today's ET calendar date, then do pure calendar arithmetic:
+	// a Date built from `YYYY-MM-DDT00:00:00Z` sits at UTC midnight, so the
+	// getUTC*/setUTC* math below is plain date math with no timezone drift.
+	const d = new Date(`${ET_DATE_FORMATTER.format(new Date())}T00:00:00Z`);
 	if (period === 'week') {
 		// getUTCDay(): 0=Sun..6=Sat — back up to most recent Sunday.
 		d.setUTCDate(d.getUTCDate() - d.getUTCDay());
