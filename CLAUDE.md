@@ -36,7 +36,7 @@ Gamified fitness app: run a mile every day, build streaks, compete with friends.
 1. **Backend is ESM** - `"type": "module"` in package.json. All local imports MUST use `.js` extension (e.g., `import foo from './foo.js'`), even though source is `.ts`.
 2. **Express 5.1** - Async errors propagate automatically. Controllers currently use explicit try/catch but it's not strictly required.
 3. **JWT uses `jose`** - Auth middleware uses `jwtVerify` from `jose`, NOT `jsonwebtoken`. The `jsonwebtoken` package is also installed but only used for token signing in some auth flows.
-4. **No migrations system** - Database schema changes are done manually against PostgreSQL. No ORM.
+4. **Migrations via Drizzle** - Schema changes go through drizzle-kit (`src/db/drizzle/`, see `.claude/rules/backend.md`). Drizzle ORM and raw SQL coexist on one pool. Existing schema is baselined; never recreate live tables.
 5. **No CI/CD** - No automated tests or deployment pipeline. Be extra careful with changes.
 6. **No shared package manager** - Backend and website both use npm. No monorepo tooling.
 7. **`.claudeignore` excludes `project.pbxproj`** - This is intentional. Never ask to read it.

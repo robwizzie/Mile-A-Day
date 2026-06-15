@@ -6,7 +6,12 @@
 	"scripts": {
 		"dev": "tsx watch src/server.ts",
 		"build": "tsc",
-		"start": "node dist/server.js"
+		"start": "node dist/server.js",
+		"db:pull": "drizzle-kit pull",
+		"db:generate": "drizzle-kit generate",
+		"db:migrate": "drizzle-kit migrate",
+		"db:check": "drizzle-kit check",
+		"db:studio": "drizzle-kit studio"
 	},
 	"keywords": [],
 	"author": "",
@@ -15,6 +20,7 @@
 	"dependencies": {
 		"compression": "^1.8.1",
 		"dotenv": "^17.2.0",
+		"drizzle-orm": "^0.45.2",
 		"express": "^5.1.0",
 		"jose": "^6.1.0",
 		"jsonwebtoken": "^9.0.3",
@@ -32,6 +38,7 @@
 		"@types/node-cron": "^3.0.11",
 		"@types/pg": "^8.15.4",
 		"@types/sharp": "^0.31.1",
+		"drizzle-kit": "^0.31.10",
 		"tsx": "^4.20.3",
 		"typescript": "^5.8.3"
 	}

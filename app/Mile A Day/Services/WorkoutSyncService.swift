@@ -310,8 +310,9 @@ class WorkoutSyncService: ObservableObject {
                     "[WorkoutSyncService] 📤 Uploading batch \(index + 1)/\(totalBatches) (\(batch.count) workouts)"
                 )
 
-                // Upload batch with retry logic
-                try await uploadBatchWithRetry(batch)
+                // Upload batch with retry logic. This is the initial account-setup
+                // backfill, so flag it full-sync to suppress friend notifications.
+                try await uploadBatchWithRetry(batch, fullSync: true)
 
                 // Mark as synced
                 markWorkoutsAsSynced(batch.map { $0.uuid.uuidString })
@@ -467,13 +468,16 @@ class WorkoutSyncService: ObservableObject {
         }
     }
 
-    /// Upload a single batch with retry logic
-    private func uploadBatchWithRetry(_ workouts: [HKWorkout]) async throws {
+    /// Upload a single batch with retry logic.
+    /// `fullSync` is true only for the one-time HealthKit backfill run at account
+    /// setup / re-login; it tells the backend to skip friend-facing notifications
+    /// so a historical import doesn't spam other users.
+    private func uploadBatchWithRetry(_ workouts: [HKWorkout], fullSync: Bool = false) async throws {
         var lastError: Error?
 
         for attempt in 1...maxRetries {
             do {
-                try await uploadBatch(workouts)
+                try await uploadBatch(workouts, fullSync: fullSync)
                 return  // Success!
             } catch {
                 lastError = error
@@ -493,8 +497,10 @@ class WorkoutSyncService: ObservableObject {
         }
     }
 
-    /// Upload a single batch to the backend
-    private func uploadBatch(_ workouts: [HKWorkout]) async throws {
+    /// Upload a single batch to the backend.
+    /// When `fullSync` is true the request carries ?fullSync=true so the backend
+    /// suppresses friend-facing notifications for this historical backfill.
+    private func uploadBatch(_ workouts: [HKWorkout], fullSync: Bool = false) async throws {
         guard let userId = currentUserId else {
             throw SyncError.notAuthenticated
         }
@@ -503,7 +509,7 @@ class WorkoutSyncService: ObservableObject {
         let workoutData = try await transformWorkoutsForBackend(workouts)
 
         // Make API request using fancyFetch
-        let endpoint = "/workouts/\(userId)/upload"
+        let endpoint = fullSync ? "/workouts/\(userId)/upload?fullSync=true" : "/workouts/\(userId)/upload"
         let requestBody = try JSONSerialization.data(withJSONObject: workoutData)
 
         struct UploadedBadge: Codable {
