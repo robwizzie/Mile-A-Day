@@ -1,5 +1,6 @@
 import { User } from '../types/user.js';
-import { PostgresService } from './DbService.js';
+import { PostgresService, db as orm, schema } from './DbService.js';
+import { count, eq, sql } from 'drizzle-orm';
 import crypto from 'crypto';
 
 const db = PostgresService.getInstance();
@@ -83,7 +84,8 @@ export async function updateProfileImage({ userId, profileImageUrl }: { userId: 
 }
 
 export async function checkUsernameAvailability(username: string): Promise<boolean> {
-	const existingUser = await db.query('SELECT user_id FROM users WHERE username = $1', [username]);
+	// Drizzle ORM equivalent of `SELECT user_id FROM users WHERE username = $1`.
+	const existingUser = await orm.select({ userId: schema.users.userId }).from(schema.users).where(eq(schema.users.username, username));
 	return existingUser.length === 0;
 }
 
@@ -98,14 +100,17 @@ export async function getPublicStreak(username: string): Promise<{ username: str
 	const normalized = username.toLowerCase();
 	if (!PUBLIC_STREAK_USERNAMES.has(normalized)) return null;
 
-	const results = await db.query(
-		'SELECT username, current_streak::int AS current_streak FROM users WHERE LOWER(username) = $1',
-		[normalized]
-	);
-	return results[0] ?? null;
+	// Return shape is preserved exactly: { username, current_streak } (snake_case),
+	// since the public API contract depends on it.
+	const [row] = await orm
+		.select({ username: schema.users.username, current_streak: schema.users.currentStreak })
+		.from(schema.users)
+		.where(sql`lower(${schema.users.username}) = ${normalized}`);
+	if (!row || row.username === null) return null;
+	return { username: row.username, current_streak: row.current_streak };
 }
 
 export async function getUserCount(): Promise<number> {
-	const results = await db.query('SELECT COUNT(*)::int AS count FROM users');
-	return results[0].count;
+	const [row] = await orm.select({ count: count() }).from(schema.users);
+	return row.count;
 }
