@@ -17,6 +17,7 @@ class CloseFriendsService: ObservableObject {
 
 	@Published private(set) var closeFriends: [BackendUser] = []
 	@Published private(set) var closeFriendIds: Set<String> = []
+	@Published private(set) var hasLoadedOnce = false
 	@Published var isLoading = false
 	@Published var errorMessage: String?
 
@@ -25,6 +26,13 @@ class CloseFriendsService: ObservableObject {
 	/// True when `userId` is on the current user's close list.
 	func isClose(_ userId: String) -> Bool {
 		closeFriendIds.contains(userId)
+	}
+
+	/// Load once per session if we haven't already (e.g. when a profile opens).
+	/// Silently ignores errors — callers that need to surface failures use `load()`.
+	func loadIfNeeded() async {
+		guard !hasLoadedOnce else { return }
+		try? await load()
 	}
 
 	/// Load the full close-friends list from the backend.
@@ -38,6 +46,7 @@ class CloseFriendsService: ObservableObject {
 			)
 			closeFriends = friends
 			closeFriendIds = Set(friends.map { $0.user_id })
+			hasLoadedOnce = true
 		} catch {
 			errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
 			throw error
