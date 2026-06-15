@@ -142,15 +142,17 @@ struct PendingNotificationsSheet: View {
 	// MARK: - Labels
 
 	private func icon(for item: PendingFriendNotification) -> String {
-		switch item.activityType {
-		case "walk": return "figure.walk"
-		case "run": return "figure.run"
+		// Non-workout events get their own icon even when activity-tagged; only
+		// workout-type events fall back to the run/walk glyph.
+		switch item.eventType {
+		case AudienceEventType.personalBest.rawValue: return "bolt.fill"
+		case AudienceEventType.badgeEarned.rawValue: return "rosette"
+		case AudienceEventType.challengeCompleted.rawValue: return "checkmark.seal.fill"
+		case AudienceEventType.streakBroken.rawValue: return "flame"
 		default:
-			switch item.eventType {
-			case AudienceEventType.personalBest.rawValue: return "bolt.fill"
-			case AudienceEventType.badgeEarned.rawValue: return "rosette"
-			case AudienceEventType.challengeCompleted.rawValue: return "checkmark.seal.fill"
-			case AudienceEventType.streakBroken.rawValue: return "flame"
+			switch item.activityType {
+			case "walk": return "figure.walk"
+			case "run": return "figure.run"
 			default: return "bell.fill"
 			}
 		}

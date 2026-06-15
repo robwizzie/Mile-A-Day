@@ -69,10 +69,16 @@ class PendingNotificationsService: ObservableObject {
 			pending.removeAll { $0.id == item.id }
 			return response.sent
 		} catch {
-			// On 409/410 the item is no longer actionable — drop it locally so the
-			// UI doesn't keep offering a dead action.
-			if case APIError.conflict = error { pending.removeAll { $0.id == item.id } }
-			if case APIError.apiError = error { pending.removeAll { $0.id == item.id } }
+			// On 409 (already sent/dismissed or current setting blocks) or 410
+			// (expired past its day) the item is permanently dead — drop it so the
+			// UI stops offering an action that can never succeed. Transient errors
+			// (network/500) keep the item; the next load() re-syncs from the server.
+			switch error {
+			case APIError.conflict, APIError.gone:
+				pending.removeAll { $0.id == item.id }
+			default:
+				break
+			}
 			errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
 			throw error
 		}

@@ -71,7 +71,7 @@ class AudienceSettingsService: ObservableObject {
 			let direction: String
 			let event_type: String
 			let activity_type: String
-			let audience: String?  // nil → synthesized encoder omits → server resets
+			let audience: String?  // nil → omitted (Swift encodeIfPresent); server treats omitted OR null as reset
 		}
 		let body = Body(
 			direction: direction.rawValue,
