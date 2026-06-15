@@ -1,13 +1,12 @@
+model = "gpt-5.5"
+model_reasoning_effort = "high"
+
 [mcp_servers.context7]
 args = [
     "-y",
     "@upstash/context7-mcp",
 ]
 command = "npx"
-
-[model]
-name = "gpt-5-codex"
-reasoning_effort = "high"
 
 [routing]
 critical_paths = [
