@@ -14,6 +14,10 @@ import SwiftUI
 /// backend/src/services/audienceSettingsService.ts exactly.
 @MainActor
 class AudienceSettingsService: ObservableObject {
+	static let shared = AudienceSettingsService()
+
+	private init() {}
+
 	@Published private(set) var outgoing: [AudienceSetting] = []
 	@Published private(set) var incoming: [AudienceSetting] = []
 	@Published private(set) var systemDefaults: AudienceSettingsResponse.SystemDefaults =
@@ -116,6 +120,25 @@ class AudienceSettingsService: ObservableObject {
 		activity: AudienceActivity = .none
 	) -> Audience {
 		resolveFromRows(rows(for: direction), direction, eventType.rawValue, activity.rawValue, depth: 0)
+	}
+
+	/// What a cell WOULD resolve to if its explicit row were removed — i.e. the
+	/// value behind a "Default · <resolved>" menu label.
+	func resolvedDefault(
+		direction: AudienceDirection,
+		eventType: AudienceEventType,
+		activity: AudienceActivity = .none
+	) -> Audience {
+		let filtered = rows(for: direction).filter {
+			!($0.eventType == eventType.rawValue && $0.activityType == activity.rawValue)
+		}
+		return resolveFromRows(filtered, direction, eventType.rawValue, activity.rawValue, depth: 0)
+	}
+
+	/// Load once per session if not already loaded. Silently ignores errors.
+	func loadIfNeeded() async {
+		guard !hasLoaded else { return }
+		try? await load()
 	}
 
 	private func systemDefault(_ direction: AudienceDirection, _ eventType: String) -> Audience {

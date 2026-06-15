@@ -113,6 +113,30 @@ struct NotificationSettingsView: View {
                             description: "Halfway marks, one point from winning, and more")
                     }
 
+                    // Friend Activity audiences (who hears about your activity,
+                    // and whose you hear about). Separate from the boolean
+                    // friend-activity prefs below — these gate the audience.
+                    settingsSection(title: "FRIEND ACTIVITY", icon: "person.2.wave.2.fill", iconColor: .pink) {
+                        NavigationLink(destination: FriendActivitySettingsView()) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Activity sharing & audiences")
+                                        .font(MADTheme.Typography.body)
+                                        .foregroundColor(.white)
+                                    Text("Choose who hears about your runs, walks, PBs, and more")
+                                        .font(.system(size: 11, design: .rounded))
+                                        .foregroundColor(.white.opacity(0.4))
+                                        .multilineTextAlignment(.leading)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.3))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+
                     // Friend-Specific Settings
                     settingsSection(title: "FRIEND-SPECIFIC", icon: "person.crop.circle.badge.minus", iconColor: .purple) {
                         Button {
