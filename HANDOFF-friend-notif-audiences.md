@@ -11,7 +11,17 @@
 
 **Branch:** `feat/friend-notif-audiences`
 **Worktree:** `.claude/worktrees/friend-notifs` (inside the repo, gitignored — NOT a sibling dir)
-**Backend: DONE + smoke-tested. NOT deployed.** 13 commits, `tsc` clean. iOS: not started.
+**Backend: DONE + smoke-tested. In PR review (not yet merged/deployed).** iOS: not started.
+
+**Status (2026-06-15):**
+- Backend split to a clean branch `feat/friend-notif-backend` (no handoff doc) and
+  opened as **PR #174 → main**. Merge/deploy is the user's call; once it merges the backend is live.
+- `main` has been merged INTO this branch, so it's current (main added Drizzle ORM
+  + a users-count feature). Only conflict was `backend/src/controllers/workoutController.ts`
+  (upload path) — resolved so competition lead/milestone checks run on every upload
+  AND the new pre-goal `workout` branch is present. `npm install` was needed for the
+  new `drizzle-orm` dep; `tsc` clean.
+- Continue iOS work (tasks #7–#11) on this branch, then delete this file before the iOS PR.
 
 This feature adds per-event-type notification **audience** controls (who hears
 about your activity, and whose you hear about) plus a private **close friends**
