@@ -69,7 +69,9 @@ export async function refresh(req: Request, res: Response) {
 		return res.json({ ...tokenPair, expiresIn: '30d', expiresAt });
 	} catch (err) {
 		console.error('Token refresh failed', err);
-		return res.status(403).json({
+		// 401: the refresh credential itself is invalid/expired/revoked. The
+		// client treats this as "auth is dead" -> force sign-out + re-login.
+		return res.status(401).json({
 			error: 'Invalid or expired refresh token',
 			message: err instanceof Error ? err.message : 'Token refresh failed'
 		});
