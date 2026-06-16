@@ -47,6 +47,32 @@ struct NotificationSettingsView: View {
         }
     }
 
+    // True when any of the 8 competition alerts is on — drives the collapsed
+    // master toggle and whether the "Customize" drill-in is shown.
+    private var anyCompetitionEnabled: Bool {
+        prefs.competitionInviteEnabled || prefs.competitionAcceptedEnabled
+            || prefs.competitionStartEnabled || prefs.competitionFinishEnabled
+            || prefs.competitionNudgeEnabled || prefs.competitionFlexEnabled
+            || prefs.hypeEnabled || prefs.competitionMilestonesEnabled
+    }
+
+    // Master toggle: reading is "any on"; turning it off silences all eight,
+    // turning it on enables all eight. Granular control lives on the drill-in.
+    private var competitionsMasterBinding: Binding<Bool> {
+        Binding {
+            anyCompetitionEnabled
+        } set: { newValue in
+            prefs.competitionInviteEnabled = newValue
+            prefs.competitionAcceptedEnabled = newValue
+            prefs.competitionStartEnabled = newValue
+            prefs.competitionFinishEnabled = newValue
+            prefs.competitionNudgeEnabled = newValue
+            prefs.competitionFlexEnabled = newValue
+            prefs.hypeEnabled = newValue
+            prefs.competitionMilestonesEnabled = newValue
+        }
+    }
+
     var body: some View {
         ZStack {
             MADTheme.Colors.appBackgroundGradient
@@ -54,24 +80,45 @@ struct NotificationSettingsView: View {
 
             ScrollView {
                 VStack(spacing: MADTheme.Spacing.lg) {
-                    // Daily Reminder Section
-                    settingsSection(title: "DAILY REMINDER", icon: "alarm.fill", iconColor: .orange) {
-                        Toggle("Enable Daily Reminder", isOn: $prefs.dailyReminderEnabled)
-                            .font(MADTheme.Typography.body)
-                            .tint(MADTheme.Colors.madRed)
-
-                        if prefs.dailyReminderEnabled {
-                            Divider().overlay(Color.white.opacity(0.06))
-
-                            DatePicker("Reminder Time", selection: reminderTimeBinding, displayedComponents: .hourAndMinute)
-                                .font(MADTheme.Typography.body)
-                                .datePickerStyle(.compact)
-                                .tint(MADTheme.Colors.madRed)
+                    // Friend Activity — promoted to a hero card at the very top.
+                    // Audience controls for who hears about your activity (and
+                    // whose you hear about). Separate from the boolean activity
+                    // prefs below, which still gate whether anything sends.
+                    NavigationLink(destination: FriendActivitySettingsView()) {
+                        HStack(spacing: MADTheme.Spacing.md) {
+                            Image(systemName: "person.2.wave.2.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 44, height: 44)
+                                .background(RoundedRectangle(cornerRadius: 12).fill(MADTheme.Colors.madRed))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Friend Activity")
+                                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                                    .foregroundColor(.white)
+                                Text("Who hears about your runs, walks & PBs")
+                                    .font(.system(size: 12, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.6))
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.4))
                         }
+                        .padding(MADTheme.Spacing.md)
+                        .background(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                .fill(MADTheme.Colors.madRed.opacity(0.12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                        .strokeBorder(MADTheme.Colors.madRed.opacity(0.45), lineWidth: 1.5)
+                                )
+                        )
                     }
+                    .buttonStyle(.plain)
 
                     // Activity Notifications
-                    settingsSection(title: "ACTIVITY", icon: "figure.run", iconColor: .green) {
+                    settingsSection(title: "YOUR ACTIVITY", icon: "figure.run", iconColor: .green) {
                         settingsToggle("When I complete a mile", isOn: $prefs.mileCompletedEnabled)
                         settingsDivider
                         settingsToggle("When a friend completes a mile", isOn: $prefs.friendCompletedEnabled)
@@ -92,49 +139,34 @@ struct NotificationSettingsView: View {
                         settingsToggle("Friend nudges", isOn: $prefs.friendNudgeEnabled)
                     }
 
-                    // Competition Notifications
+                    // Competition Notifications — collapsed behind a master
+                    // toggle; the 8 individual alerts live on a drill-in screen
+                    // so they don't dominate this page.
                     settingsSection(title: "COMPETITIONS", icon: "trophy.fill", iconColor: .yellow) {
-                        settingsToggle("Competition invites", isOn: $prefs.competitionInviteEnabled)
-                        settingsDivider
-                        settingsToggle("Invite accepted", isOn: $prefs.competitionAcceptedEnabled)
-                        settingsDivider
-                        settingsToggle("Competition started", isOn: $prefs.competitionStartEnabled)
-                        settingsDivider
-                        settingsToggle("Competition finished", isOn: $prefs.competitionFinishEnabled)
-                        settingsDivider
-                        settingsToggle("Competition nudges", isOn: $prefs.competitionNudgeEnabled)
-                        settingsDivider
-                        settingsToggle("Flex notifications", isOn: $prefs.competitionFlexEnabled)
-                        settingsDivider
-                        settingsToggle("Hype reactions", isOn: $prefs.hypeEnabled,
-                            description: "When a friend or competitor cheers on your completed mile")
-                        settingsDivider
-                        settingsToggle("Milestones & updates", isOn: $prefs.competitionMilestonesEnabled,
-                            description: "Halfway marks, one point from winning, and more")
-                    }
+                        settingsToggle("Competition notifications", isOn: competitionsMasterBinding,
+                            description: "Invites, status, cheers, and milestones")
 
-                    // Friend Activity audiences (who hears about your activity,
-                    // and whose you hear about). Separate from the boolean
-                    // friend-activity prefs below — these gate the audience.
-                    settingsSection(title: "FRIEND ACTIVITY", icon: "person.2.wave.2.fill", iconColor: .pink) {
-                        NavigationLink(destination: FriendActivitySettingsView()) {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Activity sharing & audiences")
-                                        .font(MADTheme.Typography.body)
-                                        .foregroundColor(.white)
-                                    Text("Choose who hears about your runs, walks, PBs, and more")
-                                        .font(.system(size: 11, design: .rounded))
-                                        .foregroundColor(.white.opacity(0.4))
-                                        .multilineTextAlignment(.leading)
+                        if anyCompetitionEnabled {
+                            settingsDivider
+
+                            NavigationLink(destination: CompetitionNotificationSettingsView(prefs: $prefs, onSave: saveAndApply)) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Customize what & when")
+                                            .font(MADTheme.Typography.body)
+                                            .foregroundColor(.white)
+                                        Text("Fine-tune the 8 competition alerts")
+                                            .font(.system(size: 11, design: .rounded))
+                                            .foregroundColor(.white.opacity(0.4))
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.3))
                                 }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(.white.opacity(0.3))
                             }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
 
                     // Friend-Specific Settings
@@ -185,14 +217,25 @@ struct NotificationSettingsView: View {
                         }
                     }
 
-                    // Do Not Disturb Schedule
-                    settingsSection(title: "DO NOT DISTURB", icon: "moon.fill", iconColor: .indigo) {
-                        settingsToggle("Enable DND Schedule", isOn: $prefs.dndEnabled,
-                            description: "Silence all notifications during scheduled hours")
+                    // Schedule — daily reminder + Do Not Disturb together, since
+                    // both are time-based and least-frequently changed.
+                    settingsSection(title: "SCHEDULE", icon: "clock.fill", iconColor: .orange) {
+                        settingsToggle("Daily reminder", isOn: $prefs.dailyReminderEnabled,
+                            description: "A nudge to get your mile in")
+
+                        if prefs.dailyReminderEnabled {
+                            DatePicker("Reminder Time", selection: reminderTimeBinding, displayedComponents: .hourAndMinute)
+                                .font(MADTheme.Typography.body)
+                                .datePickerStyle(.compact)
+                                .tint(MADTheme.Colors.madRed)
+                        }
+
+                        settingsDivider
+
+                        settingsToggle("Do Not Disturb", isOn: $prefs.dndEnabled,
+                            description: "Silence notifications during scheduled hours")
 
                         if prefs.dndEnabled {
-                            settingsDivider
-
                             DatePicker("Start", selection: dndStartBinding, displayedComponents: .hourAndMinute)
                                 .font(MADTheme.Typography.body)
                                 .datePickerStyle(.compact)
