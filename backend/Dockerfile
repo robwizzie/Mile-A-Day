@@ -29,6 +29,12 @@ FROM node:24-slim AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 
+# curl is required by Coolify's HTTP health check, which it runs by exec'ing
+# `curl` INSIDE the container. node:*-slim ships neither curl nor wget, so the
+# probe errors with "curl: not found" and the deploy is marked unhealthy.
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+	&& rm -rf /var/lib/apt/lists/*
+
 # Reuse the builder's resolved node_modules. We keep the FULL tree (not
 # --omit=dev) on purpose: `drizzle-kit migrate` runs at startup and drizzle-kit
 # is a devDependency. Copying from the builder is deterministic and avoids a
