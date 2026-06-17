@@ -78,6 +78,7 @@ class WorkoutSyncService: ObservableObject {
     private let lastSyncedWorkoutDateKey = "lastSyncedWorkoutDate"
     private let uploadedWorkoutIdsKey = "uploadedWorkoutIds"
     private let pendingUploadQueueKey = "pendingUploadQueue"
+    private let pendingManualUploadsKey = "pendingManualWorkoutUploads"
     private let initialSyncStartedKey = "MAD_InitialSyncStarted"
 
     // MARK: - Initialization
@@ -226,6 +227,7 @@ class WorkoutSyncService: ObservableObject {
         UserDefaults.standard.removeObject(forKey: lastSyncedWorkoutDateKey)
         UserDefaults.standard.removeObject(forKey: uploadedWorkoutIdsKey)
         UserDefaults.standard.removeObject(forKey: pendingUploadQueueKey)
+        UserDefaults.standard.removeObject(forKey: pendingManualUploadsKey)
         UserDefaults.standard.removeObject(forKey: initialSyncStartedKey)
         lastSyncDate = nil
         currentProgress = nil
@@ -702,6 +704,180 @@ class WorkoutSyncService: ObservableObject {
         }
         return Set()
     }
+
+    // MARK: - Pending Manual Upload Queue
+
+    /// A manually-entered workout is pushed to the backend the instant it's
+    /// saved. If that POST fails (offline, or the app is killed mid-request) the
+    /// workout would be lost server-side: it's backdated, so the endDate-based
+    /// incremental sync in `getUnsyncedWorkouts()` can never re-pick it up. To
+    /// prevent that, every manual workout is enqueued here *before* the upload is
+    /// attempted and only removed once the server confirms it.
+    /// `flushPendingManualUploads()` retries the queue on every app launch /
+    /// foreground so a stuck workout eventually lands.
+
+    /// Enqueue a manual workout payload (the backend-shaped dict) for durable
+    /// retry. De-dupes by workoutId so repeated save attempts don't stack copies.
+    func enqueueManualUpload(_ payload: [String: Any]) {
+        guard let workoutId = payload["workoutId"] as? String else { return }
+        var queue = pendingManualUploads()
+        queue.removeAll { ($0["workoutId"] as? String) == workoutId }
+        queue.append(payload)
+        savePendingManualUploads(queue)
+    }
+
+    /// Remove a manual workout from the retry queue once the server has it.
+    func removeManualUpload(workoutId: String) {
+        var queue = pendingManualUploads()
+        let before = queue.count
+        queue.removeAll { ($0["workoutId"] as? String) == workoutId }
+        if queue.count != before { savePendingManualUploads(queue) }
+    }
+
+    /// Best-effort retry of any manual workouts whose original upload didn't
+    /// land. Never throws — a still-failing item simply stays queued for next
+    /// time. No `fullSync` flag: the backend already suppresses notifications for
+    /// workouts older than 24h, so a freshly-logged mile still hypes friends
+    /// while a long-stuck backfill stays silent.
+    func flushPendingManualUploads() async {
+        let queue = pendingManualUploads()
+        guard !queue.isEmpty, let userId = currentUserId else { return }
+
+        print("[WorkoutSyncService] 🔁 Flushing \(queue.count) pending manual upload(s)")
+
+        for payload in queue {
+            guard let workoutId = payload["workoutId"] as? String else {
+                continue
+            }
+            do {
+                let requestBody = try JSONSerialization.data(withJSONObject: [payload])
+                let _: ManualUploadAck = try await APIClient.fancyFetch(
+                    endpoint: "/workouts/\(userId)/upload",
+                    method: .POST,
+                    body: requestBody,
+                    responseType: ManualUploadAck.self
+                )
+                removeManualUpload(workoutId: workoutId)
+                print("[WorkoutSyncService] ✅ Flushed pending manual workout \(workoutId)")
+            } catch {
+                print("[WorkoutSyncService] ⚠️ Pending manual workout \(workoutId) still failing: \(error)")
+            }
+        }
+    }
+
+    private func pendingManualUploads() -> [[String: Any]] {
+        guard let data = UserDefaults.standard.data(forKey: pendingManualUploadsKey),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else {
+            return []
+        }
+        return arr
+    }
+
+    private func savePendingManualUploads(_ queue: [[String: Any]]) {
+        if queue.isEmpty {
+            UserDefaults.standard.removeObject(forKey: pendingManualUploadsKey)
+            return
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: queue) {
+            UserDefaults.standard.set(data, forKey: pendingManualUploadsKey)
+        }
+    }
+
+    // MARK: - Recalibrate Streak
+
+    /// Result of a recalibration: the freshly-recomputed server streak and how
+    /// many local workouts were re-checked against the server.
+    struct RecalibrateOutcome {
+        let streak: Int
+        let workoutsPushed: Int
+    }
+
+    /// Reconcile the server with the phone's HealthKit truth, then recompute the
+    /// server streak. Fixes the case where a manual/backdated workout never
+    /// reached the server (its upload failed and incremental sync can't re-pick
+    /// up backdated workouts), leaving the server streak shorter than reality.
+    /// `localStreakDays` scopes how far back to re-push — we cover the streak
+    /// plus a buffer, with a sensible floor.
+    func recalibrateStreak(localStreakDays: Int) async throws -> RecalibrateOutcome {
+        guard let userId = currentUserId else { throw SyncError.notAuthenticated }
+
+        // 1. Flush any manual workouts still stuck in the retry queue.
+        await flushPendingManualUploads()
+
+        // 2. Re-push the HealthKit workouts spanning the streak window. Uploads
+        //    are idempotent on the backend (ON CONFLICT (workout_id) DO UPDATE),
+        //    so re-sending already-synced workouts is harmless and just backfills
+        //    any that are missing. fullSync=true keeps this bulk re-push silent.
+        let lookbackDays = max(localStreakDays + 14, 60)
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        let since = Calendar.current.date(byAdding: .day, value: -lookbackDays, to: startOfToday) ?? startOfToday
+        let workouts = try await fetchWorkouts(since: since)
+
+        for batch in workouts.chunked(into: batchSize) {
+            try await uploadBatchWithRetry(batch, fullSync: true)
+            markWorkoutsAsSynced(batch.map { $0.uuid.uuidString })
+        }
+
+        // 3. Ask the backend to recompute the streak synchronously and return it.
+        let response: RecalibrateStreakResponse = try await APIClient.fancyFetch(
+            endpoint: "/workouts/\(userId)/recalibrate-streak",
+            method: .POST,
+            body: nil,
+            responseType: RecalibrateStreakResponse.self
+        )
+
+        return RecalibrateOutcome(streak: response.streak, workoutsPushed: workouts.count)
+    }
+
+    /// Fetch running + walking workouts ending on/after `since` from HealthKit.
+    private func fetchWorkouts(since: Date) async throws -> [HKWorkout] {
+        try await withCheckedThrowingContinuation { continuation in
+            guard HKHealthStore.isHealthDataAvailable() else {
+                continuation.resume(throwing: SyncError.healthKitNotAvailable)
+                return
+            }
+
+            let healthStore = HKHealthStore()
+            let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
+            let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
+            let typePredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [
+                runningPredicate, walkingPredicate,
+            ])
+            let datePredicate = HKQuery.predicateForSamples(withStart: since, end: nil, options: [])
+            let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                typePredicate, datePredicate,
+            ])
+            let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+
+            let query = HKSampleQuery(
+                sampleType: HKObjectType.workoutType(),
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: [sortDescriptor]
+            ) { _, samples, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: (samples as? [HKWorkout]) ?? [])
+            }
+
+            healthStore.execute(query)
+        }
+    }
+}
+
+// MARK: - Lightweight Response Models
+
+/// Minimal decode target for an upload we don't need the rewards payload from.
+private struct ManualUploadAck: Decodable {
+    let message: String?
+}
+
+/// Response from POST /workouts/:userId/recalibrate-streak.
+private struct RecalibrateStreakResponse: Decodable {
+    let streak: Int
 }
 
 // MARK: - Helper Extensions
