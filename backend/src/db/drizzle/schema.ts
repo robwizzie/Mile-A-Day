@@ -143,6 +143,7 @@ export const refreshTokens = pgTable("refresh_tokens", {
 	expiresAt: timestamp("expires_at", { mode: 'string' }),
 	revokedAt: timestamp("revoked_at", { mode: 'string' }),
 	revokedReason: varchar("revoked_reason", { length: 50 }),
+	replacedByHash: varchar("replaced_by_hash", { length: 64 }),
 	userAgent: text("user_agent"),
 	ipAddress: inet("ip_address"),
 	deviceInfo: jsonb("device_info"),
