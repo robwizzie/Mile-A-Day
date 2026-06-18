@@ -131,6 +131,7 @@
 				Shared/WidgetDataStore.swift,
 				Widgets/StreakCountWidget.swift,
 				Widgets/TodayProgressWidget.swift,
+				Widgets/WorkoutLiveActivity.swift,
 			);
 			target = B218EEE12DFCD67F00E19230 /* MileADayWidgetsExtension */;
 		};

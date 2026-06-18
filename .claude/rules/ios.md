@@ -33,9 +33,13 @@ globs: app/**
 - Watch app is a separate target at `Mile A Day Watch App/`.
 - iOS 26 auto-wraps custom `ToolbarItem` views in a shared glass capsule. For a custom-styled pill, apply `.sharedBackgroundVisibility(.hidden)` to the `ToolbarItem` itself (it's on `CustomizableToolbarContent`, NOT a `View` modifier; gate with `#available(iOS 26)`) or it renders pill-inside-a-pill. Also `.fixedSize()` toolbar HStacks — leading items truncate `Text` to zero width otherwise.
 
+## Entitlements
+- Adding a capability by hand-editing a `.entitlements` file (e.g. `com.apple.developer.associated-domains`) WITHOUT enabling it in Signing & Capabilities / on the App ID makes the app build + install but get killed by AMFI at launch: `Thread 1: abort with payload or reason` (`__abort_with_payload`, generic reason). The build succeeding is not proof the entitlement is provisioned — the kill is at launch, not build.
+
 ## Do NOT
 - Modify the Xcode project file (`project.pbxproj`) - it's excluded via .claudeignore.
 - Change the API base URL without coordinating both client and server.
+- Worry about pbxproj when CREATING .swift files — the project uses synchronized folders; files added on disk are picked up automatically (verified via git history).
 
 ## App Store Review Compliance
 Every change must pass App Review. Check BEFORE proposing and AFTER implementing. Flag any borderline item explicitly.

@@ -7,20 +7,12 @@
 
 import SwiftUI
 import UIKit
-import BackgroundTasks
 
 @main
 struct Mile_A_DayApp: App {
     
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
-    init() {
-        // Register background tasks when app launches
-        MADBackgroundService.shared.registerBackgroundTasks()
-        // Start HealthKit-driven daily steps sync (observer + background delivery).
-        DailyStepsSyncService.shared.start()
-    }
-    
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -54,6 +46,19 @@ struct Mile_A_DayApp: App {
                     }
                 }
                 .onOpenURL { url in
+                    // In-app profile links (mileaday://u/<username>) park their
+                    // username on DeepLinkRouter so the Friends tab can resolve
+                    // it whenever it's ready — covers cold launches where the
+                    // tab UI doesn't exist yet.
+                    if DeepLinkRouter.shared.handleProfileLink(url) {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("MAD_SwitchTab"),
+                            object: nil,
+                            userInfo: ["tab": 2]
+                        )
+                        return
+                    }
+
                     // Handle deep links from Live Activities / widgets
                     guard url.scheme == "mileaday" else { return }
                     switch url.host {

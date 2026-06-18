@@ -11,7 +11,8 @@ import {
 	getHypeResetsAt,
 	hasHypedContext,
 	HYPE_DAILY_LIMIT,
-	HypeContext
+	HypeContext,
+	getReceivedHypes
 } from '../services/hypeService.js';
 
 const db = PostgresService.getInstance();
@@ -181,6 +182,17 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
 	} catch (error: any) {
 		console.error('Error sending hype:', error.message);
 		res.status(500).json({ error: 'Error sending hype' });
+	}
+}
+
+export async function getReceivedHypesController(req: AuthenticatedRequest, res: Response) {
+	const userId = req.userId!;
+	try {
+		const hypes = await getReceivedHypes(userId);
+		res.status(200).json(hypes);
+	} catch (error: any) {
+		console.error('Error getting received hypes:', error.message);
+		res.status(500).json({ error: 'Error getting received hypes' });
 	}
 }
 

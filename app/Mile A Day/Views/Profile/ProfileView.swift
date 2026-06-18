@@ -14,6 +14,21 @@ struct ProfileView: View {
     @State private var showingManagePins = false
     @State private var pinnedBadgeForDetail: Badge?
     @State private var isShowingBadgeDetail = false
+    @State private var showingShareProfile = false
+
+    // Friends count shown in the header (Instagram-style), tappable through to
+    // the friends list. Owns one FriendService for the count + the list link.
+    @StateObject private var friendService = FriendService()
+    @State private var ownFriendCount: Int?
+
+    // "You got hyped" — recent hypes received, surfaced on the profile so they
+    // aren't push-only.
+    @State private var receivedHypes: [ReceivedHype] = []
+    @State private var hasLoadedHypes = false
+
+    // Recent workouts for the rolling "Last 7 Days" chart on the Activity tab.
+    // Same data + component the friend profile uses, so both read identically.
+    @State private var ownWorkouts: [FriendWorkout] = []
 
     // Section tabs — mirrors UserProfileDetailView's structure so navigating
     // between own profile and friend profile feels consistent. Own profile
@@ -35,6 +50,9 @@ struct ProfileView: View {
             MADTabHeader(
                 title: "Profile",
                 actions: [
+                    MADHeaderAction(id: "share", systemImage: "qrcode") {
+                        showingShareProfile = true
+                    },
                     MADHeaderAction(id: "edit", systemImage: "pencil") {
                         activeSheet = .editProfile
                     },
@@ -78,6 +96,11 @@ struct ProfileView: View {
         }
         .background(MADTheme.Colors.appBackgroundGradient)
         .toolbar(.hidden, for: .navigationBar)
+        // Pushed in the tab's NavigationStack — consistent with the
+        // no-slide-down direction for navigational destinations.
+        .navigationDestination(isPresented: $showingShareProfile) {
+            ShareProfileView()
+        }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .totalMiles:
@@ -100,6 +123,15 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showingManagePins) {
             ManagePinnedBadgesSheet(userManager: userManager)
+        }
+        .task {
+            await loadOwnFriendCount()
+        }
+        .task {
+            await loadReceivedHypes()
+        }
+        .task {
+            await loadOwnWorkouts()
         }
         .navigationDestination(isPresented: $isShowingBadgeDetail) {
             // Match the BadgesView navigation-push presentation so tapping a
@@ -151,7 +183,84 @@ struct ProfileView: View {
     private var ownActivityTabContent: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
             streakAndGoalRow
+            if !ownWorkouts.isEmpty {
+                Last7DaysChart(workouts: ownWorkouts)
+            }
+            if !receivedHypes.isEmpty {
+                recentHypesSection
+            }
         }
+    }
+
+    /// "You got hyped" — recent 🔥 reactions friends sent you.
+    private var recentHypesSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            HStack {
+                Text("RECENT HYPES")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.4))
+                Spacer()
+            }
+
+            VStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(receivedHypes.prefix(8)) { hype in
+                    HStack(spacing: 12) {
+                        AvatarView(
+                            name: hype.displayName,
+                            imageURL: hype.profile_image_url,
+                            size: 40
+                        )
+                        VStack(alignment: .leading, spacing: 2) {
+                            (Text("🔥 ")
+                                + Text(hype.displayName).fontWeight(.bold)
+                                + Text(" \(hype.actionText)"))
+                                .font(.system(size: 14, weight: .medium, design: .rounded))
+                                .foregroundColor(.white.opacity(0.9))
+                                .lineLimit(2)
+                            Text(Self.relativeHypeTime(hype.created_at))
+                                .font(.system(size: 11, weight: .medium, design: .rounded))
+                                .foregroundColor(.white.opacity(0.45))
+                        }
+                        Spacer(minLength: 4)
+                    }
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color.orange.opacity(0.06))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .strokeBorder(Color.orange.opacity(0.18), lineWidth: 1)
+                            )
+                    )
+                }
+            }
+        }
+    }
+
+    private func loadReceivedHypes() async {
+        guard !hasLoadedHypes else { return }
+        do {
+            receivedHypes = try await HypeService.received()
+        } catch {
+            print("[ProfileView] loadReceivedHypes failed: \(error)")
+        }
+        hasLoadedHypes = true
+    }
+
+    private static func relativeHypeTime(_ iso: String) -> String {
+        let parse = ISO8601DateFormatter()
+        parse.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = parse.date(from: iso) ?? {
+            parse.formatOptions = [.withInternetDateTime]
+            return parse.date(from: iso)
+        }()
+        guard let date else { return "" }
+        let secs = Date().timeIntervalSince(date)
+        if secs < 60 { return "just now" }
+        if secs < 3600 { return "\(Int(secs / 60))m ago" }
+        if secs < 86400 { return "\(Int(secs / 3600))h ago" }
+        return "\(Int(secs / 86400))d ago"
     }
 
     /// Performance metrics — same role as the friend profile's Stats tab.
@@ -192,6 +301,28 @@ struct ProfileView: View {
             if showsDevelopmentSection {
                 developmentSection
             }
+        }
+    }
+
+    private func loadOwnFriendCount() async {
+        guard let userId = userManager.currentUser.backendUserId else { return }
+        do {
+            let list = try await friendService.getFriendsList(for: userId)
+            await MainActor.run { ownFriendCount = list.count }
+        } catch {
+            print("[ProfileView] loadOwnFriendCount failed: \(error)")
+        }
+    }
+
+    /// Pulls the user's own recent workouts to feed the rolling 7-day chart.
+    /// A limit of 20 comfortably covers the last week even for multi-run days.
+    private func loadOwnWorkouts() async {
+        guard let userId = userManager.currentUser.backendUserId else { return }
+        do {
+            let workouts = try await friendService.fetchRecentWorkouts(for: userId, limit: 20)
+            await MainActor.run { ownWorkouts = workouts }
+        } catch {
+            print("[ProfileView] loadOwnWorkouts failed: \(error)")
         }
     }
 
@@ -285,6 +416,17 @@ struct ProfileView: View {
                             .padding(.top, MADTheme.Spacing.xs)
                         }
                     }
+
+                    // Triple-stat row (Streak · Miles · Friends). Friends is
+                    // tappable through to the friends list / leaderboard.
+                    ProfileStatsRow(
+                        streak: userManager.currentUser.streak,
+                        totalMiles: userManager.currentUser.totalMiles,
+                        friendCount: ownFriendCount
+                    ) {
+                        FriendsListView(friendService: friendService)
+                    }
+                    .padding(.horizontal, MADTheme.Spacing.lg)
 
                     // Edit Profile Button
                     Button {
@@ -526,7 +668,7 @@ struct ProfileView: View {
 
                 settingsDivider
 
-                NavigationLink(destination: FriendsListView(friendService: FriendService())) {
+                NavigationLink(destination: FriendsListView(friendService: friendService)) {
                     MADSettingsRow(
                         icon: "person.2.fill",
                         title: "Friends & Leaderboard",

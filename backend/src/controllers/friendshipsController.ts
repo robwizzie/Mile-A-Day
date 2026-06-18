@@ -5,8 +5,12 @@ import {
 	getFriendRequests as getUserFriendRequests,
 	getSentRequests as getUserSentRequests,
 	updateFriendship,
-	getFriendsActivityToday as getActivityToday
+	getFriendsActivityToday as getActivityToday,
+	getFriendSuggestions,
+	getMutualFriendCount,
+	getFriendsWorkoutFeed
 } from '../services/friendshipService.js';
+import { AuthenticatedRequest } from '../middleware/auth.js';
 import hasRequiredKeys from '../utils/hasRequiredKeys.js';
 import { getUser, getUsers } from '../services/userService.js';
 import { sendPush } from '../services/pushNotificationService.js';
@@ -91,6 +95,43 @@ export async function sendRequest(req: Request, res: Response) {
 	}).catch(err => console.error('[Push] Error sending friend request notification:', err.message));
 
 	res.send(friendResult);
+}
+
+export async function getSuggestions(req: Request, res: Response) {
+	if (!hasRequiredKeys(['userId'], req, res)) return;
+
+	const { userId } = req.params;
+
+	const user = await getUser({ userId });
+	if (!user) {
+		return res.status(400).send({ error: `No user found with ID ${userId}` });
+	}
+
+	const suggestions = await getFriendSuggestions(userId);
+
+	res.send(suggestions);
+}
+
+export async function getFriendsFeed(req: Request, res: Response) {
+	const userId = (req as AuthenticatedRequest).userId;
+	if (!userId) {
+		return res.status(401).send({ error: 'Not authenticated' });
+	}
+
+	const feed = await getFriendsWorkoutFeed(userId);
+
+	res.send(feed);
+}
+
+export async function getMutualFriends(req: Request, res: Response) {
+	if (!hasRequiredKeys(['userId'], req, res)) return;
+
+	const viewerId = (req as AuthenticatedRequest).userId;
+	const { userId } = req.params;
+
+	const count = await getMutualFriendCount(viewerId as string, userId);
+
+	res.send({ count });
 }
 
 export async function getFriendsActivityToday(req: Request, res: Response) {

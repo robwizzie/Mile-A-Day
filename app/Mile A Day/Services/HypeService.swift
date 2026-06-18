@@ -71,4 +71,44 @@ enum HypeService {
             responseType: HypeStatusResponse.self
         )
     }
+
+    /// Recent hypes the current user has RECEIVED (newest first), with sender
+    /// info — powers the "you got hyped" surface on the profile.
+    static func received() async throws -> [ReceivedHype] {
+        return try await APIClient.fancyFetch(
+            endpoint: "/hype/received",
+            responseType: [ReceivedHype].self
+        )
+    }
+}
+
+/// A hype someone sent to the current user.
+struct ReceivedHype: Decodable, Identifiable {
+    let sender_id: String
+    let username: String?
+    let first_name: String?
+    let last_name: String?
+    let profile_image_url: String?
+    let context_type: String?
+    let context_label: String?
+    let created_at: String
+
+    var id: String { "\(sender_id)-\(created_at)" }
+
+    var displayName: String {
+        if let username = username, !username.isEmpty { return username }
+        if let first_name = first_name { return first_name }
+        return "Someone"
+    }
+
+    /// "hyped your daily mile" / "hyped you earning 'X'" style phrase.
+    var actionText: String {
+        switch context_type {
+        case "mile": return "hyped your daily mile"
+        case "badge": return "hyped you earning '\(context_label ?? "a badge")'"
+        case "pr": return "hyped your \(context_label ?? "personal best")"
+        case "challenge": return "hyped your '\(context_label ?? "challenge")' challenge"
+        default: return "hyped your recent workout"
+        }
+    }
 }

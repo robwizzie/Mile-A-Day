@@ -13,7 +13,9 @@ struct WorkoutTrackingView: View {
     let startingDistance: Double
     @Environment(\.dismiss) var dismiss
 
-    @StateObject private var locationManager = WorkoutLocationManager()
+    // Shared singleton — tracking keeps running when this view is dismissed
+    // (e.g. user navigates back to the dashboard mid-workout).
+    @ObservedObject private var locationManager = WorkoutLocationManager.shared
     @State private var showActivitySelection = true
     @State private var showLocationTypeSelection = false
     @State private var selectedActivityType: HKWorkoutActivityType?
@@ -29,6 +31,14 @@ struct WorkoutTrackingView: View {
     @State private var showPreviousProgress = false // Show notification when reaching previous progress
     @State private var hasReachedPreviousProgress = false // Track if we've reached starting distance
     @State private var showRecap = false
+    // Recap snapshots, frozen at the moment the workout ends. The recap can't
+    // read live values: after the save, the dashboard re-feeds this view fresh
+    // goal/startingDistance (which now INCLUDE the finished workout), so live
+    // reads would double-count the daily total while the recap is on screen.
+    @State private var recapDistance: Double = 0
+    @State private var recapDuration: TimeInterval = 0
+    @State private var recapStartingDistance: Double = 0
+    @State private var recapGoalDistance: Double = 0
     @State private var showStopConfirmation = false // Confirmation before ending workout
     @State private var isStopping = false // Prevents double-stop and shows "Ending..." UI
     /// Whether the Live Activity goal-completed alert was already sent (or the
@@ -522,9 +532,13 @@ struct WorkoutTrackingView: View {
                 countdownContent
             } else if showRecap {
                 WorkoutRecapView(
-                    distance: currentDistance,
-                    duration: elapsedTime,
-                    goalDistance: goalDistance,
+                    distance: recapDistance,
+                    duration: recapDuration,
+                    activityName: selectedActivityType == .running ? "Run" : "Walk",
+                    activityIcon: selectedActivityType == .running ? "figure.run" : "figure.walk",
+                    startingDistance: recapStartingDistance,
+                    goalDistance: recapGoalDistance,
+                    streak: userManager.currentUser.streak,
                     onDismiss: { dismiss() }
                 )
             } else {
@@ -784,6 +798,12 @@ struct WorkoutTrackingView: View {
 
         // Capture final distance before stopping tracking
         let finalDistance = currentDistance
+
+        // Freeze the recap stats now, before anything refreshes underneath us
+        recapDistance = finalDistance
+        recapDuration = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
+        recapStartingDistance = startingDistance
+        recapGoalDistance = goalDistance
 
         // Flush any buffered route points
         InProgressWorkoutStore.flushRoutePoints()

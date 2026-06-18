@@ -231,6 +231,13 @@ struct DashboardView: View {
             print("[Dashboard] ⏳ Skipping celebration check - initial data not yet loaded")
             return
         }
+        // Defer while the workout tracker covers the dashboard — the celebration
+        // overlay lives on this view, so it would play hidden behind the cover.
+        // The cover's onDismiss re-runs this check once the dashboard is visible.
+        guard !showWorkoutView else {
+            print("[Dashboard] ⏸️ Deferring celebration check — workout tracker is on screen")
+            return
+        }
         guard currentState.isCompleted,
               healthManager.todaysDistance > 0 else {
             return
@@ -245,12 +252,18 @@ struct DashboardView: View {
 
         print("[Dashboard] 🎉 Goal completion detected! Distance: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles)")
         celebrationManager.addCelebration(.goalCompleted(stats: stats))
+        // Baseline the post-goal counter at the goal-completing workout so the
+        // "Extra Mile" message only fires for workouts finished AFTER this one,
+        // not for the same workout once HealthKit's count catches up.
+        celebrationManager.lastPostGoalWorkoutCount = max(healthManager.todaysWorkoutCount, 1)
     }
 
     /// Show encouragement when the user completes additional workouts after reaching their goal.
     /// Uses workout count to ensure it only fires when a new workout finishes (not mid-workout).
     private func checkAndShowPostGoalEncouragement() {
-        guard currentState.isCompleted,
+        // Same deferral as the goal celebration: don't play it behind the cover.
+        guard !showWorkoutView,
+              currentState.isCompleted,
               celebrationManager.hasShownGoalCelebrationToday,
               healthManager.todaysDistance > 0,
               healthManager.todaysWorkoutCount > celebrationManager.lastPostGoalWorkoutCount else {
@@ -368,27 +381,29 @@ struct DashboardView: View {
                 hasActiveWorkout = hasActive
                 showInProgressBanner = hasActive
 
-                // If goal was already met, show encouragement for the extra effort
+                // Surface any celebration earned during the workout now that the
+                // dashboard is visible again (checks are deferred while covered):
+                // goal completion first, then the extra-mile encouragement.
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 500_000_000)
+                    checkAndShowGoalCelebration()
                     checkAndShowPostGoalEncouragement()
                 }
             }) {
-                if let state = InProgressWorkoutStore.load(), state.isActive {
-                    WorkoutTrackingView(
-                        healthManager: healthManager,
-                        userManager: userManager,
-                        goalDistance: state.goalDistance,
-                        startingDistance: state.startingDistance
-                    )
-                } else {
-                    WorkoutTrackingView(
-                        healthManager: healthManager,
-                        userManager: userManager,
-                        goalDistance: currentState.goal,
-                        startingDistance: currentState.distance
-                    )
-                }
+                // One WorkoutTrackingView with stable structural identity. This was
+                // an if/else between two WorkoutTrackingView initializers — when the
+                // workout finished, finishCleanup() cleared the persisted state, the
+                // branch flipped, and SwiftUI rebuilt the tracker from scratch: all
+                // @State (including showRecap) was lost and the user landed back on
+                // the activity-selection screen instead of the workout recap.
+                let saved = InProgressWorkoutStore.load()
+                let activeState = (saved?.isActive == true) ? saved : nil
+                WorkoutTrackingView(
+                    healthManager: healthManager,
+                    userManager: userManager,
+                    goalDistance: activeState?.goalDistance ?? currentState.goal,
+                    startingDistance: activeState?.startingDistance ?? currentState.distance
+                )
             }
             .onAppear {
                 refreshData()

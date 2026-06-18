@@ -14,7 +14,15 @@ struct MainTabView: View {
     @State private var unreadNotificationCount = 0
     @State private var showNotificationInbox = false
 
+    // App-wide "workout in progress" banner — tracking now runs in a shared
+    // singleton, so we surface a live, tappable banner above the tab bar on
+    // every tab (except Dashboard, which has its own inline banner) so users
+    // never lose where their walk/run is.
+    @StateObject private var trackingManager = WorkoutLocationManager.shared
+    @State private var activeWorkoutForBanner: InProgressWorkoutState?
+
     var body: some View {
+        ZStack(alignment: .bottom) {
         TabView(selection: $selectedTab) {
             NavigationStack {
                 DashboardView(
@@ -63,6 +71,9 @@ struct MainTabView: View {
         .safeAreaInset(edge: .bottom) {
             SyncStatusBanner()
         }
+        .onChange(of: trackingManager.isTracking) { _, tracking in
+            activeWorkoutForBanner = tracking ? InProgressWorkoutStore.load() : nil
+        }
         .onAppear {
             initializeApp()
             handlePendingNotification()
@@ -71,6 +82,12 @@ struct MainTabView: View {
             WorkoutSyncService.shared.startInitialSyncIfNeeded()
         }
         .task {
+            // Cold launch from a profile universal link: the onOpenURL
+            // MAD_SwitchTab post fired before this view existed, so read the
+            // parked deep link directly. FriendsListView resolves + presents.
+            if DeepLinkRouter.shared.pendingProfileUsername != nil {
+                selectedTab = 2
+            }
             await competitionService.refreshAllData()
             await friendService.refreshAllData()
             await refreshUnreadCount()
@@ -161,6 +178,27 @@ struct MainTabView: View {
             // Keep widget data in sync so the willPresent check has fresh data
             WidgetDataStore.save(todayMiles: newDistance, goal: userManager.currentUser.goalMiles)
         }
+
+            // Floating in-app workout banner — sits ABOVE the tab bar instead of
+            // over it. (safeAreaInset on a TabView renders on top of the bar, so
+            // it covered the tab buttons.) Padded up by ~one tab-bar height; the
+            // home indicator is handled by the safe area.
+            if trackingManager.isTracking, selectedTab != 0, let state = activeWorkoutForBanner {
+                InProgressWorkoutBanner(state: state) {
+                    // Reuse the Dashboard's resume path so starting/goal
+                    // distance are computed correctly.
+                    selectedTab = 0
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("MAD_OpenWorkoutFromLiveActivity"),
+                        object: nil
+                    )
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 52)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: trackingManager.isTracking)
     }
 
     // MARK: - Configuration

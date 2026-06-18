@@ -128,6 +128,41 @@ class FriendService: ObservableObject {
         }
     }
     
+    // MARK: - Friend Suggestions
+    /// "People you may know" — friends-of-friends ranked by mutual count,
+    /// plus people from shared competitions who aren't friends yet.
+    func getSuggestions() async throws -> [FriendSuggestion] {
+        guard let currentUserId = getCurrentUserId() else {
+            throw FriendServiceError.notAuthenticated
+        }
+
+        return try await makeRequest(
+            endpoint: "/friends/suggestions/\(currentUserId)",
+            responseType: [FriendSuggestion].self
+        )
+    }
+
+    /// Any user's friends list (Instagram-style). Public among authenticated
+    /// users — used for the friend count + browsable list on profiles.
+    func getFriendsList(for userId: String) async throws -> [BackendUser] {
+        return try await makeRequest(
+            endpoint: "/friends/list/\(userId)",
+            responseType: [BackendUser].self
+        )
+    }
+
+    private struct MutualCountResponse: Codable { let count: Int }
+
+    /// Number of accepted friends shared with `userId` — the "X mutual
+    /// friends" line on a profile.
+    func getMutualFriendCount(with userId: String) async throws -> Int {
+        let response: MutualCountResponse = try await makeRequest(
+            endpoint: "/friends/mutual/\(userId)",
+            responseType: MutualCountResponse.self
+        )
+        return response.count
+    }
+
     // MARK: - Friend Management
     /// Send a friend request
     func sendFriendRequest(to user: BackendUser) async throws {
@@ -522,6 +557,15 @@ class FriendService: ObservableObject {
         )
     }
 
+    /// Rolling-48h activity feed: individual workouts from friends + self,
+    /// newest first, each tagged with whether the viewer has hyped it.
+    func fetchFriendsFeed() async throws -> [FeedWorkoutItem] {
+        return try await makeRequest(
+            endpoint: "/friends/feed",
+            responseType: [FeedWorkoutItem].self
+        )
+    }
+
     // MARK: - Friend Workout Data
 
     /// Fetch recent workouts for a friend
@@ -584,6 +628,54 @@ class FriendService: ObservableObject {
     }
 }
 
+// MARK: - Friend Suggestion Models
+
+/// A "person you may know" from /friends/suggestions — a user plus the
+/// signals that ranked them (mutual friends, shared competitions).
+struct FriendSuggestion: Codable, Identifiable {
+    let user_id: String
+    let username: String?
+    let email: String?
+    let first_name: String?
+    let last_name: String?
+    let bio: String?
+    let profile_image_url: String?
+    let current_streak: Int?
+    let mutual_friends: Int
+    let shared_competitions: Int
+
+    var id: String { user_id }
+
+    /// The same person as a BackendUser, for reuse of existing profile UI
+    /// and FriendService actions.
+    var user: BackendUser {
+        BackendUser(
+            user_id: user_id,
+            username: username,
+            email: email,
+            first_name: first_name,
+            last_name: last_name,
+            bio: bio,
+            profile_image_url: profile_image_url,
+            apple_id: nil,
+            auth_provider: nil,
+            role: nil
+        )
+    }
+
+    /// "3 mutual friends · Competed together" style reason line.
+    var reasonText: String {
+        var parts: [String] = []
+        if mutual_friends > 0 {
+            parts.append("\(mutual_friends) mutual friend\(mutual_friends == 1 ? "" : "s")")
+        }
+        if shared_competitions > 0 {
+            parts.append("Competed together")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
 // MARK: - Friend Activity Models
 
 /// Today's activity status for a friend
@@ -606,6 +698,30 @@ struct FriendActivityItem: Codable, Identifiable {
             return first
         }
         return "User"
+    }
+}
+
+/// One workout in the rolling-48h activity feed (Today tab).
+struct FeedWorkoutItem: Codable, Identifiable {
+    let workout_id: String
+    let user_id: String
+    let username: String?
+    let first_name: String?
+    let last_name: String?
+    let profile_image_url: String?
+    let workout_type: String
+    let distance: Double
+    let completed_at: String
+    let is_self: Bool
+    var is_hyped: Bool   // var: flipped optimistically when the viewer hypes
+
+    var id: String { workout_id }
+
+    var displayName: String {
+        if is_self { return "You" }
+        if let username = username, !username.isEmpty { return username }
+        if let first = first_name { return first }
+        return "Friend"
     }
 }
 

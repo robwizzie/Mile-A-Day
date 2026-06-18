@@ -5,7 +5,9 @@ import Foundation
 struct BackendUser: Codable, Identifiable, Hashable {
     let user_id: String
     let username: String?
-    let email: String
+    // Optional: public endpoints (search, friend lists, suggestions) omit email
+    // for privacy; only the authenticated user's own record carries it.
+    let email: String?
     let first_name: String?
     let last_name: String?
     let bio: String?
