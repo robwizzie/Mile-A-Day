@@ -46,9 +46,9 @@ extension HealthKitManager {
         #if !os(watchOS)
         // CRITICAL FIX: If index exists, use it instead of old calculation
         if let index = workoutIndex {
-            log("[HealthKit] ✅ Index available, using pre-computed streak: \(index.currentStreak)")
+            log("[HealthKit] ✅ Index available, using pre-computed streak: \(index.activeStreak())")
             DispatchQueue.main.async {
-                self.retroactiveStreak = index.currentStreak
+                self.retroactiveStreak = index.activeStreak()
                 self.saveCachedData() // Save correct value immediately
             }
             return // Skip old calculation entirely
@@ -109,9 +109,9 @@ extension HealthKitManager {
         #if !os(watchOS)
         // CRITICAL FIX: If index exists, use it instead of old calculation
         if let index = workoutIndex {
-            log("[HealthKit] ✅ Index available, using pre-computed streak: \(index.currentStreak)")
+            log("[HealthKit] ✅ Index available, using pre-computed streak: \(index.activeStreak())")
             DispatchQueue.main.async {
-                self.retroactiveStreak = index.currentStreak
+                self.retroactiveStreak = index.activeStreak()
                 self.saveCachedData() // Save correct value immediately
             }
             return // Skip old calculation entirely

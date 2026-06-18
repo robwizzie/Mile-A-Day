@@ -422,10 +422,12 @@ class HealthKitManager: ObservableObject {
         // PHASE 1: Try to load workout index first (instant)
         if let cachedIndex = WorkoutIndex.load() {
             self.workoutIndex = cachedIndex
-            log("[HealthKit] ✅ Loaded workout index: \(cachedIndex.currentStreak) day streak, \(cachedIndex.totalWorkouts) workouts")
+            log("[HealthKit] ✅ Loaded workout index: \(cachedIndex.activeStreak()) day streak, \(cachedIndex.totalWorkouts) workouts")
 
-            // Use index data immediately (no 72→161 jump!)
-            self.retroactiveStreak = cachedIndex.currentStreak
+            // Use index data immediately (no 72→161 jump!). Derive the streak as
+            // of NOW rather than trusting the stored snapshot, which goes stale
+            // once the calendar advances past the grace window with no new runs.
+            self.retroactiveStreak = cachedIndex.activeStreak()
             self.hasIndexOrStreakLoaded = true
         } else {
             log("[HealthKit] 📋 No workout index found - will build on first data fetch")

@@ -164,6 +164,11 @@ extension HealthKitManager {
             // Still populate dailyMileGoals from the cached index so the
             // streak week-dots render correctly (the index was loaded from
             // disk at init, but dailyMileGoals is not persisted).
+            //
+            // Also recompute the displayed streak as of NOW. Without this, a user
+            // who hit their goal a few days ago and hasn't run since keeps showing
+            // their last computed streak (typically "1") forever, because the
+            // stored snapshot is only refreshed when a new workout arrives.
             await MainActor.run {
                 var goals: [Date: Bool] = [:]
                 for (dateKey, records) in currentIndex.workoutsByDate {
@@ -173,6 +178,8 @@ extension HealthKitManager {
                     }
                 }
                 self.dailyMileGoals = goals
+                self.retroactiveStreak = currentIndex.activeStreak()
+                self.saveCachedData()
             }
             return
         }

@@ -11,7 +11,7 @@ extension HealthKitManager {
         // CRITICAL FIX: If index exists, use it for streak and total miles
         if let index = workoutIndex {
             DispatchQueue.main.async {
-                self.retroactiveStreak = index.currentStreak
+                self.retroactiveStreak = index.activeStreak()
                 self.totalLifetimeMiles = index.totalLifetimeMiles
                 self.saveCachedData()
             }
@@ -177,9 +177,9 @@ extension HealthKitManager {
         // CRITICAL FIX: If index exists, DON'T run old streak calculation (use index value instead)
         if let index = workoutIndex {
             let indexMostMiles = index.mostMilesInOneDay
-            log("[HealthKit] ✅ Index available, skipping old streak calculation. Using index streak: \(index.currentStreak), mostMilesInOneDay: \(indexMostMiles)")
+            log("[HealthKit] ✅ Index available, skipping old streak calculation. Using index streak: \(index.activeStreak()), mostMilesInOneDay: \(indexMostMiles)")
             DispatchQueue.main.async {
-                self.retroactiveStreak = index.currentStreak
+                self.retroactiveStreak = index.activeStreak()
                 self.mostMilesInOneDay = indexMostMiles
                 self.mostMilesWorkouts = [] // Index has no HKWorkouts; use empty (stats still correct)
                 self.saveCachedData() // Save correct value from index

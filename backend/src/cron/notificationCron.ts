@@ -9,6 +9,7 @@ import {
 	checkClashTies
 } from '../services/notificationService.js';
 import { sendPendingDailyReminders } from '../services/dailyReminderService.js';
+import { reconcileStaleStreaks } from '../services/leaderboardService.js';
 
 export function startNotificationCron(): void {
 	// All "overnight result" notifications fire together at 9 AM ET so users
@@ -119,5 +120,20 @@ export function startNotificationCron(): void {
 		}
 	);
 
-	console.log('Notification cron jobs scheduled (hourly daily-reminder + 3 AM, 9 AM, 6 PM ET).');
+	// Reconcile stored current_streak values every 6 hours. refreshCurrentStreak
+	// only runs on workout upload, so streaks of users who stopped running go
+	// stale (a stuck "1" on the streak leaderboard / public-streak endpoint).
+	// Running every 6h keeps the leaderboard fresh across timezones as each
+	// user's local day rolls over. Bounded to users with current_streak > 0.
+	cron.schedule('0 */6 * * *', async () => {
+		console.log('[CRON] Reconciling stale streaks...');
+		try {
+			const { checked, changed } = await reconcileStaleStreaks();
+			console.log(`[CRON] Streak reconcile complete: ${changed}/${checked} updated.`);
+		} catch (error: any) {
+			console.error('[CRON] Error reconciling streaks:', error.message);
+		}
+	});
+
+	console.log('Notification cron jobs scheduled (hourly daily-reminder + streak reconcile every 6h + 3 AM, 9 AM, 6 PM ET).');
 }

@@ -122,7 +122,41 @@ struct WorkoutIndex: Codable {
         let key = dateKey(from: date)
         return qualifyingDays.contains(key)
     }
-    
+
+    /// Recompute the active streak as of `now`, using the same today-or-yesterday
+    /// grace rule as `WorkoutProcessor.calculateStreak`.
+    ///
+    /// IMPORTANT: the stored `currentStreak` is only a snapshot from the last time
+    /// a workout was added to the index. Its correctness depends on the current
+    /// date, so it goes stale as the calendar advances with no new runs (e.g. a
+    /// user who ran once shows a frozen "1" forever). Always derive the *displayed*
+    /// streak from this method — which reads `qualifyingDays` relative to `now` —
+    /// instead of trusting `currentStreak`.
+    func activeStreak(asOf now: Date = Date()) -> Int {
+        guard !qualifyingDays.isEmpty else { return 0 }
+
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: now)
+        var streak = 0
+
+        // Today counts if it qualifies, but isn't required (grace window).
+        if hasQualifyingWorkout(on: today) {
+            streak += 1
+        }
+
+        // Walk backwards from yesterday; stop at the first non-qualifying day.
+        guard var checkDate = calendar.date(byAdding: .day, value: -1, to: today) else {
+            return streak
+        }
+        while hasQualifyingWorkout(on: checkDate) {
+            streak += 1
+            guard let previous = calendar.date(byAdding: .day, value: -1, to: checkDate) else { break }
+            checkDate = previous
+            if streak > 1000 { break } // safety against runaway loops
+        }
+        return streak
+    }
+
     /// Get total miles for a specific date
     func totalMiles(for date: Date) -> Double {
         return workouts(for: date).reduce(0) { $0 + $1.distance }
