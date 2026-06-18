@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { getRecentWorkouts, getStreak, getUserStats, getWorkoutRange, uploadWorkouts, updateWorkout } from '../controllers/workoutController.js';
+import { getRecentWorkouts, getStreak, getUserStats, getWorkoutRange, uploadWorkouts, updateWorkout, recalibrateStreak } from '../controllers/workoutController.js';
 import { requireSelfAccess } from '../middleware/auth.js';
 
 const router = Router();
 
 router.post('/:userId/upload', requireSelfAccess('userId'), uploadWorkouts);
+router.post('/:userId/recalibrate-streak', requireSelfAccess('userId'), recalibrateStreak);
 router.patch('/:userId/workout/:workoutId', requireSelfAccess('userId'), updateWorkout);
 router.get('/:userId/streak', getStreak);
 router.get('/:userId/range', getWorkoutRange);

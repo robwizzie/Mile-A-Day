@@ -236,6 +236,35 @@ export async function getStreak(req: Request, res: Response) {
 	}
 }
 
+/**
+ * Force a synchronous recompute of the user's current streak and return the
+ * fresh value. The "recalibrate streak" feature: the client first re-uploads
+ * its local HealthKit workouts (idempotent via ON CONFLICT) to backfill any
+ * runs that never reached the server — e.g. a manual/backdated log whose
+ * upload silently failed — then calls this so the streak reflects the
+ * now-complete data immediately, instead of racing the fire-and-forget
+ * refresh that the upload pipeline kicks off.
+ */
+export async function recalibrateStreak(req: Request, res: Response) {
+	if (!hasRequiredKeys(['userId'], req, res)) return;
+
+	try {
+		const userId = req.params.userId;
+
+		const user = await getUser({ userId });
+		if (!user) {
+			return res.status(400).send({ error: `No user found with ID ${userId}` });
+		}
+
+		const streak = await refreshCurrentStreak(userId);
+
+		return res.status(200).json({ streak });
+	} catch (error: any) {
+		console.error('Error recalibrating streak:', error.message);
+		res.status(500).json({ error: 'Error recalibrating streak: ' + error.message });
+	}
+}
+
 export async function getWorkoutRange() {}
 
 export async function getRecentWorkouts(req: Request, res: Response) {
