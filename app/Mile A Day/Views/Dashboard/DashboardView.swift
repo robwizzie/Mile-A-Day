@@ -58,6 +58,10 @@ struct DashboardView: View {
     /// Navigation state for badges view from celebration
     @State private var navigateToBadgesFromCelebration = false
 
+    /// Guards against launching multiple concurrent streak fetches when several
+    /// observers trigger the goal-celebration check at the same time.
+    @State private var isPreparingGoalCelebration = false
+
 
     /// Build goal completion stats for the celebration
     private func buildGoalCompletionStats() -> GoalCompletionStats {
@@ -216,15 +220,45 @@ struct DashboardView: View {
             return
         }
 
-        let stats = buildGoalCompletionStats()
-
-        // If goal celebration was already shown today, show post-goal encouragement instead
-        if celebrationManager.hasShownGoalCelebrationToday {
+        // Already shown today → nothing to do.
+        guard !celebrationManager.hasShownGoalCelebrationToday else {
             return
         }
 
-        print("[Dashboard] 🎉 Goal completion detected! Distance: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles)")
-        celebrationManager.addCelebration(.goalCompleted(stats: stats))
+        // Avoid stacking redundant streak fetches when several observers fire at once.
+        guard !isPreparingGoalCelebration else { return }
+        isPreparingGoalCelebration = true
+
+        // Sample the workout count NOW (goal-completion time) as the extra-mile
+        // baseline, before the await below — a workout finishing during the fetch
+        // must still count as an "extra mile", not silently raise the baseline past
+        // itself and get skipped.
+        let goalCompletionWorkoutCount = healthManager.todaysWorkoutCount
+
+        Task { @MainActor in
+            defer { isPreparingGoalCelebration = false }
+
+            // Pull the freshest streak before building the celebration. On cold launch
+            // the cached streak hasn't yet counted today's mile, so without this the
+            // counter shows a day stale (the value a manual refresh later corrects).
+            await refreshStreakFromBackendForCelebration()
+
+            // Re-validate after the await — state may have changed, or another trigger
+            // may have shown the celebration while we were fetching.
+            guard currentState.isCompleted,
+                  healthManager.todaysDistance > 0,
+                  !celebrationManager.hasShownGoalCelebrationToday else {
+                return
+            }
+
+            // Baseline for extra-mile detection = workout count at goal completion.
+            // Scoped to today (see CelebrationManager.lastPostGoalWorkoutCount) so it
+            // neither suppresses tomorrow's extra mile nor spuriously fires on reopen.
+            celebrationManager.lastPostGoalWorkoutCount = goalCompletionWorkoutCount
+
+            print("[Dashboard] 🎉 Goal completion detected! Distance: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles)")
+            celebrationManager.addCelebration(.goalCompleted(stats: buildGoalCompletionStats()))
+        }
     }
 
     /// Show encouragement when the user completes additional workouts after reaching their goal.
@@ -533,6 +567,24 @@ struct DashboardView: View {
             } catch {
                 print("[Dashboard] ⚠️ Failed to fetch stats from backend: \(error)")
             }
+        }
+    }
+
+    /// Pull the current streak from the backend (the authoritative source the manual
+    /// refresh uses) and apply it before a streak celebration is built, so the counter
+    /// isn't a day stale on cold launch. `updateStreakFromBackend` only raises the
+    /// value, so a higher HealthKit-computed streak is never clobbered. Bounded by
+    /// APIClient's 15s request timeout; on failure we fall back to the cached streak —
+    /// no worse than before.
+    @MainActor
+    private func refreshStreakFromBackendForCelebration() async {
+        guard let userId = UserDefaults.standard.string(forKey: "backendUserId") else { return }
+        do {
+            let stats = try await workoutService.getUserStats(userId: userId)
+            print("[Dashboard] 🔄 Fresh streak for celebration = \(stats.streak)")
+            userManager.updateStreakFromBackend(stats.streak)
+        } catch {
+            print("[Dashboard] ⚠️ Fresh streak fetch for celebration failed: \(error)")
         }
     }
 
