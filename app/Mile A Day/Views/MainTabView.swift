@@ -63,6 +63,11 @@ struct MainTabView: View {
         .safeAreaInset(edge: .bottom) {
             SyncStatusBanner()
         }
+        .overlay(alignment: .top) {
+            // Foreground notification banner — floats above all tabs/nav bars.
+            InAppNotificationBanner()
+                .padding(.top, 4)
+        }
         .onAppear {
             initializeApp()
             handlePendingNotification()
