@@ -50,12 +50,12 @@ struct MADWidgetLabel: View {
     var color: Color = MADWidgetStyle.red
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             Image(systemName: icon)
-                .font(.system(size: 9, weight: .bold))
+                .font(.system(size: 8.5, weight: .semibold))
             Text(text)
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                .tracking(1.0)
+                .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                .tracking(1.6)
         }
         .foregroundColor(color)
         .lineLimit(1)
@@ -98,27 +98,30 @@ struct TodayProgressEntry: TimelineEntry {
     let goal: Double
     let streakCompleted: Bool
     let progress: Double // Pre-calculated progress capped at 1.0
+    var streak: Int = 0  // Current streak (read straight from the shared store).
 }
 
 struct TodayProgressProvider: TimelineProvider {
     func placeholder(in context: Context) -> TodayProgressEntry {
         TodayProgressEntry(
-            date: Date(), 
-            milesCompleted: 0.5, 
-            goal: 1.0, 
+            date: Date(),
+            milesCompleted: 0.5,
+            goal: 1.0,
             streakCompleted: false,
-            progress: 0.5
+            progress: 0.5,
+            streak: 12
         )
     }
 
     func getSnapshot(in context: Context, completion: @escaping (TodayProgressEntry) -> Void) {
         let data = WidgetDataStore.load()
         completion(TodayProgressEntry(
-            date: Date(), 
-            milesCompleted: data.miles, 
-            goal: data.goal, 
+            date: Date(),
+            milesCompleted: data.miles,
+            goal: data.goal,
             streakCompleted: data.streakCompleted,
-            progress: data.progress
+            progress: data.progress,
+            streak: WidgetDataStore.loadStreak()
         ))
     }
 
@@ -128,11 +131,12 @@ struct TodayProgressProvider: TimelineProvider {
         print("[Widget] Timeline - Miles: \(data.miles), Goal: \(data.goal), Progress: \(data.progress * 100)%")
         
         let entry = TodayProgressEntry(
-            date: Date(), 
-            milesCompleted: data.miles, 
-            goal: data.goal, 
+            date: Date(),
+            milesCompleted: data.miles,
+            goal: data.goal,
             streakCompleted: data.streakCompleted,
-            progress: data.progress
+            progress: data.progress,
+            streak: WidgetDataStore.loadStreak()
         )
         
         // Refresh every minute for incomplete goals, every 15 minutes for completed goals
@@ -182,7 +186,8 @@ struct TodayProgressWidgetEntryView: View {
                         progress: entry.progress,
                         milesCompleted: entry.milesCompleted,
                         goal: entry.goal,
-                        streakCompleted: entry.streakCompleted
+                        streakCompleted: entry.streakCompleted,
+                        streak: entry.streak
                     )
                 }
             } else {
@@ -190,7 +195,8 @@ struct TodayProgressWidgetEntryView: View {
                     progress: entry.progress,
                     milesCompleted: entry.milesCompleted,
                     goal: entry.goal,
-                    streakCompleted: entry.streakCompleted
+                    streakCompleted: entry.streakCompleted,
+                    streak: entry.streak
                 )
             }
         }
@@ -298,103 +304,122 @@ struct HomeScreenProgressView: View {
     let milesCompleted: Double
     let goal: Double
     let streakCompleted: Bool
+    var streak: Int = 0
 
     var body: some View {
-        HStack(spacing: 18) {
-            // Progress ring with % (checkmark when done)
+        // Three zones: progress ring (left), today's mile (center), streak
+        // (right). Every text element is single-line + scalable so the layout
+        // holds from the narrowest systemMedium (iPhone SE/11) up to Pro Max
+        // and iPad without clipping.
+        HStack(spacing: 14) {
+            // Progress ring — the visual anchor; fills the card height. Kept
+            // moderate so the center + streak zones never get squeezed on the
+            // narrowest systemMedium.
             MADWidgetRing(
                 progress: progress,
-                size: 92,
-                lineWidth: 9,
+                size: 96,
+                lineWidth: 7,
                 isComplete: streakCompleted
             ) {
                 if streakCompleted {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 32, weight: .heavy))
+                        .font(.system(size: 30, weight: .semibold))
                         .foregroundColor(MADWidgetStyle.green)
                 } else {
-                    VStack(spacing: -2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 1) {
                         Text("\(Int(progress * 100))")
-                            .font(.system(size: 32, weight: .heavy, design: .rounded))
+                            .font(.system(size: 26, weight: .semibold, design: .rounded))
                             .foregroundColor(.white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
                         Text("%")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundColor(MADWidgetStyle.secondaryText)
                     }
                 }
             }
 
-            // Right column spans the full widget height: section label pinned
-            // to the top, the hero stat floated to the optical center, and the
-            // status / CTA row anchored to the bottom edge. The Spacers do the
-            // vertical distribution so the card reads edge-to-edge instead of
-            // a small block hovering in the middle.
-            VStack(alignment: .leading, spacing: 0) {
+            // Center: label, today's miles, status / CTA.
+            VStack(alignment: .leading, spacing: 7) {
                 MADWidgetLabel(icon: "figure.run", text: "TODAY'S MILE")
 
-                Spacer(minLength: 4)
-
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text(String(format: "%.2f", milesCompleted))
-                        .font(.system(size: 38, weight: .heavy, design: .rounded))
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
-                    Text(String(format: "of %.1f mi", goal))
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    Text(String(format: "/ %.1f mi", goal))
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundColor(MADWidgetStyle.secondaryText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                 }
 
-                Spacer(minLength: 4)
-
-                // Status row: celebration when done, otherwise remaining
-                // distance + a Start Mile button that deep-links straight into
-                // the in-app workout tracker. (Widget buttons that should open
-                // the app must be Links — Button(intent:) runs in the
+                // Status: celebration chip when done, otherwise a Start button
+                // that deep-links into the in-app tracker. (Widget buttons that
+                // open the app must be Links — Button(intent:) runs in the
                 // background only.)
                 if streakCompleted {
                     HStack(spacing: 5) {
                         Image(systemName: "flame.fill")
-                            .font(.system(size: 12, weight: .bold))
-                        Text("Streak safe — see you tomorrow!")
-                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Streak safe")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                     }
                     .foregroundColor(MADWidgetStyle.green)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(MADWidgetStyle.green.opacity(0.15)))
                 } else {
-                    HStack(spacing: 8) {
-                        let remaining = max(goal - milesCompleted, 0.0)
-                        Text(String(format: "%.2f mi to go", remaining))
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                            .foregroundColor(MADWidgetStyle.secondaryText)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-
-                        Spacer(minLength: 4)
-
-                        Link(destination: URL(string: "mileaday://workout/start")!) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "play.fill")
-                                    .font(.system(size: 10, weight: .bold))
-                                Text("Start Mile")
-                                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 8)
-                            .background(
-                                Capsule()
-                                    .fill(MADWidgetStyle.red)
-                                    .shadow(color: MADWidgetStyle.red.opacity(0.5), radius: 5, y: 2)
-                            )
+                    Link(destination: URL(string: "mileaday://workout/start")!) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("Start Mile")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(MADWidgetStyle.red))
                     }
                 }
             }
-            .frame(maxHeight: .infinity)
+
+            Spacer(minLength: 8)
+
+            // Right: streak — a prominent stat filling the right side, set off
+            // by a hairline divider so it reads as its own zone.
+            if streak > 0 {
+                HStack(spacing: 12) {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.10))
+                        .frame(width: 1, height: 58)
+
+                    VStack(spacing: 1) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(MADWidgetStyle.orange)
+                        Text("\(streak)")
+                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                        Text("DAY STREAK")
+                            .font(.system(size: 7.5, weight: .semibold, design: .rounded))
+                            .tracking(1.0)
+                            .foregroundColor(MADWidgetStyle.secondaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .fixedSize()
+                }
+            }
         }
         .frame(maxHeight: .infinity)
     }
@@ -419,5 +444,5 @@ struct TodayProgressWidget: Widget {
 #Preview(as: .systemMedium) {
     TodayProgressWidget()
 } timeline: {
-    TodayProgressEntry(date: .now, milesCompleted: 0.2, goal: 1.0, streakCompleted: false, progress: 0.2)
+    TodayProgressEntry(date: .now, milesCompleted: 0.2, goal: 1.0, streakCompleted: false, progress: 0.2, streak: 401)
 }

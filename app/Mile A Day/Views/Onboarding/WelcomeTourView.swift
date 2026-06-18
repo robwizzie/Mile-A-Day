@@ -11,6 +11,9 @@ import SwiftUI
 /// the daily mile, syncing, streaks, challenges & medals, competitions, and
 /// friends.
 struct WelcomeTourView: View {
+    /// Title for the final-page CTA. Defaults to the in-app replay wording;
+    /// pre-sign-up onboarding passes "Get Started".
+    var finishButtonTitle: String = "Start My Streak"
     /// Called when the user finishes or skips. The presenter is responsible
     /// for dismissing and (on first run) persisting the "seen" flag.
     let onComplete: () -> Void
@@ -96,7 +99,7 @@ struct WelcomeTourView: View {
 
             Button(action: advance) {
                 HStack(spacing: 8) {
-                    Text(isLast ? "Start My Streak" : "Next")
+                    Text(isLast ? finishButtonTitle : "Next")
                     if !isLast {
                         Image(systemName: "arrow.right")
                             .font(.system(size: 14, weight: .bold))

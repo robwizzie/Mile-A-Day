@@ -98,16 +98,16 @@ struct CompetitionWidgetEntryView: View {
                                         startPoint: .top, endPoint: .bottom
                                     )
                                 )
-                                .frame(width: 30, height: 30)
+                                .frame(width: 26, height: 26)
                             Image(systemName: "trophy.fill")
-                                .font(.system(size: 14, weight: .bold))
+                                .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(
                                     LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
                                 )
                         }
 
                         Text(summary.name)
-                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
@@ -116,11 +116,11 @@ struct CompetitionWidgetEntryView: View {
 
                         if !summary.rankText.isEmpty {
                             Text(summary.rankText)
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
                                 .foregroundColor(MADWidgetStyle.secondaryText)
                                 .lineLimit(1)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 5)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
                                 .background(Capsule().fill(Color.white.opacity(0.10)))
                         }
                     }
@@ -129,13 +129,13 @@ struct CompetitionWidgetEntryView: View {
 
                     HStack(spacing: 4) {
                         Text(summary.isStale ? "OPEN FOR TODAY'S STANDING" : summary.pill)
-                            .font(.system(size: 11, weight: .black, design: .rounded))
-                            .tracking(0.6)
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .tracking(0.8)
                             .foregroundColor(color)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
                             .background(
                                 Capsule()
                                     .fill(color.opacity(0.16))
@@ -147,7 +147,7 @@ struct CompetitionWidgetEntryView: View {
                     Spacer(minLength: 8)
 
                     Text(summary.isStale ? "Standings shown are from a previous day." : summary.detail)
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundColor(MADWidgetStyle.secondaryText)
                         .lineLimit(2)
                         .minimumScaleFactor(0.85)

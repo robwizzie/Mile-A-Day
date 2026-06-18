@@ -152,27 +152,23 @@ struct MediumStreakView: View {
     }
 
     var body: some View {
-        HStack(spacing: 18) {
-            // Streak ring
+        HStack(spacing: 16) {
+            // Streak ring — thin stroke, compact count.
             MADWidgetRing(
                 progress: entry.liveProgress,
-                size: 92,
-                lineWidth: 7,
+                size: 78,
+                lineWidth: 6,
                 isComplete: entry.isGoalCompleted
             ) {
                 VStack(spacing: -1) {
                     Image(systemName: "flame.fill")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(MADWidgetStyle.orange)
                     Text("\(entry.streak)")
-                        .font(.system(size: 32, weight: .heavy, design: .rounded))
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
-                    Text(entry.streak == 1 ? "DAY" : "DAYS")
-                        .font(.system(size: 8, weight: .heavy, design: .rounded))
-                        .tracking(1.0)
-                        .foregroundColor(MADWidgetStyle.secondaryText)
                 }
             }
 
@@ -182,9 +178,9 @@ struct MediumStreakView: View {
             VStack(alignment: .leading, spacing: 0) {
                 MADWidgetLabel(icon: "calendar", text: "THIS WEEK", color: MADWidgetStyle.red)
 
-                Spacer(minLength: 8)
+                Spacer(minLength: 6)
 
-                HStack(spacing: 7) {
+                HStack(spacing: 6) {
                     ForEach(0..<7, id: \.self) { index in
                         let completed = index < entry.weekCompletions.count ? entry.weekCompletions[index] : false
                         let isToday = index == todayIndex
@@ -192,7 +188,7 @@ struct MediumStreakView: View {
 
                         VStack(spacing: 5) {
                             Text(Self.dayLetters[index])
-                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                                .font(.system(size: 8.5, weight: .semibold, design: .rounded))
                                 .foregroundColor(isToday ? .white : MADWidgetStyle.secondaryText)
 
                             ZStack {
@@ -202,13 +198,13 @@ struct MediumStreakView: View {
                                             ? AnyShapeStyle(LinearGradient(
                                                 colors: [MADWidgetStyle.green, MADWidgetStyle.green.opacity(0.7)],
                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-                                            : AnyShapeStyle(Color.white.opacity(isFuture ? 0.06 : 0.14))
+                                            : AnyShapeStyle(Color.white.opacity(isFuture ? 0.05 : 0.12))
                                     )
-                                    .frame(width: 24, height: 24)
+                                    .frame(width: 21, height: 21)
 
                                 if completed {
-                                    Image(systemName: "figure.run")
-                                        .font(.system(size: 10, weight: .bold))
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 9, weight: .bold))
                                         .foregroundColor(.white)
                                 }
 
@@ -216,16 +212,16 @@ struct MediumStreakView: View {
                                     Circle()
                                         .stroke(
                                             entry.isGoalCompleted ? MADWidgetStyle.green : MADWidgetStyle.red,
-                                            lineWidth: 2
+                                            lineWidth: 1.5
                                         )
-                                        .frame(width: 29, height: 29)
+                                        .frame(width: 25, height: 25)
                                 }
                             }
                         }
                     }
                 }
 
-                Spacer(minLength: 8)
+                Spacer(minLength: 6)
 
                 statusLine
             }
@@ -244,9 +240,9 @@ struct MediumStreakView: View {
         if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
             HStack(spacing: 4) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 9, weight: .semibold))
                 Text(timeRemaining)
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
@@ -254,16 +250,16 @@ struct MediumStreakView: View {
         } else if entry.isGoalCompleted {
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 10, weight: .bold))
-                Text("Mile done — streak safe 🔥")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .font(.system(size: 9, weight: .semibold))
+                Text("Mile done — streak safe")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
             .foregroundColor(MADWidgetStyle.green)
         } else {
-            Text("\(completedThisWeek)/7 this week · run to keep it alive")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+            Text("\(completedThisWeek)/7 this week · keep it alive")
+                .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundColor(MADWidgetStyle.secondaryText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
@@ -431,57 +427,70 @@ struct HomeScreenStreakView: View {
 
             MADWidgetRing(
                 progress: entry.liveProgress,
-                size: 98,
-                lineWidth: 8,
+                size: 90,
+                lineWidth: 7,
                 isComplete: entry.isGoalCompleted
             ) {
                 VStack(spacing: -1) {
                     Image(systemName: entry.isAtRisk ? "exclamationmark.triangle.fill" : "flame.fill")
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(entry.isAtRisk ? .red : MADWidgetStyle.orange)
 
                     Text("\(entry.streak)")
-                        .font(.system(size: 36, weight: .heavy, design: .rounded))
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
-
-                    Text(entry.streak == 1 ? "DAY" : "DAYS")
-                        .font(.system(size: 9, weight: .heavy, design: .rounded))
-                        .tracking(1.2)
-                        .foregroundColor(MADWidgetStyle.secondaryText)
                 }
             }
 
-            Spacer(minLength: 0)
+            // Fixed breathing room between the ring and the chip; the flexible
+            // spacers above/below keep the ring + chip group optically centered.
+            Color.clear.frame(height: 14)
 
-            // Always-present status line so the ring never floats over an empty
+            // Always-present status chip so the ring never floats over an empty
             // band: countdown when at risk, confirmation when done, otherwise
             // today's live progress toward the mile.
-            statusLine
+            statusChip
+
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
-    private var statusLine: some View {
+    private var statusChip: some View {
         if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
-            Text(timeRemaining)
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundColor(.red)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+            StreakStatusChip(icon: "exclamationmark.triangle.fill", text: timeRemaining, color: .red)
         } else if entry.isGoalCompleted {
-            Text("Streak safe 🔥")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundColor(MADWidgetStyle.green)
+            StreakStatusChip(icon: "flame.fill", text: "Streak safe", color: MADWidgetStyle.green)
         } else {
-            Text("\(Int(entry.liveProgress * 100))% of today's mile")
+            StreakStatusChip(icon: nil, text: "\(Int(entry.liveProgress * 100))% today", color: MADWidgetStyle.secondaryText)
+        }
+    }
+}
+
+/// Compact tinted status pill used at the bottom of the streak widget.
+private struct StreakStatusChip: View {
+    let icon: String?
+    let text: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            Text(text)
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundColor(MADWidgetStyle.secondaryText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
         }
+        .foregroundColor(color)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(color.opacity(0.15)))
     }
 }
 

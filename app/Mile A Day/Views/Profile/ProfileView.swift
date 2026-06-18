@@ -17,6 +17,7 @@ struct ProfileView: View {
     @State private var isRecalibratingStreak = false
     @State private var recalibrateResultMessage: String?
     @State private var showingShareProfile = false
+    @State private var showAppTour = false
 
     // Friends count shown in the header (Instagram-style), tappable through to
     // the friends list. Owns one FriendService for the count + the list link.
@@ -125,6 +126,9 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showingManagePins) {
             ManagePinnedBadgesSheet(userManager: userManager)
+        }
+        .fullScreenCover(isPresented: $showAppTour) {
+            WelcomeTourView { showAppTour = false }
         }
         .task {
             await loadOwnFriendCount()
@@ -742,6 +746,18 @@ struct ProfileView: View {
                         icon: "lock.shield.fill",
                         title: "Privacy Settings",
                         subtitle: "Control what others can see",
+                        iconColor: MADTheme.Colors.madRed
+                    )
+                }
+                .buttonStyle(.plain)
+
+                settingsDivider
+
+                Button { showAppTour = true } label: {
+                    MADSettingsRow(
+                        icon: "figure.run.circle.fill",
+                        title: "App Tour",
+                        subtitle: "Replay the welcome walkthrough",
                         iconColor: MADTheme.Colors.madRed
                     )
                 }
