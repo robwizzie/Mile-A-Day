@@ -63,6 +63,16 @@ struct DashboardView: View {
     /// Navigation state for badges view from celebration
     @State private var navigateToBadgesFromCelebration = false
 
+    /// Guards against launching multiple concurrent streak fetches when several
+    /// observers trigger the goal-celebration check at the same time.
+    @State private var isPreparingGoalCelebration = false
+
+    // Ask-mode pending friend notifications (stash sheet). The celebration
+    // embed handles the mile-completed pending; this sheet catches everything
+    // else (walks, extra workouts, background syncs).
+    @ObservedObject private var pendingService = PendingNotificationsService.shared
+    @State private var showPendingSheet = false
+
     /// First-run welcome tour state. The flag persists so the full-screen
     /// tour only auto-plays once; users can replay it any time from the
     /// dashboard welcome banner or Help & Support.
@@ -240,19 +250,46 @@ struct DashboardView: View {
             return
         }
 
-        let stats = buildGoalCompletionStats()
-
-        // If goal celebration was already shown today, show post-goal encouragement instead
-        if celebrationManager.hasShownGoalCelebrationToday {
+        // Already shown today → nothing to do.
+        guard !celebrationManager.hasShownGoalCelebrationToday else {
             return
         }
 
-        print("[Dashboard] 🎉 Goal completion detected! Distance: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles)")
-        celebrationManager.addCelebration(.goalCompleted(stats: stats))
-        // Baseline the post-goal counter at the goal-completing workout so the
-        // "Extra Mile" message only fires for workouts finished AFTER this one,
-        // not for the same workout once HealthKit's count catches up.
-        celebrationManager.lastPostGoalWorkoutCount = max(healthManager.todaysWorkoutCount, 1)
+        // Avoid stacking redundant streak fetches when several observers fire at once.
+        guard !isPreparingGoalCelebration else { return }
+        isPreparingGoalCelebration = true
+
+        // Sample the workout count NOW (goal-completion time) as the extra-mile
+        // baseline, before the await below — a workout finishing during the fetch
+        // must still count as an "extra mile", not silently raise the baseline past
+        // itself and get skipped. Floor at 1 so the goal-completing effort always
+        // counts even when today's distance came from a non-workout source.
+        let goalCompletionWorkoutCount = max(healthManager.todaysWorkoutCount, 1)
+
+        Task { @MainActor in
+            defer { isPreparingGoalCelebration = false }
+
+            // Pull the freshest streak before building the celebration. On cold launch
+            // the cached streak hasn't yet counted today's mile, so without this the
+            // counter shows a day stale (the value a manual refresh later corrects).
+            await refreshStreakFromBackendForCelebration()
+
+            // Re-validate after the await — state may have changed, or another trigger
+            // may have shown the celebration while we were fetching.
+            guard currentState.isCompleted,
+                  healthManager.todaysDistance > 0,
+                  !celebrationManager.hasShownGoalCelebrationToday else {
+                return
+            }
+
+            // Baseline for extra-mile detection = workout count at goal completion.
+            // Scoped to today (see CelebrationManager.lastPostGoalWorkoutCount) so it
+            // neither suppresses tomorrow's extra mile nor spuriously fires on reopen.
+            celebrationManager.lastPostGoalWorkoutCount = goalCompletionWorkoutCount
+
+            print("[Dashboard] 🎉 Goal completion detected! Distance: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles)")
+            celebrationManager.addCelebration(.goalCompleted(stats: buildGoalCompletionStats()))
+        }
     }
 
     /// Show encouragement when the user completes additional workouts after reaching their goal.
@@ -373,6 +410,8 @@ struct DashboardView: View {
                     checkAndShowGoalCelebration()
                     checkAndShowPostGoalEncouragement()
                 }
+                // A workout just finished/synced — refresh ask-mode pendings.
+                loadPendingNotifications()
             }) {
                 // One WorkoutTrackingView with stable structural identity. This was
                 // an if/else between two WorkoutTrackingView initializers — when the
@@ -393,6 +432,8 @@ struct DashboardView: View {
                 refreshData()
                 // Sync widget data immediately
                 syncWidgetData()
+                // Load ask-mode pending notifications (cheap-guarded on settings).
+                loadPendingNotifications()
 
                 // Fetch fastest mile pace from backend database
                 fetchFastestPaceFromBackend()
@@ -445,6 +486,9 @@ struct DashboardView: View {
                 )
                 .presentationDetents([.height(300)])
                     }
+            .sheet(isPresented: $showPendingSheet) {
+                PendingNotificationsSheet()
+            }
             .alert("Workout Upload", isPresented: $showWorkoutUploadAlert) {
                 Button("OK") { }
             } message: {
@@ -461,8 +505,17 @@ struct DashboardView: View {
                     celebrationManager.onAppBecameActive()
                     // Re-check celebrations in case data changed while backgrounded
                     checkAndShowGoalCelebration()
+                    // Pick up ask-mode pendings created while backgrounded.
+                    loadPendingNotifications()
                 } else if newPhase == .background || newPhase == .inactive {
                     celebrationManager.onAppResignedActive()
+                }
+            }
+            .onChange(of: celebrationManager.isShowingCelebration) { wasShowing, isShowing in
+                // When a celebration finishes, surface any leftover pendings the
+                // embed didn't handle (other event types, or an un-acted mile).
+                if wasShowing && !isShowing {
+                    maybePresentPendingSheet()
                 }
             }
             .onChange(of: healthManager.hasLoadedInitialData) { _, isLoaded in
@@ -568,6 +621,38 @@ struct DashboardView: View {
         isRefreshing = false
     }
 
+    // MARK: - Ask-mode Pending Notifications
+
+    /// Load ask-mode pending friend notifications, then maybe surface the stash
+    /// sheet. Cheap-guarded: skips the network call entirely unless the user has
+    /// at least one outgoing "ask" audience setting.
+    private func loadPendingNotifications() {
+        Task { @MainActor in
+            await AudienceSettingsService.shared.loadIfNeeded()
+            guard AudienceSettingsService.shared.hasAskSettings else { return }
+            try? await pendingService.load()
+            maybePresentPendingSheet()
+        }
+    }
+
+    /// Present the standalone stash sheet when there are pendings the celebration
+    /// embed won't handle. A fresh mile-only stash is left to the goal
+    /// celebration (CelebrationManager owns presentation priority).
+    private func maybePresentPendingSheet() {
+        guard !pendingService.pending.isEmpty else { return }
+        guard !celebrationManager.isShowingCelebration else { return }
+        guard !showPendingSheet else { return }
+
+        let onlyMile = pendingService.pending.allSatisfy {
+            $0.eventType == AudienceEventType.mileCompleted.rawValue
+        }
+        // If the only pending is today's mile and the goal celebration hasn't run
+        // yet, let the celebration's embed handle it instead of this sheet.
+        if onlyMile && !celebrationManager.hasShownGoalCelebrationToday { return }
+
+        showPendingSheet = true
+    }
+
     /// Fetch fastest mile pace from backend database (authoritative source)
     private func fetchFastestPaceFromBackend() {
         guard let userId = UserDefaults.standard.string(forKey: "backendUserId") else { return }
@@ -589,6 +674,24 @@ struct DashboardView: View {
             } catch {
                 print("[Dashboard] ⚠️ Failed to fetch stats from backend: \(error)")
             }
+        }
+    }
+
+    /// Pull the current streak from the backend (the authoritative source the manual
+    /// refresh uses) and apply it before a streak celebration is built, so the counter
+    /// isn't a day stale on cold launch. `updateStreakFromBackend` only raises the
+    /// value, so a higher HealthKit-computed streak is never clobbered. Bounded by
+    /// APIClient's 15s request timeout; on failure we fall back to the cached streak —
+    /// no worse than before.
+    @MainActor
+    private func refreshStreakFromBackendForCelebration() async {
+        guard let userId = UserDefaults.standard.string(forKey: "backendUserId") else { return }
+        do {
+            let stats = try await workoutService.getUserStats(userId: userId)
+            print("[Dashboard] 🔄 Fresh streak for celebration = \(stats.streak)")
+            userManager.updateStreakFromBackend(stats.streak)
+        } catch {
+            print("[Dashboard] ⚠️ Fresh streak fetch for celebration failed: \(error)")
         }
     }
 

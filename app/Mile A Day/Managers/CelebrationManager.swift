@@ -316,10 +316,37 @@ class CelebrationManager: ObservableObject {
     /// Tracks whether goal completion has been shown today (to prevent duplicates)
     @AppStorage("lastGoalCelebrationDate") private var lastGoalCelebrationDateString: String = ""
 
-    /// Tracks the workout count when the last post-goal encouragement was shown
-    @AppStorage("lastPostGoalWorkoutCount") var lastPostGoalWorkoutCount: Int = 0
+    /// Backing store for the extra-mile workout-count baseline. Scoped to a single
+    /// day via `lastPostGoalDateString` — see `lastPostGoalWorkoutCount`.
+    @AppStorage("lastPostGoalWorkoutCount") private var storedPostGoalWorkoutCount: Int = 0
+    @AppStorage("lastPostGoalDate") private var lastPostGoalDateString: String = ""
 
-    private init() {}
+    /// Workout-count baseline above which an extra-mile ("Extra mile") celebration
+    /// fires. Resets to 0 at the start of each calendar day so a baseline carried
+    /// over from a previous day can't suppress today's celebration — the bug where
+    /// the extra-mile screen "sometimes" didn't show. The getter returns 0 whenever
+    /// the stored date isn't today; the setter always stamps today's date.
+    var lastPostGoalWorkoutCount: Int {
+        get {
+            lastPostGoalDateString == formatDate(Date()) ? storedPostGoalWorkoutCount : 0
+        }
+        set {
+            storedPostGoalWorkoutCount = newValue
+            lastPostGoalDateString = formatDate(Date())
+        }
+    }
+
+    private init() {
+        // Migration for installs created before the per-day baseline date existed.
+        // If the goal was already celebrated today under the old logic, adopt today's
+        // date so the legacy `storedPostGoalWorkoutCount` keeps gating extra-mile
+        // celebrations for the rest of today exactly as before — instead of the new
+        // getter reading 0 and possibly firing a spurious Extra Mile without a new
+        // workout. From the next calendar day on, the day-scoped reset takes over.
+        if lastPostGoalDateString.isEmpty && hasShownGoalCelebrationToday {
+            lastPostGoalDateString = formatDate(Date())
+        }
+    }
     
     /// Check if goal celebration has already been shown today
     var hasShownGoalCelebrationToday: Bool {
@@ -475,6 +502,7 @@ class CelebrationManager: ObservableObject {
     /// Reset daily tracking (for testing)
     func resetDailyTracking() {
         lastGoalCelebrationDateString = ""
-        lastPostGoalWorkoutCount = 0
+        storedPostGoalWorkoutCount = 0
+        lastPostGoalDateString = ""
     }
 }

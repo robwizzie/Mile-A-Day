@@ -1,5 +1,12 @@
 import { PostgresService } from './DbService.js';
 import { getNotificationPreferences, shouldSendNotification } from './notificationSettingsService.js';
+import {
+	resolveAudience,
+	filterByIncomingAudience,
+	restrictToCloseFriends,
+	queuePendingFriendNotification,
+	AudienceEventType
+} from './audienceSettingsService.js';
 import { hasUnlimitedActions } from './privilegedUsers.js';
 import { START_OF_TODAY_ET_SQL } from './dailyResetTime.js';
 import fs from 'fs';
@@ -632,28 +639,59 @@ export async function fireBadgeEarnedPush(userId: string, badge: BadgeEarnedPayl
 }
 
 /**
+ * Apply the sender's outgoing audience setting to a friend fan-out and the
+ * recipients' incoming audience filter. Returns the final recipient list, or
+ * null when nothing should send now ('none', or 'ask' — in which case the
+ * payload has been queued in pending_friend_notifications for confirmation).
+ */
+async function resolveFriendFanOutRecipients(
+	senderId: string,
+	eventType: AudienceEventType,
+	payload: PushPayload,
+	workoutId: string | null = null
+): Promise<string[] | null> {
+	const outgoing = await resolveAudience(senderId, 'outgoing', eventType, '');
+	if (outgoing === 'none') return null;
+	if (outgoing === 'ask') {
+		// Pass workoutId when available so the partial unique index dedupes
+		// re-queued pendings (e.g. PR re-detection on a same-day re-upload).
+		await queuePendingFriendNotification(senderId, eventType, '', workoutId, payload);
+		return null;
+	}
+
+	let friendIds = await getAcceptedFriendIds(senderId);
+	if (outgoing === 'close') {
+		friendIds = await restrictToCloseFriends(senderId, friendIds);
+	}
+	if (friendIds.length === 0) return [];
+	return filterByIncomingAudience(friendIds, senderId, eventType, '');
+}
+
+/**
  * Fan out a rare+ badge to every accepted friend. Throttled 1/hour per (sender, recipient).
  */
 export async function fanOutFriendBadgePush(senderId: string, badge: BadgeEarnedPayload): Promise<void> {
-	const friendIds = await getAcceptedFriendIds(senderId);
-	if (friendIds.length === 0) return;
 	const sender = await getSenderDisplayName(senderId);
+	const payload: PushPayload = {
+		title: `${sender} earned a medal`,
+		body: `${badge.name} — ${badge.rarity}`,
+		type: 'friend_badge_earned',
+		data: {
+			sender_id: senderId,
+			badge_id: badge.badgeId,
+			badge_name: badge.name,
+			rarity: badge.rarity
+		}
+	};
+
+	const friendIds = await resolveFriendFanOutRecipients(senderId, 'badge_earned', payload);
+	if (!friendIds || friendIds.length === 0) return;
 
 	for (const friendId of friendIds) {
 		const okToPush = await passesFriendBadgeThrottle(senderId, friendId);
 		if (!okToPush) continue;
 
-		sendPush(friendId, {
-			title: `${sender} earned a medal`,
-			body: `${badge.name} — ${badge.rarity}`,
-			type: 'friend_badge_earned',
-			data: {
-				sender_id: senderId,
-				badge_id: badge.badgeId,
-				badge_name: badge.name,
-				rarity: badge.rarity
-			}
-		}).catch(err => console.error('[Push] friend_badge_earned send failed:', err.message));
+		sendPush(friendId, payload).catch(err => console.error('[Push] friend_badge_earned send failed:', err.message));
 	}
 }
 
@@ -691,30 +729,28 @@ export async function fanOutFriendPersonalBestPush(
 	newValue: number,
 	workoutId: string
 ): Promise<void> {
-	const friendIds = await getAcceptedFriendIds(senderId);
-	if (friendIds.length === 0) return;
 	const sender = await getSenderDisplayName(senderId);
+	const payload: PushPayload = {
+		title: `${sender} set a new personal best`,
+		body: formatPersonalBestBody(prType, newValue),
+		type: 'friend_personal_best',
+		data: {
+			sender_id: senderId,
+			pr_type: prType,
+			pr_label: personalBestLabel(prType, newValue),
+			new_value: String(newValue),
+			workout_id: workoutId
+		}
+	};
 
-	const title = `${sender} set a new personal best`;
-	const body = formatPersonalBestBody(prType, newValue);
-	const label = personalBestLabel(prType, newValue);
+	const friendIds = await resolveFriendFanOutRecipients(senderId, 'personal_best', payload, workoutId);
+	if (!friendIds || friendIds.length === 0) return;
 
 	for (const friendId of friendIds) {
 		const allowed = await shouldSendNotification(friendId, senderId, 'friend_personal_best');
 		if (!allowed) continue;
 
-		sendPush(friendId, {
-			title,
-			body,
-			type: 'friend_personal_best',
-			data: {
-				sender_id: senderId,
-				pr_type: prType,
-				pr_label: label,
-				new_value: String(newValue),
-				workout_id: workoutId
-			}
-		}).catch(err => console.error('[Push] friend_personal_best send failed:', err.message));
+		sendPush(friendId, payload).catch(err => console.error('[Push] friend_personal_best send failed:', err.message));
 	}
 }
 
@@ -722,22 +758,24 @@ export async function fanOutFriendPersonalBestPush(
  * Fan out a daily-challenge completion to every accepted friend.
  */
 export async function fanOutFriendChallengePush(senderId: string, completion: ChallengeCompletedPayload): Promise<void> {
-	const friendIds = await getAcceptedFriendIds(senderId);
-	if (friendIds.length === 0) return;
 	const sender = await getSenderDisplayName(senderId);
+	const payload: PushPayload = {
+		title: `${sender} finished today's challenge`,
+		body: completion.challengeTitle,
+		type: 'friend_challenge_completed',
+		data: {
+			sender_id: senderId,
+			challenge_key: completion.challengeKey,
+			challenge_title: completion.challengeTitle,
+			local_date: completion.localDate
+		}
+	};
+
+	const friendIds = await resolveFriendFanOutRecipients(senderId, 'challenge_completed', payload);
+	if (!friendIds || friendIds.length === 0) return;
 
 	for (const friendId of friendIds) {
-		sendPush(friendId, {
-			title: `${sender} finished today's challenge`,
-			body: completion.challengeTitle,
-			type: 'friend_challenge_completed',
-			data: {
-				sender_id: senderId,
-				challenge_key: completion.challengeKey,
-				challenge_title: completion.challengeTitle,
-				local_date: completion.localDate
-			}
-		}).catch(err => console.error('[Push] friend_challenge_completed send failed:', err.message));
+		sendPush(friendId, payload).catch(err => console.error('[Push] friend_challenge_completed send failed:', err.message));
 	}
 }
 

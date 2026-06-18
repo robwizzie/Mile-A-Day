@@ -412,6 +412,15 @@ export async function updateFriendship(
 				[user1, user2]
 			);
 
+			await db.query(
+				`
+				DELETE FROM close_friends
+				WHERE (user_id = $1 AND close_friend_id = $2)
+					OR (user_id = $2 AND close_friend_id = $1)
+				`,
+				[user1, user2]
+			);
+
 			return {
 				message: status === 'rejected' ? 'Successfully rejected friend request' : 'Successfully deleted friendship'
 			};

@@ -163,6 +163,8 @@ class APIClient {
             throw APIError.notFound
         case 409:
             throw APIError.conflict(extractErrorMessage(from: data) ?? "Conflict")
+        case 410:
+            throw APIError.gone(extractErrorMessage(from: data) ?? "No longer available")
         case 429:
             throw APIError.rateLimited(extractErrorMessage(from: data) ?? "Slow down — try again in a bit")
         default:
@@ -241,6 +243,9 @@ enum APIError: LocalizedError {
     case badRequest(String)
     case conflict(String)
     case rateLimited(String)
+    /// HTTP 410 — the resource existed but is permanently gone (e.g. an expired
+    /// pending notification past its same-day window). Terminal; don't retry.
+    case gone(String)
     case notFound
     case serverError(Int)
     /// Server returned a non-2xx with a parseable `{ error: "..." }` body —
@@ -265,6 +270,8 @@ enum APIError: LocalizedError {
         case .conflict(let message):
             return message
         case .rateLimited(let message):
+            return message
+        case .gone(let message):
             return message
         case .notFound:
             return "Resource not found"

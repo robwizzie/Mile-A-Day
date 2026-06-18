@@ -22,6 +22,7 @@ struct FriendsListView: View {
     @State private var topMode: FriendsTabMode = .friends
     @State private var showingSearch = false
     @State private var showingRequestsSheet = false
+    @State private var showingCloseFriends = false
     @State private var selectedUser: BackendUser?
     // Profile to open once the requests sheet finishes dismissing. Presenting
     // from the sheet's onDismiss (instead of a fixed asyncAfter delay) avoids
@@ -120,6 +121,11 @@ struct FriendsListView: View {
                 UserProfileDetailView(user: user, friendService: friendService)
             }
         }
+        .sheet(isPresented: $showingCloseFriends) {
+            NavigationStack {
+                CloseFriendsListView(friendService: friendService)
+            }
+        }
         .task {
             if friendService.friends.isEmpty && friendService.friendRequests.isEmpty && friendService.sentRequests.isEmpty {
                 await friendService.refreshAllData()
@@ -187,6 +193,9 @@ struct FriendsListView: View {
             HStack(spacing: 8) {
                 headerCircleButton(systemImage: "magnifyingglass") {
                     showingSearch = true
+                }
+                headerCircleButton(systemImage: "star") {
+                    showingCloseFriends = true
                 }
                 // Badge counts only incoming requests — sent ones aren't a
                 // notification, they're just pending state the user already

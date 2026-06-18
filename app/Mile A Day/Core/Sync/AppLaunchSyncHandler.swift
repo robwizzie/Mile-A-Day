@@ -36,6 +36,12 @@ class AppLaunchSyncHandler: ObservableObject {
             return
         }
 
+        // Retry any manual workouts whose original upload failed (offline / app
+        // killed mid-save). These are backdated, so the endDate-based incremental
+        // sync below can never re-pick them up — they must be flushed explicitly.
+        // Best-effort and independent of the workout sync that follows.
+        await syncService.flushPendingManualUploads()
+
         guard !isSyncing else {
             print("[AppLaunchSyncHandler] Sync already in progress")
             return

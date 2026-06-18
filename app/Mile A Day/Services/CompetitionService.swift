@@ -65,6 +65,8 @@ class CompetitionService: ObservableObject {
                 throw CompetitionServiceError.apiError(message)
             case .conflict(let message):
                 throw CompetitionServiceError.apiError(message)
+            case .gone(let message):
+                throw CompetitionServiceError.apiError(message)
             case .rateLimited(let message):
                 throw CompetitionServiceError.apiError(message)
             case .serverError(let code):

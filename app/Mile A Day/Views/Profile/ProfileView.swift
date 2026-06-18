@@ -14,6 +14,8 @@ struct ProfileView: View {
     @State private var showingManagePins = false
     @State private var pinnedBadgeForDetail: Badge?
     @State private var isShowingBadgeDetail = false
+    @State private var isRecalibratingStreak = false
+    @State private var recalibrateResultMessage: String?
     @State private var showingShareProfile = false
 
     // Friends count shown in the header (Instagram-style), tappable through to
@@ -170,6 +172,44 @@ struct ProfileView: View {
             Button("OK") { deleteAccountErrorMessage = nil }
         } message: {
             Text(deleteAccountErrorMessage ?? "")
+        }
+        .alert(
+            "Streak Recalibrated",
+            isPresented: Binding(
+                get: { recalibrateResultMessage != nil },
+                set: { if !$0 { recalibrateResultMessage = nil } }
+            )
+        ) {
+            Button("OK") { recalibrateResultMessage = nil }
+        } message: {
+            Text(recalibrateResultMessage ?? "")
+        }
+    }
+
+    // MARK: - Recalibrate Streak
+
+    /// Re-push the phone's local workouts to the server and recompute the streak.
+    /// Recovers a streak that reads too low because a manual/backdated workout
+    /// never reached the backend. Local HealthKit is the source of truth, so this
+    /// only ever fills server gaps — it can't shorten a legitimately broken streak.
+    private func recalibrateStreak() async {
+        guard !isRecalibratingStreak else { return }
+        isRecalibratingStreak = true
+        defer { isRecalibratingStreak = false }
+
+        do {
+            let outcome = try await WorkoutSyncService.shared.recalibrateStreak(
+                localStreakDays: healthManager.retroactiveStreak
+            )
+            userManager.updateStreakFromBackend(outcome.streak)
+
+            let dayWord = outcome.streak == 1 ? "day" : "days"
+            let workoutWord = outcome.workoutsPushed == 1 ? "workout" : "workouts"
+            recalibrateResultMessage =
+                "Your streak is now \(outcome.streak) \(dayWord). We re-checked \(outcome.workoutsPushed) recent \(workoutWord) and made sure they're all saved to your account."
+        } catch {
+            recalibrateResultMessage =
+                "We couldn't finish recalibrating right now. Please check your connection and try again."
         }
     }
 
@@ -666,6 +706,23 @@ struct ProfileView: View {
                     )
                 }
                 .buttonStyle(.plain)
+
+                settingsDivider
+
+                Button {
+                    Task { await recalibrateStreak() }
+                } label: {
+                    MADSettingsRow(
+                        icon: "arrow.triangle.2.circlepath",
+                        title: "Recalibrate Streak",
+                        subtitle: isRecalibratingStreak
+                            ? "Re-syncing your workouts…"
+                            : "Fix a streak that looks too low",
+                        iconColor: Color.green
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isRecalibratingStreak)
 
                 settingsDivider
 

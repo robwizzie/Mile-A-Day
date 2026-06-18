@@ -667,6 +667,39 @@ export async function refreshCurrentStreak(userId: string): Promise<number> {
 	return streak;
 }
 
+/**
+ * Recompute current_streak for every user who currently has a non-zero stored
+ * streak, and write back the corrected value.
+ *
+ * Why this is needed: refreshCurrentStreak only runs on the workout-upload path,
+ * so a user who hit their goal and then stopped uploading keeps their last
+ * computed streak forever — the stored value never decays as the calendar moves
+ * past the today/yesterday grace window. That makes the streak leaderboard and
+ * the public-streak endpoint show stale streaks (commonly a stuck "1"). This job
+ * reconciles them daily. Only users with current_streak > 0 can be stale-high,
+ * so we scope to those; the upload path keeps values fresh in the upward
+ * direction. refreshCurrentStreak derives "today" from each user's own timezone
+ * offset, so the result is correct regardless of when this job runs.
+ */
+export async function reconcileStaleStreaks(): Promise<{ checked: number; changed: number }> {
+	const rows = await db.query<{ user_id: string; current_streak: number }>(
+		`SELECT user_id, current_streak FROM users WHERE current_streak > 0`
+	);
+
+	let changed = 0;
+	for (const { user_id, current_streak } of rows) {
+		try {
+			const after = await refreshCurrentStreak(user_id);
+			if (current_streak !== after) changed++;
+		} catch (err: any) {
+			// Isolate per-user failures so one bad row doesn't abort the sweep.
+			console.error(`[Streaks] Failed to reconcile streak for ${user_id}:`, err.message);
+		}
+	}
+
+	return { checked: rows.length, changed };
+}
+
 function dateStringMinus(dateStr: string, days: number): string {
 	const [y, m, d] = dateStr.split('-').map(Number);
 	const date = new Date(Date.UTC(y, m - 1, d));

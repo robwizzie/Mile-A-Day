@@ -71,6 +71,11 @@ struct MainTabView: View {
         .safeAreaInset(edge: .bottom) {
             SyncStatusBanner()
         }
+        .overlay(alignment: .top) {
+            // Foreground notification banner — floats above all tabs/nav bars.
+            InAppNotificationBanner()
+                .padding(.top, 4)
+        }
         .onChange(of: trackingManager.isTracking) { _, tracking in
             activeWorkoutForBanner = tracking ? InProgressWorkoutStore.load() : nil
         }

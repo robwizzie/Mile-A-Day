@@ -410,7 +410,18 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             )
         }
 
-        return [.banner, .sound]
+        // Present our own branded, tappable in-app banner instead of Apple's
+        // generic foreground banner. We still return `.list` so it lands in
+        // Notification Center, and `.sound`, but drop `.banner` to avoid a
+        // double banner. (Background/locked delivery is unaffected.)
+        let content = notification.request.content
+        InAppBannerManager.shared.show(
+            title: content.title,
+            body: content.body,
+            type: userInfo["type"] as? String,
+            data: userInfo["data"] as? [String: String] ?? [:]
+        )
+        return [.list, .sound]
     }
 
     @MainActor

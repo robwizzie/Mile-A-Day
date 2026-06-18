@@ -101,6 +101,8 @@ class WorkoutService: ObservableObject {
                 throw WorkoutServiceError.apiError(message)
             case .conflict(let message):
                 throw WorkoutServiceError.apiError(message)
+            case .gone(let message):
+                throw WorkoutServiceError.apiError(message)
             case .rateLimited(let message):
                 throw WorkoutServiceError.apiError(message)
             case .serverError(let code):
@@ -361,6 +363,14 @@ class WorkoutService: ObservableObject {
             "source": "manual"
         ]
 
+        // Durability: enqueue BEFORE attempting the upload so a failed or
+        // interrupted POST isn't silently lost. A manual workout is backdated,
+        // so the normal incremental sync (filters by endDate > lastSync) would
+        // never re-push it — this retry queue is the only safety net. The entry
+        // is removed once the server confirms; if we throw below it stays queued
+        // and flushPendingManualUploads() retries it on the next launch.
+        WorkoutSyncService.shared.enqueueManualUpload(workoutDict)
+
         let requestBody = try JSONSerialization.data(withJSONObject: [workoutDict])
 
         let _: WorkoutUploadResponse = try await makeRequest(
@@ -369,6 +379,8 @@ class WorkoutService: ObservableObject {
             body: requestBody,
             responseType: WorkoutUploadResponse.self
         )
+
+        WorkoutSyncService.shared.removeManualUpload(workoutId: workoutId)
     }
 
     /// Write a manual workout to HealthKit for Apple Health sync.

@@ -19,6 +19,7 @@ import { checkRaceCompletions } from '../services/competitionService.js';
 import {
 	notifyFriendsOfMileCompletion,
 	notifyFriendsOfExtraWorkout,
+	notifyFriendsOfWorkout,
 	checkCompetitionMilestones,
 	checkLeadChanges
 } from '../services/notificationService.js';
@@ -123,7 +124,22 @@ export async function uploadWorkouts(req: Request, res: Response) {
 							}
 						}
 					}
+				} else {
+					// Daily mile NOT yet met — pre-goal workout notifications. Opt-in:
+					// the default outgoing audience for 'workout' is 'none', so this
+					// sends nothing unless the user enabled it. The workout that later
+					// completes the mile takes the >= 1.0 branch (mile_completed only),
+					// so the two never double-fire for the same workout.
+					for (const w of req.body as Workout[]) {
+						if (w.workoutType === 'running' || w.workoutType === 'walking') {
+							notifyFriendsOfWorkout(userId, w.workoutId).catch(err =>
+								console.error('Error notifying pre-goal workout:', err.message)
+							);
+						}
+					}
 				}
+				// Competition lead changes + milestones run on every upload,
+				// regardless of whether the daily mile was completed.
 				(async () => {
 					const notifiedRecipients = new Map<string, number>();
 					await checkLeadChanges(userId, notifiedRecipients).catch(err =>
@@ -233,6 +249,35 @@ export async function getStreak(req: Request, res: Response) {
 	} catch (error: any) {
 		console.error('Error getting streak:', error.message);
 		res.status(500).json({ error: 'Error getting streak: ' + error.message });
+	}
+}
+
+/**
+ * Force a synchronous recompute of the user's current streak and return the
+ * fresh value. The "recalibrate streak" feature: the client first re-uploads
+ * its local HealthKit workouts (idempotent via ON CONFLICT) to backfill any
+ * runs that never reached the server — e.g. a manual/backdated log whose
+ * upload silently failed — then calls this so the streak reflects the
+ * now-complete data immediately, instead of racing the fire-and-forget
+ * refresh that the upload pipeline kicks off.
+ */
+export async function recalibrateStreak(req: Request, res: Response) {
+	if (!hasRequiredKeys(['userId'], req, res)) return;
+
+	try {
+		const userId = req.params.userId;
+
+		const user = await getUser({ userId });
+		if (!user) {
+			return res.status(400).send({ error: `No user found with ID ${userId}` });
+		}
+
+		const streak = await refreshCurrentStreak(userId);
+
+		return res.status(200).json({ streak });
+	} catch (error: any) {
+		console.error('Error recalibrating streak:', error.message);
+		res.status(500).json({ error: 'Error recalibrating streak: ' + error.message });
 	}
 }
 
