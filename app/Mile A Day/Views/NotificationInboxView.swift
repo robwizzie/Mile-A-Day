@@ -101,7 +101,9 @@ struct NotificationInboxView: View {
             await loadNotifications()
         }
         .refreshable {
-            await loadNotifications()
+            // Pull-to-refresh also settles the unread state in place, so the
+            // user doesn't have to leave and return to see the dots clear.
+            await loadNotifications(markVisibleRead: true)
         }
         .onChange(of: unreadCount) { _, newCount in
             onUnreadCountChanged?(newCount)
@@ -749,7 +751,15 @@ struct NotificationInboxView: View {
 
     // MARK: - Data Loading
 
-    private func loadNotifications() async {
+    /// Loads the inbox and auto-reads everything on the server.
+    ///
+    /// On open (`.task`) the freshly-fetched rows still carry `is_read=false`,
+    /// so the unread dots stay visible for this visit and settle when the view
+    /// reappears. Pull-to-refresh passes `markVisibleRead: true` to also clear
+    /// those dots in place — everything is read server-side at that point, so
+    /// flipping the displayed rows just mirrors the reappear behavior without
+    /// requiring the user to leave and come back.
+    private func loadNotifications(markVisibleRead: Bool = false) async {
         isLoading = true
         do {
             let response = try await friendService.getInboxNotifications()
@@ -759,14 +769,15 @@ struct NotificationInboxView: View {
                 hasMore = response.notifications.count >= 50
                 isLoading = false
             }
-            // Opening the inbox auto-reads everything on the server. The rows
-            // fetched above still carry is_read=false, so the unread dots stay
-            // visible for this visit — they clear on the next fetch (leave and
-            // come back, or pull-to-refresh). Zeroing unreadCount clears the
-            // bell badge via onUnreadCountChanged.
+            // Zeroing unreadCount clears the bell badge via onUnreadCountChanged.
             if response.unread_count > 0 {
                 try? await friendService.markAllNotificationsRead()
                 await MainActor.run { unreadCount = 0 }
+            }
+            if markVisibleRead {
+                await MainActor.run {
+                    notifications = notifications.map { $0.is_read ? $0 : readCopy($0) }
+                }
             }
         } catch {
             await MainActor.run { isLoading = false }
@@ -805,22 +816,26 @@ struct NotificationInboxView: View {
             try? await friendService.markNotificationRead(id: notification.id)
             await MainActor.run {
                 if let idx = notifications.firstIndex(where: { $0.id == notification.id }) {
-                    // Create updated notification with is_read = true
-                    let n = notifications[idx]
-                    notifications[idx] = InAppNotification(
-                        id: n.id, title: n.title, body: n.body,
-                        type: n.type, data: n.data, is_read: true,
-                        created_at: n.created_at,
-                        hype_target_user_id: n.hype_target_user_id,
-                        hype_context_type: n.hype_context_type,
-                        hype_context_id: n.hype_context_id,
-                        hype_context_label: n.hype_context_label,
-                        is_hyped: n.is_hyped
-                    )
+                    notifications[idx] = readCopy(notifications[idx])
                     unreadCount = max(0, unreadCount - 1)
                 }
             }
         }
+    }
+
+    /// Returns a copy of the notification with `is_read = true`. The model's
+    /// fields are immutable `let`s, so the row is rebuilt rather than mutated.
+    private func readCopy(_ n: InAppNotification) -> InAppNotification {
+        InAppNotification(
+            id: n.id, title: n.title, body: n.body,
+            type: n.type, data: n.data, is_read: true,
+            created_at: n.created_at,
+            hype_target_user_id: n.hype_target_user_id,
+            hype_context_type: n.hype_context_type,
+            hype_context_id: n.hype_context_id,
+            hype_context_label: n.hype_context_label,
+            is_hyped: n.is_hyped
+        )
     }
 
 }
