@@ -101,6 +101,8 @@ class WorkoutService: ObservableObject {
                 throw WorkoutServiceError.apiError(message)
             case .conflict(let message):
                 throw WorkoutServiceError.apiError(message)
+            case .gone(let message):
+                throw WorkoutServiceError.apiError(message)
             case .rateLimited(let message):
                 throw WorkoutServiceError.apiError(message)
             case .serverError(let code):

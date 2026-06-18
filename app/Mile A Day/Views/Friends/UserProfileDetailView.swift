@@ -5,7 +5,13 @@ struct UserProfileDetailView: View {
     let user: BackendUser
     let friendService: FriendService
     @ObservedObject private var userManager = UserManager.shared
+    @ObservedObject private var closeFriends = CloseFriendsService.shared
     @Environment(\.dismiss) private var dismiss
+
+    // Close-friends star: one-time explainer the first time someone adds a
+    // close friend, so the privacy model ("they're never told") is clear.
+    @AppStorage("hasSeenCloseFriendHint") private var hasSeenCloseFriendHint = false
+    @State private var closeFriendActionInProgress = false
 
     @State private var userStats: UserStats?
     @State private var userBadges: [Badge] = []
@@ -136,6 +142,78 @@ struct UserProfileDetailView: View {
         .task {
             await loadNudgeStatus()
         }
+        .task {
+            await closeFriends.loadIfNeeded()
+        }
+    }
+
+    // MARK: - Close Friend Toggle
+
+    /// Star pill that adds/removes this friend from the user's private close
+    /// list. Optimistic via CloseFriendsService; the other user is never told.
+    @ViewBuilder
+    private var closeFriendToggle: some View {
+        let isClose = closeFriends.isClose(user.user_id)
+        VStack(spacing: MADTheme.Spacing.sm) {
+            Button {
+                handleCloseFriendToggle()
+            } label: {
+                HStack(spacing: 6) {
+                    if closeFriendActionInProgress {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                            .tint(.yellow)
+                    } else {
+                        Image(systemName: isClose ? "star.fill" : "star")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    Text(isClose ? "Close Friend" : "Add to Close Friends")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .lineLimit(1)
+                }
+                .foregroundColor(isClose ? .yellow : .white.opacity(0.7))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .frame(maxWidth: .infinity)
+                .background(
+                    Capsule()
+                        .fill(isClose ? Color.yellow.opacity(0.12) : Color.white.opacity(0.05))
+                        .overlay(
+                            Capsule().strokeBorder(
+                                isClose ? Color.yellow.opacity(0.45) : Color.white.opacity(0.12),
+                                lineWidth: 1
+                            )
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(closeFriendActionInProgress)
+
+            // One-time explainer of the privacy model.
+            if !hasSeenCloseFriendHint {
+                Text("Close friends can get notifications others don't. They're never told.")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.45))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func handleCloseFriendToggle() {
+        guard !closeFriendActionInProgress else { return }
+        closeFriendActionInProgress = true
+        hasSeenCloseFriendHint = true
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Task {
+            do {
+                try await closeFriends.toggle(user)
+            } catch {
+                print("[UserProfile] close-friend toggle failed: \(error)")
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+            await MainActor.run { closeFriendActionInProgress = false }
+        }
     }
 
     private func loadBadges() async {
@@ -254,6 +332,8 @@ struct UserProfileDetailView: View {
                     // stays out (context-dependent, lives on push events).
                     if !isCurrentUser(), friendService.isFriend(user) {
                         actionRow
+                            .padding(.horizontal, MADTheme.Spacing.lg)
+                        closeFriendToggle
                             .padding(.horizontal, MADTheme.Spacing.lg)
                     }
                 }

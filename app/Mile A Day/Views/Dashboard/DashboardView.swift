@@ -62,6 +62,12 @@ struct DashboardView: View {
     /// observers trigger the goal-celebration check at the same time.
     @State private var isPreparingGoalCelebration = false
 
+    // Ask-mode pending friend notifications (stash sheet). The celebration
+    // embed handles the mile-completed pending; this sheet catches everything
+    // else (walks, extra workouts, background syncs).
+    @ObservedObject private var pendingService = PendingNotificationsService.shared
+    @State private var showPendingSheet = false
+
 
     /// Build goal completion stats for the celebration
     private func buildGoalCompletionStats() -> GoalCompletionStats {
@@ -362,6 +368,8 @@ struct DashboardView: View {
                     try? await Task.sleep(nanoseconds: 500_000_000)
                     checkAndShowPostGoalEncouragement()
                 }
+                // A workout just finished/synced — refresh ask-mode pendings.
+                loadPendingNotifications()
             }) {
                 if let state = InProgressWorkoutStore.load(), state.isActive {
                     WorkoutTrackingView(
@@ -383,6 +391,8 @@ struct DashboardView: View {
                 refreshData()
                 // Sync widget data immediately
                 syncWidgetData()
+                // Load ask-mode pending notifications (cheap-guarded on settings).
+                loadPendingNotifications()
 
                 // PHASE 1: Listen for workout index completion
                 NotificationCenter.default.addObserver(
@@ -445,6 +455,9 @@ struct DashboardView: View {
             .sheet(isPresented: $showInstructions) {
                 InstructionsView()
             }
+            .sheet(isPresented: $showPendingSheet) {
+                PendingNotificationsSheet()
+            }
             .alert("Workout Upload", isPresented: $showWorkoutUploadAlert) {
                 Button("OK") { }
             } message: {
@@ -461,8 +474,17 @@ struct DashboardView: View {
                     celebrationManager.onAppBecameActive()
                     // Re-check celebrations in case data changed while backgrounded
                     checkAndShowGoalCelebration()
+                    // Pick up ask-mode pendings created while backgrounded.
+                    loadPendingNotifications()
                 } else if newPhase == .background || newPhase == .inactive {
                     celebrationManager.onAppResignedActive()
+                }
+            }
+            .onChange(of: celebrationManager.isShowingCelebration) { wasShowing, isShowing in
+                // When a celebration finishes, surface any leftover pendings the
+                // embed didn't handle (other event types, or an un-acted mile).
+                if wasShowing && !isShowing {
+                    maybePresentPendingSheet()
                 }
             }
             .onChange(of: healthManager.hasLoadedInitialData) { _, isLoaded in
@@ -544,6 +566,38 @@ struct DashboardView: View {
         fetchFastestPaceFromBackend()
         applyHealthDataToUserManager()
         isRefreshing = false
+    }
+
+    // MARK: - Ask-mode Pending Notifications
+
+    /// Load ask-mode pending friend notifications, then maybe surface the stash
+    /// sheet. Cheap-guarded: skips the network call entirely unless the user has
+    /// at least one outgoing "ask" audience setting.
+    private func loadPendingNotifications() {
+        Task { @MainActor in
+            await AudienceSettingsService.shared.loadIfNeeded()
+            guard AudienceSettingsService.shared.hasAskSettings else { return }
+            try? await pendingService.load()
+            maybePresentPendingSheet()
+        }
+    }
+
+    /// Present the standalone stash sheet when there are pendings the celebration
+    /// embed won't handle. A fresh mile-only stash is left to the goal
+    /// celebration (CelebrationManager owns presentation priority).
+    private func maybePresentPendingSheet() {
+        guard !pendingService.pending.isEmpty else { return }
+        guard !celebrationManager.isShowingCelebration else { return }
+        guard !showPendingSheet else { return }
+
+        let onlyMile = pendingService.pending.allSatisfy {
+            $0.eventType == AudienceEventType.mileCompleted.rawValue
+        }
+        // If the only pending is today's mile and the goal celebration hasn't run
+        // yet, let the celebration's embed handle it instead of this sheet.
+        if onlyMile && !celebrationManager.hasShownGoalCelebrationToday { return }
+
+        showPendingSheet = true
     }
 
     /// Fetch fastest mile pace from backend database (authoritative source)

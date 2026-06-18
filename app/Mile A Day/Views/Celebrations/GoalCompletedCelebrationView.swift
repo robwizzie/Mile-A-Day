@@ -10,8 +10,15 @@ import SwiftUI
 
 struct GoalCompletedCelebrationView: View {
     @ObservedObject var manager = CelebrationManager.shared
+    @ObservedObject private var pendingService = PendingNotificationsService.shared
     @Environment(\.scenePhase) private var scenePhase
     var stats: GoalCompletionStats = .placeholder
+
+    // Ask-mode: when the user's mile-completed outgoing audience is "ask", the
+    // server stashes a pending row instead of auto-notifying. If one exists for
+    // today's mile, embed a notify card here. Loaded by DashboardView; this view
+    // just reacts to the shared service.
+    @State private var notifyInFlight = false
 
     // Phase 1: Flame Ignition
     @State private var overlayOpacity: Double = 0
@@ -120,6 +127,11 @@ struct GoalCompletedCelebrationView: View {
                             if showMotivation {
                                 motivationSection
                                     .transition(.opacity.combined(with: .offset(y: 20)))
+                            }
+
+                            if showButtons, let pending = pendingService.mileCompletedPending {
+                                notifyFriendsCard(pending)
+                                    .transition(.scale(scale: 0.9).combined(with: .opacity))
                             }
 
                             if showButtons {
@@ -537,6 +549,100 @@ struct GoalCompletedCelebrationView: View {
 
     private var nextMajorMilestone: StreakMilestone? {
         StreakMilestone.allCases.first { $0.days > stats.currentStreak && $0.isMajor }
+    }
+
+    // MARK: - Notify Friends (ask-mode embed)
+
+    /// "Let your friends know?" card shown inside the celebration when an
+    /// ask-mode mile-completed notification is pending. Notify sends it;
+    /// "Not this time" dismisses the pending (the moment has passed).
+    private func notifyFriendsCard(_ pending: PendingFriendNotification) -> some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 6) {
+                Text("📣")
+                Text("Let your friends know?")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+            }
+
+            Text(notifyAudienceCaption(for: pending))
+                .font(.system(size: 11, weight: .regular, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+
+            Button {
+                handleNotify(pending)
+            } label: {
+                HStack(spacing: 8) {
+                    if notifyInFlight {
+                        ProgressView().scaleEffect(0.7).tint(.white)
+                    } else {
+                        Image(systemName: "bell.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("Notify Friends")
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                    }
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+                .background(RoundedRectangle(cornerRadius: 14).fill(MADTheme.Colors.madRed))
+            }
+            .buttonStyle(.plain)
+            .disabled(notifyInFlight)
+
+            Button {
+                handleNotifyDecline(pending)
+            } label: {
+                Text("Not this time")
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            .buttonStyle(.plain)
+            .disabled(notifyInFlight)
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Color.black.opacity(0.4))
+                .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+        )
+    }
+
+    private func notifyAudienceCaption(for pending: PendingFriendNotification) -> String {
+        let activity = AudienceActivity(rawValue: pending.activityType) ?? .none
+        switch AudienceSettingsService.shared.resolve(direction: .outgoing, eventType: .mileCompleted, activity: activity) {
+        case .close: return "Goes to your close friends · expires at midnight"
+        default: return "Goes to your friends · expires at midnight"
+        }
+    }
+
+    private func handleNotify(_ pending: PendingFriendNotification) {
+        guard !notifyInFlight else { return }
+        notifyInFlight = true
+        impactMedium.impactOccurred()
+        Task {
+            do {
+                try await pendingService.send(pending)
+                notification.notificationOccurred(.success)
+            } catch {
+                print("[GoalCelebration] notify friends failed: \(error)")
+                notification.notificationOccurred(.error)
+            }
+            await MainActor.run { notifyInFlight = false }
+        }
+    }
+
+    private func handleNotifyDecline(_ pending: PendingFriendNotification) {
+        guard !notifyInFlight else { return }
+        notifyInFlight = true
+        Task {
+            do {
+                try await pendingService.dismiss(pending)
+            } catch {
+                print("[GoalCelebration] notify decline failed: \(error)")
+            }
+            await MainActor.run { notifyInFlight = false }
+        }
     }
 
     // MARK: - Buttons
