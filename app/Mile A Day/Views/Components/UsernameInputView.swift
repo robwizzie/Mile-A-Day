@@ -49,11 +49,15 @@ struct UsernameInputView: View {
                             .font(MADTheme.Typography.title1)
                             .fontWeight(.bold)
                             .foregroundColor(MADTheme.Colors.primaryText)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
 
                         Text("This will be how friends can find and add you")
                             .font(MADTheme.Typography.body)
                             .foregroundColor(MADTheme.Colors.secondaryText)
                             .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
 
                     // Username Input
@@ -282,14 +286,15 @@ struct RequirementRow: View {
     let isMet: Bool
     
     var body: some View {
-        HStack(spacing: MADTheme.Spacing.sm) {
+        HStack(alignment: .top, spacing: MADTheme.Spacing.sm) {
             Image(systemName: isMet ? "checkmark.circle.fill" : "circle")
                 .foregroundColor(isMet ? MADTheme.Colors.success : MADTheme.Colors.secondaryText)
                 .font(.system(size: 12))
-            
+
             Text(text)
                 .font(MADTheme.Typography.caption)
                 .foregroundColor(isMet ? MADTheme.Colors.success : MADTheme.Colors.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

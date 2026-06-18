@@ -31,11 +31,14 @@ extension HealthKitManager {
         // Always calculate personal records to populate cachedWorkouts
         calculatePersonalRecords()
 
-        // Smart caching: only fetch if we need new workout data
-        if needsNewWorkoutFetch() {
+        // Smart caching: only fetch if we need new workout data.
+        // Cold-cache guard: when cachedWorkouts is empty,
+        // calculatePersonalRecords() above already performs the full-history
+        // fetch and populates the cache — running fetchWorkoutsSmartly() too
+        // (which has no start date in that state) would scan all-time history
+        // a second time, concurrently.
+        if !cachedWorkouts.isEmpty && needsNewWorkoutFetch() {
             fetchWorkoutsSmartly()
-        } else {
-            // Data is already loaded from cache in init()
         }
     }
 
@@ -169,18 +172,18 @@ extension HealthKitManager {
     /// Updates cached workout data with new workouts
     /// Must be called on the main thread (cachedWorkouts is @Published)
     func updateCachedWorkoutData(with newWorkouts: [HKWorkout]) {
-        var addedCount = 0
-        var duplicateCount = 0
-
-        for workout in newWorkouts {
-            if !cachedWorkoutUUIDs.contains(workout.uuid) {
-                cachedWorkouts.append(workout)
-                cachedWorkoutUUIDs.insert(workout.uuid)
-                addedCount += 1
-            } else {
-                duplicateCount += 1
-            }
+        // Collect first, then append once — cachedWorkouts is @Published, so
+        // per-item appends trigger one SwiftUI invalidation per workout.
+        var appended: [HKWorkout] = []
+        for workout in newWorkouts where !cachedWorkoutUUIDs.contains(workout.uuid) {
+            appended.append(workout)
+            cachedWorkoutUUIDs.insert(workout.uuid)
         }
+        if !appended.isEmpty {
+            cachedWorkouts.append(contentsOf: appended)
+        }
+        let addedCount = appended.count
+        let duplicateCount = newWorkouts.count - addedCount
 
         if let latestWorkout = newWorkouts.max(by: { $0.endDate < $1.endDate }) {
             if let currentLatest = cachedLatestWorkoutDate {

@@ -686,10 +686,29 @@ class HealthKitManager: ObservableObject {
             limit: HKObjectQueryNoLimit,
             sortDescriptors: [sortDescriptor]
         ) { [weak self] _, samples, error in
-            guard let self = self, let workouts = samples as? [HKWorkout], !workouts.isEmpty else {
+            guard let self = self else { return }
+
+            // Query failed — most commonly because the device is locked when a
+            // background refresh fires (HealthKit data is protected while locked,
+            // so the query errors out). Treat this as "no answer", NOT "0 miles":
+            // writing 0 here was randomly resetting the widgets to 0 mi / not
+            // completed until the next foreground launch.
+            if error != nil {
                 DispatchQueue.main.async {
-                    self?.todaysDistance = 0.0
-                    self?.todaysWorkouts = []
+                    if !self.hasTodaysDistanceLoaded {
+                        self.hasTodaysDistanceLoaded = true
+                        self.checkInitialDataReady()
+                    }
+                }
+                return
+            }
+
+            let workouts = (samples as? [HKWorkout]) ?? []
+            guard !workouts.isEmpty else {
+                // Successful query, genuinely no workouts in the window — a real 0.
+                DispatchQueue.main.async {
+                    self.todaysDistance = 0.0
+                    self.todaysWorkouts = []
                     #if !os(watchOS)
                     // Get current goal from widget store or default to 1.0
                     let widgetData = WidgetDataStore.load()
@@ -699,14 +718,14 @@ class HealthKitManager: ObservableObject {
                     // Use unified progress calculation
                     WidgetDataStore.save(todayMiles: 0, goal: safeGoal)
                     #endif
-                    if self?.hasTodaysDistanceLoaded == false {
-                        self?.hasTodaysDistanceLoaded = true
-                        self?.checkInitialDataReady()
+                    if !self.hasTodaysDistanceLoaded {
+                        self.hasTodaysDistanceLoaded = true
+                        self.checkInitialDataReady()
                     }
                 }
                 return
             }
-            
+
             let todaysWorkouts = self.filterWorkoutsByDeviceToday(workouts: workouts)
             self.processTodaysWorkouts(todaysWorkouts)
         }

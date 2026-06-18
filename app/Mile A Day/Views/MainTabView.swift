@@ -14,7 +14,15 @@ struct MainTabView: View {
     @State private var unreadNotificationCount = 0
     @State private var showNotificationInbox = false
 
+    // App-wide "workout in progress" banner — tracking now runs in a shared
+    // singleton, so we surface a live, tappable banner above the tab bar on
+    // every tab (except Dashboard, which has its own inline banner) so users
+    // never lose where their walk/run is.
+    @StateObject private var trackingManager = WorkoutLocationManager.shared
+    @State private var activeWorkoutForBanner: InProgressWorkoutState?
+
     var body: some View {
+        ZStack(alignment: .bottom) {
         TabView(selection: $selectedTab) {
             NavigationStack {
                 DashboardView(
@@ -68,6 +76,9 @@ struct MainTabView: View {
             InAppNotificationBanner()
                 .padding(.top, 4)
         }
+        .onChange(of: trackingManager.isTracking) { _, tracking in
+            activeWorkoutForBanner = tracking ? InProgressWorkoutStore.load() : nil
+        }
         .onAppear {
             initializeApp()
             handlePendingNotification()
@@ -76,6 +87,12 @@ struct MainTabView: View {
             WorkoutSyncService.shared.startInitialSyncIfNeeded()
         }
         .task {
+            // Cold launch from a profile universal link: the onOpenURL
+            // MAD_SwitchTab post fired before this view existed, so read the
+            // parked deep link directly. FriendsListView resolves + presents.
+            if DeepLinkRouter.shared.pendingProfileUsername != nil {
+                selectedTab = 2
+            }
             await competitionService.refreshAllData()
             await friendService.refreshAllData()
             await refreshUnreadCount()
@@ -125,6 +142,9 @@ struct MainTabView: View {
                 selectedTab = tab
             }
         }
+        .onReceive(competitionService.$competitions) { competitions in
+            syncCompetitionWidget(competitions)
+        }
         .onChange(of: selectedTab) { _, newTab in
             // TabView keeps tab views alive, so their onAppear/.task don't re-fire
             // on tab switches — without this, Compete/Friends showed whatever was
@@ -163,6 +183,27 @@ struct MainTabView: View {
             // Keep widget data in sync so the willPresent check has fresh data
             WidgetDataStore.save(todayMiles: newDistance, goal: userManager.currentUser.goalMiles)
         }
+
+            // Floating in-app workout banner — sits ABOVE the tab bar instead of
+            // over it. (safeAreaInset on a TabView renders on top of the bar, so
+            // it covered the tab buttons.) Padded up by ~one tab-bar height; the
+            // home indicator is handled by the safe area.
+            if trackingManager.isTracking, selectedTab != 0, let state = activeWorkoutForBanner {
+                InProgressWorkoutBanner(state: state) {
+                    // Reuse the Dashboard's resume path so starting/goal
+                    // distance are computed correctly.
+                    selectedTab = 0
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("MAD_OpenWorkoutFromLiveActivity"),
+                        object: nil
+                    )
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 52)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: trackingManager.isTracking)
     }
 
     // MARK: - Configuration
@@ -249,6 +290,57 @@ struct MainTabView: View {
     private func syncWidgetData() {
         WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles)
         WidgetDataStore.save(streak: userManager.currentUser.streak)
+    }
+
+    /// Mirror the most urgent active competition into the App Group for the
+    /// Competition widget — same focus/sort logic as the dashboard cards.
+    private func syncCompetitionWidget(_ competitions: [Competition]) {
+        let active = competitions.filter { $0.status == .active }
+        guard !active.isEmpty else {
+            WidgetDataStore.clearCompetitionSummary()
+            return
+        }
+
+        let userId = UserDefaults.standard.string(forKey: "backendUserId")
+        guard let top = active.min(by: { a, b in
+            TodayFocus.compute(for: a, currentUserId: userId).level.sortKey
+                < TodayFocus.compute(for: b, currentUserId: userId).level.sortKey
+        }) else { return }
+
+        let focus = TodayFocus.compute(for: top, currentUserId: userId)
+
+        let ranked = top.users
+            .filter { $0.invite_status == .accepted }
+            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+        var rankText = ""
+        if let uid = userId, let index = ranked.firstIndex(where: { $0.user_id == uid }) {
+            let rank = index + 1
+            let ordinal: String
+            switch rank {
+            case 1: ordinal = "1st"
+            case 2: ordinal = "2nd"
+            case 3: ordinal = "3rd"
+            default: ordinal = "\(rank)th"
+            }
+            rankText = "\(ordinal) of \(ranked.count)"
+        }
+
+        let urgency: String
+        switch focus.level {
+        case .urgent: urgency = "urgent"
+        case .behind: urgency = "behind"
+        case .neutral: urgency = "neutral"
+        case .winning: urgency = "winning"
+        }
+
+        WidgetDataStore.save(
+            competitionId: top.competition_id,
+            competitionName: top.competition_name,
+            pill: focus.pill,
+            detail: focus.detail,
+            rankText: rankText,
+            urgency: urgency
+        )
     }
 }
 

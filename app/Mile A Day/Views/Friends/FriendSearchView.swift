@@ -11,28 +11,84 @@ struct FriendSearchView: View {
     @State private var searchTask: Task<Void, Never>?
     @State private var showingUnfriendAlert = false
     @State private var userToUnfriend: BackendUser?
-    
+    @FocusState private var isSearchFocused: Bool
+
+    // "People you may know" shown while the search field is empty.
+    @State private var suggestions: [FriendSuggestion] = []
+    @State private var isLoadingSuggestions = false
+    @State private var hasLoadedSuggestions = false
+
+    // In-app QR scanning.
+    @State private var showingScanner = false
+    @State private var scanError: String?
+    @State private var isResolvingScan = false
+
     var body: some View {
-        Group {
-            if isLoading {
-                loadingView
-            } else if !searchResults.isEmpty {
-                searchResultsView
-            } else if !searchText.isEmpty && searchText.count >= 3 {
-                noResultsView
-            } else {
-                recommendationsView
+        VStack(spacing: 0) {
+            // Always-visible search bar — replaces the system .searchable
+            // drawer, which stayed hidden until the user pulled down on the
+            // content and was easy to miss entirely.
+            searchBar
+                .padding(.horizontal, MADTheme.Spacing.md)
+                .padding(.top, MADTheme.Spacing.sm)
+                .padding(.bottom, MADTheme.Spacing.sm)
+
+            Group {
+                if isLoading {
+                    loadingView
+                } else if !searchResults.isEmpty {
+                    searchResultsView
+                } else if !searchText.isEmpty && searchText.count >= 3 {
+                    noResultsView
+                } else {
+                    recommendationsView
+                }
             }
         }
+        .background(MADTheme.Colors.appBackgroundGradient.ignoresSafeArea())
         .navigationTitle("Find Friends")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $searchText, prompt: "Search by username")
-        .autocorrectionDisabled()
-        .textInputAutocapitalization(.never)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingScanner = true
+                } label: {
+                    Image(systemName: "qrcode.viewfinder")
+                        .font(.system(size: 17, weight: .semibold))
+                }
+                .accessibilityLabel("Scan a friend's QR code")
+            }
+        }
+        .task {
+            await loadSuggestions()
+        }
         .sheet(item: $selectedUser) { user in
             NavigationStack {
                 UserProfileDetailView(user: user, friendService: friendService)
             }
+        }
+        .sheet(isPresented: $showingScanner) {
+            QRScannerView { code in
+                handleScannedCode(code)
+            }
+        }
+        .overlay {
+            if isResolvingScan {
+                ZStack {
+                    Color.black.opacity(0.4).ignoresSafeArea()
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(1.4)
+                }
+            }
+        }
+        .alert("Couldn't Open Profile", isPresented: Binding(
+            get: { scanError != nil },
+            set: { if !$0 { scanError = nil } }
+        )) {
+            Button("OK", role: .cancel) { scanError = nil }
+        } message: {
+            Text(scanError ?? "")
         }
         .onChange(of: searchText) { oldValue, newValue in
             handleSearchTextChange(newValue)
@@ -51,6 +107,51 @@ struct FriendSearchView: View {
             Text("You will no longer be friends with this person.")
         }
     }
+
+    // MARK: - Search Bar
+
+    private var searchBar: some View {
+        HStack(spacing: MADTheme.Spacing.sm) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white.opacity(0.45))
+
+            TextField(
+                "",
+                text: $searchText,
+                prompt: Text("Search by username")
+                    .foregroundColor(.white.opacity(0.4))
+            )
+            .font(MADTheme.Typography.body)
+            .foregroundColor(.white)
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
+            .submitLabel(.search)
+            .focused($isSearchFocused)
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.white.opacity(0.4))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                )
+        )
+    }
+
     // MARK: - Search Results View
     private var searchResultsView: some View {
         ScrollView {
@@ -58,6 +159,7 @@ struct FriendSearchView: View {
                 ForEach(searchResults) { user in
                     UserProfileCard(
                         user: user,
+                        subtitle: searchSubtitle(for: user),
                         showStats: false,
                         showBadges: false,
                         onTap: {
@@ -112,9 +214,9 @@ struct FriendSearchView: View {
             }
             .padding(MADTheme.Spacing.md)
         }
-        .background(MADTheme.Colors.appBackgroundGradient)
+        .scrollDismissesKeyboard(.interactively)
     }
-    
+
     // MARK: - Loading View
     private var loadingView: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
@@ -127,7 +229,6 @@ struct FriendSearchView: View {
                 .foregroundColor(MADTheme.Colors.secondaryText)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(MADTheme.Colors.appBackgroundGradient)
     }
 
     // MARK: - No Results View
@@ -151,36 +252,166 @@ struct FriendSearchView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(MADTheme.Spacing.xl)
-        .background(MADTheme.Colors.appBackgroundGradient)
     }
 
-    // MARK: - Recommendations View
+    // MARK: - Recommendations View ("People You May Know" + invite)
     private var recommendationsView: some View {
-        VStack(spacing: MADTheme.Spacing.lg) {
-            Spacer()
+        ScrollView {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                inviteFriendsCard
 
-            VStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: "person.2.circle.fill")
-                    .font(.system(size: 48))
-                    .foregroundColor(MADTheme.Colors.madRed)
+                if isLoadingSuggestions && suggestions.isEmpty {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
+                        Spacer()
+                    }
+                    .padding(.top, MADTheme.Spacing.xl)
+                } else if !suggestions.isEmpty {
+                    Text("PEOPLE YOU MAY KNOW")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .tracking(1.4)
+                        .foregroundColor(.white.opacity(0.4))
+                        .padding(.horizontal, 4)
+                        .padding(.top, MADTheme.Spacing.sm)
 
-                Text("Discover Runners")
-                    .font(MADTheme.Typography.title2)
-                    .foregroundColor(MADTheme.Colors.primaryText)
+                    ForEach(suggestions) { suggestion in
+                        UserProfileCard(
+                            user: suggestion.user,
+                            subtitle: suggestion.reasonText.isEmpty ? nil : suggestion.reasonText,
+                            showStats: false,
+                            showBadges: false,
+                            showDetails: false,
+                            onTap: {
+                                selectedUser = suggestion.user
+                            },
+                            actionButton: AnyView(
+                                FriendActionButton(
+                                    title: getActionButtonTitle(for: suggestion.user),
+                                    style: getActionButtonStyle(for: suggestion.user),
+                                    isLoading: false,
+                                    action: {
+                                        handleFriendAction(for: suggestion.user)
+                                    }
+                                )
+                            )
+                        )
+                    }
+                } else if hasLoadedSuggestions {
+                    VStack(spacing: MADTheme.Spacing.sm) {
+                        Image(systemName: "person.2.circle.fill")
+                            .font(.system(size: 48))
+                            .foregroundColor(MADTheme.Colors.madRed)
 
-                Text("Type at least 3 letters to search for users")
-                    .font(MADTheme.Typography.body)
-                    .foregroundColor(MADTheme.Colors.secondaryText)
-                    .multilineTextAlignment(.center)
+                        Text("Discover Runners")
+                            .font(MADTheme.Typography.title2)
+                            .foregroundColor(MADTheme.Colors.primaryText)
+
+                        Text("Search by username to find people you know")
+                            .font(MADTheme.Typography.body)
+                            .foregroundColor(MADTheme.Colors.secondaryText)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, MADTheme.Spacing.xxl)
+                }
             }
-
-            Spacer()
+            .padding(MADTheme.Spacing.md)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(MADTheme.Spacing.lg)
-        .background(MADTheme.Colors.appBackgroundGradient)
+        .scrollDismissesKeyboard(.interactively)
     }
-    
+
+    /// Entry point to profile sharing — pushed so there's no extra sheet
+    /// layered onto this screen.
+    private var inviteFriendsCard: some View {
+        NavigationLink {
+            ShareProfileView()
+        } label: {
+            HStack(spacing: MADTheme.Spacing.md) {
+                Image(systemName: "qrcode")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(MADTheme.Colors.madRed)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(MADTheme.Colors.madRed.opacity(0.12)))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Invite Friends")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("Share your profile link or QR code")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                }
+
+                Spacer(minLength: 4)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func loadSuggestions() async {
+        guard !hasLoadedSuggestions else { return }
+        isLoadingSuggestions = true
+        do {
+            suggestions = try await friendService.getSuggestions()
+        } catch {
+            // Suggestions are best-effort; the screen falls back to the
+            // plain "search by username" hint.
+            print("[FriendSearchView] ❌ Failed to load suggestions: \(error)")
+        }
+        isLoadingSuggestions = false
+        hasLoadedSuggestions = true
+    }
+
+    // MARK: - QR Scan Handling
+
+    /// Parses a scanned QR payload (mileaday://u/<username> or the web link),
+    /// looks up the user, and presents their profile with an Add Friend button.
+    private func handleScannedCode(_ code: String) {
+        showingScanner = false
+
+        guard let url = URL(string: code.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let username = DeepLinkRouter.shared.username(from: url) else {
+            scanError = "That QR code isn't a Mile A Day profile."
+            return
+        }
+
+        isResolvingScan = true
+        Task {
+            do {
+                let users = try await friendService.searchUsers(byUsername: username)
+                let match = users.first { $0.username?.lowercased() == username } ?? users.first
+                await MainActor.run {
+                    isResolvingScan = false
+                    if let match {
+                        selectedUser = match
+                    } else {
+                        scanError = "Couldn't find @\(username)."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isResolvingScan = false
+                    scanError = error.localizedDescription
+                }
+            }
+        }
+    }
+
     // MARK: - Helper Methods
     private func handleSearchTextChange(_ newValue: String) {
         let trimmedText = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -245,6 +476,17 @@ struct FriendSearchView: View {
         }
     }
     
+    /// Real name shown under the @username in search results, so name-based
+    /// matches make sense (e.g. searching "rob" surfacing @runner42 · Rob Smith).
+    /// Returns nil when there's no distinct real name to add.
+    private func searchSubtitle(for user: BackendUser) -> String? {
+        let name = user.displayName
+        guard name != (user.username ?? ""), name != "Unknown User", !name.isEmpty else {
+            return nil
+        }
+        return name
+    }
+
     private func getActionButtonTitle(for user: BackendUser) -> String {
         if friendService.isFriend(user) {
             return "Friends"

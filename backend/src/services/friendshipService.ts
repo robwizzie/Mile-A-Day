@@ -37,9 +37,13 @@ export async function getFriendship(user1: string, user2: string): Promise<Frien
 }
 
 export async function getFriends(user: string): Promise<User[]> {
+	// Safe column set only — never expose email through friend lists (these are
+	// viewable by other users, not just the owner).
 	const friends = await db.query(
 		`
-		SELECT u.* FROM friendships f
+		SELECT u.user_id, u.username, u.first_name, u.last_name, u.bio,
+			u.profile_image_url, u.current_streak
+		FROM friendships f
 		JOIN users u ON u.user_id = f.friend_id
 		WHERE f.user_id = $1
 			AND f.status = 'accepted'
@@ -158,6 +162,201 @@ export async function getFriendsActivityToday(userId: string): Promise<FriendAct
 		today_miles: parseFloat(r.today_miles) || 0,
 		completed_today: parseFloat(r.today_miles) >= 1.0
 	}));
+}
+
+export interface FriendSuggestion {
+	user_id: string;
+	username: string | null;
+	first_name: string | null;
+	last_name: string | null;
+	bio: string | null;
+	profile_image_url: string | null;
+	current_streak: number;
+	mutual_friends: number;
+	shared_competitions: number;
+}
+
+/**
+ * "People you may know": friends-of-friends ranked by mutual-friend count,
+ * plus people the user has shared a competition with but never friended.
+ *
+ * Exclusions: the user themself and anyone with ANY friendship row touching
+ * the user (accepted rows exist in both directions; pending/ignored exist
+ * one-way from the sender; rejected/removed rows are deleted — so a single
+ * either-direction check covers every live relationship state).
+ */
+export async function getFriendSuggestions(userId: string, limit: number = 20): Promise<FriendSuggestion[]> {
+	const suggestions = await db.query<FriendSuggestion>(
+		`
+		WITH my_friends AS (
+			-- Accepted friendships are stored bidirectionally, so one
+			-- direction is enough to enumerate the friend set.
+			SELECT friend_id AS fid
+			FROM friendships
+			WHERE user_id = $1 AND status = 'accepted'
+		),
+		excluded AS (
+			SELECT CASE WHEN user_id = $1 THEN friend_id ELSE user_id END AS uid
+			FROM friendships
+			WHERE user_id = $1 OR friend_id = $1
+		),
+		fof AS (
+			SELECT f.friend_id AS suggested_id, COUNT(*)::int AS mutual_friends
+			FROM friendships f
+			JOIN my_friends mf ON mf.fid = f.user_id
+			WHERE f.status = 'accepted'
+			GROUP BY f.friend_id
+		),
+		shared_comps AS (
+			SELECT cu2.user_id AS suggested_id,
+				COUNT(DISTINCT cu2.competition_id)::int AS shared_competitions
+			FROM competition_users cu1
+			JOIN competition_users cu2
+				ON cu2.competition_id = cu1.competition_id
+				AND cu2.user_id <> cu1.user_id
+			WHERE cu1.user_id = $1
+				AND cu1.invite_status = 'accepted'
+				AND cu2.invite_status = 'accepted'
+			GROUP BY cu2.user_id
+		),
+		candidates AS (
+			SELECT suggested_id FROM fof
+			UNION
+			SELECT suggested_id FROM shared_comps
+		)
+		SELECT u.user_id, u.username, u.first_name, u.last_name, u.bio,
+			u.profile_image_url, u.current_streak,
+			COALESCE(fof.mutual_friends, 0) AS mutual_friends,
+			COALESCE(sc.shared_competitions, 0) AS shared_competitions
+		FROM candidates c
+		JOIN users u ON u.user_id = c.suggested_id
+		LEFT JOIN fof ON fof.suggested_id = c.suggested_id
+		LEFT JOIN shared_comps sc ON sc.suggested_id = c.suggested_id
+		WHERE c.suggested_id <> $1
+			AND c.suggested_id NOT IN (SELECT uid FROM excluded)
+			-- Guests have no username; an unaddressable suggestion card is
+			-- useless, so skip them.
+			AND u.username IS NOT NULL
+		ORDER BY COALESCE(fof.mutual_friends, 0) DESC,
+			COALESCE(sc.shared_competitions, 0) DESC,
+			u.username ASC
+		LIMIT $2
+		`,
+		[userId, limit]
+	);
+
+	// Cold-start fallback: a sparse social graph (no friends-of-friends, no
+	// shared competitions) yields an empty list, leaving "People You May Know"
+	// blank. Top up with the most active runners the user isn't already
+	// connected to so there's always something to discover.
+	if (suggestions.length >= limit) {
+		return suggestions;
+	}
+
+	const fallback = await db.query<FriendSuggestion>(
+		`
+		SELECT u.user_id, u.username, u.first_name, u.last_name, u.bio,
+			u.profile_image_url, u.current_streak,
+			0 AS mutual_friends, 0 AS shared_competitions
+		FROM users u
+		WHERE u.user_id <> $1
+			AND u.username IS NOT NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM friendships f
+				WHERE (f.user_id = $1 AND f.friend_id = u.user_id)
+					OR (f.friend_id = $1 AND f.user_id = u.user_id)
+			)
+		ORDER BY u.current_streak DESC NULLS LAST, u.username ASC
+		LIMIT $2
+		`,
+		// Over-fetch so we can drop anyone already in the graph-based list.
+		[userId, limit + 25]
+	);
+
+	const alreadySuggested = new Set(suggestions.map(s => s.user_id));
+	const extras = fallback
+		.filter(u => !alreadySuggested.has(u.user_id))
+		.slice(0, limit - suggestions.length);
+
+	return [...suggestions, ...extras];
+}
+
+export interface FeedWorkout {
+	workout_id: string;
+	user_id: string;
+	username: string | null;
+	first_name: string | null;
+	last_name: string | null;
+	profile_image_url: string | null;
+	workout_type: string;
+	distance: number;
+	completed_at: string;
+	is_self: boolean;
+	is_hyped: boolean;
+}
+
+/**
+ * Rolling-48h activity feed: individual workouts from the viewer's accepted
+ * friends plus the viewer, newest first. Each row is tagged with whether the
+ * viewer has already hyped that specific workout (context_type 'mile', keyed
+ * on workout_id) so the UI can show a one-shot 🔥 button.
+ */
+export async function getFriendsWorkoutFeed(userId: string): Promise<FeedWorkout[]> {
+	const rows = await db.query<FeedWorkout>(
+		`
+		WITH circle AS (
+			SELECT friend_id AS uid FROM friendships
+			WHERE user_id = $1 AND status = 'accepted'
+			UNION
+			SELECT $1 AS uid
+		)
+		SELECT
+			w.workout_id,
+			w.user_id,
+			u.username,
+			u.first_name,
+			u.last_name,
+			u.profile_image_url,
+			w.workout_type,
+			w.distance::float AS distance,
+			w.device_end_date AS completed_at,
+			(w.user_id = $1) AS is_self,
+			EXISTS (
+				SELECT 1 FROM hype_log h
+				WHERE h.sender_id = $1
+					AND h.target_id = w.user_id
+					AND h.context_type = 'mile'
+					AND h.context_id = w.workout_id
+			) AS is_hyped
+		FROM workouts w
+		JOIN circle c ON c.uid = w.user_id
+		JOIN users u ON u.user_id = w.user_id
+		WHERE w.device_end_date >= NOW() - INTERVAL '48 hours'
+		ORDER BY w.device_end_date DESC
+		LIMIT 100
+		`,
+		[userId]
+	);
+	return rows;
+}
+
+/**
+ * Number of accepted friends shared between the viewer and another user —
+ * the "X mutual friends" line shown on a profile.
+ */
+export async function getMutualFriendCount(viewerId: string, otherId: string): Promise<number> {
+	if (viewerId === otherId) return 0;
+	const rows = await db.query<{ count: number }>(
+		`
+		SELECT COUNT(*)::int AS count
+		FROM friendships a
+		JOIN friendships b ON a.friend_id = b.friend_id
+		WHERE a.user_id = $1 AND a.status = 'accepted'
+			AND b.user_id = $2 AND b.status = 'accepted'
+		`,
+		[viewerId, otherId]
+	);
+	return rows[0]?.count ?? 0;
 }
 
 export async function updateFriendship(

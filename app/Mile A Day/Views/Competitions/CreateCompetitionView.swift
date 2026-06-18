@@ -40,6 +40,7 @@ struct CreateCompetitionView: View {
     @State private var failedInviteCount = 0
     @State private var showFriendPicker = false
     @State private var showTypeSelector = false
+    @State private var friendPickerFilter = ""
 
     var canCreate: Bool {
         !selectedFriends.isEmpty &&
@@ -193,11 +194,22 @@ struct CreateCompetitionView: View {
             .navigationTitle("Competition")
             .navigationBarTitleDisplayMode(.inline)
             // iOS 26: Liquid Glass is automatic - no toolbar modifiers needed
-            .sheet(isPresented: $showFriendPicker) {
-                friendPickerSheet
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .foregroundColor(.white)
+                }
             }
-            .sheet(isPresented: $showTypeSelector) {
-                typeSelectorSheet
+            // Pushed within this sheet's NavigationStack instead of stacking
+            // a second sheet on top — sheet-over-sheet meant two layers of
+            // slide-down-to-dismiss, which was easy to trigger by accident.
+            .navigationDestination(isPresented: $showFriendPicker) {
+                friendPickerView
+            }
+            .navigationDestination(isPresented: $showTypeSelector) {
+                typeSelectorView
             }
             .alert("Error", isPresented: $showError) {
                 Button("OK", role: .cancel) { }
@@ -297,6 +309,9 @@ struct CreateCompetitionView: View {
                 }
             }
         }
+        // The sheet can no longer be swiped away — an accidental slide-down
+        // used to silently discard the whole form. Cancel is the explicit exit.
+        .interactiveDismissDisabled()
     }
 
     // MARK: - Name Section
@@ -1002,97 +1017,150 @@ struct CreateCompetitionView: View {
         .buttonStyle(ScaleButtonStyle())
     }
 
-    // MARK: - Friend Picker Sheet
+    // MARK: - Friend Picker (pushed)
 
-    var friendPickerSheet: some View {
-        NavigationStack {
-            ZStack {
-                MADTheme.Colors.appBackgroundGradient
-                    .ignoresSafeArea()
+    /// Friends matching the picker's filter text. Falls back to the full
+    /// list when the filter is empty.
+    var filteredPickerFriends: [BackendUser] {
+        let query = friendPickerFilter.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return friendService.friends }
+        return friendService.friends.filter { friend in
+            friend.displayName.localizedCaseInsensitiveContains(query)
+                || (friend.username?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+    }
 
-                if friendService.friends.isEmpty {
-                    VStack(spacing: MADTheme.Spacing.lg) {
-                        Image(systemName: "person.2.slash")
-                            .font(.system(size: 50))
-                            .foregroundColor(.white.opacity(0.3))
+    var friendPickerView: some View {
+        ZStack {
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea()
 
-                        Text("No Friends Yet")
-                            .font(MADTheme.Typography.title2)
-                            .foregroundColor(.white)
+            if friendService.friends.isEmpty {
+                VStack(spacing: MADTheme.Spacing.lg) {
+                    Image(systemName: "person.2.slash")
+                        .font(.system(size: 50))
+                        .foregroundColor(.white.opacity(0.3))
 
-                        Text("Add friends to compete with")
-                            .font(MADTheme.Typography.callout)
-                            .foregroundColor(.white.opacity(0.7))
+                    Text("No Friends Yet")
+                        .font(MADTheme.Typography.title2)
+                        .foregroundColor(.white)
+
+                    Text("Add friends to compete with")
+                        .font(MADTheme.Typography.callout)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+            } else {
+                VStack(spacing: 0) {
+                    // Always-visible filter — no hidden pull-down search.
+                    HStack(spacing: MADTheme.Spacing.sm) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.45))
+
+                        TextField(
+                            "",
+                            text: $friendPickerFilter,
+                            prompt: Text("Filter friends")
+                                .foregroundColor(.white.opacity(0.4))
+                        )
+                        .font(MADTheme.Typography.body)
+                        .foregroundColor(.white)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+
+                        if !friendPickerFilter.isEmpty {
+                            Button {
+                                friendPickerFilter = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.white.opacity(0.4))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
-                } else {
+                    .padding(.horizontal, MADTheme.Spacing.md)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                            )
+                    )
+                    .padding(.horizontal, MADTheme.Spacing.lg)
+                    .padding(.top, MADTheme.Spacing.md)
+
                     ScrollView {
                         VStack(spacing: MADTheme.Spacing.md) {
-                            ForEach(friendService.friends) { friend in
-                                FriendSelectRow(
-                                    friend: friend,
-                                    isSelected: selectedFriends.contains(friend),
-                                    action: {
-                                        if selectedFriends.contains(friend) {
-                                            selectedFriends.remove(friend)
-                                        } else {
-                                            selectedFriends.insert(friend)
+                            if filteredPickerFriends.isEmpty {
+                                Text("No friends match \"\(friendPickerFilter)\"")
+                                    .font(MADTheme.Typography.callout)
+                                    .foregroundColor(.white.opacity(0.6))
+                                    .padding(.top, MADTheme.Spacing.xl)
+                            } else {
+                                ForEach(filteredPickerFriends) { friend in
+                                    FriendSelectRow(
+                                        friend: friend,
+                                        isSelected: selectedFriends.contains(friend),
+                                        action: {
+                                            if selectedFriends.contains(friend) {
+                                                selectedFriends.remove(friend)
+                                            } else {
+                                                selectedFriends.insert(friend)
+                                            }
                                         }
-                                    }
-                                )
+                                    )
+                                }
                             }
                         }
                         .padding(MADTheme.Spacing.lg)
                     }
+                    .scrollDismissesKeyboard(.interactively)
                 }
             }
-            .navigationTitle("Select Friends")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        showFriendPicker = false
-                    }
-                    .foregroundColor(.white)
+        }
+        .navigationTitle("Select Friends")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") {
+                    showFriendPicker = false
                 }
+                .foregroundColor(.white)
             }
+        }
+        .onAppear {
+            friendPickerFilter = ""
         }
     }
 
-    // MARK: - Type Selector Sheet
+    // MARK: - Type Selector (pushed)
 
-    var typeSelectorSheet: some View {
-        NavigationStack {
-            ZStack {
-                MADTheme.Colors.appBackgroundGradient
-                    .ignoresSafeArea()
+    var typeSelectorView: some View {
+        ZStack {
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea()
 
-                ScrollView {
-                    VStack(spacing: MADTheme.Spacing.lg) {
-                        ForEach(CompetitionType.allCases, id: \.self) { type in
-                            CompetitionTypeCard(
-                                type: type,
-                                isSelected: selectedType == type,
-                                action: {
-                                    selectedType = type
-                                    showTypeSelector = false
-                                }
-                            )
-                        }
+            ScrollView {
+                VStack(spacing: MADTheme.Spacing.lg) {
+                    ForEach(CompetitionType.allCases, id: \.self) { type in
+                        CompetitionTypeCard(
+                            type: type,
+                            isSelected: selectedType == type,
+                            action: {
+                                selectedType = type
+                                showTypeSelector = false
+                            }
+                        )
                     }
-                    .padding(MADTheme.Spacing.lg)
                 }
-            }
-            .navigationTitle("Competition Type")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        showTypeSelector = false
-                    }
-                    .foregroundColor(.white)
-                }
+                .padding(MADTheme.Spacing.lg)
             }
         }
+        .navigationTitle("Competition Type")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     // MARK: - Helper Functions

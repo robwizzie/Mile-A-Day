@@ -6,14 +6,21 @@
 //
 
 import UIKit
+import BackgroundTasks
 
 class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // Apple requires BGTask registration before the app finishes launching.
+        MADBackgroundService.shared.registerBackgroundTasks()
+
         // Ensure the notification delegate is set before the system delivers
         // a pending notification response on cold launch.
         _ = MADNotificationService.shared
+
+        // HealthKit step-count observer — start after UIApplication is ready.
+        DailyStepsSyncService.shared.start()
 
         // If iOS launched us in the background (no UI scene), kick off a sync immediately.
         // For UI launches, the scene lifecycle in Mile_A_DayApp handles the sync.

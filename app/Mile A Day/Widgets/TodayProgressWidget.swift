@@ -1,6 +1,97 @@
 import WidgetKit
 import SwiftUI
 
+// MARK: - Shared MAD widget styling
+// One visual family for all home-screen widgets: the app's dark gradient with
+// a soft red glow, brand-gradient rings, and small-caps section labels —
+// matching the Live Activity lock-screen card.
+
+enum MADWidgetStyle {
+    static let red = Color(red: 217/255, green: 64/255, blue: 63/255)
+    static let orange = Color(red: 1.0, green: 0.55, blue: 0.2)
+    static let green = Color(red: 0.30, green: 0.85, blue: 0.45)
+    static let track = Color.white.opacity(0.14)
+    static let secondaryText = Color.white.opacity(0.65)
+
+    static var ringGradient: AngularGradient {
+        AngularGradient(
+            colors: [red, orange, red],
+            center: .center,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(270)
+        )
+    }
+
+    @ViewBuilder
+    static var background: some View {
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.14, green: 0.07, blue: 0.09),
+                    Color(red: 0.06, green: 0.03, blue: 0.05)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            RadialGradient(
+                colors: [red.opacity(0.28), .clear],
+                center: .topLeading,
+                startRadius: 0,
+                endRadius: 190
+            )
+        }
+    }
+}
+
+/// Small-caps section label shared by all MAD widgets.
+struct MADWidgetLabel: View {
+    let icon: String
+    let text: String
+    var color: Color = MADWidgetStyle.red
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .bold))
+            Text(text)
+                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .tracking(1.0)
+        }
+        .foregroundColor(color)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+    }
+}
+
+/// Brand progress ring with rounded caps; flips green when complete.
+struct MADWidgetRing<Center: View>: View {
+    let progress: Double
+    let size: CGFloat
+    let lineWidth: CGFloat
+    var isComplete: Bool = false
+    @ViewBuilder let center: () -> Center
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(MADWidgetStyle.track, lineWidth: lineWidth)
+
+            Circle()
+                .trim(from: 0, to: min(max(progress, isComplete ? 1.0 : 0.0), 1.0))
+                .stroke(
+                    isComplete
+                        ? AnyShapeStyle(MADWidgetStyle.green)
+                        : AnyShapeStyle(MADWidgetStyle.ringGradient),
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+
+            center()
+        }
+        .frame(width: size, height: size)
+    }
+}
+
 struct TodayProgressEntry: TimelineEntry {
     let date: Date
     let milesCompleted: Double
@@ -46,8 +137,14 @@ struct TodayProgressProvider: TimelineProvider {
         
         // Refresh every minute for incomplete goals, every 15 minutes for completed goals
         let refreshInterval: TimeInterval = data.streakCompleted ? 900 : 60 // 1min incomplete, 15min completed
-        
-        let nextRefresh = Date().addingTimeInterval(refreshInterval)
+
+        // Never sleep past midnight: WidgetDataStore.load() zeroes out data
+        // from a previous day, so rebuilding right at the day boundary makes
+        // the widget reset to 0.00 mi without the app being opened.
+        let intervalRefresh = Date().addingTimeInterval(refreshInterval)
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        let nextMidnight = Calendar.current.date(byAdding: .day, value: 1, to: startOfToday) ?? intervalRefresh
+        let nextRefresh = min(intervalRefresh, nextMidnight)
         let timeline = Timeline(entries: [entry], policy: .after(nextRefresh))
         completion(timeline)
     }
@@ -201,66 +298,96 @@ struct HomeScreenProgressView: View {
     let milesCompleted: Double
     let goal: Double
     let streakCompleted: Bool
-    
+
     var body: some View {
-        VStack(spacing: 12) {
-            // Header
-            HStack {
-                Image(systemName: "figure.run")
-                    .foregroundColor(.primary)
-                Text("Today's Progress")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                Spacer()
+        HStack(spacing: 16) {
+            // Progress ring with % (checkmark when done)
+            MADWidgetRing(
+                progress: progress,
+                size: 78,
+                lineWidth: 8,
+                isComplete: streakCompleted
+            ) {
                 if streakCompleted {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 26, weight: .heavy))
+                        .foregroundColor(MADWidgetStyle.green)
+                } else {
+                    VStack(spacing: 0) {
+                        Text("\(Int(progress * 100))")
+                            .font(.system(size: 24, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
+                        Text("%")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .foregroundColor(MADWidgetStyle.secondaryText)
+                    }
                 }
             }
-            
-            // Progress Bar - Always capped at 100%
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(height: 16)
-                    
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(streakCompleted ? Color.green : Color("appPrimary"))
-                        .frame(width: progress * geometry.size.width, height: 16) // progress already capped
-                        .animation(.easeInOut, value: progress)
+
+            VStack(alignment: .leading, spacing: 7) {
+                MADWidgetLabel(icon: "figure.run", text: "TODAY'S MILE")
+
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(String(format: "%.2f", milesCompleted))
+                        .font(.system(size: 28, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                    Text(String(format: "of %.1f mi", goal))
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundColor(MADWidgetStyle.secondaryText)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                // Status row: celebration when done, otherwise remaining
+                // distance + a Start Mile button that deep-links straight into
+                // the in-app workout tracker. (Widget buttons that should open
+                // the app must be Links — Button(intent:) runs in the
+                // background only.)
+                if streakCompleted {
+                    HStack(spacing: 5) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("Streak safe — see you tomorrow!")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .foregroundColor(MADWidgetStyle.green)
+                } else {
+                    HStack(spacing: 8) {
+                        let remaining = max(goal - milesCompleted, 0.0)
+                        Text(String(format: "%.2f mi to go", remaining))
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(MADWidgetStyle.secondaryText)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+
+                        Spacer(minLength: 4)
+
+                        Link(destination: URL(string: "mileaday://workout/start")!) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 10, weight: .bold))
+                                Text("Start Mile")
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(
+                                Capsule()
+                                    .fill(MADWidgetStyle.red)
+                                    .shadow(color: MADWidgetStyle.red.opacity(0.5), radius: 5, y: 2)
+                            )
+                        }
+                    }
+                }
             }
-            .frame(height: 16)
-            
-            // Distance Display
-            HStack {
-                Text(String(format: "%.2f", milesCompleted))
-                    .font(.title2)
-                    .fontWeight(.bold)
-                
-                Text("of")
-                    .font(.subheadline)
-                
-                Text(String(format: "%.1f mi", goal))
-                    .font(.title2)
-                    .fontWeight(.bold)
-            }
-            
-            // Status or remaining distance
-            if streakCompleted {
-                Label("Goal Complete!", systemImage: "star.fill")
-                    .foregroundColor(.green)
-                    .font(.caption)
-            } else {
-                let remaining = max(goal - milesCompleted, 0.0)
-                Text(String(format: "%.2f mi to go", remaining))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
+
+            Spacer(minLength: 0)
         }
-        .padding()
     }
 }
 
@@ -272,16 +399,16 @@ struct TodayProgressWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: TodayProgressProvider()) { entry in
             TodayProgressWidgetEntryView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(for: .widget) { MADWidgetStyle.background }
         }
         .configurationDisplayName("Today's Progress")
         .description("Track your daily mile progress.")
-        .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline])
+        .supportedFamilies([.systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline])
     }
 }
 
-#Preview(as: .systemSmall) {
+#Preview(as: .systemMedium) {
     TodayProgressWidget()
 } timeline: {
     TodayProgressEntry(date: .now, milesCompleted: 0.2, goal: 1.0, streakCompleted: false, progress: 0.2)
-} 
+}

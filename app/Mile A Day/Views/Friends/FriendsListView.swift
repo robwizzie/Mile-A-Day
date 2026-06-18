@@ -3,11 +3,12 @@ import SwiftUI
 /// Top-level mode for the Friends tab: either the existing friends/requests
 /// management UI, or the new global/friends leaderboard.
 private enum FriendsTabMode: String, CaseIterable, Identifiable {
-    case friends, leaderboard
+    case friends, today, leaderboard
     var id: String { rawValue }
     var displayName: String {
         switch self {
         case .friends: return "Friends"
+        case .today: return "Today"
         case .leaderboard: return "Leaderboard"
         }
     }
@@ -45,6 +46,13 @@ struct FriendsListView: View {
     @State private var myRankEntry: LeaderboardEntry?
     @State private var myRankTotal: Int = 0
 
+    // "Today" tab — rolling-48h workout feed + inline hype state.
+    @State private var feedItems: [FeedWorkoutItem] = []
+    @State private var isLoadingFeed = false
+    @State private var hasLoadedFeed = false
+    @State private var hypesRemaining: Int?
+    @State private var hypingWorkoutIds: Set<String> = []
+
     // Shared namespace so a friend row can slide smoothly between
     // "Cheer Them On" and "Done Today" when their status flips.
     @Namespace private var friendRowNamespace
@@ -55,12 +63,15 @@ struct FriendsListView: View {
                 friendsHeader
                 modePicker
 
-                if topMode == .leaderboard {
+                switch topMode {
+                case .leaderboard:
                     LeaderboardSection(
                         friendService: friendService,
                         onAddFriends: { showingSearch = true }
                     )
-                } else {
+                case .today:
+                    feedView
+                case .friends:
                     friendsHome
                 }
             }
@@ -78,10 +89,11 @@ struct FriendsListView: View {
         }
         .background(MADTheme.Colors.appBackgroundGradient)
         .toolbar(.hidden, for: .navigationBar)
-        .sheet(isPresented: $showingSearch) {
-            NavigationStack {
-                FriendSearchView(friendService: friendService)
-            }
+        // Pushed, not presented as a sheet — keeps Find Friends inside the
+        // tab's NavigationStack so there's no slide-down gesture involved
+        // (the tab bar's stack is set up in MainTabView).
+        .navigationDestination(isPresented: $showingSearch) {
+            FriendSearchView(friendService: friendService)
         }
         .sheet(isPresented: $showingRequestsSheet, onDismiss: {
             if let user = pendingProfileUser {
@@ -120,13 +132,29 @@ struct FriendsListView: View {
                 showingRequestsSheet = true
                 MADNotificationService.shared.pendingNotificationType = nil
             }
+            // Cold-launch profile link: the username was parked before this
+            // view existed. (Warm launches arrive via the onReceive below.)
+            if let pending = DeepLinkRouter.shared.pendingProfileUsername {
+                openProfileFromDeepLink(username: pending)
+            }
             await loadNudgeStatuses()
             await loadMyRank()
+            await loadFeed()
+        }
+        .onChange(of: topMode) { _, newMode in
+            if newMode == .today {
+                Task { await loadFeed() }
+            }
+        }
+        .onReceive(DeepLinkRouter.shared.$pendingProfileUsername) { username in
+            guard let username else { return }
+            openProfileFromDeepLink(username: username)
         }
         .refreshable {
             // refreshAllData re-fetches nudge statuses internally.
             await friendService.refreshAllData()
             await loadMyRank()
+            await loadFeed(force: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
             guard let type = notification.userInfo?["type"] as? String else { return }
@@ -219,6 +247,7 @@ struct FriendsListView: View {
             selection: $topMode,
             options: [
                 .init(id: .friends, title: "Friends", systemImage: "person.2.fill"),
+                .init(id: .today, title: "Today", systemImage: "flame.fill"),
                 .init(id: .leaderboard, title: "Leaderboard", systemImage: "trophy.fill")
             ]
         )
@@ -260,6 +289,274 @@ struct FriendsListView: View {
             .padding(.bottom, MADTheme.Spacing.xxl)
         }
         .scrollIndicators(.hidden)
+    }
+
+    // MARK: - Today (rolling-48h workout feed + hypes)
+
+    private var feedView: some View {
+        ScrollView {
+            VStack(spacing: MADTheme.Spacing.md) {
+                if isLoadingFeed && feedItems.isEmpty {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
+                        .padding(.top, MADTheme.Spacing.xxl)
+                } else if feedItems.isEmpty {
+                    FriendEmptyStateView(
+                        title: "No Activity Yet",
+                        message: "When you and your friends log workouts, they'll show up here — give each other a 🔥.",
+                        systemImage: "flame",
+                        actionTitle: "Add Friends",
+                        action: { showingSearch = true }
+                    )
+                    .padding(.top, MADTheme.Spacing.lg)
+                } else {
+                    hypesRemainingChip
+                    ForEach(groupedFeed(), id: \.title) { group in
+                        feedSectionHeader(group.title)
+                        ForEach(group.items) { feedRow($0) }
+                    }
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.top, MADTheme.Spacing.md)
+            .padding(.bottom, MADTheme.Spacing.xxl)
+        }
+        .scrollIndicators(.hidden)
+    }
+
+    private var hypesRemainingChip: some View {
+        HStack {
+            Spacer()
+            Text("🔥 \(hypesRemaining ?? HypeService.dailyLimit)/\(HypeService.dailyLimit) hypes left today")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+            Spacer()
+        }
+        .padding(.top, 2)
+    }
+
+    private func feedSectionHeader(_ title: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .tracking(1.2)
+                .foregroundColor(.white.opacity(0.4))
+            Spacer()
+        }
+        .padding(.top, MADTheme.Spacing.sm)
+        .padding(.horizontal, 4)
+    }
+
+    private func feedRow(_ item: FeedWorkoutItem) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                selectedUser = makeBackendUser(from: item)
+            } label: {
+                AvatarView(name: item.displayName, imageURL: item.profile_image_url, size: 44)
+            }
+            .buttonStyle(.plain)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.displayName)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Image(systemName: workoutIcon(item.workout_type))
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(workoutColor(item.workout_type))
+                    Text("\(workoutVerb(item.workout_type)) \(String(format: "%.2f", item.distance)) mi")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.8))
+                    Text("· \(relativeTime(item.completed_at))")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.45))
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            if !item.is_self {
+                hypeButton(item)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(item.distance >= 1.0 ? Color.green.opacity(0.06) : Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(item.distance >= 1.0 ? Color.green.opacity(0.18) : Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
+    }
+
+    private func hypeButton(_ item: FeedWorkoutItem) -> some View {
+        let busy = hypingWorkoutIds.contains(item.workout_id)
+        let outOfHypes = (hypesRemaining ?? HypeService.dailyLimit) <= 0 && !item.is_hyped
+        return Button {
+            Task { await sendHype(for: item) }
+        } label: {
+            HStack(spacing: 4) {
+                Text("🔥").font(.system(size: 12))
+                Text(item.is_hyped ? "Hyped" : "Hype")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+            }
+            .foregroundColor(item.is_hyped ? .orange : (outOfHypes ? .white.opacity(0.3) : .white.opacity(0.85)))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(item.is_hyped ? Color.orange.opacity(0.15) : Color.white.opacity(0.06))
+                    .overlay(Capsule().strokeBorder(item.is_hyped ? Color.orange.opacity(0.4) : Color.white.opacity(0.12), lineWidth: 1))
+            )
+            .opacity(busy ? 0.5 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(item.is_hyped || busy || outOfHypes)
+    }
+
+    private func makeBackendUser(from item: FeedWorkoutItem) -> BackendUser {
+        BackendUser(
+            user_id: item.user_id,
+            username: item.username,
+            email: nil,
+            first_name: item.first_name,
+            last_name: item.last_name,
+            bio: nil,
+            profile_image_url: item.profile_image_url,
+            apple_id: nil,
+            auth_provider: nil,
+            role: nil
+        )
+    }
+
+    // MARK: Feed helpers
+
+    private struct FeedGroup { let title: String; let items: [FeedWorkoutItem] }
+
+    private func groupedFeed() -> [FeedGroup] {
+        let cal = Calendar.current
+        var today: [FeedWorkoutItem] = []
+        var yesterday: [FeedWorkoutItem] = []
+        var earlier: [FeedWorkoutItem] = []
+        for item in feedItems {
+            guard let date = parseFeedDate(item.completed_at) else { earlier.append(item); continue }
+            if cal.isDateInToday(date) { today.append(item) }
+            else if cal.isDateInYesterday(date) { yesterday.append(item) }
+            else { earlier.append(item) }
+        }
+        var groups: [FeedGroup] = []
+        if !today.isEmpty { groups.append(FeedGroup(title: "TODAY", items: today)) }
+        if !yesterday.isEmpty { groups.append(FeedGroup(title: "YESTERDAY", items: yesterday)) }
+        if !earlier.isEmpty { groups.append(FeedGroup(title: "EARLIER", items: earlier)) }
+        return groups
+    }
+
+    private func parseFeedDate(_ s: String) -> Date? {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = iso.date(from: s) { return d }
+        iso.formatOptions = [.withInternetDateTime]
+        if let d = iso.date(from: s) { return d }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+        if let d = f.date(from: s) { return d }
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+        return f.date(from: s)
+    }
+
+    private func relativeTime(_ s: String) -> String {
+        guard let date = parseFeedDate(s) else { return "" }
+        let secs = Date().timeIntervalSince(date)
+        if secs < 60 { return "just now" }
+        if secs < 3600 { return "\(Int(secs / 60))m ago" }
+        if secs < 6 * 3600 { return "\(Int(secs / 3600))h ago" }
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        return f.string(from: date)
+    }
+
+    private func workoutVerb(_ type: String) -> String {
+        switch type.lowercased() {
+        case "running": return "ran"
+        case "walking": return "walked"
+        case "cycling": return "biked"
+        case "hiking": return "hiked"
+        default: return "logged"
+        }
+    }
+
+    private func workoutIcon(_ type: String) -> String {
+        switch type.lowercased() {
+        case "running": return "figure.run"
+        case "walking": return "figure.walk"
+        case "cycling": return "figure.outdoor.cycle"
+        case "hiking": return "figure.hiking"
+        default: return "figure.run"
+        }
+    }
+
+    private func workoutColor(_ type: String) -> Color {
+        switch type.lowercased() {
+        case "running": return MADTheme.Colors.madRed
+        case "walking": return .blue
+        case "cycling": return .green
+        case "hiking": return .orange
+        default: return MADTheme.Colors.madRed
+        }
+    }
+
+    private func sendHype(for item: FeedWorkoutItem) async {
+        guard !item.is_hyped, !hypingWorkoutIds.contains(item.workout_id) else { return }
+        hypingWorkoutIds.insert(item.workout_id)
+        defer { hypingWorkoutIds.remove(item.workout_id) }
+
+        let label = "\(workoutVerb(item.workout_type)) \(String(format: "%.2f", item.distance)) mi"
+        let context = HypeContext(contextType: "mile", contextId: item.workout_id, contextLabel: label)
+        do {
+            let response = try await HypeService.sendHype(targetUserId: item.user_id, context: context)
+            markHyped(item.workout_id)
+            hypesRemaining = response.hypes_remaining
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        } catch let error as APIError {
+            switch error {
+            case .conflict:
+                // Already hyped this workout — reflect that state.
+                markHyped(item.workout_id)
+            case .rateLimited:
+                hypesRemaining = 0
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            default:
+                print("[FriendsListView] hype failed: \(error)")
+            }
+        } catch {
+            print("[FriendsListView] hype failed: \(error)")
+        }
+    }
+
+    private func markHyped(_ workoutId: String) {
+        if let idx = feedItems.firstIndex(where: { $0.workout_id == workoutId }) {
+            feedItems[idx].is_hyped = true
+        }
+    }
+
+    private func loadFeed(force: Bool = false) async {
+        if hasLoadedFeed && !force { return }
+        isLoadingFeed = true
+        do {
+            feedItems = try await friendService.fetchFriendsFeed()
+        } catch {
+            print("[FriendsListView] feed load failed: \(error)")
+        }
+        if let status = try? await HypeService.status() {
+            hypesRemaining = status.hypes_remaining
+        }
+        isLoadingFeed = false
+        hasLoadedFeed = true
     }
 
     // MARK: Personal hero card
@@ -838,6 +1135,32 @@ struct FriendsListView: View {
         }
         .padding(.horizontal, MADTheme.Spacing.md)
         .padding(.vertical, 10)
+    }
+
+    // MARK: - Deep Link Profile Open
+
+    /// Resolves a username from a mileaday.run/u/<username> link to a
+    /// BackendUser and presents their profile (which carries the Add Friend
+    /// button). Clears the pending value first so the onReceive re-fire
+    /// with nil is a no-op and repeat links still work.
+    private func openProfileFromDeepLink(username: String) {
+        DeepLinkRouter.shared.pendingProfileUsername = nil
+        Task {
+            do {
+                let matches = try await friendService.searchUsers(byUsername: username)
+                // The search endpoint is a substring match — prefer the exact
+                // username, fall back to the first hit.
+                let user = matches.first(where: { $0.username?.lowercased() == username.lowercased() })
+                    ?? matches.first
+                if let user {
+                    await MainActor.run {
+                        selectedUser = user
+                    }
+                }
+            } catch {
+                print("[FriendsList] ❌ Deep link profile lookup failed for '\(username)': \(error)")
+            }
+        }
     }
 
     // MARK: - Nudge Methods

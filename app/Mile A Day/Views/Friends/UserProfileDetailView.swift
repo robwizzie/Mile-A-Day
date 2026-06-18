@@ -27,6 +27,11 @@ struct UserProfileDetailView: View {
     @State private var selectedWorkout: FriendWorkout?
     @State private var friendTodayChallenge: RemoteChallengeService.FriendTodayDTO?
 
+    // Instagram-style friend count shown in the header, tappable to browse.
+    @State private var friendCount: Int?
+    // Mutual friends with the viewer ("X mutual friends"), non-self only.
+    @State private var mutualCount: Int?
+
     // Nudge state — fetched on appear, only relevant when viewing a friend
     // who hasn't completed today and hasn't been nudged in the last 24h.
     @State private var nudgeStatus: NudgeStatusResponse?
@@ -145,6 +150,12 @@ struct UserProfileDetailView: View {
         .task {
             await closeFriends.loadIfNeeded()
         }
+        .task {
+            await loadFriendCount()
+        }
+        .task {
+            await loadMutualCount()
+        }
     }
 
     // MARK: - Close Friend Toggle
@@ -213,6 +224,25 @@ struct UserProfileDetailView: View {
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
             }
             await MainActor.run { closeFriendActionInProgress = false }
+        }
+    }
+
+    private func loadFriendCount() async {
+        do {
+            let list = try await friendService.getFriendsList(for: user.user_id)
+            await MainActor.run { friendCount = list.count }
+        } catch {
+            print("[UserProfileDetailView] loadFriendCount failed: \(error)")
+        }
+    }
+
+    private func loadMutualCount() async {
+        guard !isCurrentUser() else { return }
+        do {
+            let count = try await friendService.getMutualFriendCount(with: user.user_id)
+            await MainActor.run { mutualCount = count }
+        } catch {
+            print("[UserProfileDetailView] loadMutualCount failed: \(error)")
         }
     }
 
@@ -319,6 +349,16 @@ struct UserProfileDetailView: View {
                         }
                     }
 
+                    // Triple-stat row (Streak · Miles · Friends). Friends is
+                    // tappable to browse and add more people.
+                    profileStatsRow
+
+                    if !isCurrentUser(), let mutualCount, mutualCount > 0 {
+                        Text("\(mutualCount) mutual friend\(mutualCount == 1 ? "" : "s")")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.55))
+                    }
+
                     // Friend status pill (friendship state + actions menu).
                     // Centered at natural size — used to be full-width which
                     // made it dominate the header.
@@ -343,6 +383,22 @@ struct UserProfileDetailView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous))
         .madLiquidGlass()
+    }
+
+    // MARK: - Profile Stats Row
+
+    private var profileStatsRow: some View {
+        ProfileStatsRow(
+            streak: userStats?.streak ?? 0,
+            totalMiles: userStats?.totalMiles ?? 0,
+            friendCount: friendCount
+        ) {
+            UserFriendsListView(
+                userId: user.user_id,
+                ownerName: user.username ?? user.displayName,
+                friendService: friendService
+            )
+        }
     }
 
     // MARK: - Tab Content
@@ -1342,18 +1398,26 @@ struct Last7DaysChart: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                // Day initial
-                Text(dayLetter(for: day))
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                    .foregroundColor(isToday || isSelected ? .white : .white.opacity(0.45))
-                    .frame(width: 18, height: 18)
-                    .background(
-                        Circle()
-                            .fill(
-                                isSelected ? color.opacity(0.85) :
-                                (isToday ? MADTheme.Colors.madRed : Color.clear)
-                            )
-                    )
+                // Weekday + date. A 3-letter abbreviation ("Tue") plus the
+                // day number removes the ambiguity of single letters — "T"
+                // read as both Tue and Thu, "S" as both Sat and Sun — which
+                // made it impossible to tell which bar was which day.
+                VStack(spacing: 0) {
+                    Text(weekdayAbbrev(for: day))
+                        .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    Text(dayNumber(for: day))
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .opacity(0.75)
+                }
+                .foregroundColor(isToday || isSelected ? .white : .white.opacity(0.45))
+                .frame(width: 30, height: 30)
+                .background(
+                    Capsule()
+                        .fill(
+                            isSelected ? color.opacity(0.85) :
+                            (isToday ? MADTheme.Colors.madRed : Color.clear)
+                        )
+                )
             }
             .contentShape(Rectangle())
         }
@@ -1439,25 +1503,63 @@ struct Last7DaysChart: View {
         }
     }
 
-    private func dayLetter(for date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "EEEEE" // single letter
-        return formatter.string(from: date)
+    /// Three-letter localized weekday ("Sun", "Mon", "Tue"…). Unambiguous
+    /// where a single letter is not.
+    private func weekdayAbbrev(for date: Date) -> String {
+        Self.weekdayFormatter.string(from: date)
     }
 
+    /// Day of month ("1"…"31"), shown under the weekday so a specific date
+    /// is identifiable at a glance.
+    private func dayNumber(for date: Date) -> String {
+        Self.dayNumberFormatter.string(from: date)
+    }
+
+    private static let weekdayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE"
+        return f
+    }()
+
+    private static let dayNumberFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d"
+        return f
+    }()
+
     private func parseDay(_ string: String) -> Date? {
-        // Workout dates come in two formats from the backend.
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
-        if let parsed = formatter.date(from: string) {
+        // Workout dates come in two formats from the backend: a plain
+        // `local_date` ("yyyy-MM-dd") or, rarely, a full ISO timestamp. Both
+        // are fixed-format, so the formatters MUST use the POSIX locale —
+        // otherwise a user on a non-Gregorian calendar (e.g. Buddhist) or an
+        // unusual locale fails to parse and the day silently drops to zero.
+        if let parsed = Self.dateOnlyFormatter.date(from: string) {
             return calendar.startOfDay(for: parsed)
         }
-        formatter.dateFormat = "yyyy-MM-dd"
-        if let parsed = formatter.date(from: string) {
+        if let parsed = Self.isoFormatter.date(from: string) {
             return calendar.startOfDay(for: parsed)
         }
         return nil
     }
+
+    /// Plain `local_date` ("yyyy-MM-dd"). This is the format the backend
+    /// actually sends for workout dates, so it's tried first.
+    private static let dateOnlyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// Fallback ISO timestamp ("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").
+    private static let isoFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+        return f
+    }()
 }
 
 // MARK: - Preview

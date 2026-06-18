@@ -58,7 +58,7 @@ struct AuthenticationView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                Spacer()
+                Spacer(minLength: 16)
 
                 // Logo and title
                 VStack(spacing: MADTheme.Spacing.xl) {
@@ -91,17 +91,21 @@ struct AuthenticationView: View {
                             .font(.system(size: 34, weight: .black, design: .rounded))
                             .foregroundColor(titleColor)
                             .tracking(2)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
 
                         Text("Your daily fitness journey starts here")
                             .font(.system(size: 16, weight: .regular, design: .rounded))
                             .foregroundColor(subtitleColor)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 2)
                     }
                 }
                 .opacity(contentOpacity)
 
-                Spacer()
-                Spacer()
+                Spacer(minLength: 16)
+                Spacer(minLength: 16)
 
                 // Sign in button
                 VStack(spacing: MADTheme.Spacing.md) {
@@ -141,12 +145,13 @@ struct AuthenticationView: View {
                         .font(.system(size: 14, weight: .regular, design: .rounded))
                         .foregroundColor(tertiaryTextColor)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, MADTheme.Spacing.lg)
                 .offset(y: buttonsOffset)
                 .opacity(contentOpacity)
 
-                Spacer()
+                Spacer(minLength: 12)
 
                 // Terms and privacy
                 VStack(spacing: MADTheme.Spacing.xs) {
@@ -173,6 +178,7 @@ struct AuthenticationView: View {
                         .foregroundColor(subtitleColor)
                         .underline()
                     }
+                    .fixedSize()
                 }
                 .opacity(contentOpacity)
                 .padding(.bottom, MADTheme.Spacing.xl)

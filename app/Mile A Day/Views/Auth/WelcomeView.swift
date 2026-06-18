@@ -21,91 +21,105 @@ struct WelcomeView: View {
             )
             .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                Spacer()
+            // Scrolls when the content is taller than the screen (SE/mini-class
+            // devices) instead of relying on Spacers that collapse and clip text.
+            // The minHeight frame + edge Spacers keep the content vertically
+            // centered on taller phones, matching the original layout.
+            GeometryReader { geo in
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    Spacer(minLength: MADTheme.Spacing.xl)
 
-                // Animated logo with glow
-                ZStack {
-                    Circle()
-                        .fill(MADTheme.Colors.madRed.opacity(0.15))
-                        .frame(width: 180, height: 180)
-                        .blur(radius: 35)
+                    // Animated logo with glow
+                    ZStack {
+                        Circle()
+                            .fill(MADTheme.Colors.madRed.opacity(0.15))
+                            .frame(width: 180, height: 180)
+                            .blur(radius: 35)
 
-                    Image("mad-logo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 100, height: 100)
-                }
-                .scaleEffect(iconScale)
-                .offset(y: floatOffset)
-                .padding(.bottom, MADTheme.Spacing.xl)
-
-                // Personalized greeting
-                VStack(spacing: MADTheme.Spacing.sm) {
-                    Text("You're all set,")
-                        .font(.system(size: 18, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.7))
-
-                    Text(userManager.currentUser.username ?? "Runner")
-                        .font(.system(size: 34, weight: .black, design: .rounded))
-                        .foregroundColor(.white)
-
-                    Text("Here's what awaits you")
-                        .font(.system(size: 16, weight: .regular, design: .rounded))
-                        .foregroundColor(.white.opacity(0.6))
-                        .padding(.top, 2)
-                }
-                .opacity(titleOpacity)
-                .padding(.bottom, MADTheme.Spacing.xxl)
-
-                // Feature highlights
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
-                    featureRow(
-                        icon: "figure.run",
-                        color: MADTheme.Colors.madRed,
-                        title: "Daily Mile",
-                        subtitle: "Walk or run one mile every day"
-                    )
-                    featureRow(
-                        icon: "flame.fill",
-                        color: Color(red: 1.0, green: 0.5, blue: 0.0),
-                        title: "Build Streaks",
-                        subtitle: "Keep your streak alive day after day"
-                    )
-                    featureRow(
-                        icon: "person.2.fill",
-                        color: Color(red: 0.2, green: 0.7, blue: 0.9),
-                        title: "Compete with Friends",
-                        subtitle: "See who's leading the pack"
-                    )
-                }
-                .padding(.horizontal, MADTheme.Spacing.xl)
-                .opacity(featuresOpacity)
-
-                Spacer()
-                Spacer()
-
-                // Continue button
-                Button(action: {
-                    withAnimation(MADTheme.Animation.standard) {
-                        appStateManager.completeWelcome()
+                        Image("mad-logo")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 100, height: 100)
                     }
-                }) {
-                    Text("Let's Go")
-                        .font(.system(size: 17, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14)
-                                .fill(MADTheme.Colors.madRed)
+                    .scaleEffect(iconScale)
+                    .offset(y: floatOffset)
+                    .padding(.bottom, MADTheme.Spacing.xl)
+
+                    // Personalized greeting
+                    VStack(spacing: MADTheme.Spacing.sm) {
+                        Text("You're all set,")
+                            .font(.system(size: 18, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.7))
+
+                        Text(userManager.currentUser.username ?? "Runner")
+                            .font(.system(size: 34, weight: .black, design: .rounded))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.45)
+                            .padding(.horizontal, MADTheme.Spacing.lg)
+
+                        Text("Here's what awaits you")
+                            .font(.system(size: 16, weight: .regular, design: .rounded))
+                            .foregroundColor(.white.opacity(0.6))
+                            .padding(.top, 2)
+                    }
+                    .opacity(titleOpacity)
+                    .padding(.bottom, MADTheme.Spacing.xxl)
+
+                    // Feature highlights
+                    VStack(alignment: .leading, spacing: MADTheme.Spacing.lg) {
+                        featureRow(
+                            icon: "figure.run",
+                            color: MADTheme.Colors.madRed,
+                            title: "Daily Mile",
+                            subtitle: "Walk or run one mile every day"
                         )
-                        .shadow(color: MADTheme.Colors.madRed.opacity(0.3), radius: 12, x: 0, y: 6)
+                        featureRow(
+                            icon: "flame.fill",
+                            color: Color(red: 1.0, green: 0.5, blue: 0.0),
+                            title: "Build Streaks",
+                            subtitle: "Keep your streak alive day after day"
+                        )
+                        featureRow(
+                            icon: "person.2.fill",
+                            color: Color(red: 0.2, green: 0.7, blue: 0.9),
+                            title: "Compete with Friends",
+                            subtitle: "See who's leading the pack"
+                        )
+                    }
+                    .padding(.horizontal, MADTheme.Spacing.xl)
+                    .opacity(featuresOpacity)
+
+                    Spacer(minLength: MADTheme.Spacing.xl)
                 }
-                .padding(.horizontal, MADTheme.Spacing.xl)
-                .padding(.bottom, MADTheme.Spacing.xxl)
-                .opacity(buttonOpacity)
+                .frame(maxWidth: .infinity, minHeight: geo.size.height)
             }
+            .scrollBounceBehavior(.basedOnSize)
+            }
+        }
+        // Button lives in the bottom safe-area inset so it can never be pushed
+        // off screen by tall content above it.
+        .safeAreaInset(edge: .bottom) {
+            Button(action: {
+                withAnimation(MADTheme.Animation.standard) {
+                    appStateManager.completeWelcome()
+                }
+            }) {
+                Text("Let's Go")
+                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(MADTheme.Colors.madRed)
+                    )
+                    .shadow(color: MADTheme.Colors.madRed.opacity(0.3), radius: 12, x: 0, y: 6)
+            }
+            .padding(.horizontal, MADTheme.Spacing.xl)
+            .padding(.bottom, MADTheme.Spacing.md)
+            .opacity(buttonOpacity)
         }
         .onAppear { startAnimations() }
     }
@@ -125,9 +139,11 @@ struct WelcomeView: View {
                 Text(title)
                     .font(.system(size: 17, weight: .semibold, design: .rounded))
                     .foregroundColor(.white)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(subtitle)
                     .font(.system(size: 14, weight: .regular, design: .rounded))
                     .foregroundColor(.white.opacity(0.6))
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

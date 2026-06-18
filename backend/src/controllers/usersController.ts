@@ -36,7 +36,20 @@ export async function searchUsers(req: Request, res: Response) {
 
 	const { query } = req.query;
 
-	const results = await db.query(`SELECT * FROM users WHERE username ILIKE $1 OR email ILIKE $1 LIMIT 50`, [`%${query}%`]);
+	// Match username OR first/last/full name. Email is intentionally NOT
+	// searchable or returned — searching by email leaks who owns an address.
+	// Username matches rank first so an exact handle isn't buried under names.
+	const results = await db.query(
+		`SELECT user_id, username, first_name, last_name, bio, profile_image_url, current_streak
+		 FROM users
+		 WHERE username ILIKE $1
+		    OR first_name ILIKE $1
+		    OR last_name ILIKE $1
+		    OR (COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) ILIKE $1
+		 ORDER BY (username ILIKE $1) DESC, username ASC
+		 LIMIT 50`,
+		[`%${query}%`]
+	);
 
 	if (!results.length) {
 		return res.status(404).json({

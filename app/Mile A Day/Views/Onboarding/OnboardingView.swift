@@ -167,7 +167,7 @@ struct OnboardingPageView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer()
+            Spacer(minLength: MADTheme.Spacing.md)
 
             // Icon
             ZStack {
@@ -192,7 +192,7 @@ struct OnboardingPageView: View {
             }
             .scaleEffect(iconScale)
             .offset(y: floatOffset)
-            .padding(.bottom, MADTheme.Spacing.xxxl)
+            .padding(.bottom, MADTheme.Spacing.xl)
 
             // Text
             VStack(spacing: MADTheme.Spacing.md) {
@@ -200,19 +200,22 @@ struct OnboardingPageView: View {
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundColor(primaryTextColor)
                     .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
 
                 Text(page.subtitle)
                     .font(.system(size: 17, weight: .regular, design: .rounded))
                     .foregroundColor(secondaryTextColor)
                     .multilineTextAlignment(.center)
                     .lineSpacing(4)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, MADTheme.Spacing.xl)
             .offset(y: contentOffset)
             .opacity(contentOpacity)
 
-            Spacer()
-            Spacer()
+            Spacer(minLength: MADTheme.Spacing.md)
+            Spacer(minLength: MADTheme.Spacing.md)
         }
         .onAppear {
             startAnimations()

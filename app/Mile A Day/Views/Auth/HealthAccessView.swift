@@ -18,8 +18,12 @@ struct HealthAccessView: View {
             )
             .ignoresSafeArea()
 
+            // Scrolls when the content is taller than the screen (SE/mini-class
+            // devices) instead of relying on Spacers that collapse and clip text.
+            GeometryReader { geo in
+            ScrollView(showsIndicators: false) {
             VStack(spacing: MADTheme.Spacing.xl) {
-                Spacer()
+                Spacer(minLength: MADTheme.Spacing.lg)
 
                 // Icon
                 ZStack {
@@ -65,48 +69,59 @@ struct HealthAccessView: View {
                             .font(MADTheme.Typography.caption)
                             .foregroundColor(MADTheme.Colors.error)
                             .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
 
                         Text("Please enable Health access in Settings > Privacy & Security > Health > Mile A Day.")
                             .font(MADTheme.Typography.caption)
                             .foregroundColor(MADTheme.Colors.secondaryText)
                             .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.horizontal, MADTheme.Spacing.md)
                 }
 
-                Spacer()
-
-                // Action button
-                VStack(spacing: MADTheme.Spacing.md) {
-                    Button(action: requestAccess) {
-                        HStack {
-                            if isRequesting {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    .scaleEffect(0.8)
-                            } else {
-                                Text(wasDenied ? "Open Settings" : "Continue")
-                                    .font(MADTheme.Typography.headline)
-                                    .fontWeight(.semibold)
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, MADTheme.Spacing.md)
-                        .background(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                .fill(MADTheme.Colors.madRed)
-                        )
-                        .foregroundColor(.white)
-                    }
-                    .disabled(isRequesting)
-
-                    Text("Without Health access, Mile A Day cannot track your workouts or streaks.")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(MADTheme.Colors.secondaryText)
-                        .multilineTextAlignment(.center)
-                }
+                Spacer(minLength: MADTheme.Spacing.lg)
             }
-            .padding(MADTheme.Spacing.lg)
+            .padding(.horizontal, MADTheme.Spacing.lg)
+            .frame(maxWidth: .infinity, minHeight: geo.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            }
+        }
+        // Button lives in the bottom safe-area inset so it can never be pushed
+        // off screen by tall content above it.
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: MADTheme.Spacing.md) {
+                Button(action: requestAccess) {
+                    HStack {
+                        if isRequesting {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.8)
+                        } else {
+                            Text(wasDenied ? "Open Settings" : "Continue")
+                                .font(MADTheme.Typography.headline)
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, MADTheme.Spacing.md)
+                    .background(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                            .fill(MADTheme.Colors.madRed)
+                    )
+                    .foregroundColor(.white)
+                }
+                .disabled(isRequesting)
+
+                Text("Without Health access, Mile A Day cannot track your workouts or streaks.")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundColor(MADTheme.Colors.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, MADTheme.Spacing.lg)
+            .padding(.bottom, MADTheme.Spacing.md)
         }
     }
 
@@ -120,6 +135,7 @@ struct HealthAccessView: View {
             Text(text)
                 .font(MADTheme.Typography.body)
                 .foregroundColor(MADTheme.Colors.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
