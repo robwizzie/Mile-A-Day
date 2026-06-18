@@ -157,8 +157,15 @@ function sendToDevice(deviceToken: string, payload: PushPayload): Promise<boolea
 				resolve(true);
 			} else {
 				console.error(`[Push] APNs error ${statusCode}: ${responseData}`);
-				// If token is invalid, remove it
-				if (statusCode === 410 || (statusCode === 400 && responseData.includes('BadDeviceToken'))) {
+				// Only delete on 410 Unregistered — that's APNs definitively saying the
+				// app was uninstalled, so the token is truly dead. Do NOT delete on
+				// 400 BadDeviceToken: that usually means an environment mismatch (a
+				// sandbox token reaching the prod host, or vice versa), not a dead
+				// token. Deleting on 400 nukes valid tokens any time the server is
+				// pointed at the wrong APNs environment — a recoverable misconfig
+				// becomes permanent token loss. Stale env-mismatched tokens are
+				// harmless noise; they age out as devices re-register.
+				if (statusCode === 410) {
 					removeInvalidToken(deviceToken).catch(() => {});
 				}
 				resolve(false);
@@ -373,7 +380,9 @@ function sendSilentPushToDevice(deviceToken: string, type: string, data: Record<
 				resolve(true);
 			} else {
 				console.error(`[Push] Silent APNs error ${statusCode}: ${responseData}`);
-				if (statusCode === 410 || (statusCode === 400 && responseData.includes('BadDeviceToken'))) {
+				// 410-only, same rationale as the alert path: a 400 BadDeviceToken is
+				// usually an environment mismatch, not a dead token — don't delete on it.
+				if (statusCode === 410) {
 					removeInvalidToken(deviceToken).catch(() => {});
 				}
 				resolve(false);

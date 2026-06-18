@@ -8,6 +8,7 @@ export interface RefreshToken {
 	expires_at: Date | null;
 	revoked_at: Date | null;
 	revoked_reason: string | null;
+	replaced_by_hash: string | null;
 	user_agent?: string;
 	ip_address?: string;
 	device_info?: any;

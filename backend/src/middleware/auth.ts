@@ -21,7 +21,13 @@ export async function authenticateToken(req: AuthenticatedRequest, res: Response
 		next();
 	} catch (err) {
 		console.error('Token verification failed:', err);
-		return res.status(403).json({ error: 'Invalid or expired token' });
+		// 401 (not 403) for a bad/expired credential: this is an AUTHENTICATION
+		// failure the client must recover from by refreshing or signing out. 403
+		// is reserved for AUTHORIZATION failures (authenticated but not allowed),
+		// which must NOT trigger a sign-out. Shipped clients only run their
+		// refresh+retry / force-logout path on 401, so returning 403 here left
+		// users stuck: every call failed and they were never bounced to login.
+		return res.status(401).json({ error: 'Invalid or expired token' });
 	}
 }
 

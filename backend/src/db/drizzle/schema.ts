@@ -1,0 +1,475 @@
+import { pgTable, index, uuid, text, timestamp, foreignKey, unique, serial, varchar, integer, doublePrecision, numeric, date, boolean, check, jsonb, inet, uniqueIndex, bigserial, primaryKey } from "drizzle-orm/pg-core"
+import { sql } from "drizzle-orm"
+
+
+
+export const friendNudgeLog = pgTable("friend_nudge_log", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	senderId: text("sender_id").notNull(),
+	targetId: text("target_id").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("idx_friend_nudge_log_lookup").using("btree", table.senderId.asc().nullsLast(), table.targetId.asc().nullsLast(), table.createdAt.desc().nullsFirst()),
+]);
+
+export const workoutSplits = pgTable("workout_splits", {
+	id: serial().primaryKey().notNull(),
+	workoutId: varchar("workout_id", { length: 255 }).notNull(),
+	splitNumber: integer("split_number").notNull(),
+	splitDuration: doublePrecision("split_duration").notNull(),
+	splitDistance: doublePrecision("split_distance"),
+	splitPace: doublePrecision("split_pace"),
+}, (table) => [
+	index("idx_splits_time").using("btree", table.splitDuration.asc().nullsLast()),
+	index("idx_splits_workout").using("btree", table.workoutId.asc().nullsLast()),
+	foreignKey({
+			columns: [table.workoutId],
+			foreignColumns: [workouts.workoutId],
+			name: "workout_splits_workout_id_fkey"
+		}).onDelete("cascade"),
+	unique("workout_splits_workout_id_split_number_key").on(table.workoutId, table.splitNumber),
+]);
+
+export const flexLog = pgTable("flex_log", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	senderId: text("sender_id").notNull(),
+	targetId: text("target_id").notNull(),
+	competitionId: text("competition_id").notNull(),
+	message: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("idx_flex_log_lookup").using("btree", table.senderId.asc().nullsLast(), table.targetId.asc().nullsLast(), table.createdAt.desc().nullsFirst()),
+]);
+
+export const users = pgTable("users", {
+	userId: text("user_id").primaryKey().notNull(),
+	username: varchar({ length: 30 }),
+	email: varchar({ length: 255 }),
+	firstName: varchar("first_name", { length: 50 }),
+	lastName: varchar("last_name", { length: 50 }),
+	appleSub: varchar("apple_sub", { length: 255 }).notNull(),
+	profileImageUrl: text("profile_image_url"),
+	bio: text(),
+	role: varchar({ length: 20 }).default('user'),
+	goalMiles: numeric("goal_miles").default('1.0').notNull(),
+	currentStreak: integer("current_streak").default(0).notNull(),
+}, (table) => [
+	index("idx_users_current_streak_desc").using("btree", table.currentStreak.desc().nullsFirst()),
+	index("idx_users_email_trgm").using("gin", table.email.asc().nullsLast().op("gin_trgm_ops")),
+	index("idx_users_username").using("btree", table.username.asc().nullsLast()),
+	index("idx_users_username_trgm").using("gin", table.username.asc().nullsLast().op("gin_trgm_ops")),
+	unique("users_apple_id_key").on(table.email),
+	unique("users_apple_sub_key").on(table.appleSub),
+]);
+
+export const workouts = pgTable("workouts", {
+	workoutId: varchar("workout_id", { length: 255 }).primaryKey().notNull(),
+	userId: varchar("user_id", { length: 255 }).notNull(),
+	distance: doublePrecision().notNull(),
+	localDate: date("local_date").notNull(),
+	date: date().notNull(),
+	timezoneOffset: integer("timezone_offset").notNull(),
+	workoutType: varchar("workout_type", { length: 50 }).notNull(),
+	deviceEndDate: timestamp("device_end_date", { withTimezone: true, mode: 'string' }).notNull(),
+	calories: doublePrecision().notNull(),
+	totalDuration: doublePrecision("total_duration").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	source: varchar({ length: 20 }).default('healthkit').notNull(),
+	originalDistance: doublePrecision("original_distance"),
+	originalDuration: doublePrecision("original_duration"),
+	steps: integer(),
+}, (table) => [
+	index("idx_workouts_local_date_user_id").using("btree", table.localDate.asc().nullsLast(), table.userId.asc().nullsLast()),
+	index("idx_workouts_user_device_end").using("btree", table.userId.asc().nullsLast(), table.deviceEndDate.desc().nullsFirst()),
+	index("idx_workouts_user_local_date").using("btree", table.userId.asc().nullsLast(), table.localDate.desc().nullsFirst()),
+	unique("workouts_user_workout_unique").on(table.workoutId, table.userId),
+]);
+
+export const notificationSettings = pgTable("notification_settings", {
+	userId: text("user_id").primaryKey().notNull(),
+	nudgesEnabled: boolean("nudges_enabled").default(true),
+	flexesEnabled: boolean("flexes_enabled").default(true),
+	friendActivityEnabled: boolean("friend_activity_enabled").default(true),
+	competitionInvitesEnabled: boolean("competition_invites_enabled").default(true),
+	competitionUpdatesEnabled: boolean("competition_updates_enabled").default(true),
+	competitionMilestonesEnabled: boolean("competition_milestones_enabled").default(true),
+	quietHoursStart: integer("quiet_hours_start"),
+	quietHoursEnd: integer("quiet_hours_end"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	hypesEnabled: boolean("hypes_enabled").default(true).notNull(),
+	stepGoalEnabled: boolean("step_goal_enabled").default(true).notNull(),
+	friendPersonalBestEnabled: boolean("friend_personal_best_enabled").default(true),
+	dailyReminderEnabled: boolean("daily_reminder_enabled").default(true),
+	dailyReminderHour: integer("daily_reminder_hour").default(18),
+	timezoneOffsetMinutes: integer("timezone_offset_minutes"),
+});
+
+export const competitions = pgTable("competitions", {
+	id: varchar({ length: 32 }).default(sql`replace((gen_random_uuid())::text, '-'::text, ''::text)`).primaryKey().notNull(),
+	competitionName: varchar("competition_name", { length: 100 }),
+	startDate: date("start_date"),
+	endDate: date("end_date"),
+	workouts: jsonb().notNull(),
+	type: varchar({ length: 20 }).notNull(),
+	options: jsonb().notNull(),
+	ended: boolean().default(false),
+	winner: text(),
+	owner: text(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("idx_competitions_winner").using("btree", table.winner.asc().nullsLast()).where(sql`(winner IS NOT NULL)`),
+	foreignKey({
+			columns: [table.winner],
+			foreignColumns: [users.userId],
+			name: "competitions_winner_fkey"
+		}).onDelete("set null"),
+	foreignKey({
+			columns: [table.owner],
+			foreignColumns: [users.userId],
+			name: "competitions_owner_fkey"
+		}).onDelete("set null"),
+	check("competitions_type_check", sql`(type)::text = ANY ((ARRAY['streaks'::character varying, 'apex'::character varying, 'clash'::character varying, 'targets'::character varying, 'race'::character varying])::text[])`),
+]);
+
+export const refreshTokens = pgTable("refresh_tokens", {
+	tokenId: uuid("token_id").defaultRandom().primaryKey().notNull(),
+	userId: varchar("user_id", { length: 32 }).notNull(),
+	tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+	tokenFamilyId: uuid("token_family_id").notNull(),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow().notNull(),
+	lastUsedAt: timestamp("last_used_at", { mode: 'string' }).defaultNow().notNull(),
+	expiresAt: timestamp("expires_at", { mode: 'string' }),
+	revokedAt: timestamp("revoked_at", { mode: 'string' }),
+	revokedReason: varchar("revoked_reason", { length: 50 }),
+	replacedByHash: varchar("replaced_by_hash", { length: 64 }),
+	userAgent: text("user_agent"),
+	ipAddress: inet("ip_address"),
+	deviceInfo: jsonb("device_info"),
+}, (table) => [
+	index("idx_refresh_tokens_family_id").using("btree", table.tokenFamilyId.asc().nullsLast()),
+	index("idx_refresh_tokens_revoked_at").using("btree", table.revokedAt.asc().nullsLast()).where(sql`(revoked_at IS NULL)`),
+	index("idx_refresh_tokens_token_hash").using("btree", table.tokenHash.asc().nullsLast()),
+	index("idx_refresh_tokens_user_id").using("btree", table.userId.asc().nullsLast()),
+	foreignKey({
+			columns: [table.userId],
+			foreignColumns: [users.userId],
+			name: "refresh_tokens_user_id_fkey"
+		}).onDelete("cascade"),
+	unique("refresh_tokens_token_hash_key").on(table.tokenHash),
+]);
+
+export const deviceTokens = pgTable("device_tokens", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: text("user_id").notNull(),
+	deviceToken: text("device_token").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("idx_device_tokens_user_id").using("btree", table.userId.asc().nullsLast()),
+	foreignKey({
+			columns: [table.userId],
+			foreignColumns: [users.userId],
+			name: "device_tokens_user_id_fkey"
+		}).onDelete("cascade"),
+	unique("device_tokens_user_id_device_token_key").on(table.userId, table.deviceToken),
+]);
+
+export const pendingNotifications = pgTable("pending_notifications", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: text("user_id").notNull(),
+	type: text().notNull(),
+	competitionId: text("competition_id"),
+	competitionName: text("competition_name"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	sentAt: timestamp("sent_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("idx_pending_notifications_unsent").using("btree", table.userId.asc().nullsLast()).where(sql`(sent_at IS NULL)`),
+	foreignKey({
+			columns: [table.userId],
+			foreignColumns: [users.userId],
+			name: "pending_notifications_user_id_fkey"
+		}).onDelete("cascade"),
+]);
+
+export const nudgeLog = pgTable("nudge_log", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	competitionId: text("competition_id").notNull(),
+	senderId: text("sender_id").notNull(),
+	targetId: text("target_id").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("idx_nudge_log_lookup").using("btree", table.competitionId.asc().nullsLast(), table.senderId.asc().nullsLast(), table.targetId.asc().nullsLast(), table.createdAt.asc().nullsLast()),
+	index("idx_nudge_log_rate_limit").using("btree", table.competitionId.asc().nullsLast(), table.senderId.asc().nullsLast(), table.targetId.asc().nullsLast(), table.createdAt.asc().nullsLast()),
+]);
+
+export const workoutCompletionNotifications = pgTable("workout_completion_notifications", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: text("user_id").notNull(),
+	notifiedDate: date("notified_date").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	unique("workout_completion_notifications_user_id_notified_date_key").on(table.userId, table.notifiedDate),
+]);
+
+export const milestoneNotifications = pgTable("milestone_notifications", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	milestoneKey: text("milestone_key").notNull(),
+	competitionId: text("competition_id"),
+	userId: text("user_id"),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	unique("milestone_notifications_milestone_key_key").on(table.milestoneKey),
+]);
+
+export const badges = pgTable("badges", {
+	badgeId: text("badge_id").primaryKey().notNull(),
+	category: text().notNull(),
+	name: text().notNull(),
+	description: text().notNull(),
+	icon: text().notNull(),
+	rarity: text().notNull(),
+	requirement: numeric(),
+	isHidden: boolean("is_hidden").default(false).notNull(),
+	sortOrder: integer("sort_order").default(0).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_badges_category").using("btree", table.category.asc().nullsLast()),
+	check("badges_rarity_check", sql`rarity = ANY (ARRAY['common'::text, 'rare'::text, 'legendary'::text])`),
+]);
+
+export const userBadges = pgTable("user_badges", {
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
+	userId: text("user_id").notNull(),
+	badgeId: text("badge_id").notNull(),
+	earnedAt: timestamp("earned_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	isNew: boolean("is_new").default(true).notNull(),
+	triggeringWorkoutId: varchar("triggering_workout_id", { length: 255 }),
+	progressSnapshot: jsonb("progress_snapshot"),
+	pinSlot: integer("pin_slot"),
+}, (table) => [
+	index("idx_user_badges_user").using("btree", table.userId.asc().nullsLast()),
+	index("idx_user_badges_user_new").using("btree", table.userId.asc().nullsLast()).where(sql`(is_new = true)`),
+	uniqueIndex("idx_user_badges_user_pin_slot").using("btree", table.userId.asc().nullsLast(), table.pinSlot.asc().nullsLast()).where(sql`(pin_slot IS NOT NULL)`),
+	index("idx_user_badges_workout").using("btree", table.triggeringWorkoutId.asc().nullsLast()),
+	foreignKey({
+			columns: [table.userId],
+			foreignColumns: [users.userId],
+			name: "user_badges_user_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.badgeId],
+			foreignColumns: [badges.badgeId],
+			name: "user_badges_badge_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.triggeringWorkoutId],
+			foreignColumns: [workouts.workoutId],
+			name: "user_badges_triggering_workout_id_fkey"
+		}).onDelete("set null"),
+	unique("user_badges_user_id_badge_id_key").on(table.userId, table.badgeId),
+	check("user_badges_pin_slot_range", sql`(pin_slot IS NULL) OR ((pin_slot >= 0) AND (pin_slot <= 2))`),
+]);
+
+export const inAppNotifications = pgTable("in_app_notifications", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: text("user_id").notNull(),
+	title: text().notNull(),
+	body: text().notNull(),
+	type: text().notNull(),
+	data: jsonb().default({}),
+	isRead: boolean("is_read").default(false),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("idx_in_app_notifications_unread").using("btree", table.userId.asc().nullsLast(), table.isRead.asc().nullsLast()).where(sql`(is_read = false)`),
+	index("idx_in_app_notifications_user").using("btree", table.userId.asc().nullsLast(), table.createdAt.desc().nullsFirst()),
+	foreignKey({
+			columns: [table.userId],
+			foreignColumns: [users.userId],
+			name: "in_app_notifications_user_id_fkey"
+		}),
+]);
+
+export const notificationLog = pgTable("notification_log", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	userId: text("user_id").notNull(),
+	type: text().notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	index("idx_notification_log_user_date").using("btree", table.userId.asc().nullsLast(), table.createdAt.asc().nullsLast()),
+]);
+
+export const userChallengeCompletions = pgTable("user_challenge_completions", {
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
+	userId: text("user_id").notNull(),
+	localDate: date("local_date").notNull(),
+	challengeKey: text("challenge_key").notNull(),
+	completedAt: timestamp("completed_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+	completingWorkoutId: varchar("completing_workout_id", { length: 255 }),
+}, (table) => [
+	index("idx_ucc_user").using("btree", table.userId.asc().nullsLast()),
+	index("idx_ucc_user_date").using("btree", table.userId.asc().nullsLast(), table.localDate.desc().nullsFirst()),
+	foreignKey({
+			columns: [table.userId],
+			foreignColumns: [users.userId],
+			name: "user_challenge_completions_user_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.challengeKey],
+			foreignColumns: [dailyChallenges.challengeKey],
+			name: "user_challenge_completions_challenge_key_fkey"
+		}),
+	foreignKey({
+			columns: [table.completingWorkoutId],
+			foreignColumns: [workouts.workoutId],
+			name: "user_challenge_completions_completing_workout_id_fkey"
+		}).onDelete("set null"),
+	unique("user_challenge_completions_user_id_local_date_key").on(table.userId, table.localDate),
+]);
+
+export const dailyChallenges = pgTable("daily_challenges", {
+	challengeKey: text("challenge_key").primaryKey().notNull(),
+	title: text().notNull(),
+	descriptionTemplate: text("description_template").notNull(),
+	icon: text().notNull(),
+	gradientStart: text("gradient_start").notNull(),
+	gradientEnd: text("gradient_end").notNull(),
+	type: text().notNull(),
+	active: boolean().default(true).notNull(),
+	rotationIndex: integer("rotation_index").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	unique("daily_challenges_rotation_index_key").on(table.rotationIndex),
+	check("daily_challenges_type_check", sql`type = ANY (ARRAY['pace'::text, 'distance'::text, 'time'::text, 'activity'::text, 'steps'::text])`),
+]);
+
+export const hypeLog = pgTable("hype_log", {
+	id: uuid().defaultRandom().primaryKey().notNull(),
+	senderId: text("sender_id").notNull(),
+	targetId: text("target_id").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	contextType: text("context_type"),
+	contextId: text("context_id"),
+	contextLabel: text("context_label"),
+}, (table) => [
+	uniqueIndex("hype_log_context_dedupe_idx").using("btree", table.senderId.asc().nullsLast(), table.targetId.asc().nullsLast(), table.contextType.asc().nullsLast(), table.contextId.asc().nullsLast()).where(sql`(context_id IS NOT NULL)`),
+	index("idx_hype_log_lookup").using("btree", table.senderId.asc().nullsLast(), table.createdAt.desc().nullsFirst()),
+]);
+
+export const pendingFriendNotifications = pgTable("pending_friend_notifications", {
+	id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
+	userId: text("user_id").notNull(),
+	eventType: text("event_type").notNull(),
+	activityType: text("activity_type").default('').notNull(),
+	workoutId: text("workout_id"),
+	payload: jsonb().notNull(),
+	localDate: date("local_date").notNull(),
+	status: text().default('pending').notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_pending_friend_notif_user").using("btree", table.userId.asc().nullsLast(), table.status.asc().nullsLast()),
+	uniqueIndex("uq_pending_friend_notif_workout").using("btree", table.userId.asc().nullsLast(), table.eventType.asc().nullsLast(), table.workoutId.asc().nullsLast()).where(sql`((workout_id IS NOT NULL) AND (status = 'pending'::text))`),
+	check("pending_friend_notifications_status_check", sql`status = ANY (ARRAY['pending'::text, 'sent'::text, 'dismissed'::text, 'expired'::text])`),
+]);
+
+export const friendships = pgTable("friendships", {
+	userId: text("user_id").notNull(),
+	friendId: text("friend_id").notNull(),
+	status: text().default('pending').notNull(),
+}, (table) => [
+	index("idx_friendships_friend_status").using("btree", table.friendId.asc().nullsLast(), table.status.asc().nullsLast()),
+	index("idx_friendships_user_status").using("btree", table.userId.asc().nullsLast(), table.status.asc().nullsLast()),
+	foreignKey({
+			columns: [table.userId],
+			foreignColumns: [users.userId],
+			name: "friendships_user_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.friendId],
+			foreignColumns: [users.userId],
+			name: "friendships_friend_id_fkey"
+		}).onDelete("cascade"),
+	primaryKey({ columns: [table.userId, table.friendId], name: "friendships_pkey"}),
+	unique("unique_friendship_pair").on(table.userId, table.friendId),
+]);
+
+export const closeFriends = pgTable("close_friends", {
+	userId: text("user_id").notNull(),
+	closeFriendId: text("close_friend_id").notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_close_friends_friend").using("btree", table.closeFriendId.asc().nullsLast()),
+	primaryKey({ columns: [table.userId, table.closeFriendId], name: "close_friends_pkey"}),
+]);
+
+export const dailySteps = pgTable("daily_steps", {
+	userId: text("user_id").notNull(),
+	localDate: date("local_date").notNull(),
+	steps: integer().notNull(),
+	timezoneOffset: integer("timezone_offset").notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	index("idx_daily_steps_user_date").using("btree", table.userId.asc().nullsLast(), table.localDate.desc().nullsFirst()),
+	foreignKey({
+			columns: [table.userId],
+			foreignColumns: [users.userId],
+			name: "daily_steps_user_id_fkey"
+		}).onDelete("cascade"),
+	primaryKey({ columns: [table.userId, table.localDate], name: "daily_steps_pkey"}),
+	check("daily_steps_steps_check", sql`steps >= 0`),
+]);
+
+export const notificationAudienceSettings = pgTable("notification_audience_settings", {
+	userId: text("user_id").notNull(),
+	direction: text().notNull(),
+	eventType: text("event_type").notNull(),
+	activityType: text("activity_type").default('').notNull(),
+	audience: text().notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.userId, table.direction, table.eventType, table.activityType], name: "notification_audience_settings_pkey"}),
+	check("notification_audience_settings_direction_check", sql`direction = ANY (ARRAY['outgoing'::text, 'incoming'::text])`),
+	check("notification_audience_settings_audience_check", sql`audience = ANY (ARRAY['none'::text, 'close'::text, 'all'::text, 'ask'::text, 'match_run'::text])`),
+]);
+
+export const friendNotificationSettings = pgTable("friend_notification_settings", {
+	userId: text("user_id").notNull(),
+	friendId: text("friend_id").notNull(),
+	muted: boolean().default(false).notNull(),
+	nudgesMuted: boolean("nudges_muted").default(false).notNull(),
+	activityMuted: boolean("activity_muted").default(false).notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { withTimezone: true, mode: 'string' }).defaultNow(),
+}, (table) => [
+	primaryKey({ columns: [table.userId, table.friendId], name: "friend_notification_settings_pkey"}),
+]);
+
+export const competitionUsers = pgTable("competition_users", {
+	competitionId: text("competition_id").notNull(),
+	userId: text("user_id").notNull(),
+	progress: jsonb(),
+	inviteStatus: varchar("invite_status", { length: 20 }),
+	placement: integer(),
+	lastKnownRank: integer("last_known_rank"),
+	lastKnownScore: doublePrecision("last_known_score"),
+	lastRankUpdatedAt: timestamp("last_rank_updated_at", { withTimezone: true, mode: 'string' }),
+}, (table) => [
+	index("idx_competition_users_comp").using("btree", table.competitionId.asc().nullsLast()),
+	index("idx_competition_users_competition").using("btree", table.competitionId.asc().nullsLast()),
+	index("idx_competition_users_rank_cache").using("btree", table.competitionId.asc().nullsLast(), table.lastKnownRank.asc().nullsLast()).where(sql`((invite_status)::text = 'accepted'::text)`),
+	index("idx_competition_users_user").using("btree", table.userId.asc().nullsLast()),
+	index("idx_competition_users_user_status").using("btree", table.userId.asc().nullsLast(), table.inviteStatus.asc().nullsLast()),
+	foreignKey({
+			columns: [table.userId],
+			foreignColumns: [users.userId],
+			name: "competition_users_user_id_fkey"
+		}).onDelete("cascade"),
+	foreignKey({
+			columns: [table.competitionId],
+			foreignColumns: [competitions.id],
+			name: "competition_users_competition_id_fkey"
+		}).onDelete("cascade"),
+	primaryKey({ columns: [table.competitionId, table.userId], name: "competition_users_pkey"}),
+	check("competition_users_invite_status_check", sql`(invite_status)::text = ANY ((ARRAY['pending'::character varying, 'accepted'::character varying, 'declined'::character varying])::text[])`),
+]);

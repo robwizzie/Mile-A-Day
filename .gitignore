@@ -26,3 +26,14 @@ xcuserdata/
 
 # Git worktrees
 .worktrees/
+
+# moved out of repo by claude global hook
+docs/superpowers/
+.claude/worktrees/
+
+# Local Claude/Codex tooling & artifacts (machine-local, not shared)
+.claude/screenshots/
+.agents/
+.codex/agents/
+.codex/hooks/
+.codex/hooks.json
