@@ -77,7 +77,7 @@ struct CompetitionWidgetEntryView: View {
         if let summary = entry.summary {
             let color = summary.isStale ? Color.gray : urgencyColor(summary.urgency)
 
-            HStack(spacing: 12) {
+            HStack(spacing: 13) {
                 // Urgency accent bar — same "what needs attention" color
                 // language as the dashboard competition cards.
                 RoundedRectangle(cornerRadius: 2)
@@ -85,8 +85,11 @@ struct CompetitionWidgetEntryView: View {
                     .frame(width: 4)
                     .padding(.vertical, 2)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 7) {
+                // Content spans the full widget height: title row pinned top,
+                // the urgency pill floated to center, and the standings detail
+                // anchored to the bottom edge so the card reads edge-to-edge.
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 8) {
                         ZStack {
                             Circle()
                                 .fill(
@@ -95,16 +98,16 @@ struct CompetitionWidgetEntryView: View {
                                         startPoint: .top, endPoint: .bottom
                                     )
                                 )
-                                .frame(width: 26, height: 26)
+                                .frame(width: 30, height: 30)
                             Image(systemName: "trophy.fill")
-                                .font(.system(size: 12, weight: .bold))
+                                .font(.system(size: 14, weight: .bold))
                                 .foregroundStyle(
                                     LinearGradient(colors: [.yellow, .orange], startPoint: .top, endPoint: .bottom)
                                 )
                         }
 
                         Text(summary.name)
-                            .font(.system(size: 15, weight: .heavy, design: .rounded))
+                            .font(.system(size: 16, weight: .heavy, design: .rounded))
                             .foregroundColor(.white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.75)
@@ -113,24 +116,26 @@ struct CompetitionWidgetEntryView: View {
 
                         if !summary.rankText.isEmpty {
                             Text(summary.rankText)
-                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
                                 .foregroundColor(MADWidgetStyle.secondaryText)
                                 .lineLimit(1)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 5)
                                 .background(Capsule().fill(Color.white.opacity(0.10)))
                         }
                     }
 
+                    Spacer(minLength: 8)
+
                     HStack(spacing: 4) {
                         Text(summary.isStale ? "OPEN FOR TODAY'S STANDING" : summary.pill)
-                            .font(.system(size: 10, weight: .black, design: .rounded))
+                            .font(.system(size: 11, weight: .black, design: .rounded))
                             .tracking(0.6)
                             .foregroundColor(color)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 4)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
                             .background(
                                 Capsule()
                                     .fill(color.opacity(0.16))
@@ -139,14 +144,15 @@ struct CompetitionWidgetEntryView: View {
                         Spacer(minLength: 0)
                     }
 
+                    Spacer(minLength: 8)
+
                     Text(summary.isStale ? "Standings shown are from a previous day." : summary.detail)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
                         .foregroundColor(MADWidgetStyle.secondaryText)
                         .lineLimit(2)
                         .minimumScaleFactor(0.85)
-
-                    Spacer(minLength: 0)
                 }
+                .frame(maxHeight: .infinity)
             }
             // Tap lands directly on this competition's detail screen.
             .widgetURL(URL(string: "mileaday://competition/\(summary.id)"))

@@ -715,6 +715,16 @@ struct FeedWorkoutItem: Codable, Identifiable {
     let is_self: Bool
     var is_hyped: Bool   // var: flipped optimistically when the viewer hypes
 
+    // Detail fields for the inline-expand stats strip. Optional so an older
+    // backend (or a partial response) decodes cleanly instead of failing the
+    // whole feed; the UI falls back to "—" when absent.
+    let total_duration: Double?
+    let calories: Double?
+    let steps: Int?
+    // Total hypes this workout has received from anyone. `var` so it can be
+    // bumped optimistically when the viewer hypes.
+    var hype_count: Int?
+
     var id: String { workout_id }
 
     var displayName: String {
@@ -722,6 +732,41 @@ struct FeedWorkoutItem: Codable, Identifiable {
         if let username = username, !username.isEmpty { return username }
         if let first = first_name { return first }
         return "Friend"
+    }
+
+    /// Elapsed time, e.g. "32m 14s" / "1h 05m". "—" when unavailable.
+    var durationText: String {
+        guard let d = total_duration, d > 0 else { return "—" }
+        let total = Int(d.rounded())
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        if h > 0 { return "\(h)h \(String(format: "%02d", m))m" }
+        if m > 0 { return "\(m)m \(String(format: "%02d", s))s" }
+        return "\(s)s"
+    }
+
+    /// Average pace in minutes per mile, e.g. "8:30". "—" when unavailable.
+    var paceText: String {
+        guard let d = total_duration, d > 0, distance > 0 else { return "—" }
+        let paceMin = (d / 60.0) / distance
+        let m = Int(paceMin)
+        let s = Int((paceMin - Double(m)) * 60)
+        return "\(m):\(String(format: "%02d", s))"
+    }
+
+    /// Whole-calorie string, e.g. "247". "—" when unavailable.
+    var caloriesText: String {
+        guard let c = calories, c > 0 else { return "—" }
+        return "\(Int(c.rounded()))"
+    }
+
+    /// Thousands-grouped step count, or nil when the workout has none.
+    var stepsText: String? {
+        guard let s = steps, s > 0 else { return nil }
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        return f.string(from: NSNumber(value: s)) ?? "\(s)"
     }
 }
 

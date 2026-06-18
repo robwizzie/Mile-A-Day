@@ -37,10 +37,15 @@ export async function searchUsers(req: Request, res: Response) {
 	const { query } = req.query;
 
 	// Match username OR first/last/full name. Email is intentionally NOT
-	// searchable or returned — searching by email leaks who owns an address.
+	// searchable — searching by email leaks who owns an address.
 	// Username matches rank first so an exact handle isn't buried under names.
+	// BACKWARDS COMPAT: the shipped App Store app decodes search results into a
+	// BackendUser whose `email` is a NON-optional String, so omitting the key
+	// hard-fails Codable and breaks user search. Return an empty-string email —
+	// present for the old client, no real address exposed. Drop it once the
+	// email-optional app build has fully rolled out.
 	const results = await db.query(
-		`SELECT user_id, username, first_name, last_name, bio, profile_image_url, current_streak
+		`SELECT user_id, username, first_name, last_name, bio, profile_image_url, current_streak, '' AS email
 		 FROM users
 		 WHERE username ILIKE $1
 		    OR first_name ILIKE $1

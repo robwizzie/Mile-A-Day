@@ -28,7 +28,7 @@ export function Footer() {
               Our Story
             </a>
             <a
-              href="https://apps.apple.com/us/app/mile-a-day/id6504697812"
+              href="https://apps.apple.com/us/app/mile-a-day/id6746970905"
               target="_blank"
               rel="noopener noreferrer"
               className="text-sm text-[#a0a0a0] transition-colors hover:text-[#f5f5f5]"

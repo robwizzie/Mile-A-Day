@@ -37,12 +37,17 @@ export async function getFriendship(user1: string, user2: string): Promise<Frien
 }
 
 export async function getFriends(user: string): Promise<User[]> {
-	// Safe column set only — never expose email through friend lists (these are
-	// viewable by other users, not just the owner).
+	// Safe column set only — never expose a real email through friend lists
+	// (these are viewable by other users, not just the owner).
+	// BACKWARDS COMPAT: the shipped App Store app decodes friends into a
+	// BackendUser whose `email` is a NON-optional String, so a missing key
+	// hard-fails Codable and breaks the friends list. Return an empty-string
+	// email — present for the old client, leaks nothing. Drop it once the
+	// email-optional app build has fully rolled out.
 	const friends = await db.query(
 		`
 		SELECT u.user_id, u.username, u.first_name, u.last_name, u.bio,
-			u.profile_image_url, u.current_streak
+			u.profile_image_url, u.current_streak, '' AS email
 		FROM friendships f
 		JOIN users u ON u.user_id = f.friend_id
 		WHERE f.user_id = $1
@@ -293,13 +298,22 @@ export interface FeedWorkout {
 	completed_at: string;
 	is_self: boolean;
 	is_hyped: boolean;
+	// Detail fields — let the client surface duration/pace/calories/steps
+	// inline without an extra round trip. Additive; older clients ignore them.
+	total_duration: number;
+	calories: number;
+	steps: number | null;
+	// Social-proof tally: total hypes this specific workout has received from
+	// anyone (not just the viewer). Powers the "👏 N" badge on each feed row.
+	hype_count: number;
 }
 
 /**
  * Rolling-48h activity feed: individual workouts from the viewer's accepted
  * friends plus the viewer, newest first. Each row is tagged with whether the
  * viewer has already hyped that specific workout (context_type 'mile', keyed
- * on workout_id) so the UI can show a one-shot 🔥 button.
+ * on workout_id) so the UI can show a one-shot hype button, plus the total
+ * hype tally for that workout.
  */
 export async function getFriendsWorkoutFeed(userId: string): Promise<FeedWorkout[]> {
 	const rows = await db.query<FeedWorkout>(
@@ -320,6 +334,9 @@ export async function getFriendsWorkoutFeed(userId: string): Promise<FeedWorkout
 			w.workout_type,
 			w.distance::float AS distance,
 			w.device_end_date AS completed_at,
+			w.total_duration::float AS total_duration,
+			w.calories::float AS calories,
+			w.steps,
 			(w.user_id = $1) AS is_self,
 			EXISTS (
 				SELECT 1 FROM hype_log h
@@ -327,7 +344,12 @@ export async function getFriendsWorkoutFeed(userId: string): Promise<FeedWorkout
 					AND h.target_id = w.user_id
 					AND h.context_type = 'mile'
 					AND h.context_id = w.workout_id
-			) AS is_hyped
+			) AS is_hyped,
+			(
+				SELECT COUNT(*)::int FROM hype_log hc
+				WHERE hc.context_type = 'mile'
+					AND hc.context_id = w.workout_id
+			) AS hype_count
 		FROM workouts w
 		JOIN circle c ON c.uid = w.user_id
 		JOIN users u ON u.user_id = w.user_id

@@ -85,12 +85,12 @@ struct NotificationInboxView: View {
                 // stops the orange pill from rendering inside a second system pill.
                 if #available(iOS 26.0, *) {
                     ToolbarItem(placement: .navigationBarLeading) {
-                        HypePill(remaining: remaining)
+                        HypePill(remaining: remaining, compact: true)
                     }
                     .sharedBackgroundVisibility(.hidden)
                 } else {
                     ToolbarItem(placement: .navigationBarLeading) {
-                        HypePill(remaining: remaining)
+                        HypePill(remaining: remaining, compact: true)
                     }
                 }
             }
@@ -614,27 +614,9 @@ struct NotificationInboxView: View {
 
                     if canShowHypeButton(notification) {
                         let hyped = isAlreadyHyped(notification)
-                        Button {
-                            if !hyped { performHype(notification) }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: hyped ? "hands.clap.fill" : "hands.clap")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .opacity(hyped ? 0.45 : 1)
-                                Text(hyped ? "Hyped" : "Hype")
-                                    .font(.system(size: 12, weight: .heavy, design: .rounded))
-                            }
-                            .foregroundColor(hyped ? .white.opacity(0.35) : .white)
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 6)
-                            .background(
-                                Capsule()
-                                    .fill(hyped ? Color.white.opacity(0.06) : Color.orange)
-                                    .shadow(color: hyped ? .clear : Color.orange.opacity(0.35), radius: 5, y: 2)
-                            )
+                        HypeButton(isHyped: hyped) {
+                            performHype(notification)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(hyped)
                         .padding(.top, 4)
                     }
                 }
@@ -823,42 +805,6 @@ struct NotificationInboxView: View {
         }
     }
 
-}
-
-/// Toolbar pill showing how many hypes the user has left today.
-/// Reads "👏 N left" and dims to grey once the daily allowance is spent.
-private struct HypePill: View {
-    let remaining: Int
-
-    private var depleted: Bool { remaining <= 0 }
-    private var tint: Color { depleted ? .white.opacity(0.55) : .orange }
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "hands.clap.fill")
-                .font(.system(size: 11, weight: .bold))
-            Text("\(remaining) left")
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
-                .monospacedDigit()
-                .lineLimit(1)
-        }
-        .fixedSize()
-        .foregroundColor(tint)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 5)
-        .background(pillBackground)
-    }
-
-    private var pillBackground: some View {
-        Capsule()
-            .fill(depleted ? Color.white.opacity(0.08) : Color.orange.opacity(0.15))
-            .overlay(
-                Capsule().strokeBorder(
-                    depleted ? Color.white.opacity(0.18) : Color.orange.opacity(0.35),
-                    lineWidth: 1
-                )
-            )
-    }
 }
 
 #Preview {

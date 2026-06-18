@@ -1,3 +1,5 @@
+import { Timer, Flame, TrendingUp } from "lucide-react"
+
 export function HabitSection() {
   return (
     <section
@@ -71,6 +73,31 @@ export function HabitSection() {
               It&apos;s just what you do now. You don&apos;t negotiate with yourself. You lace up and
               go. Congratulations — you&apos;re a runner.
             </p>
+          </div>
+        </div>
+
+        {/* Personal Records */}
+        <div className="mt-16">
+          <h3 className="reveal font-heading text-[24px] tracking-[2px] text-center text-[#a0a0a0] mb-6">
+            TRACK YOUR PERSONAL BESTS
+          </h3>
+          <div className="grid gap-4 sm:grid-cols-3">
+            {[
+              { icon: Timer, label: "Fastest Mile", value: "5:12", color: "#33B34D" },
+              { icon: Flame, label: "Longest Streak", value: "288 days", color: "#FF9900" },
+              { icon: TrendingUp, label: "Most In A Day", value: "26.2 mi", color: "#D94059" },
+            ].map((record, i) => (
+              <div
+                key={record.label}
+                className={`reveal-scale reveal-delay-${i + 1} glass-card rounded-2xl p-5 text-center`}
+              >
+                <record.icon className="mx-auto mb-2 h-5 w-5" style={{ color: record.color }} />
+                <div className="font-heading text-[32px] leading-none text-[#f5f5f5]">{record.value}</div>
+                <div className="mt-1 text-xs font-semibold uppercase tracking-wider" style={{ color: record.color }}>
+                  {record.label}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>

@@ -2,8 +2,10 @@ import { Navbar } from "@/components/navbar"
 import { HeroSection } from "@/components/hero-section"
 import { MarqueeSection } from "@/components/marquee-section"
 import { FeaturesSection } from "@/components/features-section"
+import { BadgeShowcaseSection } from "@/components/badge-showcase-section"
 import { HabitSection } from "@/components/habit-section"
 import { CompetitionsSection } from "@/components/competitions-section"
+import { SocialSection } from "@/components/social-section"
 import { HowItWorksSection } from "@/components/how-it-works-section"
 import { StorySection } from "@/components/story-section"
 import { CtaSection } from "@/components/cta-section"
@@ -18,8 +20,10 @@ export default function Home() {
       <HeroSection />
       <MarqueeSection />
       <FeaturesSection />
+      <BadgeShowcaseSection />
       <HabitSection />
       <CompetitionsSection />
+      <SocialSection />
       <HowItWorksSection />
       <StorySection />
       <CtaSection />

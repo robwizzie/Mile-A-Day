@@ -147,21 +147,25 @@ struct MediumStreakView: View {
         Calendar.current.component(.weekday, from: entry.date) - 1
     }
 
+    private var completedThisWeek: Int {
+        entry.weekCompletions.prefix(todayIndex + 1).filter { $0 }.count
+    }
+
     var body: some View {
         HStack(spacing: 18) {
             // Streak ring
             MADWidgetRing(
                 progress: entry.liveProgress,
-                size: 84,
+                size: 92,
                 lineWidth: 7,
                 isComplete: entry.isGoalCompleted
             ) {
-                VStack(spacing: 0) {
+                VStack(spacing: -1) {
                     Image(systemName: "flame.fill")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundColor(MADWidgetStyle.orange)
                     Text("\(entry.streak)")
-                        .font(.system(size: 26, weight: .heavy, design: .rounded))
+                        .font(.system(size: 32, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
@@ -172,13 +176,13 @@ struct MediumStreakView: View {
                 }
             }
 
-            // Week dots
-            VStack(alignment: .leading, spacing: 9) {
-                MADWidgetLabel(
-                    icon: entry.isGoalCompleted ? "checkmark.seal.fill" : "calendar",
-                    text: entry.isGoalCompleted ? "MILE DONE — STREAK SAFE" : "THIS WEEK",
-                    color: entry.isGoalCompleted ? MADWidgetStyle.green : MADWidgetStyle.red
-                )
+            // Right column spans the full height: section label pinned top,
+            // the week dots (the focal element) centered, and an always-present
+            // status line anchored to the bottom edge.
+            VStack(alignment: .leading, spacing: 0) {
+                MADWidgetLabel(icon: "calendar", text: "THIS WEEK", color: MADWidgetStyle.red)
+
+                Spacer(minLength: 8)
 
                 HStack(spacing: 7) {
                     ForEach(0..<7, id: \.self) { index in
@@ -186,9 +190,9 @@ struct MediumStreakView: View {
                         let isToday = index == todayIndex
                         let isFuture = index > todayIndex
 
-                        VStack(spacing: 4) {
+                        VStack(spacing: 5) {
                             Text(Self.dayLetters[index])
-                                .font(.system(size: 8, weight: .bold, design: .rounded))
+                                .font(.system(size: 9, weight: .bold, design: .rounded))
                                 .foregroundColor(isToday ? .white : MADWidgetStyle.secondaryText)
 
                             ZStack {
@@ -200,11 +204,11 @@ struct MediumStreakView: View {
                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
                                             : AnyShapeStyle(Color.white.opacity(isFuture ? 0.06 : 0.14))
                                     )
-                                    .frame(width: 21, height: 21)
+                                    .frame(width: 24, height: 24)
 
                                 if completed {
                                     Image(systemName: "figure.run")
-                                        .font(.system(size: 9, weight: .bold))
+                                        .font(.system(size: 10, weight: .bold))
                                         .foregroundColor(.white)
                                 }
 
@@ -212,29 +216,57 @@ struct MediumStreakView: View {
                                     Circle()
                                         .stroke(
                                             entry.isGoalCompleted ? MADWidgetStyle.green : MADWidgetStyle.red,
-                                            lineWidth: 1.8
+                                            lineWidth: 2
                                         )
-                                        .frame(width: 26, height: 26)
+                                        .frame(width: 29, height: 29)
                                 }
                             }
                         }
                     }
                 }
 
-                if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
-                    HStack(spacing: 4) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 9, weight: .bold))
-                        Text(timeRemaining)
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    .foregroundColor(.red)
-                }
+                Spacer(minLength: 8)
+
+                statusLine
             }
+            .frame(maxHeight: .infinity)
 
             Spacer(minLength: 0)
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    // Always-present bottom line so the card never renders an empty band:
+    // red countdown when at risk, a green confirmation once the mile is done,
+    // otherwise a quiet motivational nudge with this week's tally.
+    @ViewBuilder
+    private var statusLine: some View {
+        if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10, weight: .bold))
+                Text(timeRemaining)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundColor(.red)
+        } else if entry.isGoalCompleted {
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 10, weight: .bold))
+                Text("Mile done — streak safe 🔥")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundColor(MADWidgetStyle.green)
+        } else {
+            Text("\(completedThisWeek)/7 this week · run to keep it alive")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(MADWidgetStyle.secondaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
     }
 }
@@ -394,20 +426,22 @@ struct HomeScreenStreakView: View {
     // WidgetKit renders this view statically — .onAppear-driven @State
     // animation never plays, so the real progress value is drawn directly.
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+
             MADWidgetRing(
                 progress: entry.liveProgress,
-                size: 92,
-                lineWidth: 7,
+                size: 98,
+                lineWidth: 8,
                 isComplete: entry.isGoalCompleted
             ) {
-                VStack(spacing: 0) {
+                VStack(spacing: -1) {
                     Image(systemName: entry.isAtRisk ? "exclamationmark.triangle.fill" : "flame.fill")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: 14, weight: .bold))
                         .foregroundColor(entry.isAtRisk ? .red : MADWidgetStyle.orange)
 
                     Text("\(entry.streak)")
-                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .font(.system(size: 36, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
@@ -419,20 +453,35 @@ struct HomeScreenStreakView: View {
                 }
             }
 
-            // Status line: countdown when at risk, otherwise streak state
-            if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
-                Text(timeRemaining)
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(.red)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            } else if entry.isGoalCompleted {
-                Text("Streak safe 🔥")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundColor(MADWidgetStyle.green)
-            }
+            Spacer(minLength: 0)
+
+            // Always-present status line so the ring never floats over an empty
+            // band: countdown when at risk, confirmation when done, otherwise
+            // today's live progress toward the mile.
+            statusLine
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var statusLine: some View {
+        if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
+            Text(timeRemaining)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundColor(.red)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        } else if entry.isGoalCompleted {
+            Text("Streak safe 🔥")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundColor(MADWidgetStyle.green)
+        } else {
+            Text("\(Int(entry.liveProgress * 100))% of today's mile")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundColor(MADWidgetStyle.secondaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
     }
 }
 

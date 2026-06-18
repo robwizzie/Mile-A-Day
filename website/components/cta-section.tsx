@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { LiveCommunityCount } from "./live-community-count"
 
 export function CtaSection() {
   const [email, setEmail] = useState("")
@@ -23,6 +24,9 @@ export function CtaSection() {
         <span className="reveal mb-4 inline-block text-sm font-semibold uppercase tracking-widest text-[#c72554]">
           Join the Movement
         </span>
+        <div className="mb-8 flex justify-center">
+          <LiveCommunityCount />
+        </div>
         <h2 className="reveal-scale reveal-delay-1 font-heading text-[clamp(48px,8vw,96px)] leading-[0.95] tracking-[-1px] text-[#f5f5f5]">
           YOUR STREAK<br />STARTS <span className="text-[#c72554]">TODAY</span>
         </h2>
@@ -32,7 +36,7 @@ export function CtaSection() {
         </p>
         <div className="reveal reveal-delay-3 mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
           <a
-            href="https://apps.apple.com/us/app/mile-a-day/id6504697812"
+            href="https://apps.apple.com/us/app/mile-a-day/id6746970905"
             target="_blank"
             rel="noopener noreferrer"
             className="glass-button inline-flex items-center gap-3 rounded-2xl px-7 py-4 text-[#ffffff] transition-all hover:-translate-y-1"
