@@ -64,9 +64,34 @@ app.get(
 	}
 );
 
-app.use('/auth', authRoutes);
-app.use('/dev', devRoutes);
-app.use('/badges', publicBadgesRouter);
+// Public endpoint: minimal profile by username for the marketing site's
+// /u/<username> share pages. Intentionally excludes email and any other
+// sensitive fields — this is world-readable.
+app.get(
+  "/public/users/:username",
+  (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    next();
+  },
+  async (req, res) => {
+    const db = PostgresService.getInstance();
+    const results = await db.query(
+      `SELECT user_id, username, first_name, last_name, bio,
+              profile_image_url, current_streak
+       FROM users
+       WHERE LOWER(username) = LOWER($1)`,
+      [req.params.username],
+    );
+    if (!results.length) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    res.json(results[0]);
+  },
+);
+
+app.use("/auth", authRoutes);
+app.use("/dev", devRoutes);
+app.use("/badges", publicBadgesRouter);
 app.use('/public', publicRoutes);
 
 app.use(authenticateToken);

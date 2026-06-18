@@ -15,11 +15,17 @@ import CoreMotion
 // The key invariant: currentDistance must NEVER be overwritten with a smaller value
 // by the tracking system itself. Only stopTracking() and explicit reset can clear it.
 class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
+    /// App-level singleton so tracking survives leaving the tracking screen.
+    /// Previously this was a per-view `@StateObject`, so navigating back to the
+    /// dashboard deallocated it and silently stopped GPS/pedometer mid-workout.
+    static let shared = WorkoutLocationManager()
+
     private let locationManager = CLLocationManager()
     private let pedometer = CMPedometer()
     private var lastLocation: CLLocation?
     private var isUsingPedometer = false
-    private var isTracking = false
+    /// Published so the app-wide "workout in progress" banner can appear/hide.
+    @Published private(set) var isTracking = false
 
     // For indoor pedometer mode: the pedometer reports cumulative distance from its
     // start date. When recovering a workout, we set this offset to the previously
@@ -27,10 +33,17 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     // replacing it. For GPS mode this is unused (GPS is incremental).
     private var pedometerOffset: Double = 0.0
 
+    // Direct-to-disk persistence of live distance from the background callbacks.
+    // The foreground timer normally saves state, but it's suspended in the
+    // background — without this, distance accrued while backgrounded is lost if
+    // iOS terminates the app. Throttled to limit UserDefaults writes.
+    private var lastDistancePersist = Date.distantPast
+    private let distancePersistInterval: TimeInterval = 2.0
+
     @Published var currentDistance: Double = 0.0 // Distance in miles
     @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
 
-    override init() {
+    private override init() {
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
@@ -71,9 +84,18 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
                         let newTotal = self.pedometerOffset + distanceInMiles
                         DispatchQueue.main.async {
                             self.currentDistance = newTotal
+                            self.persistDistanceThrottled()
                         }
                     }
                 }
+                // Keep-alive: pedometer updates are suspended with the app when
+                // the phone locks (CoreMotion batches them until foreground),
+                // which froze the Live Activity for indoor workouts. Running
+                // low-accuracy location updates keeps the app alive via the
+                // `location` background mode; distance from these fixes is
+                // ignored in pedometer mode (see didUpdateLocations).
+                locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+                locationManager.startUpdatingLocation()
             } else {
                 isUsingPedometer = false
                 startGPSTracking()
@@ -87,6 +109,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         if authorizationStatus == .notDetermined {
             requestPermission()
         }
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
         locationManager.startUpdatingLocation()
     }
 
@@ -96,15 +119,20 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
 
         if isUsingPedometer {
             pedometer.stopUpdates()
-        } else {
-            locationManager.stopUpdatingLocation()
         }
+        // Location runs in both modes (distance source for GPS, keep-alive
+        // for pedometer) — always stop it.
+        locationManager.stopUpdatingLocation()
         lastLocation = nil
     }
 
     // MARK: - CLLocationManagerDelegate
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        // In pedometer mode location is only a background keep-alive —
+        // distance comes from CMPedometer and there's no meaningful route.
+        guard !isUsingPedometer else { return }
+
         guard let newLocation = locations.last else { return }
 
         // Only use accurate locations
@@ -121,6 +149,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             if distanceInMiles < 0.1 {
                 DispatchQueue.main.async {
                     self.currentDistance += distanceInMiles
+                    self.persistDistanceThrottled()
                 }
             }
         }
@@ -129,6 +158,17 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
 
         // Persist route point for recovery
         InProgressWorkoutStore.addRoutePoint(newLocation)
+    }
+
+    /// Persist live distance straight to the recovery store from the background
+    /// data callbacks, so distance survives app termination even when the
+    /// foreground timer is suspended. Throttled; no-op when not tracking.
+    private func persistDistanceThrottled() {
+        guard isTracking else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastDistancePersist) >= distancePersistInterval else { return }
+        lastDistancePersist = now
+        InProgressWorkoutStore.updateDistance(currentDistance)
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -150,6 +190,7 @@ struct InProgressWorkoutBanner: View {
 
     @State private var currentTime = Date()
     @State private var latestState: InProgressWorkoutState?
+    @State private var tickTimer: Timer?
 
     // Compute real-time elapsed time based on start time
     private var realTimeElapsedSeconds: TimeInterval {
@@ -220,14 +261,21 @@ struct InProgressWorkoutBanner: View {
         }
         .buttonStyle(PlainButtonStyle())
         .onAppear {
-            // Start a timer to update the time display every second
-            Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            // Start a timer to update the time display every second. Stored so
+            // it can be invalidated on disappear — this banner now appears on
+            // every tab, so an un-invalidated timer would pile up on each switch.
+            tickTimer?.invalidate()
+            tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
                 currentTime = Date()
                 // Reload the latest state to get updated distance
                 if let updated = InProgressWorkoutStore.load(), updated.isActive {
                     latestState = updated
                 }
             }
+        }
+        .onDisappear {
+            tickTimer?.invalidate()
+            tickTimer = nil
         }
     }
 }

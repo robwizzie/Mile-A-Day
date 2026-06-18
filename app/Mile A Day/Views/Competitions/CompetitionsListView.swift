@@ -854,6 +854,9 @@ struct EditCompetitionWrapper: View {
             competition: $competition,
             competitionService: service
         )
+        // Form sheet — an accidental slide-down would silently discard edits.
+        // Cancel/Save in the toolbar are the explicit exits.
+        .interactiveDismissDisabled()
     }
 }
 

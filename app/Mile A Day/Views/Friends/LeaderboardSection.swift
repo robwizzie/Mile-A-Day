@@ -4,7 +4,7 @@ import SwiftUI
 
 @Observable
 final class LeaderboardViewModel {
-    var metric: LeaderboardMetric = .milesRan {
+    var metric: LeaderboardMetric = .milesTotal {
         didSet { if oldValue != metric { refresh() } }
     }
     var period: LeaderboardPeriod = .week {

@@ -25,29 +25,44 @@ struct InstructionsBanner: View {
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
 
-                        Text("Start a run in-app or log workouts from Apple Fitness. Tap the ")
-                            + Text(Image(systemName: "info.circle"))
-                                .foregroundColor(.white.opacity(0.7))
-                            + Text(" icon anytime for help.")
+                        Text("Start a run in-app or log workouts from Apple Fitness — everything syncs automatically.")
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.7))
                 }
 
-                Button {
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        hasSeenInstructions = true
+                HStack(spacing: 10) {
+                    Button {
+                        showInstructions = true
+                    } label: {
+                        Text("Show me how")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                Capsule()
+                                    .fill(MADTheme.Colors.madRed.opacity(0.8))
+                            )
                     }
-                } label: {
-                    Text("Got it!")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(
-                            Capsule()
-                                .fill(MADTheme.Colors.madRed.opacity(0.8))
-                        )
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            hasSeenInstructions = true
+                        }
+                    } label: {
+                        Text("Got it!")
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.85))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                Capsule()
+                                    .fill(Color.white.opacity(0.10))
+                                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+                            )
+                    }
                 }
             }
             .padding(16)
@@ -260,6 +275,207 @@ struct InstructionRow: View {
                         .strokeBorder(color.opacity(0.22), lineWidth: 1)
                 )
         )
+    }
+}
+
+// MARK: - First-Run Spotlight Tour
+
+/// Steps of the first-run dashboard tour, in presentation order.
+enum DashboardTourStep: Int, CaseIterable {
+    case progress
+    case week
+    case challenge
+    case actions
+    case explore
+
+    var icon: String {
+        switch self {
+        case .progress:  return "figure.run"
+        case .week:      return "flame.fill"
+        case .challenge: return "trophy.fill"
+        case .actions:   return "bell.fill"
+        case .explore:   return "person.2.fill"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .progress:  return "Your Daily Mile"
+        case .week:      return "Your Streak"
+        case .challenge: return "Daily Challenges"
+        case .actions:   return "Quick Actions"
+        case .explore:   return "Better with Friends"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .progress:
+            return "This is today's progress. Run or walk a mile anywhere — Apple Watch and Fitness workouts count automatically — or tap Start Mile to track right here."
+        case .week:
+            return "Hit your goal every day to build a streak. Flip between your streak, this week's chart, and trends."
+        case .challenge:
+            return "A fresh bonus challenge every day. Finish it to earn medals and keep things interesting."
+        case .actions:
+            return "Notifications, manual workout logging, and your daily goal all live up here."
+        case .explore:
+            return "Add friends and start competitions from the tabs below — racing a friend is the easiest way to keep a streak alive. You're all set: go get your mile!"
+        }
+    }
+}
+
+/// Collects the on-screen bounds of tour-target views via anchor preferences.
+struct DashboardTourAnchorKey: PreferenceKey {
+    static var defaultValue: [Int: Anchor<CGRect>] = [:]
+    static func reduce(value: inout [Int: Anchor<CGRect>], nextValue: () -> [Int: Anchor<CGRect>]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+extension View {
+    /// Marks this view as the spotlight target for a tour step.
+    func tourAnchor(_ step: DashboardTourStep) -> some View {
+        anchorPreference(key: DashboardTourAnchorKey.self, value: .bounds) { [step.rawValue: $0] }
+    }
+}
+
+/// Dimmed overlay that spotlights one dashboard element per step with a
+/// cut-out, plus a callout card with Next/Skip. Steps whose target is
+/// off-screen (or untagged, like the tab bar) fall back to a centered card.
+struct DashboardTourOverlay: View {
+    let anchors: [Int: Anchor<CGRect>]
+    let proxy: GeometryProxy
+    @Binding var stepIndex: Int
+    let onFinish: () -> Void
+
+    private var step: DashboardTourStep {
+        DashboardTourStep(rawValue: stepIndex) ?? .explore
+    }
+
+    private var isLastStep: Bool {
+        stepIndex >= DashboardTourStep.allCases.count - 1
+    }
+
+    /// Spotlight rect for the current step, only when (mostly) visible.
+    private var targetRect: CGRect? {
+        guard let anchor = anchors[step.rawValue] else { return nil }
+        let rect = proxy[anchor]
+        let height = proxy.size.height
+        guard rect.minY >= -12, rect.maxY <= height + 12 else { return nil }
+        return rect.insetBy(dx: -6, dy: -6)
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            // Dim layer with a punched-out spotlight.
+            Color.black.opacity(0.72)
+                .mask {
+                    Rectangle()
+                        .overlay(alignment: .topLeading) {
+                            if let rect = targetRect {
+                                RoundedRectangle(cornerRadius: 18)
+                                    .frame(width: rect.width, height: rect.height)
+                                    .offset(x: rect.minX, y: rect.minY)
+                                    .blendMode(.destinationOut)
+                            }
+                        }
+                        .compositingGroup()
+                }
+                .ignoresSafeArea()
+                .onTapGesture { advance() }
+
+            // Spotlight ring
+            if let rect = targetRect {
+                RoundedRectangle(cornerRadius: 18)
+                    .strokeBorder(MADTheme.Colors.madRed, lineWidth: 2)
+                    .frame(width: rect.width, height: rect.height)
+                    .offset(x: rect.minX, y: rect.minY)
+                    .allowsHitTesting(false)
+            }
+
+            calloutCard
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: stepIndex)
+    }
+
+    private var calloutCard: some View {
+        let cardEstimatedHeight: CGFloat = 190
+        let y: CGFloat = {
+            guard let rect = targetRect else {
+                return max((proxy.size.height - cardEstimatedHeight) / 2, 24)
+            }
+            // Below the target if there's room, otherwise above it.
+            if rect.maxY + 16 + cardEstimatedHeight < proxy.size.height {
+                return rect.maxY + 16
+            }
+            return max(rect.minY - cardEstimatedHeight - 16, 24)
+        }()
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: step.icon)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(
+                        LinearGradient(colors: [MADTheme.Colors.madRed, .orange], startPoint: .top, endPoint: .bottom)
+                    )
+                Text(step.title)
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Spacer()
+                Button("Skip") { onFinish() }
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+            }
+
+            Text(step.message)
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                // Progress dots
+                HStack(spacing: 6) {
+                    ForEach(DashboardTourStep.allCases, id: \.rawValue) { s in
+                        Capsule()
+                            .fill(s.rawValue == stepIndex ? MADTheme.Colors.madRed : Color.white.opacity(0.25))
+                            .frame(width: s.rawValue == stepIndex ? 18 : 6, height: 6)
+                    }
+                }
+
+                Spacer()
+
+                Button {
+                    advance()
+                } label: {
+                    Text(isLastStep ? "Let's Go!" : "Next")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .background(Capsule().fill(MADTheme.Colors.madRed))
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Color(red: 0.11, green: 0.10, blue: 0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.4), radius: 16, y: 6)
+        )
+        .padding(.horizontal, 20)
+        .offset(y: y)
+    }
+
+    private func advance() {
+        if isLastStep {
+            onFinish()
+        } else {
+            stepIndex += 1
+        }
     }
 }
 

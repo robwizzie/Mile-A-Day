@@ -13,7 +13,9 @@ struct WorkoutTrackingView: View {
     let startingDistance: Double
     @Environment(\.dismiss) var dismiss
 
-    @StateObject private var locationManager = WorkoutLocationManager()
+    // Shared singleton — tracking keeps running when this view is dismissed
+    // (e.g. user navigates back to the dashboard mid-workout).
+    @ObservedObject private var locationManager = WorkoutLocationManager.shared
     @State private var showActivitySelection = true
     @State private var showLocationTypeSelection = false
     @State private var selectedActivityType: HKWorkoutActivityType?
@@ -29,8 +31,25 @@ struct WorkoutTrackingView: View {
     @State private var showPreviousProgress = false // Show notification when reaching previous progress
     @State private var hasReachedPreviousProgress = false // Track if we've reached starting distance
     @State private var showRecap = false
+    // Recap snapshots, frozen at the moment the workout ends. The recap can't
+    // read live values: after the save, the dashboard re-feeds this view fresh
+    // goal/startingDistance (which now INCLUDE the finished workout), so live
+    // reads would double-count the daily total while the recap is on screen.
+    @State private var recapDistance: Double = 0
+    @State private var recapDuration: TimeInterval = 0
+    @State private var recapStartingDistance: Double = 0
+    @State private var recapGoalDistance: Double = 0
     @State private var showStopConfirmation = false // Confirmation before ending workout
     @State private var isStopping = false // Prevents double-stop and shows "Ending..." UI
+    /// Whether the Live Activity goal-completed alert was already sent (or the
+    /// goal was already met before this workout started, so no alert is due).
+    @State private var hasSentGoalAlert = false
+    /// Live Activity push throttling — the elapsed clock ticks natively via
+    /// Text(timerInterval:), so pushes are only needed when distance moves.
+    /// Pushing every second exhausted ActivityKit's update budget and the
+    /// system started deferring updates (frozen activity on the lock screen).
+    @State private var lastActivityPushDate: Date = .distantPast
+    @State private var lastPushedDistance: Double = -1
     @State private var showEndWorkoutError = false // Show error alert when end fails
     @State private var endWorkoutErrorMessage = "" // Error message for end workout failure
     @State private var endWorkoutTimeoutTask: DispatchWorkItem? // Timeout for end workout flow
@@ -513,9 +532,13 @@ struct WorkoutTrackingView: View {
                 countdownContent
             } else if showRecap {
                 WorkoutRecapView(
-                    distance: currentDistance,
-                    duration: elapsedTime,
-                    goalDistance: goalDistance,
+                    distance: recapDistance,
+                    duration: recapDuration,
+                    activityName: selectedActivityType == .running ? "Run" : "Walk",
+                    activityIcon: selectedActivityType == .running ? "figure.run" : "figure.walk",
+                    startingDistance: recapStartingDistance,
+                    goalDistance: recapGoalDistance,
+                    streak: userManager.currentUser.streak,
                     onDismiss: { dismiss() }
                 )
             } else {
@@ -776,6 +799,12 @@ struct WorkoutTrackingView: View {
         // Capture final distance before stopping tracking
         let finalDistance = currentDistance
 
+        // Freeze the recap stats now, before anything refreshes underneath us
+        recapDistance = finalDistance
+        recapDuration = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
+        recapStartingDistance = startingDistance
+        recapGoalDistance = goalDistance
+
         // Flush any buffered route points
         InProgressWorkoutStore.flushRoutePoints()
 
@@ -950,8 +979,16 @@ struct WorkoutTrackingView: View {
             totalDailyDistance: totalDailyDistance,
             elapsedTime: realTimeElapsed,
             goalDistance: goalDistance,
-            activityType: selectedActivityType == .running ? "Running" : "Walking"
+            activityType: selectedActivityType == .running ? "Running" : "Walking",
+            timerStartDate: Date().addingTimeInterval(-realTimeElapsed),
+            streak: userManager.currentUser.streak
         )
+
+        // If the goal was already met before this workout (post-goal extra
+        // miles), don't fire the "mile complete" island alert mid-session.
+        if goalDistance > 0 && totalDailyDistance >= goalDistance {
+            hasSentGoalAlert = true
+        }
 
         do {
             let activity = try Activity.request(
@@ -988,15 +1025,53 @@ struct WorkoutTrackingView: View {
             startLiveActivity()
         }
         if let activity = workoutActivity {
-            let updatedState = WorkoutActivityAttributes.ContentState(
-                distance: freshDistance,
-                totalDailyDistance: freshTotalDaily,
-                elapsedTime: realTimeElapsed,
-                goalDistance: goalDistance,
-                activityType: selectedActivityType == .running ? "Running" : "Walking"
-            )
-            Task {
-                await activity.update(ActivityContent(state: updatedState, staleDate: nil))
+            // Goal crossed during THIS workout → one celebratory alert update
+            // that briefly expands the Dynamic Island / lights up the watch.
+            let goalJustCompleted = goalDistance > 0
+                && freshTotalDaily >= goalDistance
+                && !hasSentGoalAlert
+
+            // Throttle: push on goal-cross, when distance moved ≥ 0.01 mi, or
+            // every 30s (keeps pace fresh and renews the staleDate). The
+            // elapsed clock needs no pushes at all — it ticks natively.
+            let shouldPush = goalJustCompleted
+                || abs(freshDistance - lastPushedDistance) >= 0.01
+                || Date().timeIntervalSince(lastActivityPushDate) >= 30
+
+            if shouldPush {
+                if goalJustCompleted {
+                    hasSentGoalAlert = true
+                }
+                lastActivityPushDate = Date()
+                lastPushedDistance = freshDistance
+
+                let updatedState = WorkoutActivityAttributes.ContentState(
+                    distance: freshDistance,
+                    totalDailyDistance: freshTotalDaily,
+                    elapsedTime: realTimeElapsed,
+                    goalDistance: goalDistance,
+                    activityType: selectedActivityType == .running ? "Running" : "Walking",
+                    timerStartDate: Date().addingTimeInterval(-realTimeElapsed),
+                    streak: userManager.currentUser.streak
+                )
+                // staleDate lets the system dim the activity if the app dies and
+                // stops sending updates, instead of showing confident stale data.
+                let content = ActivityContent(state: updatedState, staleDate: Date().addingTimeInterval(180))
+
+                Task {
+                    if goalJustCompleted {
+                        await activity.update(
+                            content,
+                            alertConfiguration: AlertConfiguration(
+                                title: "Mile complete! 🔥",
+                                body: "Your streak is safe for today.",
+                                sound: .default
+                            )
+                        )
+                    } else {
+                        await activity.update(content)
+                    }
+                }
             }
         }
 
@@ -1023,12 +1098,16 @@ struct WorkoutTrackingView: View {
         let freshTotalDaily = startingDistance + freshDistance
         let realTimeElapsed = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
 
+        // Final state: no timerStartDate, so the ended activity shows the
+        // frozen final time instead of a clock that keeps ticking.
         let finalState = WorkoutActivityAttributes.ContentState(
             distance: freshDistance,
             totalDailyDistance: freshTotalDaily,
             elapsedTime: realTimeElapsed,
             goalDistance: goalDistance,
-            activityType: selectedActivityType == .running ? "Running" : "Walking"
+            activityType: selectedActivityType == .running ? "Running" : "Walking",
+            timerStartDate: nil,
+            streak: userManager.currentUser.streak
         )
 
         // Capture the ID before clearing the reference so the orphan cleanup can exclude it

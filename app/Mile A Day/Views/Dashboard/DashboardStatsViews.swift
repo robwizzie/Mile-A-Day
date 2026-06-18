@@ -11,22 +11,15 @@ struct StatsGridView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
-            // Header with toggle
-            HStack {
-                Text("Your Stats")
-                    .font(.headline)
-
-                Spacer()
-
-                // Toggle between All Time and Current Streak
-                Picker("Stats View", selection: $selectedStatsView) {
-                    ForEach(UnifiedStatsGrid.StatsViewType.allCases, id: \.self) { type in
-                        Text(type.rawValue).tag(type)
-                    }
+            // Toggle between All Time and Current Streak. The section title
+            // comes from the collapsible wrapper on the dashboard, so no
+            // duplicate "Your Stats" header here.
+            Picker("Stats View", selection: $selectedStatsView) {
+                ForEach(UnifiedStatsGrid.StatsViewType.allCases, id: \.self) { type in
+                    Text(type.rawValue).tag(type)
                 }
-                .pickerStyle(SegmentedPickerStyle())
-                .frame(width: 180)
             }
+            .pickerStyle(SegmentedPickerStyle())
 
             // Show unified stats view based on selection
             UnifiedStatsGrid(
@@ -110,12 +103,9 @@ struct RecentWorkoutsView: View {
     private static let pageSize: Int = 10
 
     var body: some View {
+        // Section title comes from the collapsible wrapper on the dashboard,
+        // so no duplicate "Recent Workouts" header here.
         VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Recent Workouts")
-                .font(MADTheme.Typography.headline)
-                .foregroundColor(.primary)
-                .padding(.horizontal, MADTheme.Spacing.xs)
-
             if workouts.isEmpty {
                 Text("No recent workouts found")
                     .foregroundColor(.secondary)

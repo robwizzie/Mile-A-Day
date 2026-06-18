@@ -42,6 +42,12 @@ struct DashboardView: View {
     /// Controls presentation of the manual workout entry sheet.
     @State private var showManualWorkoutEntry = false
 
+    /// Cached "is there an active in-progress workout?" flag. Reading
+    /// `InProgressWorkoutStore.load()` decodes the full persisted workout
+    /// (up to thousands of GPS points) — too expensive to do per render,
+    /// so views read this flag and it's refreshed on appear / cover dismiss.
+    @State private var hasActiveWorkout = false
+
     /// Competition opened directly from a Dashboard rivalry-hint row. Sheet
     /// presentation, not a tab switch — keeps the user on Dashboard in the
     /// back stack so dismiss returns them to where they tapped.
@@ -57,6 +63,20 @@ struct DashboardView: View {
 
     /// Navigation state for badges view from celebration
     @State private var navigateToBadgesFromCelebration = false
+
+    /// First-run spotlight tour state. The flag persists so the tour only
+    /// auto-plays once; users can revisit the guide from Help & Support.
+    @AppStorage("hasSeenDashboardTour") private var hasSeenDashboardTour = false
+    /// Shared with InstructionsBanner. Existing users (who already dismissed
+    /// the banner) shouldn't get a first-run tour after an app update, and a
+    /// completed tour supersedes the banner.
+    @AppStorage("hasSeenInstructions") private var hasSeenInstructions = false
+    @State private var showDashboardTour = false
+    @State private var tourStep = 0
+
+    /// Getting-started checklist dismissal. The card also auto-hides once all
+    /// items are complete, so this only matters for users who close it early.
+    @AppStorage("gettingStartedDismissed") private var gettingStartedDismissed = false
 
 
     /// Build goal completion stats for the celebration
@@ -211,6 +231,13 @@ struct DashboardView: View {
             print("[Dashboard] ⏳ Skipping celebration check - initial data not yet loaded")
             return
         }
+        // Defer while the workout tracker covers the dashboard — the celebration
+        // overlay lives on this view, so it would play hidden behind the cover.
+        // The cover's onDismiss re-runs this check once the dashboard is visible.
+        guard !showWorkoutView else {
+            print("[Dashboard] ⏸️ Deferring celebration check — workout tracker is on screen")
+            return
+        }
         guard currentState.isCompleted,
               healthManager.todaysDistance > 0 else {
             return
@@ -225,12 +252,18 @@ struct DashboardView: View {
 
         print("[Dashboard] 🎉 Goal completion detected! Distance: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles)")
         celebrationManager.addCelebration(.goalCompleted(stats: stats))
+        // Baseline the post-goal counter at the goal-completing workout so the
+        // "Extra Mile" message only fires for workouts finished AFTER this one,
+        // not for the same workout once HealthKit's count catches up.
+        celebrationManager.lastPostGoalWorkoutCount = max(healthManager.todaysWorkoutCount, 1)
     }
 
     /// Show encouragement when the user completes additional workouts after reaching their goal.
     /// Uses workout count to ensure it only fires when a new workout finishes (not mid-workout).
     private func checkAndShowPostGoalEncouragement() {
-        guard currentState.isCompleted,
+        // Same deferral as the goal celebration: don't play it behind the cover.
+        guard !showWorkoutView,
+              currentState.isCompleted,
               celebrationManager.hasShownGoalCelebrationToday,
               healthManager.todaysDistance > 0,
               healthManager.todaysWorkoutCount > celebrationManager.lastPostGoalWorkoutCount else {
@@ -265,6 +298,7 @@ struct DashboardView: View {
                 title: "Mile A Day",
                 actions: dashboardHeaderActions
             )
+            .tourAnchor(.actions)
 
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 0) {
@@ -288,6 +322,7 @@ struct DashboardView: View {
 
                     // Week view: user can toggle between chart and dots
                     weekViewSection
+                        .tourAnchor(.week)
                         .padding(.top, 8)
                         .padding(.bottom, 8)
 
@@ -307,6 +342,28 @@ struct DashboardView: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .background(MADTheme.Colors.appBackgroundGradient)
+        // First-run spotlight tour — resolves the tagged sections' bounds and
+        // dims everything else. Sits above dashboard content but below sheets.
+        .overlayPreferenceValue(DashboardTourAnchorKey.self) { anchors in
+            if showDashboardTour {
+                GeometryReader { proxy in
+                    DashboardTourOverlay(
+                        anchors: anchors,
+                        proxy: proxy,
+                        stepIndex: $tourStep
+                    ) {
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            showDashboardTour = false
+                        }
+                        hasSeenDashboardTour = true
+                        // The tour covers everything the banner says.
+                        hasSeenInstructions = true
+                    }
+                }
+                .transition(.opacity)
+                .zIndex(50)
+            }
+        }
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $showNotificationInbox) {
             NotificationInboxView(competitionService: competitionService) { newCount in
@@ -321,61 +378,37 @@ struct DashboardView: View {
                 // When the user dismisses the workout tracker while a workout is still active,
                 // show a compact banner so they can easily resume.
                 let hasActive = InProgressWorkoutStore.load()?.isActive == true
+                hasActiveWorkout = hasActive
                 showInProgressBanner = hasActive
 
-                // If goal was already met, show encouragement for the extra effort
+                // Surface any celebration earned during the workout now that the
+                // dashboard is visible again (checks are deferred while covered):
+                // goal completion first, then the extra-mile encouragement.
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 500_000_000)
+                    checkAndShowGoalCelebration()
                     checkAndShowPostGoalEncouragement()
                 }
             }) {
-                if let state = InProgressWorkoutStore.load(), state.isActive {
-                    WorkoutTrackingView(
-                        healthManager: healthManager,
-                        userManager: userManager,
-                        goalDistance: state.goalDistance,
-                        startingDistance: state.startingDistance
-                    )
-                } else {
-                    WorkoutTrackingView(
-                        healthManager: healthManager,
-                        userManager: userManager,
-                        goalDistance: currentState.goal,
-                        startingDistance: currentState.distance
-                    )
-                }
+                // One WorkoutTrackingView with stable structural identity. This was
+                // an if/else between two WorkoutTrackingView initializers — when the
+                // workout finished, finishCleanup() cleared the persisted state, the
+                // branch flipped, and SwiftUI rebuilt the tracker from scratch: all
+                // @State (including showRecap) was lost and the user landed back on
+                // the activity-selection screen instead of the workout recap.
+                let saved = InProgressWorkoutStore.load()
+                let activeState = (saved?.isActive == true) ? saved : nil
+                WorkoutTrackingView(
+                    healthManager: healthManager,
+                    userManager: userManager,
+                    goalDistance: activeState?.goalDistance ?? currentState.goal,
+                    startingDistance: activeState?.startingDistance ?? currentState.distance
+                )
             }
             .onAppear {
                 refreshData()
                 // Sync widget data immediately
                 syncWidgetData()
-
-                // PHASE 1: Listen for workout index completion
-                NotificationCenter.default.addObserver(
-                    forName: NSNotification.Name("WorkoutIndexReady"),
-                    object: nil,
-                    queue: .main
-                ) { [weak userManager, weak healthManager] _ in
-                    guard let userManager = userManager, let healthManager = healthManager else { return }
-
-                    print("[Dashboard] 🔔 Workout index ready, updating user data and syncing widgets")
-
-                    // Update user manager with correct streak from index
-                    userManager.updateUserWithHealthKitData(
-                        retroactiveStreak: healthManager.retroactiveStreak,
-                        currentMiles: healthManager.todaysDistance,
-                        totalMiles: healthManager.totalLifetimeMiles,
-                        fastestPace: healthManager.fastestMilePace,
-                        mostMilesInDay: healthManager.mostMilesInOneDay
-                    )
-
-                    // Sync widgets with correct data
-                    WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles)
-                    WidgetDataStore.save(streak: userManager.currentUser.streak)
-                    WidgetCenter.shared.reloadAllTimelines()
-
-                    print("[Dashboard] ✅ User data and widgets updated with streak: \(userManager.currentUser.streak)")
-                }
 
                 // Fetch fastest mile pace from backend database
                 fetchFastestPaceFromBackend()
@@ -385,18 +418,40 @@ struct DashboardView: View {
 
                 // If there is a persisted in‑progress workout when the dashboard appears,
                 // automatically surface it so the user can't "lose" their active workout.
-                if let state = InProgressWorkoutStore.load(), state.isActive {
+                // Cache the flag so view bodies don't re-decode the (potentially large)
+                // persisted workout JSON on every render.
+                let active = InProgressWorkoutStore.load()?.isActive == true
+                hasActiveWorkout = active
+                if active {
                     showWorkoutView = true
                 }
 
-                // Listen for Live Activity / deep‑link requests to open the workout.
-                NotificationCenter.default.addObserver(
-                    forName: NSNotification.Name("MAD_OpenWorkoutFromLiveActivity"),
-                    object: nil,
-                    queue: .main
-                ) { _ in
-                    showWorkoutView = true
+                // First-run tour: wait a beat for layout to settle, and stand
+                // down if a celebration or the workout tracker is on screen —
+                // the flag stays unset so the tour tries again next visit.
+                if !hasSeenDashboardTour && !hasSeenInstructions && healthManager.isAuthorized {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                        if !hasSeenDashboardTour,
+                           !celebrationManager.isShowingCelebration,
+                           !showWorkoutView {
+                            tourStep = 0
+                            withAnimation(.easeIn(duration: 0.3)) {
+                                showDashboardTour = true
+                            }
+                        }
+                    }
                 }
+            }
+            // Self-cleaning replacements for the old NotificationCenter.addObserver
+            // calls in onAppear — those registered a fresh observer on every
+            // appearance and never removed them, so each event re-ran the handler
+            // (and reloaded widgets) once per past dashboard visit.
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("WorkoutIndexReady"))) { _ in
+                print("[Dashboard] 🔔 Workout index ready, updating user data and syncing widgets")
+                applyHealthDataToUserManager()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MAD_OpenWorkoutFromLiveActivity"))) { _ in
+                showWorkoutView = true
             }
             .sheet(isPresented: $showGoalSheet) {
                 GoalSettingSheet(
@@ -478,9 +533,26 @@ struct DashboardView: View {
         let state = currentState
         WidgetDataStore.save(todayMiles: state.distance, goal: state.goal)
         WidgetDataStore.save(streak: userManager.currentUser.streak)
+        WidgetDataStore.save(weekCompletions: currentWeekCompletions())
+        // No blanket reloadAllTimelines() here: the store reloads the right
+        // widget kinds itself and skips no-op writes, which preserves the
+        // per-day widget reload budget iOS enforces.
+    }
 
-        // Force widget updates
-        WidgetCenter.shared.reloadAllTimelines()
+    /// Sun–Sat goal-completion flags for the current week, for the medium
+    /// streak widget's week-dots row.
+    private func currentWeekCompletions() -> [Bool] {
+        let calendar = Calendar.current
+        let today = Date()
+        let weekday = calendar.component(.weekday, from: today)
+        guard let startOfWeek = calendar.date(
+            byAdding: .day, value: -(weekday - 1), to: calendar.startOfDay(for: today)
+        ) else { return [] }
+
+        return (0..<7).map { offset in
+            guard let day = calendar.date(byAdding: .day, value: offset, to: startOfWeek) else { return false }
+            return healthManager.dailyMileGoals[calendar.startOfDay(for: day)] ?? false
+        }
     }
 
     private func applyHealthDataToUserManager() {
@@ -508,6 +580,11 @@ struct DashboardView: View {
         isRefreshing = true
         healthManager.fetchAllWorkoutData()
         fetchFastestPaceFromBackend()
+        // The HealthKit fetches above are fire-and-forget; hold the
+        // pull-to-refresh spinner briefly so fresh values have a chance to
+        // land before it dismisses — previously it vanished instantly and
+        // looked like the refresh did nothing.
+        try? await Task.sleep(nanoseconds: 1_200_000_000)
         applyHealthDataToUserManager()
         isRefreshing = false
     }
@@ -809,7 +886,9 @@ struct DashboardView: View {
             inProgressBannerSection
             competitionInvitesSection
             instructionsSection
+            gettingStartedSection
             todayProgressSection
+                .tourAnchor(.progress)
             // Cross-comp rivalries — surface "you're X behind Y in [comp]"
             // hints from every active competition so users see all their
             // The competitions dropdown (activeCompetitionSection) replaces
@@ -817,6 +896,7 @@ struct DashboardView: View {
             // surfaces its own focus signal, so a separate rivalries section
             // would just duplicate information.
             dailyChallengeSection
+                .tourAnchor(.challenge)
             friendActivitySection
             activeCompetitionSection
             stepsAndBadgesSection
@@ -867,6 +947,73 @@ struct DashboardView: View {
         )
     }
 
+    // MARK: - Getting Started Checklist
+
+    private var gettingStartedItems: [GettingStartedChecklistCard.Item] {
+        [
+            GettingStartedChecklistCard.Item(
+                id: "first-mile",
+                icon: "figure.run",
+                title: "Do your first mile",
+                subtitle: "Run or walk it — any workout counts",
+                isDone: healthManager.totalLifetimeMiles >= 0.95
+                    || userManager.currentUser.streak > 0
+                    || currentState.isCompleted,
+                action: { showWorkoutView = true }
+            ),
+            GettingStartedChecklistCard.Item(
+                id: "add-friend",
+                icon: "person.badge.plus",
+                title: "Add your first friend",
+                subtitle: "Streaks are easier together",
+                isDone: !friendService.friends.isEmpty,
+                action: {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("MAD_SwitchTab"),
+                        object: nil,
+                        userInfo: ["tab": 2]
+                    )
+                }
+            ),
+            GettingStartedChecklistCard.Item(
+                id: "first-medal",
+                icon: "medal.fill",
+                title: "Earn your first medal",
+                subtitle: "Your first mile unlocks one",
+                isDone: userManager.currentUser.badges.contains { !$0.isLocked },
+                action: { navigateToBadgesFromCelebration = true }
+            ),
+            GettingStartedChecklistCard.Item(
+                id: "join-competition",
+                icon: "trophy.fill",
+                title: "Join a competition",
+                subtitle: "Challenge a friend to keep you honest",
+                isDone: !competitionService.competitions.isEmpty,
+                action: {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("MAD_SwitchTab"),
+                        object: nil,
+                        userInfo: ["tab": 1]
+                    )
+                }
+            )
+        ]
+    }
+
+    @ViewBuilder
+    private var gettingStartedSection: some View {
+        let items = gettingStartedItems
+        // Auto-hides for established users (everything done) — only new
+        // users ever see it, and they can dismiss it early.
+        if !gettingStartedDismissed && items.contains(where: { !$0.isDone }) {
+            GettingStartedChecklistCard(items: items) {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    gettingStartedDismissed = true
+                }
+            }
+        }
+    }
+
     private var streakSection: some View {
         StreakCard(
             streak: userManager.currentUser.streak,
@@ -897,6 +1044,7 @@ struct DashboardView: View {
             fastestPace: userManager.currentUser.fastestMilePace,
             mostMiles: healthManager.mostMilesInOneDay,
             totalMiles: healthManager.totalLifetimeMiles,
+            hasActiveWorkout: hasActiveWorkout,
             healthManager: healthManager,
             userManager: userManager,
             showWorkoutView: $showWorkoutView

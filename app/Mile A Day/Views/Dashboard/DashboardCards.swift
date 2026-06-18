@@ -505,6 +505,9 @@ struct TodayProgressCard: View {
     let fastestPace: TimeInterval
     let mostMiles: Double
     let totalMiles: Double
+    /// Passed in by DashboardView (which caches it) instead of decoding the
+    /// persisted in-progress workout JSON on every render.
+    let hasActiveWorkout: Bool
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     @Environment(\.colorScheme) var colorScheme
@@ -571,7 +574,7 @@ struct TodayProgressCard: View {
                 showWorkoutView = true
             }) {
                 HStack(spacing: 8) {
-                    if let state = InProgressWorkoutStore.load(), state.isActive {
+                    if hasActiveWorkout {
                         Image(systemName: "play.circle.fill")
                             .font(.title3)
                         Text("Resume Workout")

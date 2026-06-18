@@ -36,6 +36,35 @@ export interface HypeContext {
 	contextLabel: string;
 }
 
+export interface ReceivedHype {
+	sender_id: string;
+	username: string | null;
+	first_name: string | null;
+	last_name: string | null;
+	profile_image_url: string | null;
+	context_type: string | null;
+	context_label: string | null;
+	created_at: string;
+}
+
+/**
+ * Recent hypes the user has RECEIVED, newest first, with sender info — powers
+ * the "you got hyped" surface on the profile so it isn't push-only.
+ */
+export async function getReceivedHypes(userId: string, limit: number = 30): Promise<ReceivedHype[]> {
+	const rows = await db.query<ReceivedHype>(
+		`SELECT h.sender_id, u.username, u.first_name, u.last_name, u.profile_image_url,
+			h.context_type, h.context_label, h.created_at
+		FROM hype_log h
+		JOIN users u ON u.user_id = h.sender_id
+		WHERE h.target_id = $1
+		ORDER BY h.created_at DESC
+		LIMIT $2`,
+		[userId, limit]
+	);
+	return rows;
+}
+
 /**
  * Atomically insert a hype_log row only if the sender is still under the
  * daily limit. Optional context describes what was hyped (mile/badge/pr) and
