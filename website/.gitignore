@@ -8,3 +8,8 @@ node_modules/
 .next/
 .env*.local
 .DS_Store
+
+# TypeScript incremental build artifact — generated, must not be committed.
+# When tracked, Nixpacks mounts a cache dir over the COPY'd file and the
+# Docker build fails with "create mountpoint ... not a directory".
+*.tsbuildinfo
