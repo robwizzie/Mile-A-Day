@@ -61,7 +61,7 @@ export function Navbar() {
             </a>
           ))}
           <a
-            href="https://apps.apple.com/us/app/mile-a-day/id6504697812"
+            href="https://apps.apple.com/us/app/mile-a-day/id6746970905"
             target="_blank"
             rel="noopener noreferrer"
             className="glass-button inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-[#ffffff]"
@@ -98,7 +98,7 @@ export function Navbar() {
               </a>
             ))}
             <a
-              href="https://apps.apple.com/us/app/mile-a-day/id6504697812"
+              href="https://apps.apple.com/us/app/mile-a-day/id6746970905"
               target="_blank"
               rel="noopener noreferrer"
               className="glass-button mt-2 inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold text-[#ffffff]"

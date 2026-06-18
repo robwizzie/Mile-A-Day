@@ -18,7 +18,7 @@ struct HelpAndSupportView: View {
 
             ScrollView {
                 VStack(spacing: MADTheme.Spacing.lg) {
-                    // Getting Started guide — the same walkthrough first-time
+                    // Welcome tour — the same full-screen walkthrough first-time
                     // users see on the dashboard, re-openable any time.
                     Button {
                         showGettingStarted = true
@@ -29,10 +29,10 @@ struct HelpAndSupportView: View {
                                 .foregroundStyle(MADTheme.Colors.redGradient)
 
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Getting Started Guide")
+                                Text("Take the Tour")
                                     .font(MADTheme.Typography.headline)
                                     .foregroundColor(.primary)
-                                Text("How streaks, syncing, and medals work")
+                                Text("Streaks, syncing, competitions, and medals")
                                     .font(MADTheme.Typography.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -146,8 +146,8 @@ struct HelpAndSupportView: View {
         .navigationTitle("Help & Support")
         .navigationBarTitleDisplayMode(.large)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .sheet(isPresented: $showGettingStarted) {
-            InstructionsView()
+        .fullScreenCover(isPresented: $showGettingStarted) {
+            WelcomeTourView { showGettingStarted = false }
         }
     }
 

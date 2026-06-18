@@ -232,7 +232,7 @@ struct ProfileView: View {
         }
     }
 
-    /// "You got hyped" — recent 🔥 reactions friends sent you.
+    /// "You got hyped" — recent 👏 reactions friends sent you.
     private var recentHypesSection: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             HStack {
@@ -252,7 +252,8 @@ struct ProfileView: View {
                             size: 40
                         )
                         VStack(alignment: .leading, spacing: 2) {
-                            (Text("🔥 ")
+                            (Text(Image(systemName: "hands.clap.fill")).foregroundColor(.orange)
+                                + Text("  ")
                                 + Text(hype.displayName).fontWeight(.bold)
                                 + Text(" \(hype.actionText)"))
                                 .font(.system(size: 14, weight: .medium, design: .rounded))

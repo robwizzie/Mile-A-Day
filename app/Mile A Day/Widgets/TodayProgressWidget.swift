@@ -300,45 +300,54 @@ struct HomeScreenProgressView: View {
     let streakCompleted: Bool
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 18) {
             // Progress ring with % (checkmark when done)
             MADWidgetRing(
                 progress: progress,
-                size: 78,
-                lineWidth: 8,
+                size: 92,
+                lineWidth: 9,
                 isComplete: streakCompleted
             ) {
                 if streakCompleted {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 26, weight: .heavy))
+                        .font(.system(size: 32, weight: .heavy))
                         .foregroundColor(MADWidgetStyle.green)
                 } else {
-                    VStack(spacing: 0) {
+                    VStack(spacing: -2) {
                         Text("\(Int(progress * 100))")
-                            .font(.system(size: 24, weight: .heavy, design: .rounded))
+                            .font(.system(size: 32, weight: .heavy, design: .rounded))
                             .foregroundColor(.white)
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
                         Text("%")
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
                             .foregroundColor(MADWidgetStyle.secondaryText)
                     }
                 }
             }
 
-            VStack(alignment: .leading, spacing: 7) {
+            // Right column spans the full widget height: section label pinned
+            // to the top, the hero stat floated to the optical center, and the
+            // status / CTA row anchored to the bottom edge. The Spacers do the
+            // vertical distribution so the card reads edge-to-edge instead of
+            // a small block hovering in the middle.
+            VStack(alignment: .leading, spacing: 0) {
                 MADWidgetLabel(icon: "figure.run", text: "TODAY'S MILE")
 
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Spacer(minLength: 4)
+
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(String(format: "%.2f", milesCompleted))
-                        .font(.system(size: 28, weight: .heavy, design: .rounded))
+                        .font(.system(size: 38, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.6)
+                        .minimumScaleFactor(0.5)
                     Text(String(format: "of %.1f mi", goal))
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundColor(MADWidgetStyle.secondaryText)
                 }
+
+                Spacer(minLength: 4)
 
                 // Status row: celebration when done, otherwise remaining
                 // distance + a Start Mile button that deep-links straight into
@@ -348,9 +357,9 @@ struct HomeScreenProgressView: View {
                 if streakCompleted {
                     HStack(spacing: 5) {
                         Image(systemName: "flame.fill")
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.system(size: 12, weight: .bold))
                         Text("Streak safe — see you tomorrow!")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                     }
@@ -359,7 +368,7 @@ struct HomeScreenProgressView: View {
                     HStack(spacing: 8) {
                         let remaining = max(goal - milesCompleted, 0.0)
                         Text(String(format: "%.2f mi to go", remaining))
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
                             .foregroundColor(MADWidgetStyle.secondaryText)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
@@ -371,11 +380,11 @@ struct HomeScreenProgressView: View {
                                 Image(systemName: "play.fill")
                                     .font(.system(size: 10, weight: .bold))
                                 Text("Start Mile")
-                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                                    .font(.system(size: 13, weight: .bold, design: .rounded))
                             }
                             .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 8)
                             .background(
                                 Capsule()
                                     .fill(MADWidgetStyle.red)
@@ -385,9 +394,9 @@ struct HomeScreenProgressView: View {
                     }
                 }
             }
-
-            Spacer(minLength: 0)
+            .frame(maxHeight: .infinity)
         }
+        .frame(maxHeight: .infinity)
     }
 }
 

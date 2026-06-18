@@ -28,7 +28,6 @@ struct DashboardView: View {
     @State private var showGoalSheet = false
     @State private var newGoalMiles: Double = 1.0
     @State private var isRefreshing = false
-    @State private var showInstructions = false
     @State private var showWorkoutUploadAlert = false
     @StateObject private var celebrationManager = CelebrationManager.shared
     @Environment(\.scenePhase) private var scenePhase
@@ -74,15 +73,13 @@ struct DashboardView: View {
     @ObservedObject private var pendingService = PendingNotificationsService.shared
     @State private var showPendingSheet = false
 
-    /// First-run spotlight tour state. The flag persists so the tour only
-    /// auto-plays once; users can revisit the guide from Help & Support.
-    @AppStorage("hasSeenDashboardTour") private var hasSeenDashboardTour = false
-    /// Shared with InstructionsBanner. Existing users (who already dismissed
-    /// the banner) shouldn't get a first-run tour after an app update, and a
-    /// completed tour supersedes the banner.
+    /// First-run welcome tour state. The flag persists so the full-screen
+    /// tour only auto-plays once; users can replay it any time from the
+    /// dashboard welcome banner or Help & Support.
+    @AppStorage("hasSeenWelcomeTour") private var hasSeenWelcomeTour = false
+    /// Shared with InstructionsBanner — completing the tour hides the banner.
     @AppStorage("hasSeenInstructions") private var hasSeenInstructions = false
-    @State private var showDashboardTour = false
-    @State private var tourStep = 0
+    @State private var showWelcomeTour = false
 
     /// Getting-started checklist dismissal. The card also auto-hides once all
     /// items are complete, so this only matters for users who close it early.
@@ -335,7 +332,6 @@ struct DashboardView: View {
                 title: "Mile A Day",
                 actions: dashboardHeaderActions
             )
-            .tourAnchor(.actions)
 
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 0) {
@@ -359,7 +355,6 @@ struct DashboardView: View {
 
                     // Week view: user can toggle between chart and dots
                     weekViewSection
-                        .tourAnchor(.week)
                         .padding(.top, 8)
                         .padding(.bottom, 8)
 
@@ -379,26 +374,15 @@ struct DashboardView: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .background(MADTheme.Colors.appBackgroundGradient)
-        // First-run spotlight tour — resolves the tagged sections' bounds and
-        // dims everything else. Sits above dashboard content but below sheets.
-        .overlayPreferenceValue(DashboardTourAnchorKey.self) { anchors in
-            if showDashboardTour {
-                GeometryReader { proxy in
-                    DashboardTourOverlay(
-                        anchors: anchors,
-                        proxy: proxy,
-                        stepIndex: $tourStep
-                    ) {
-                        withAnimation(.easeOut(duration: 0.25)) {
-                            showDashboardTour = false
-                        }
-                        hasSeenDashboardTour = true
-                        // The tour covers everything the banner says.
-                        hasSeenInstructions = true
-                    }
-                }
-                .transition(.opacity)
-                .zIndex(50)
+        // First-run welcome tour — a full-screen, paged walkthrough of every
+        // feature and mode. Replaces the old spotlight overlay, which
+        // mis-highlighted dashboard elements that were scrolled off-screen.
+        .fullScreenCover(isPresented: $showWelcomeTour) {
+            WelcomeTourView {
+                showWelcomeTour = false
+                hasSeenWelcomeTour = true
+                // Completing the tour supersedes the welcome banner.
+                hasSeenInstructions = true
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -467,18 +451,16 @@ struct DashboardView: View {
                     showWorkoutView = true
                 }
 
-                // First-run tour: wait a beat for layout to settle, and stand
-                // down if a celebration or the workout tracker is on screen —
-                // the flag stays unset so the tour tries again next visit.
-                if !hasSeenDashboardTour && !hasSeenInstructions && healthManager.isAuthorized {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
-                        if !hasSeenDashboardTour,
+                // First-run welcome tour: wait a beat for layout to settle, and
+                // stand down if a celebration or the workout tracker is on
+                // screen — the flag stays unset so the tour tries again next
+                // visit.
+                if !hasSeenWelcomeTour {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                        if !hasSeenWelcomeTour,
                            !celebrationManager.isShowingCelebration,
                            !showWorkoutView {
-                            tourStep = 0
-                            withAnimation(.easeIn(duration: 0.3)) {
-                                showDashboardTour = true
-                            }
+                            showWelcomeTour = true
                         }
                     }
                 }
@@ -504,9 +486,6 @@ struct DashboardView: View {
                 )
                 .presentationDetents([.height(300)])
                     }
-            .sheet(isPresented: $showInstructions) {
-                InstructionsView()
-            }
             .sheet(isPresented: $showPendingSheet) {
                 PendingNotificationsSheet()
             }
@@ -991,7 +970,6 @@ struct DashboardView: View {
             instructionsSection
             gettingStartedSection
             todayProgressSection
-                .tourAnchor(.progress)
             // Cross-comp rivalries — surface "you're X behind Y in [comp]"
             // hints from every active competition so users see all their
             // The competitions dropdown (activeCompetitionSection) replaces
@@ -999,7 +977,6 @@ struct DashboardView: View {
             // surfaces its own focus signal, so a separate rivalries section
             // would just duplicate information.
             dailyChallengeSection
-                .tourAnchor(.challenge)
             friendActivitySection
             activeCompetitionSection
             stepsAndBadgesSection
@@ -1045,9 +1022,7 @@ struct DashboardView: View {
     }
 
     private var instructionsSection: some View {
-        InstructionsBanner(
-            showInstructions: $showInstructions
-        )
+        InstructionsBanner(onTakeTour: { showWelcomeTour = true })
     }
 
     // MARK: - Getting Started Checklist

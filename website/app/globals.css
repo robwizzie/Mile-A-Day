@@ -175,6 +175,10 @@
     animation: none;
     transform: none;
   }
+  .hero-gradient::before {
+    animation: none;
+    opacity: 0.7;
+  }
 }
 
 /* Smooth scrolling */
@@ -345,4 +349,79 @@ html {
 /* Marquee pause on hover */
 .animate-marquee:hover {
   animation-play-state: paused;
+}
+
+/* Hero gradient — static base + opacity-only animated glow (GPU composited) */
+.hero-gradient {
+  background:
+    radial-gradient(ellipse 600px 500px at 15% 10%, rgba(199,37,84,0.13) 0%, transparent 70%),
+    radial-gradient(ellipse 500px 600px at 85% 85%, rgba(139,21,56,0.10) 0%, transparent 70%),
+    radial-gradient(ellipse 400px 300px at 50% 40%, rgba(42,10,26,0.08) 0%, transparent 60%),
+    #0a0a0a;
+}
+
+/* Animated glow — only animates opacity (no layout/paint, pure compositor) */
+.hero-gradient::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 500px 400px at 30% 20%, rgba(199,37,84,0.10) 0%, transparent 70%);
+  animation: hero-glow-pulse 6s ease-in-out infinite alternate;
+  will-change: opacity;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes hero-glow-pulse {
+  0%   { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+/* Competition type cards — per-type accent glow on hover. Only transform,
+   border-color, and box-shadow animate (no layout/paint thrash), with a
+   spring-like ease so the lift feels native. Set --accent inline per card. */
+.type-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition:
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.35s ease,
+    box-shadow 0.35s ease;
+  will-change: transform;
+}
+
+.type-card:hover {
+  transform: translateY(-4px);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: 0 14px 40px -14px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .type-card,
+  .type-card:hover {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* Medal cards — subtle lift with a rarity-tinted glow on hover. Border and
+   background stay static (set inline per rarity); only transform and shadow
+   animate so the hover stays buttery. */
+.medal-card {
+  transition:
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.3s ease;
+  will-change: transform;
+}
+
+.medal-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 32px -14px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .medal-card,
+  .medal-card:hover {
+    transition: none;
+    transform: none;
+  }
 }

@@ -52,6 +52,8 @@ struct FriendsListView: View {
     @State private var hasLoadedFeed = false
     @State private var hypesRemaining: Int?
     @State private var hypingWorkoutIds: Set<String> = []
+    // Rows the user has tapped open to reveal the duration/pace/calories/steps strip.
+    @State private var expandedWorkoutIds: Set<String> = []
 
     // Shared namespace so a friend row can slide smoothly between
     // "Cheer Them On" and "Done Today" when their status flips.
@@ -303,8 +305,8 @@ struct FriendsListView: View {
                 } else if feedItems.isEmpty {
                     FriendEmptyStateView(
                         title: "No Activity Yet",
-                        message: "When you and your friends log workouts, they'll show up here — give each other a 🔥.",
-                        systemImage: "flame",
+                        message: "When you and your friends log workouts, they'll show up here — give each other some hype 👏.",
+                        systemImage: "hands.clap",
                         actionTitle: "Add Friends",
                         action: { showingSearch = true }
                     )
@@ -327,9 +329,7 @@ struct FriendsListView: View {
     private var hypesRemainingChip: some View {
         HStack {
             Spacer()
-            Text("🔥 \(hypesRemaining ?? HypeService.dailyLimit)/\(HypeService.dailyLimit) hypes left today")
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundColor(.white.opacity(0.55))
+            HypePill(remaining: hypesRemaining ?? HypeService.dailyLimit)
             Spacer()
         }
         .padding(.top, 2)
@@ -348,73 +348,131 @@ struct FriendsListView: View {
     }
 
     private func feedRow(_ item: FeedWorkoutItem) -> some View {
-        HStack(spacing: 12) {
-            Button {
-                selectedUser = makeBackendUser(from: item)
-            } label: {
-                AvatarView(name: item.displayName, imageURL: item.profile_image_url, size: 44)
-            }
-            .buttonStyle(.plain)
+        let expanded = expandedWorkoutIds.contains(item.workout_id)
+        let completedMile = item.distance >= 1.0
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(item.displayName)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                HStack(spacing: 5) {
-                    Image(systemName: workoutIcon(item.workout_type))
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(workoutColor(item.workout_type))
-                    Text("\(workoutVerb(item.workout_type)) \(String(format: "%.2f", item.distance)) mi")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.8))
-                    Text("· \(relativeTime(item.completed_at))")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.45))
-                        .lineLimit(1)
+        return VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                // Avatar opens the friend's profile.
+                Button {
+                    selectedUser = makeBackendUser(from: item)
+                } label: {
+                    AvatarView(name: item.displayName, imageURL: item.profile_image_url, size: 44)
+                }
+                .buttonStyle(.plain)
+
+                // Tapping the body expands the row to reveal workout details.
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                        if expanded { expandedWorkoutIds.remove(item.workout_id) }
+                        else { expandedWorkoutIds.insert(item.workout_id) }
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(item.displayName)
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                            if completedMile {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(.green)
+                            }
+                        }
+                        HStack(spacing: 5) {
+                            Image(systemName: workoutIcon(item.workout_type))
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(workoutColor(item.workout_type))
+                            Text("\(workoutVerb(item.workout_type)) \(String(format: "%.2f", item.distance)) mi")
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .foregroundColor(.white.opacity(0.8))
+                            Text("· \(relativeTime(item.completed_at))")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundColor(.white.opacity(0.45))
+                                .lineLimit(1)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.white.opacity(0.3))
+                                .rotationEffect(.degrees(expanded ? 180 : 0))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                // Trailing: social-proof tally + the hype action.
+                HStack(spacing: 8) {
+                    if let count = item.hype_count, count > 0 {
+                        HypeTally(count: count)
+                    }
+                    if !item.is_self {
+                        HypeButton(
+                            isHyped: item.is_hyped,
+                            isBusy: hypingWorkoutIds.contains(item.workout_id),
+                            isOutOfHypes: (hypesRemaining ?? HypeService.dailyLimit) <= 0 && !item.is_hyped
+                        ) {
+                            Task { await sendHype(for: item) }
+                        }
+                    }
                 }
             }
+            .padding(12)
 
-            Spacer(minLength: 4)
-
-            if !item.is_self {
-                hypeButton(item)
+            if expanded {
+                workoutDetailStrip(item)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
             }
         }
-        .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 14)
-                .fill(item.distance >= 1.0 ? Color.green.opacity(0.06) : Color.white.opacity(0.04))
+                .fill(completedMile ? Color.green.opacity(0.06) : Color.white.opacity(0.04))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(item.distance >= 1.0 ? Color.green.opacity(0.18) : Color.white.opacity(0.08), lineWidth: 1)
+                        .strokeBorder(completedMile ? Color.green.opacity(0.18) : Color.white.opacity(0.08), lineWidth: 1)
                 )
         )
     }
 
-    private func hypeButton(_ item: FeedWorkoutItem) -> some View {
-        let busy = hypingWorkoutIds.contains(item.workout_id)
-        let outOfHypes = (hypesRemaining ?? HypeService.dailyLimit) <= 0 && !item.is_hyped
-        return Button {
-            Task { await sendHype(for: item) }
-        } label: {
-            HStack(spacing: 4) {
-                Text("🔥").font(.system(size: 12))
-                Text(item.is_hyped ? "Hyped" : "Hype")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+    /// Inline stats revealed when a feed row is tapped open: time, pace,
+    /// calories, and (when present) steps. Pulled straight from the feed
+    /// payload so there's no extra fetch.
+    private func workoutDetailStrip(_ item: FeedWorkoutItem) -> some View {
+        HStack(spacing: 8) {
+            detailStat(icon: "clock.fill", value: item.durationText, label: "Time")
+            detailStat(icon: "speedometer", value: item.paceText, label: "Min/Mi")
+            detailStat(icon: "flame.fill", value: item.caloriesText, label: "Cal")
+            if let steps = item.stepsText {
+                detailStat(icon: "shoeprints.fill", value: steps, label: "Steps")
             }
-            .foregroundColor(item.is_hyped ? .orange : (outOfHypes ? .white.opacity(0.3) : .white.opacity(0.85)))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(item.is_hyped ? Color.orange.opacity(0.15) : Color.white.opacity(0.06))
-                    .overlay(Capsule().strokeBorder(item.is_hyped ? Color.orange.opacity(0.4) : Color.white.opacity(0.12), lineWidth: 1))
-            )
-            .opacity(busy ? 0.5 : 1)
         }
-        .buttonStyle(.plain)
-        .disabled(item.is_hyped || busy || outOfHypes)
+    }
+
+    private func detailStat(icon: String, value: String, label: String) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.white.opacity(0.65))
+            Text(value)
+                .font(.system(size: 14, weight: .heavy, design: .rounded))
+                .foregroundColor(.white)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label.uppercased())
+                .font(.system(size: 8, weight: .heavy, design: .rounded))
+                .tracking(0.6)
+                .foregroundColor(.white.opacity(0.4))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 11)
+                .fill(Color.white.opacity(0.05))
+        )
     }
 
     private func makeBackendUser(from item: FeedWorkoutItem) -> BackendUser {
@@ -519,14 +577,16 @@ struct FriendsListView: View {
         let context = HypeContext(contextType: "mile", contextId: item.workout_id, contextLabel: label)
         do {
             let response = try await HypeService.sendHype(targetUserId: item.user_id, context: context)
-            markHyped(item.workout_id)
+            // New hype landed — reflect it and bump the social-proof tally.
+            markHyped(item.workout_id, bumpCount: true)
             hypesRemaining = response.hypes_remaining
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch let error as APIError {
             switch error {
             case .conflict:
-                // Already hyped this workout — reflect that state.
-                markHyped(item.workout_id)
+                // Already hyped this workout server-side — reflect the hyped
+                // state but DON'T bump the count (it already includes this one).
+                markHyped(item.workout_id, bumpCount: false)
             case .rateLimited:
                 hypesRemaining = 0
                 UINotificationFeedbackGenerator().notificationOccurred(.warning)
@@ -538,9 +598,11 @@ struct FriendsListView: View {
         }
     }
 
-    private func markHyped(_ workoutId: String) {
-        if let idx = feedItems.firstIndex(where: { $0.workout_id == workoutId }) {
-            feedItems[idx].is_hyped = true
+    private func markHyped(_ workoutId: String, bumpCount: Bool) {
+        guard let idx = feedItems.firstIndex(where: { $0.workout_id == workoutId }) else { return }
+        feedItems[idx].is_hyped = true
+        if bumpCount {
+            feedItems[idx].hype_count = (feedItems[idx].hype_count ?? 0) + 1
         }
     }
 
