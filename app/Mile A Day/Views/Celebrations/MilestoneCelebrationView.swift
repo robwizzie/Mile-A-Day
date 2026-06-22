@@ -167,9 +167,11 @@ struct MilestoneCelebrationView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
-                // Safe area spacing for bottom (tab bar + home indicator)
+                // Clear the floating tab bar + home indicator (this overlay
+                // ignores the safe area, so the Continue button would otherwise
+                // sit under the tab bar).
                 Spacer()
-                    .frame(height: 56)
+                    .frame(height: 110)
             }
         }
         .ignoresSafeArea()

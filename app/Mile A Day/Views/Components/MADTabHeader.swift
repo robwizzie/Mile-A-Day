@@ -240,6 +240,11 @@ struct MADPillPicker<Tag: Hashable>: View {
                 }
                 Text(option.title)
                     .font(.system(size: 13, weight: .bold, design: .rounded))
+                    // Scale the label down rather than wrapping char-by-char
+                    // (e.g. "Leaderboa rd") when many pills share a narrow row
+                    // or the device uses Display Zoom / large text.
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                 if option.badgeCount > 0 {
                     Text("\(option.badgeCount)")
                         .font(.system(size: 10, weight: .heavy, design: .rounded))

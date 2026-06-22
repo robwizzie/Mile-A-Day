@@ -42,11 +42,19 @@ struct UserProfileCard: View {
                             Text(user.username ?? "Unknown")
                                 .font(MADTheme.Typography.headline)
                                 .foregroundColor(MADTheme.Colors.primaryText)
+                                // Truncate long names with an ellipsis instead of
+                                // wrapping char-by-char (e.g. "Char les") when the
+                                // row is narrow next to the action button.
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                                .truncationMode(.tail)
 
                             if user.displayName != user.username {
                                 Text(user.displayName)
                                     .font(MADTheme.Typography.caption)
                                     .foregroundColor(MADTheme.Colors.secondaryText)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
                             }
                         }
 
@@ -55,6 +63,8 @@ struct UserProfileCard: View {
                             Text(subtitle)
                                 .font(.system(size: 11, weight: .medium, design: .rounded))
                                 .foregroundColor(subtitle.contains("Done") ? .green.opacity(0.8) : .orange.opacity(0.8))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
                         }
 
                         // Bio
@@ -65,15 +75,19 @@ struct UserProfileCard: View {
                                 .lineLimit(2)
                         }
                     }
+                    // Take the remaining row width so long names truncate here
+                    // instead of squeezing the action button off-screen.
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .buttonStyle(PlainButtonStyle())
 
-            Spacer()
-
-            // Action Button - Separate from the profile tap area
+            // Action Button - Separate from the profile tap area. The profile
+            // area above flexes to fill, so the button keeps its intrinsic size
+            // and stays pinned to the trailing edge.
             if let actionButton = actionButton {
                 actionButton
+                    .layoutPriority(1)
             }
         }
         .padding(MADTheme.Spacing.md)

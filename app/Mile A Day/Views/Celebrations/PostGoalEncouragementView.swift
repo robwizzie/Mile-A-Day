@@ -177,7 +177,10 @@ struct PostGoalEncouragementView: View {
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
 
-                            Spacer(minLength: 40)
+                            // Clear the floating tab bar + home indicator so the
+                            // button is reachable when scrolled to the bottom
+                            // (the celebration ignores the safe area).
+                            Spacer(minLength: geo.safeAreaInsets.bottom + 40)
                         }
                         .padding(.horizontal, 24)
                         .padding(.top, 8)
