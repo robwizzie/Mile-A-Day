@@ -30,11 +30,22 @@ struct SocialFeedView: View {
 
     private var statsInput: RunStatsInput {
         let user = userManager.currentUser
+        // Pull today's real run data from HealthKit so users can show pace, time,
+        // calories and steps — not just distance. Zero/absent values are dropped
+        // by RunStatsInput.datum(for:), so only meaningful stats are offered.
+        let duration = healthManager.todaysTotalDuration
+        // todaysAveragePace is MINUTES per mile; the sticker + snapshot use
+        // SECONDS per mile, so convert here.
+        let paceSecPerMile = healthManager.todaysAveragePace.map { $0 * 60 }
+        let calories = healthManager.todaysTotalCalories
+        let steps = healthManager.todaysSteps
         return RunStatsInput(
             distance: healthManager.todaysDistance,
-            paceSecondsPerMile: nil,
-            durationSeconds: nil,
+            paceSecondsPerMile: (paceSecPerMile ?? 0) > 0 ? paceSecPerMile : nil,
+            durationSeconds: duration > 0 ? duration : nil,
             streak: user.streak,
+            calories: calories > 0 ? calories : nil,
+            steps: steps > 0 ? steps : nil,
             workoutId: nil,
             dateText: Self.todayText()
         )

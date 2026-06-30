@@ -11,6 +11,8 @@ struct PostStats: Codable, Equatable {
     let duration: Double?   // seconds
     let streak: Int?
     let date: String?
+    var calories: Double?
+    var steps: Int?
 }
 
 /// A social post — a photo (run-stats overlay already baked in) plus optional

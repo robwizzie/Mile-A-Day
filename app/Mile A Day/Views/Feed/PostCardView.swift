@@ -14,6 +14,9 @@ struct PostCardView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             header
             photo
+            if let stats = post.stats_snapshot {
+                PostStatStrip(stats: stats).padding(.horizontal, 2)
+            }
             if let caption = post.caption, !caption.isEmpty {
                 Text(caption)
                     .font(.system(size: 14, weight: .medium, design: .rounded))
