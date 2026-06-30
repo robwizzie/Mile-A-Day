@@ -252,6 +252,17 @@ enum StreakMilestone: CaseIterable {
 
 // MARK: - Celebration Types
 
+/// Payload for the daily-challenge completion celebration. Visuals (icon, gradient)
+/// are resolved from today's challenge at enqueue time so the moment matches the card.
+struct ChallengeCelebrationInfo: Equatable {
+    let key: String
+    let title: String
+    let description: String
+    let icon: String
+    let gradient: [Color]
+    let challengeStreak: Int
+}
+
 /// Types of celebrations that can be shown
 enum CelebrationType: Identifiable, Equatable {
     case goalCompleted(stats: GoalCompletionStats)
@@ -266,6 +277,8 @@ enum CelebrationType: Identifiable, Equatable {
     /// One-time welcome summary for a new account with historical data — shows
     /// the COUNT of badges unlocked instead of spamming a popup per badge.
     case badgeSummary(count: Int, badges: [Badge])
+    /// Rewarding moment when the user completes today's daily challenge.
+    case challengeCompleted(info: ChallengeCelebrationInfo)
 
     var id: String {
         switch self {
@@ -283,6 +296,8 @@ enum CelebrationType: Identifiable, Equatable {
             return "year-milestone-\(info.years)"
         case .badgeSummary:
             return "badge-summary"
+        case .challengeCompleted(let info):
+            return "challenge-completed-\(info.key)"
         }
     }
 
@@ -302,6 +317,8 @@ enum CelebrationType: Identifiable, Equatable {
             return i1.years == i2.years
         case (.badgeSummary, .badgeSummary):
             return true // only one welcome summary
+        case (.challengeCompleted(let i1), .challengeCompleted(let i2)):
+            return i1.key == i2.key // one celebration per challenge per day
         default:
             return false
         }
@@ -472,6 +489,7 @@ class CelebrationManager: ObservableObject {
         case .postGoalWorkout: return 2
         case .badgeUnlocked: return 3
         case .milestone: return 4
+        case .challengeCompleted: return 5 // celebrate the daily challenge as a finale
         }
     }
 

@@ -25,6 +25,8 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
     private(set) var todayLocalDate: String?
     private(set) var tomorrowChallenge: DailyChallenge?
     private(set) var tomorrowLocalDate: String?
+    /// Today's Head-to-Head rival, if the challenge is `head_to_head`.
+    private(set) var todayOpponent: ChallengeOpponent?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -101,6 +103,7 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
                 self.todayLocalDate = response.localDate
                 self.tomorrowChallenge = tomorrow
                 self.tomorrowLocalDate = response.tomorrowLocalDate
+                self.todayOpponent = response.opponent?.toOpponent()
                 self.saveTodaySnapshot(response: response, userId: userId)
                 NotificationCenter.default.post(name: ChallengeService.changedNotification, object: nil)
             }
@@ -194,6 +197,7 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         todayLocalDate = response.localDate
         tomorrowChallenge = response.tomorrowChallenge?.toDailyChallenge()
         tomorrowLocalDate = response.tomorrowLocalDate
+        todayOpponent = response.opponent?.toOpponent()
     }
 
     private static func currentLocalDateString() -> String {
@@ -242,8 +246,28 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
             case "time": return .time
             case "activity": return .activity
             case "steps": return .steps
+            case "social": return .social
             default: return .distance
             }
+        }
+    }
+
+    /// Head-to-Head rival payload (present only when today's challenge is `head_to_head`).
+    struct OpponentDTO: Codable {
+        let userId: String
+        let username: String?
+        let profileImageUrl: String?
+        let miles: Double
+        let myMiles: Double
+
+        func toOpponent() -> ChallengeOpponent {
+            ChallengeOpponent(
+                userId: userId,
+                username: username,
+                profileImageUrl: profileImageUrl,
+                miles: miles,
+                myMiles: myMiles
+            )
         }
     }
 
@@ -253,6 +277,8 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         let progress: Double
         let completed: Bool
         let completedAt: Date?
+        // Present only for the Head-to-Head challenge; nil otherwise.
+        let opponent: OpponentDTO?
         // Older server builds may not return tomorrow yet; keep optional for backward compat.
         let tomorrowChallenge: ChallengeDTO?
         let tomorrowLocalDate: String?
@@ -278,5 +304,12 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         let localDate: String
         let completed: Bool
         let challengeKey: String?
+        // Enriched by the server so a friend's profile renders the right challenge
+        // without relying on a hardcoded client catalog. Optional for back-compat
+        // with older server builds.
+        let challengeTitle: String?
+        let challengeIcon: String?
+        let gradientStart: String?
+        let gradientEnd: String?
     }
 }

@@ -60,12 +60,17 @@ class UserManager: ObservableObject {
             forName: Notification.Name("MAD_WorkoutsUploaded"),
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] note in
             guard let self else { return }
             guard let userId = self.currentUser.backendUserId else { return }
+            let freshCompletions = note.userInfo?["newChallengeCompletions"] as? [[String: String]] ?? []
             Task {
                 await self.refreshBadgesFromServer()
                 await ChallengeService.refresh(userId: userId)
+                // After state is fresh, celebrate any challenge completed by this upload.
+                await MainActor.run {
+                    self.celebrateChallengeCompletions(freshCompletions)
+                }
             }
         }
 
@@ -534,6 +539,33 @@ class UserManager: ObservableObject {
         CelebrationManager.shared.addCelebration(
             .badgeSummary(count: earned.count, badges: Array(earned.prefix(12)))
         )
+    }
+
+    /// Queue a rewarding celebration for each daily challenge freshly completed by
+    /// the latest upload. Visuals are resolved from today's challenge (already
+    /// refreshed) so the moment matches the dashboard card. During the initial
+    /// historical sync we stay silent — the welcome badge summary covers that.
+    func celebrateChallengeCompletions(_ completions: [[String: String]]) {
+        guard hasCompletedInitialBadgeSync, !completions.isEmpty else { return }
+        let remote = ChallengeService.shared as? RemoteChallengeService
+        let today = remote?.todayChallenge
+        let streak = remote?.currentChallengeStreak() ?? 0
+        for c in completions {
+            guard let key = c["challengeKey"] else { continue }
+            let title = c["challengeTitle"] ?? today?.title ?? "Challenge Complete"
+            // Use today's rendered visuals when the completed key is today's challenge.
+            let matchesToday = today?.key == key
+            let info = ChallengeCelebrationInfo(
+                key: key,
+                title: title,
+                description: matchesToday ? (today?.description ?? "Daily challenge complete!")
+                                          : "Daily challenge complete!",
+                icon: matchesToday ? (today?.icon ?? "checkmark.seal.fill") : "checkmark.seal.fill",
+                gradient: matchesToday ? (today?.gradient ?? [.orange, .red]) : [.orange, .red],
+                challengeStreak: streak
+            )
+            CelebrationManager.shared.addCelebration(.challengeCompleted(info: info))
+        }
     }
 
     /// Returns true if a yearly celebration was queued.

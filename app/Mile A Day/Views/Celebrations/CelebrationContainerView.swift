@@ -49,6 +49,9 @@ struct CelebrationContainerView: View {
 
         case .badgeSummary(let count, let badges):
             BadgeSummaryCelebrationView(count: count, badges: badges)
+
+        case .challengeCompleted(let info):
+            ChallengeCompletedCelebrationView(info: info)
         }
     }
 }

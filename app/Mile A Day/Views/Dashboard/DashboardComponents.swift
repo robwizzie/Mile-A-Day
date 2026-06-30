@@ -1019,8 +1019,17 @@ struct DailyChallenge {
     let type: ChallengeType
 
     enum ChallengeType {
-        case pace, distance, time, activity, steps
+        case pace, distance, time, activity, steps, social
     }
+}
+
+/// Today's Head-to-Head rival (only present when the challenge is `head_to_head`).
+struct ChallengeOpponent: Equatable {
+    let userId: String
+    let username: String?
+    let profileImageUrl: String?
+    let miles: Double
+    let myMiles: Double
 }
 
 // MARK: - Friend Activity Strip
