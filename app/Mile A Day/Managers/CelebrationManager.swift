@@ -252,19 +252,40 @@ enum StreakMilestone: CaseIterable {
 
 // MARK: - Celebration Types
 
+/// Payload for the daily-challenge completion celebration. Visuals (icon, gradient)
+/// are resolved from today's challenge at enqueue time so the moment matches the card.
+struct ChallengeCelebrationInfo: Equatable {
+    let key: String
+    let title: String
+    let description: String
+    let icon: String
+    let gradient: [Color]
+    let challengeStreak: Int
+}
+
 /// Types of celebrations that can be shown
 enum CelebrationType: Identifiable, Equatable {
     case goalCompleted(stats: GoalCompletionStats)
+    /// Duolingo-style "you moved up" today's-miles leaderboard among friends,
+    /// shown right after the streak/fire celebration.
+    case leaderboardMoveUp(stats: GoalCompletionStats)
     case postGoalWorkout(stats: GoalCompletionStats)
     case badgeUnlocked(badge: Badge)
     case milestone(title: String, description: String, icon: String)
     /// Headline yearly streak celebration — fired at every multiple of 365 days.
     case yearMilestone(info: YearlyMilestoneInfo)
+    /// One-time welcome summary for a new account with historical data — shows
+    /// the COUNT of badges unlocked instead of spamming a popup per badge.
+    case badgeSummary(count: Int, badges: [Badge])
+    /// Rewarding moment when the user completes today's daily challenge.
+    case challengeCompleted(info: ChallengeCelebrationInfo)
 
     var id: String {
         switch self {
         case .goalCompleted:
             return "goal-completed-\(Date().timeIntervalSince1970)"
+        case .leaderboardMoveUp:
+            return "leaderboard-move-up"
         case .postGoalWorkout:
             return "post-goal-\(Date().timeIntervalSince1970)"
         case .badgeUnlocked(let badge):
@@ -273,6 +294,10 @@ enum CelebrationType: Identifiable, Equatable {
             return "milestone-\(title)"
         case .yearMilestone(let info):
             return "year-milestone-\(info.years)"
+        case .badgeSummary:
+            return "badge-summary"
+        case .challengeCompleted(let info):
+            return "challenge-completed-\(info.key)"
         }
     }
 
@@ -280,6 +305,8 @@ enum CelebrationType: Identifiable, Equatable {
         switch (lhs, rhs) {
         case (.goalCompleted, .goalCompleted):
             return true // Only one goal completion per day
+        case (.leaderboardMoveUp, .leaderboardMoveUp):
+            return true
         case (.postGoalWorkout, .postGoalWorkout):
             return true
         case (.badgeUnlocked(let b1), .badgeUnlocked(let b2)):
@@ -288,6 +315,10 @@ enum CelebrationType: Identifiable, Equatable {
             return t1 == t2
         case (.yearMilestone(let i1), .yearMilestone(let i2)):
             return i1.years == i2.years
+        case (.badgeSummary, .badgeSummary):
+            return true // only one welcome summary
+        case (.challengeCompleted(let i1), .challengeCompleted(let i2)):
+            return i1.key == i2.key // one celebration per challenge per day
         default:
             return false
         }
@@ -451,11 +482,14 @@ class CelebrationManager: ObservableObject {
     /// Priority for ordering celebrations: lower = shown first
     private func priority(of celebration: CelebrationType) -> Int {
         switch celebration {
-        case .yearMilestone: return -1 // Headline moment — always first
+        case .badgeSummary: return -2 // One-time welcome — show first
+        case .yearMilestone: return -1 // Headline moment
         case .goalCompleted: return 0
-        case .postGoalWorkout: return 1
-        case .badgeUnlocked: return 2
-        case .milestone: return 3
+        case .leaderboardMoveUp: return 1 // right after the fire/streak screen
+        case .postGoalWorkout: return 2
+        case .badgeUnlocked: return 3
+        case .milestone: return 4
+        case .challengeCompleted: return 5 // celebrate the daily challenge as a finale
         }
     }
 

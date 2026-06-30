@@ -18,6 +18,10 @@ struct PostGoalEncouragementView: View {
     @State private var confettiTrigger: Bool = false
     @State private var iconScale: CGFloat = 0.3
     @State private var glowOpacity: Double = 0
+    // Continuous hero flourishes (radiant rings + gentle pulse) to bring the
+    // Extra Mile screen up to the fire screen's energy.
+    @State private var heroPulse: Bool = false
+    @State private var ringExpand: Bool = false
 
     // Track whether the animation has already started
     @State private var hasStartedAnimation: Bool = false
@@ -47,6 +51,24 @@ struct PostGoalEncouragementView: View {
                             // Star icon
                             if showIcon {
                                 ZStack {
+                                    // Radiant expanding rings (continuous).
+                                    ForEach(0..<3, id: \.self) { i in
+                                        Circle()
+                                            .stroke(
+                                                LinearGradient(colors: [.yellow.opacity(0.5), .orange.opacity(0.0)],
+                                                               startPoint: .top, endPoint: .bottom),
+                                                lineWidth: 2
+                                            )
+                                            .frame(width: 120, height: 120)
+                                            .scaleEffect(ringExpand ? 1.9 : 0.7)
+                                            .opacity(ringExpand ? 0 : 0.7)
+                                            .animation(
+                                                .easeOut(duration: 2.0).repeatForever(autoreverses: false)
+                                                    .delay(Double(i) * 0.66),
+                                                value: ringExpand
+                                            )
+                                    }
+
                                     // Glow behind star
                                     Image(systemName: "star.circle.fill")
                                         .font(.system(size: geo.size.height < 700 ? 72 : 90))
@@ -63,7 +85,8 @@ struct PostGoalEncouragementView: View {
                                             )
                                         )
                                         .shadow(color: .yellow.opacity(0.5), radius: 25)
-                                        .scaleEffect(iconScale)
+                                        .scaleEffect(iconScale * (heroPulse ? 1.06 : 1.0))
+                                        .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: heroPulse)
                                 }
                                 .transition(.scale(scale: 0.3).combined(with: .opacity))
                             }
@@ -352,6 +375,9 @@ struct PostGoalEncouragementView: View {
                 iconScale = 1.0
             }
             confettiTrigger = true
+            // Kick off the continuous radiant rings + gentle pulse.
+            heroPulse = true
+            ringExpand = true
         }
 
         // Phase 3: Total distance (0.5s)

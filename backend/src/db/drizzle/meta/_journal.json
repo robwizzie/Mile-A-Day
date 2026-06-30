@@ -22,6 +22,20 @@
       "when": 1782788263312,
       "tag": "0002_early_screwball",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782795877543,
+      "tag": "0003_mixed_lucky_pierre",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1782826570266,
+      "tag": "0004_fixed_viper",
+      "breakpoints": true
     }
   ]
 }

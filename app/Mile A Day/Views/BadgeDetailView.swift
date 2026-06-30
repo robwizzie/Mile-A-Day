@@ -207,7 +207,7 @@ struct BadgeDetailView: View {
                         .font(.system(size: 45, weight: .medium))
                         .foregroundColor(.white.opacity(0.35))
                 } else {
-                    Image(systemName: iconName)
+                    Image(systemName: resolvedIcon)
                         .font(.system(size: 55, weight: .semibold))
                         .foregroundStyle(
                             LinearGradient(
@@ -287,13 +287,11 @@ struct BadgeDetailView: View {
         }
     }
     
-    private var iconName: String {
-        if badge.id.hasPrefix("streak_") || badge.id.hasPrefix("consistency_") { return "flame.fill" }
-        if badge.id.hasPrefix("miles_") { return "figure.run" }
-        if badge.id.hasPrefix("pace_") { return "bolt.fill" }
-        if badge.id.hasPrefix("daily_") { return "figure.run.circle.fill" }
-        if badge.id.hasPrefix("special_") { return "sparkles" }
-        return "star.fill"
+    private var resolvedIcon: String {
+        // Delegate to the shared global resolver (PinnedBadgesShowcase.swift) so
+        // every category — incl. story / hype / competition — renders the right
+        // SF Symbol in one place.
+        iconName(for: badge)
     }
     
     // MARK: - Details Section
@@ -315,6 +313,11 @@ struct BadgeDetailView: View {
                 lockedContent
             } else {
                 unlockedContent
+            }
+
+            // Competition badges: show the competitions behind this medal.
+            if badge.id.hasPrefix("comp_") {
+                CompetitionBadgeSection(badgeId: badge.id)
             }
         }
         .padding(.horizontal, 32)

@@ -687,6 +687,7 @@ struct DailyChallengeCard: View {
     @State private var isCompleted: Bool = false
     @State private var challengesCompletedCount: Int = ChallengeService.shared.allCompletions().count
     @State private var challengeStreak: Int = ChallengeService.shared.currentChallengeStreak()
+    @State private var opponent: ChallengeOpponent?
     @State private var iconPulse: Bool = false
 
     private var primaryColor: Color {
@@ -822,6 +823,11 @@ struct DailyChallengeCard: View {
 
             // Progress bar with inline percentage
             progressRow(challenge)
+
+            // Head-to-Head: show the live "you vs rival" strip.
+            if challenge.key == "head_to_head", let opp = opponent {
+                HeadToHeadStrip(opponent: opp, accent: primaryColor)
+            }
 
             // Footer: tomorrow preview (incomplete) OR celebration (complete)
             footerRow(challenge)
@@ -1004,6 +1010,7 @@ struct DailyChallengeCard: View {
             tomorrowsChallenge = remote.tomorrowChallenge
             challengeProgressValue = remote.todayProgress
             isCompleted = remote.todayCompleted
+            opponent = remote.todayOpponent
         }
         challengesCompletedCount = ChallengeService.shared.allCompletions().count
         challengeStreak = ChallengeService.shared.currentChallengeStreak()
@@ -1019,7 +1026,93 @@ struct DailyChallenge {
     let type: ChallengeType
 
     enum ChallengeType {
-        case pace, distance, time, activity, steps
+        case pace, distance, time, activity, steps, social
+    }
+}
+
+/// Today's Head-to-Head rival (only present when the challenge is `head_to_head`).
+struct ChallengeOpponent: Equatable {
+    let userId: String
+    let username: String?
+    let profileImageUrl: String?
+    let miles: Double
+    let myMiles: Double
+}
+
+/// Fun "you vs rival" strip for the Head-to-Head daily challenge. Shows both
+/// avatars + today's miles with a live lead indicator. Reused by the dashboard
+/// card and the dedicated challenges hero.
+struct HeadToHeadStrip: View {
+    let opponent: ChallengeOpponent
+    let accent: Color
+
+    private var myName: String {
+        UserManager.shared.currentUser.username ?? UserManager.shared.currentUser.name
+    }
+    private var myImage: String? { UserManager.shared.currentUser.profileImageUrl }
+    private var rivalName: String { opponent.username ?? "Rival" }
+    private var tied: Bool { abs(opponent.myMiles - opponent.miles) < 0.01 }
+    private var leading: Bool { opponent.myMiles > opponent.miles && !tied }
+
+    private var statusText: String {
+        if tied { return "Dead even" }
+        if leading {
+            return "You lead by \(String(format: "%.2f", opponent.myMiles - opponent.miles)) mi"
+        }
+        return "Behind by \(String(format: "%.2f", opponent.miles - opponent.myMiles)) mi"
+    }
+
+    private var statusColor: Color { tied ? .yellow : (leading ? .green : .orange) }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            side(name: "You", image: myImage, miles: opponent.myMiles,
+                 highlight: leading, color: accent)
+
+            VStack(spacing: 2) {
+                Text("VS")
+                    .font(.system(size: 13, weight: .black, design: .rounded))
+                    .foregroundColor(.primary.opacity(0.6))
+                Text(statusText)
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundColor(statusColor)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(width: 86)
+
+            side(name: rivalName, image: opponent.profileImageUrl, miles: opponent.miles,
+                 highlight: !leading && !tied, color: .orange)
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(statusColor.opacity(0.35), lineWidth: 1)
+                )
+        )
+    }
+
+    private func side(name: String, image: String?, miles: Double, highlight: Bool, color: Color) -> some View {
+        VStack(spacing: 4) {
+            AvatarView(name: name, imageURL: image, size: 36)
+                .overlay(
+                    Circle().strokeBorder(highlight ? color : .clear, lineWidth: 2)
+                )
+            Text(name)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundColor(.primary)
+                .lineLimit(1)
+            Text("\(String(format: "%.2f", miles)) mi")
+                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                .foregroundColor(highlight ? color : .primary.opacity(0.75))
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

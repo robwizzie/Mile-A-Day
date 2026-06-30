@@ -1,0 +1,2 @@
+ALTER TABLE "notification_settings" ADD COLUMN "share_workouts_to_feed" boolean DEFAULT true;--> statement-breakpoint
+ALTER TABLE "notification_settings" ADD COLUMN "friend_posts_enabled" boolean DEFAULT true;

@@ -5,6 +5,7 @@ import { getFriendship } from "../services/friendshipService.js";
 import { getUser } from "../services/userService.js";
 import { sendPush } from "../services/pushNotificationService.js";
 import { shouldSendNotification } from "../services/notificationSettingsService.js";
+import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import {
   logHypeIfUnderLimit,
   getDailyHypeCount,
@@ -178,6 +179,9 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
         resets_at: resetsAt,
       });
     }
+
+    // Re-evaluate hype badges (first hype, X hypes) in the background.
+    evaluateSocialBadgesForUser(senderId).catch(() => {});
 
     const countAfter = await getDailyHypeCount(senderId);
 

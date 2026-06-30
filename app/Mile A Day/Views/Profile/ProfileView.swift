@@ -39,7 +39,7 @@ struct ProfileView: View {
     @State private var profileTab: OwnProfileTab = .activity
 
     enum OwnProfileTab: Hashable {
-        case activity, stats, badges, settings
+        case activity, posts, stats, badges, settings
     }
 
     enum ProfileSheetType: String, Identifiable {
@@ -75,6 +75,7 @@ struct ProfileView: View {
                         selection: $profileTab,
                         options: [
                             .init(id: .activity, title: "Activity", systemImage: "flame.fill"),
+                            .init(id: .posts, title: "Posts", systemImage: "square.grid.3x3.fill"),
                             .init(id: .stats, title: "Stats", systemImage: "chart.bar.fill"),
                             .init(id: .badges, title: "Badges", systemImage: "trophy.fill"),
                             .init(id: .settings, title: "Settings", systemImage: "gearshape.fill")
@@ -84,6 +85,7 @@ struct ProfileView: View {
                     Group {
                         switch profileTab {
                         case .activity: ownActivityTabContent
+                        case .posts: ownPostsTabContent
                         case .stats: ownStatsTabContent
                         case .badges: ownBadgesTabContent
                         case .settings: ownSettingsTabContent
@@ -227,6 +229,7 @@ struct ProfileView: View {
     private var ownActivityTabContent: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
             streakAndGoalRow
+            OwnTodayChallengeCard(healthManager: healthManager, userManager: userManager)
             if !ownWorkouts.isEmpty {
                 Last7DaysChart(workouts: ownWorkouts)
             }
@@ -313,6 +316,19 @@ struct ProfileView: View {
     private var ownStatsTabContent: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
             performanceSection
+        }
+    }
+
+    /// Instagram-style grid of the user's own posts.
+    @ViewBuilder
+    private var ownPostsTabContent: some View {
+        if let uid = userManager.currentUser.backendUserId {
+            ProfilePostsGridView(userId: uid, isSelf: true)
+        } else {
+            Text("Sign in to see your posts.")
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .padding(.top, MADTheme.Spacing.xl)
         }
     }
 
@@ -1021,6 +1037,112 @@ struct MADSettingsRow: View {
                 .foregroundColor(.secondary)
         }
         .padding(.vertical, MADTheme.Spacing.xs)
+    }
+}
+
+// MARK: - Own Today's Challenge Card
+
+/// Compact "today's daily challenge" status on your own profile — mirrors the
+/// friend-profile row but adds a live progress bar and links into the full
+/// Daily Challenges screen. Reads server-authoritative state from the service.
+private struct OwnTodayChallengeCard: View {
+    @ObservedObject var healthManager: HealthKitManager
+    @ObservedObject var userManager: UserManager
+
+    @State private var challenge: DailyChallenge?
+    @State private var completed = false
+    @State private var progress: Double = 0
+
+    var body: some View {
+        Group {
+            if let challenge = challenge {
+                NavigationLink {
+                    DailyChallengesView(healthManager: healthManager, userManager: userManager)
+                } label: {
+                    card(challenge)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .onAppear(perform: refresh)
+        .onReceive(NotificationCenter.default.publisher(for: ChallengeService.changedNotification)) { _ in
+            refresh()
+        }
+    }
+
+    private func card(_ challenge: DailyChallenge) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(
+                            colors: completed ? [.green, .green.opacity(0.8)] : challenge.gradient,
+                            startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 44, height: 44)
+                    Image(systemName: completed ? "checkmark" : challenge.icon)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("TODAY'S CHALLENGE")
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .tracking(1.0)
+                        .foregroundColor(.white.opacity(0.5))
+                    Text(challenge.title)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                HStack(spacing: 4) {
+                    Image(systemName: completed ? "checkmark.circle.fill" : "hourglass")
+                        .font(.system(size: 11, weight: .bold))
+                    Text(completed ? "Done" : "In progress")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                }
+                .foregroundColor(completed ? .green : .white.opacity(0.55))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(completed ? Color.green.opacity(0.12) : Color.white.opacity(0.06))
+                        .overlay(Capsule().strokeBorder(
+                            completed ? Color.green.opacity(0.3) : Color.white.opacity(0.12), lineWidth: 1))
+                )
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.white.opacity(0.1))
+                        .frame(height: 6)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(LinearGradient(
+                            colors: completed ? [.green, .green] : challenge.gradient,
+                            startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(6, min(progress, 1.0) * geo.size.width), height: 6)
+                        .animation(.easeOut(duration: 0.5), value: progress)
+                }
+            }
+            .frame(height: 6)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(.white.opacity(0.06))
+                .overlay(RoundedRectangle(cornerRadius: 14)
+                    .stroke(.white.opacity(0.1), lineWidth: 1))
+        )
+    }
+
+    private func refresh() {
+        guard let remote = ChallengeService.shared as? RemoteChallengeService else { return }
+        challenge = remote.todayChallenge
+        completed = remote.todayCompleted
+        progress = remote.todayProgress
     }
 }
 

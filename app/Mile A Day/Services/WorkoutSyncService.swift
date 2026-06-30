@@ -545,13 +545,19 @@ class WorkoutSyncService: ObservableObject {
                 print("[WorkoutSyncService] 🎉 Rewards — \(badgeCount) badges, \(completionCount) challenge completions")
             }
 
+            // Pass the fresh completion details through so the celebration layer can
+            // show a rewarding moment for the specific challenge that was completed.
+            let completionPayload: [[String: String]] = (response.newChallengeCompletions ?? []).map {
+                ["challengeKey": $0.challengeKey, "challengeTitle": $0.challengeTitle, "localDate": $0.localDate]
+            }
             await MainActor.run {
                 NotificationCenter.default.post(
                     name: Notification.Name("MAD_WorkoutsUploaded"),
                     object: nil,
                     userInfo: [
                         "newBadgeCount": badgeCount,
-                        "newChallengeCompletionCount": completionCount
+                        "newChallengeCompletionCount": completionCount,
+                        "newChallengeCompletions": completionPayload
                     ]
                 )
             }

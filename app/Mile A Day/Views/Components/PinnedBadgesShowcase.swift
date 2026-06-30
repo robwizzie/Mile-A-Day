@@ -331,6 +331,18 @@ func iconName(for badge: Badge) -> String {
         return "figure.run.circle.fill"
     } else if badge.id.starts(with: "challenge_") {
         return "trophy.fill"
+    } else if badge.id.starts(with: "story_") {
+        return "camera.fill"
+    } else if badge.id.starts(with: "hype_") {
+        return "hands.clap.fill"
+    } else if badge.id.starts(with: "nudge_") {
+        return "hand.wave.fill"
+    } else if badge.id.starts(with: "comp_won_") {
+        return "crown.fill"
+    } else if badge.id.starts(with: "comp_started_") {
+        return "flag.checkered"
+    } else if badge.id.starts(with: "comp_entered_") || badge.id.starts(with: "comp_") {
+        return "trophy.fill"
     } else if badge.id.starts(with: "hidden_") || badge.id.starts(with: "secret_") || badge.id.starts(with: "special_") {
         return "sparkles"
     }

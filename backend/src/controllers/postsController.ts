@@ -9,6 +9,9 @@ import {
   getUserActiveStories,
   markStoryViewed,
   getFeed,
+  getUnifiedFeed,
+  getUserPosts,
+  notifyFriendsOfPost,
   getPostAuthor,
   softDeletePost,
   moderatorDeletePost,
@@ -23,6 +26,7 @@ import {
 } from "../services/moderationService.js";
 import { getDailyGoalStatus } from "../services/workoutService.js";
 import { hasUnlimitedActions } from "../services/privilegedUsers.js";
+import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 
 const POSTS_MEDIA_PREFIX = "/uploads/posts/";
 const MAX_CAPTION = 280;
@@ -136,6 +140,16 @@ export async function createPostController(
       statsSnapshot: (stats_snapshot ?? null) as PostStatsSnapshot | null,
     });
 
+    // Fire-and-forget: tell friends about a new feed post (respects their
+    // friend_posts_enabled setting). Never blocks the response.
+    if (shareToFeed) {
+      notifyFriendsOfPost(userId, post.caption).catch(() => {});
+    }
+    // Re-evaluate story badges (first story, X stories) in the background.
+    if (shareToStory) {
+      evaluateSocialBadgesForUser(userId).catch(() => {});
+    }
+
     res.status(201).json(post);
   } catch (error: any) {
     console.error("Error creating post:", error.message);
@@ -200,6 +214,55 @@ export async function getFeedController(
   } catch (error: any) {
     console.error("Error fetching feed:", error.message);
     res.status(500).json({ error: "Error fetching feed" });
+  }
+}
+
+/** GET /posts/feed/unified — interleaved posts + workout activity, paginated. */
+export async function getUnifiedFeedController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const rawLimit = parseInt(String(req.query.limit ?? ""), 10);
+    const limit = Number.isFinite(rawLimit)
+      ? Math.min(Math.max(rawLimit, 1), MAX_FEED_LIMIT)
+      : DEFAULT_FEED_LIMIT;
+    const before =
+      typeof req.query.before === "string" ? req.query.before : null;
+    const items = await getUnifiedFeed(req.userId!, limit, before);
+    const nextBefore =
+      items.length === limit ? items[items.length - 1].sort_ts : null;
+    res.status(200).json({ items, next_before: nextBefore });
+  } catch (error: any) {
+    console.error("Error fetching unified feed:", error.message);
+    res.status(500).json({ error: "Error fetching feed" });
+  }
+}
+
+/** GET /posts/user/:userId — a user's permanent posts for the profile grid. */
+export async function getUserPostsController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const rawLimit = parseInt(String(req.query.limit ?? ""), 10);
+    const limit = Number.isFinite(rawLimit)
+      ? Math.min(Math.max(rawLimit, 1), MAX_FEED_LIMIT)
+      : DEFAULT_FEED_LIMIT;
+    const before =
+      typeof req.query.before === "string" ? req.query.before : null;
+    const items = await getUserPosts(
+      req.userId!,
+      req.params.userId,
+      limit,
+      before,
+    );
+    const nextBefore =
+      items.length === limit ? items[items.length - 1].created_at : null;
+    res.status(200).json({ items, next_before: nextBefore });
+  } catch (error: any) {
+    console.error("Error fetching user posts:", error.message);
+    res.status(500).json({ error: "Error fetching posts" });
   }
 }
 

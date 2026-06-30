@@ -1,4 +1,5 @@
 import { PostgresService } from "./DbService.js";
+import { sendPush } from "./pushNotificationService.js";
 
 const db = PostgresService.getInstance();
 
@@ -273,6 +274,197 @@ export async function getFeed(
     [viewerId, before ?? null, limit],
   );
   return rows;
+}
+
+// One row of the unified feed — either a photo `post` or a raw `workout`
+// activity. Type-specific columns are null for the other kind.
+export interface FeedEntryRow {
+  kind: "post" | "workout";
+  id: string;
+  sort_ts: string;
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+  // post-only
+  media_url: string | null;
+  caption: string | null;
+  stats_snapshot: PostStatsSnapshot | null;
+  // workout-only
+  workout_type: string | null;
+  distance: number | null;
+  total_duration: number | null;
+  calories: number | null;
+  steps: number | null;
+  // shared
+  is_self: boolean;
+  is_hyped: boolean;
+  hype_count: number;
+}
+
+/**
+ * Unified, infinitely-scrollable feed: photo posts AND raw workout activity from
+ * the viewer's circle, interleaved newest-first, keyset-paginated on a combined
+ * timestamp (`before`). A workout that already has a feed post is omitted (the
+ * post represents it), and a user's raw workouts are hidden when they've turned
+ * off `share_workouts_to_feed`. No time window — paginate as far back as desired.
+ */
+export async function getUnifiedFeed(
+  viewerId: string,
+  limit: number,
+  before?: string | null,
+): Promise<FeedEntryRow[]> {
+  const rows = await db.query<FeedEntryRow>(
+    `
+		${CIRCLE_CTE}
+		SELECT * FROM (
+			SELECT
+				'post' AS kind,
+				p.post_id::text AS id,
+				p.created_at AS sort_ts,
+				p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
+				p.media_url, p.caption, p.stats_snapshot,
+				NULL::varchar AS workout_type,
+				NULL::double precision AS distance,
+				NULL::double precision AS total_duration,
+				NULL::double precision AS calories,
+				NULL::integer AS steps,
+				(p.user_id = $1) AS is_self,
+				EXISTS (
+					SELECT 1 FROM hype_log h
+					WHERE h.sender_id = $1 AND h.target_id = p.user_id
+						AND h.context_type = 'post' AND h.context_id = p.post_id::text
+				) AS is_hyped,
+				(SELECT COUNT(*)::int FROM hype_log hc
+					WHERE hc.context_type = 'post' AND hc.context_id = p.post_id::text) AS hype_count
+			FROM posts p
+			JOIN circle c ON c.uid = p.user_id
+			JOIN users u ON u.user_id = p.user_id
+			WHERE p.share_to_feed AND p.deleted_at IS NULL
+				AND p.user_id NOT IN (SELECT uid FROM blocked)
+
+			UNION ALL
+
+			SELECT
+				'workout' AS kind,
+				w.workout_id AS id,
+				w.device_end_date AS sort_ts,
+				w.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
+				NULL::text AS media_url, NULL::text AS caption, NULL::jsonb AS stats_snapshot,
+				w.workout_type,
+				w.distance::double precision,
+				w.total_duration::double precision,
+				w.calories::double precision,
+				w.steps,
+				(w.user_id = $1) AS is_self,
+				EXISTS (
+					SELECT 1 FROM hype_log h
+					WHERE h.sender_id = $1 AND h.target_id = w.user_id
+						AND h.context_type = 'mile' AND h.context_id = w.workout_id
+				) AS is_hyped,
+				(SELECT COUNT(*)::int FROM hype_log hc
+					WHERE hc.context_type = 'mile' AND hc.context_id = w.workout_id) AS hype_count
+			FROM workouts w
+			JOIN circle c ON c.uid = w.user_id
+			JOIN users u ON u.user_id = w.user_id
+			LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
+			WHERE w.user_id NOT IN (SELECT uid FROM blocked)
+				AND COALESCE(ns.share_workouts_to_feed, true) = true
+				AND NOT EXISTS (
+					SELECT 1 FROM posts p2
+					WHERE p2.workout_id = w.workout_id AND p2.deleted_at IS NULL AND p2.share_to_feed
+				)
+		) feed
+		WHERE ($2::timestamptz IS NULL OR sort_ts < $2::timestamptz)
+		ORDER BY sort_ts DESC
+		LIMIT $3
+		`,
+    [viewerId, before ?? null, limit],
+  );
+  return rows;
+}
+
+/**
+ * A user's permanent feed posts (newest first) for the Instagram-style profile
+ * grid. Viewer must be the author or an accepted friend, and not blocked.
+ * Returns [] when not allowed to view.
+ */
+export async function getUserPosts(
+  viewerId: string,
+  authorId: string,
+  limit: number,
+  before?: string | null,
+): Promise<PostRow[]> {
+  const rows = await db.query<PostRow>(
+    `
+		${CIRCLE_CTE}
+		SELECT ${POST_SELECT}
+		FROM posts p
+		JOIN users u ON u.user_id = p.user_id
+		WHERE p.user_id = $2
+			AND p.share_to_feed
+			AND p.deleted_at IS NULL
+			AND EXISTS (SELECT 1 FROM circle WHERE uid = $2)
+			AND $2 NOT IN (SELECT uid FROM blocked)
+			AND ($3::timestamptz IS NULL OR p.created_at < $3::timestamptz)
+		ORDER BY p.created_at DESC
+		LIMIT $4
+		`,
+    [viewerId, authorId, before ?? null, limit],
+  );
+  return rows;
+}
+
+/**
+ * Best-effort push to the author's friends that they shared a new feed post.
+ * Respects each friend's `friend_posts_enabled` (default on), excludes blocks
+ * both ways, and is capped to avoid fan-out storms. Never throws into the
+ * caller — notifications must not block post creation.
+ */
+export async function notifyFriendsOfPost(
+  authorId: string,
+  caption: string | null,
+): Promise<void> {
+  try {
+    const recipients = await db.query<{ uid: string }>(
+      `SELECT f.friend_id AS uid
+			 FROM friendships f
+			 LEFT JOIN notification_settings ns ON ns.user_id = f.friend_id
+			 WHERE f.user_id = $1 AND f.status = 'accepted'
+				 AND COALESCE(ns.friend_posts_enabled, true) = true
+				 AND f.friend_id NOT IN (
+					 SELECT blocked_id FROM user_blocks WHERE blocker_id = $1
+					 UNION
+					 SELECT blocker_id FROM user_blocks WHERE blocked_id = $1
+				 )
+			 LIMIT 25`,
+      [authorId],
+    );
+    if (recipients.length === 0) return;
+
+    const authorRows = await db.query<{ username: string | null }>(
+      `SELECT username FROM users WHERE user_id = $1`,
+      [authorId],
+    );
+    const name = authorRows[0]?.username ?? "A friend";
+    const trimmed = caption?.trim() ?? "";
+    const body =
+      trimmed.length > 0 ? trimmed.slice(0, 120) : "shared a new post";
+
+    for (const r of recipients) {
+      sendPush(r.uid, {
+        title: `${name} posted 📸`,
+        body,
+        type: "friend_post",
+        data: { user_id: authorId, kind: "post" },
+      }).catch((e: any) =>
+        console.error("[notifyFriendsOfPost]", e?.message ?? e),
+      );
+    }
+  } catch (e: any) {
+    console.error("[notifyFriendsOfPost] failed:", e?.message ?? e);
+  }
 }
 
 /** The author of a post (for hype targeting / report validation). */

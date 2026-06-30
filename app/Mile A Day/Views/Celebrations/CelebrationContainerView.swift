@@ -28,6 +28,9 @@ struct CelebrationContainerView: View {
         case .goalCompleted(let stats):
             GoalCompletedCelebrationView(stats: stats)
 
+        case .leaderboardMoveUp(let stats):
+            LeaderboardMoveUpView(stats: stats)
+
         case .postGoalWorkout(let stats):
             PostGoalEncouragementView(stats: stats)
 
@@ -43,6 +46,12 @@ struct CelebrationContainerView: View {
 
         case .yearMilestone(let info):
             YearlyMilestoneCelebrationView(info: info)
+
+        case .badgeSummary(let count, let badges):
+            BadgeSummaryCelebrationView(count: count, badges: badges)
+
+        case .challengeCompleted(let info):
+            ChallengeCompletedCelebrationView(info: info)
         }
     }
 }

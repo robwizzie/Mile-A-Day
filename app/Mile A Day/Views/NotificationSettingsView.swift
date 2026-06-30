@@ -139,6 +139,15 @@ struct NotificationSettingsView: View {
                         settingsToggle("Friend nudges", isOn: $prefs.friendNudgeEnabled)
                     }
 
+                    // Feed & Stories (v2)
+                    settingsSection(title: "FEED & STORIES", icon: "square.stack.fill", iconColor: MADTheme.Colors.madRed) {
+                        settingsToggle("Share my walks & runs to the feed", isOn: $prefs.shareWorkoutsToFeed,
+                            description: "Friends see your activity in the unified feed")
+                        settingsDivider
+                        settingsToggle("New posts from friends", isOn: $prefs.friendPostsEnabled,
+                            description: "Get notified when a friend shares a photo")
+                    }
+
                     // Competition Notifications — collapsed behind a master
                     // toggle; the 8 individual alerts live on a drill-in screen
                     // so they don't dominate this page.
@@ -411,6 +420,8 @@ struct NotificationSettingsView: View {
                     "daily_reminder_enabled": prefs.dailyReminderEnabled,
                     "daily_reminder_hour": prefs.dailyReminderHour,
                     "timezone_offset_minutes": TimeZone.current.secondsFromGMT() / 60,
+                    "share_workouts_to_feed": prefs.shareWorkoutsToFeed,
+                    "friend_posts_enabled": prefs.friendPostsEnabled,
                 ]
                 _ = try await friendService.updateNotificationSettings(backendSettings)
             } catch {

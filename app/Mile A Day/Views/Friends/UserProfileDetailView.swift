@@ -49,7 +49,7 @@ struct UserProfileDetailView: View {
     @State private var profileTab: FriendProfileTab = .activity
 
     enum FriendProfileTab: Hashable {
-        case activity, stats, badges
+        case activity, posts, stats, badges
     }
 
     private var canLoadMore: Bool {
@@ -76,6 +76,7 @@ struct UserProfileDetailView: View {
                             selection: $profileTab,
                             options: [
                                 .init(id: .activity, title: "Activity", systemImage: "flame.fill"),
+                                .init(id: .posts, title: "Posts", systemImage: "square.grid.3x3.fill"),
                                 .init(id: .stats, title: "Stats", systemImage: "chart.bar.fill"),
                                 .init(id: .badges, title: "Badges", systemImage: "trophy.fill")
                             ]
@@ -85,6 +86,7 @@ struct UserProfileDetailView: View {
                         Group {
                             switch profileTab {
                             case .activity: activityTabContent
+                            case .posts: ProfilePostsGridView(userId: user.user_id, isSelf: isCurrentUser())
                             case .stats: statsTabContent
                             case .badges: badgesTabContent
                             }
@@ -1174,12 +1176,17 @@ struct FriendWorkoutDetailSheet: View {
 struct FriendTodayChallengeRow: View {
     let today: RemoteChallengeService.FriendTodayDTO
 
-    /// Look up the challenge metadata so we can show its name + icon instead
-    /// of a generic "Completed / Not yet". Falls back to neutral styling when
-    /// the backend returns a key the local catalog doesn't know.
+    /// Local-catalog fallback when the server didn't enrich the row (older builds).
     private var challenge: DailyChallenge? {
         guard let key = today.challengeKey else { return nil }
         return DailyChallengeCatalog.byKey(key)
+    }
+
+    /// Prefer the server-enriched title so new challenges (e.g. social ones not in
+    /// the local catalog) render correctly; fall back to the catalog, then neutral.
+    private var displayTitle: String? {
+        if let t = today.challengeTitle, !t.isEmpty { return t }
+        return challenge?.title
     }
 
     var body: some View {
@@ -1204,16 +1211,10 @@ struct FriendTodayChallengeRow: View {
                     .font(.system(size: 10, weight: .heavy, design: .rounded))
                     .tracking(1.0)
                     .foregroundColor(.white.opacity(0.5))
-                if let challenge = challenge {
-                    Text(challenge.title)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                } else {
-                    Text("Today's challenge")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                }
+                Text(displayTitle ?? "Today's challenge")
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
             }
 
             Spacer()
@@ -1253,11 +1254,16 @@ struct FriendTodayChallengeRow: View {
     }
 
     private var iconName: String {
+        if let icon = today.challengeIcon, !icon.isEmpty { return icon }
         if let challenge = challenge { return challenge.icon }
         return today.completed ? "checkmark" : "hourglass"
     }
 
     private var iconGradient: [Color] {
+        if let start = today.gradientStart, let end = today.gradientEnd,
+           !start.isEmpty, !end.isEmpty {
+            return [Color(hex: start), Color(hex: end)]
+        }
         if let challenge = challenge {
             return challenge.gradient
         }
