@@ -288,7 +288,11 @@ struct DashboardView: View {
             celebrationManager.lastPostGoalWorkoutCount = goalCompletionWorkoutCount
 
             print("[Dashboard] 🎉 Goal completion detected! Distance: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles)")
-            celebrationManager.addCelebration(.goalCompleted(stats: buildGoalCompletionStats()))
+            let completionStats = buildGoalCompletionStats()
+            celebrationManager.addCelebration(.goalCompleted(stats: completionStats))
+            // Right after the fire/streak screen: show where you land on today's
+            // friends leaderboard, animating your climb (Duolingo-style).
+            celebrationManager.addCelebration(.leaderboardMoveUp(stats: completionStats))
         }
     }
 

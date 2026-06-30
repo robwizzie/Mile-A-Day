@@ -28,6 +28,9 @@ struct CelebrationContainerView: View {
         case .goalCompleted(let stats):
             GoalCompletedCelebrationView(stats: stats)
 
+        case .leaderboardMoveUp(let stats):
+            LeaderboardMoveUpView(stats: stats)
+
         case .postGoalWorkout(let stats):
             PostGoalEncouragementView(stats: stats)
 

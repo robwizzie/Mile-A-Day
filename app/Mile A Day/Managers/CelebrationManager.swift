@@ -255,6 +255,9 @@ enum StreakMilestone: CaseIterable {
 /// Types of celebrations that can be shown
 enum CelebrationType: Identifiable, Equatable {
     case goalCompleted(stats: GoalCompletionStats)
+    /// Duolingo-style "you moved up" today's-miles leaderboard among friends,
+    /// shown right after the streak/fire celebration.
+    case leaderboardMoveUp(stats: GoalCompletionStats)
     case postGoalWorkout(stats: GoalCompletionStats)
     case badgeUnlocked(badge: Badge)
     case milestone(title: String, description: String, icon: String)
@@ -268,6 +271,8 @@ enum CelebrationType: Identifiable, Equatable {
         switch self {
         case .goalCompleted:
             return "goal-completed-\(Date().timeIntervalSince1970)"
+        case .leaderboardMoveUp:
+            return "leaderboard-move-up"
         case .postGoalWorkout:
             return "post-goal-\(Date().timeIntervalSince1970)"
         case .badgeUnlocked(let badge):
@@ -285,6 +290,8 @@ enum CelebrationType: Identifiable, Equatable {
         switch (lhs, rhs) {
         case (.goalCompleted, .goalCompleted):
             return true // Only one goal completion per day
+        case (.leaderboardMoveUp, .leaderboardMoveUp):
+            return true
         case (.postGoalWorkout, .postGoalWorkout):
             return true
         case (.badgeUnlocked(let b1), .badgeUnlocked(let b2)):
@@ -458,11 +465,13 @@ class CelebrationManager: ObservableObject {
     /// Priority for ordering celebrations: lower = shown first
     private func priority(of celebration: CelebrationType) -> Int {
         switch celebration {
-        case .yearMilestone: return -1 // Headline moment — always first
+        case .badgeSummary: return -2 // One-time welcome — show first
+        case .yearMilestone: return -1 // Headline moment
         case .goalCompleted: return 0
-        case .postGoalWorkout: return 1
-        case .badgeUnlocked: return 2
-        case .milestone: return 3
+        case .leaderboardMoveUp: return 1 // right after the fire/streak screen
+        case .postGoalWorkout: return 2
+        case .badgeUnlocked: return 3
+        case .milestone: return 4
         }
     }
 
