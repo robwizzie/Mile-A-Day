@@ -14,7 +14,8 @@ export type DailyChallengeType =
   | "distance"
   | "time"
   | "activity"
-  | "steps";
+  | "steps"
+  | "social";
 
 export interface Badge {
   badgeId: string;
@@ -54,6 +55,15 @@ export interface DailyChallenge {
   type: DailyChallengeType;
 }
 
+/** Today's rival for the Head-to-Head challenge. */
+export interface ChallengeOpponent {
+  userId: string;
+  username: string | null;
+  profileImageUrl: string | null;
+  miles: number;
+  myMiles: number;
+}
+
 export interface TodaysChallengeResponse {
   localDate: string;
   challenge: DailyChallenge;
@@ -62,6 +72,8 @@ export interface TodaysChallengeResponse {
   completedAt: string | null;
   tomorrowChallenge: DailyChallenge;
   tomorrowLocalDate: string;
+  /** Present only for the Head-to-Head challenge. */
+  opponent?: ChallengeOpponent | null;
 }
 
 export interface ChallengeCompletionHistoryItem {
@@ -84,6 +96,12 @@ export interface FriendTodayChallengeResponse {
   localDate: string;
   completed: boolean;
   challengeKey: string | null;
+  // Enriched so a friend's profile renders the right challenge without relying
+  // on a hardcoded client catalog.
+  challengeTitle?: string | null;
+  challengeIcon?: string | null;
+  gradientStart?: string | null;
+  gradientEnd?: string | null;
 }
 
 export interface NewChallengeCompletion {

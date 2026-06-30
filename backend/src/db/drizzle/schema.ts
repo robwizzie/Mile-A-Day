@@ -644,7 +644,7 @@ export const dailyChallenges = pgTable(
     unique("daily_challenges_rotation_index_key").on(table.rotationIndex),
     check(
       "daily_challenges_type_check",
-      sql`type = ANY (ARRAY['pace'::text, 'distance'::text, 'time'::text, 'activity'::text, 'steps'::text])`,
+      sql`type = ANY (ARRAY['pace'::text, 'distance'::text, 'time'::text, 'activity'::text, 'steps'::text, 'social'::text])`,
     ),
   ],
 );

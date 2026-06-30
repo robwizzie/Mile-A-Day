@@ -1,0 +1,2 @@
+ALTER TABLE "daily_challenges" DROP CONSTRAINT "daily_challenges_type_check";--> statement-breakpoint
+ALTER TABLE "daily_challenges" ADD CONSTRAINT "daily_challenges_type_check" CHECK (type = ANY (ARRAY['pace'::text, 'distance'::text, 'time'::text, 'activity'::text, 'steps'::text, 'social'::text]));
