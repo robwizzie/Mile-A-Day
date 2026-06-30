@@ -1,67 +1,74 @@
-import 'dotenv/config';
-import express, { Request, Response, NextFunction } from 'express';
-import compression from 'compression';
-import http from 'http';
-import fs from 'fs';
-import path from 'path';
-import userRoutes from './routes/usersRoutes.js';
-import friendRoutes from './routes/friendshipsRoutes.js';
-import authRoutes from './routes/authRoutes.js';
-import devRoutes from './routes/devRoutes.js';
-import workoutRoutes from './routes/workoutRoutes.js';
-import competitionRoutes from './routes/competitionRoutes.js';
-import deviceRoutes from './routes/deviceRoutes.js';
-import notificationRoutes from './routes/notificationRoutes.js';
-import hypeRoutes from './routes/hypeRoutes.js';
-import badgesRoutes, { publicBadgesRouter } from './routes/badgesRoutes.js';
-import dailyChallengesRoutes from './routes/dailyChallengesRoutes.js';
-import dailyStepsRoutes from './routes/dailyStepsRoutes.js';
-import leaderboardRoutes from './routes/leaderboardRoutes.js';
-import publicRoutes from './routes/publicRoutes.js';
-import { authenticateToken } from './middleware/auth.js';
-import { startCompetitionCron } from './cron/competitionCron.js';
-import { startNotificationCron } from './cron/notificationCron.js';
-import { startSilentSyncCron } from './cron/silentSyncCron.js';
-import { PostgresService } from './services/DbService.js';
-import { webcrypto } from 'node:crypto';
+import "dotenv/config";
+import express, { Request, Response, NextFunction } from "express";
+import compression from "compression";
+import http from "http";
+import fs from "fs";
+import path from "path";
+import userRoutes from "./routes/usersRoutes.js";
+import friendRoutes from "./routes/friendshipsRoutes.js";
+import authRoutes from "./routes/authRoutes.js";
+import devRoutes from "./routes/devRoutes.js";
+import workoutRoutes from "./routes/workoutRoutes.js";
+import competitionRoutes from "./routes/competitionRoutes.js";
+import deviceRoutes from "./routes/deviceRoutes.js";
+import notificationRoutes from "./routes/notificationRoutes.js";
+import hypeRoutes from "./routes/hypeRoutes.js";
+import postsRoutes from "./routes/postsRoutes.js";
+import blocksRoutes from "./routes/blocksRoutes.js";
+import badgesRoutes, { publicBadgesRouter } from "./routes/badgesRoutes.js";
+import dailyChallengesRoutes from "./routes/dailyChallengesRoutes.js";
+import dailyStepsRoutes from "./routes/dailyStepsRoutes.js";
+import leaderboardRoutes from "./routes/leaderboardRoutes.js";
+import publicRoutes from "./routes/publicRoutes.js";
+import { authenticateToken } from "./middleware/auth.js";
+import { startCompetitionCron } from "./cron/competitionCron.js";
+import { startNotificationCron } from "./cron/notificationCron.js";
+import { startSilentSyncCron } from "./cron/silentSyncCron.js";
+import { startStoriesCron } from "./cron/storiesCron.js";
+import { PostgresService } from "./services/DbService.js";
+import { webcrypto } from "node:crypto";
 
 (globalThis as any).crypto ??= webcrypto;
 
 const app = express();
-const PORT = parseInt(process.env.PORT ?? '3000');
+const PORT = parseInt(process.env.PORT ?? "3000");
 
 app.use(compression());
 app.use(express.json());
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(process.cwd(), 'uploads', 'profile-images');
+// Ensure uploads directories exist
+const uploadsDir = path.join(process.cwd(), "uploads", "profile-images");
 fs.mkdirSync(uploadsDir, { recursive: true });
+fs.mkdirSync(path.join(process.cwd(), "uploads", "posts"), { recursive: true });
 
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
-app.get('/status', (req, res) => {
-	res.send('healthy');
+app.get("/status", (req, res) => {
+  res.send("healthy");
 });
 
-app.get('/test-signin.html', (req, res) => {
-	res.sendFile(path.join(process.cwd(), 'test-signin.html'));
+app.get("/test-signin.html", (req, res) => {
+  res.sendFile(path.join(process.cwd(), "test-signin.html"));
 });
 
 // Public endpoint: get profile image URL by username
 app.get(
-	'/public/profile-image/:username',
-	(req, res, next) => {
-		res.setHeader('Access-Control-Allow-Origin', '*');
-		next();
-	},
-	async (req, res) => {
-		const db = PostgresService.getInstance();
-		const results = await db.query('SELECT profile_image_url FROM users WHERE username = $1', [req.params.username]);
-		if (!results.length || !results[0].profile_image_url) {
-			return res.status(404).json({ error: 'Not found' });
-		}
-		res.json({ profile_image_url: results[0].profile_image_url });
-	}
+  "/public/profile-image/:username",
+  (req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    next();
+  },
+  async (req, res) => {
+    const db = PostgresService.getInstance();
+    const results = await db.query(
+      "SELECT profile_image_url FROM users WHERE username = $1",
+      [req.params.username],
+    );
+    if (!results.length || !results[0].profile_image_url) {
+      return res.status(404).json({ error: "Not found" });
+    }
+    res.json({ profile_image_url: results[0].profile_image_url });
+  },
 );
 
 // Public endpoint: minimal profile by username for the marketing site's
@@ -92,34 +99,37 @@ app.get(
 app.use("/auth", authRoutes);
 app.use("/dev", devRoutes);
 app.use("/badges", publicBadgesRouter);
-app.use('/public', publicRoutes);
+app.use("/public", publicRoutes);
 
 app.use(authenticateToken);
-app.use('/users', userRoutes);
-app.use('/users', badgesRoutes);
-app.use('/users', dailyChallengesRoutes);
-app.use('/users', dailyStepsRoutes);
-app.use('/friends', friendRoutes);
-app.use('/workouts', workoutRoutes);
-app.use('/competitions', competitionRoutes);
-app.use('/devices', deviceRoutes);
-app.use('/notifications', notificationRoutes);
-app.use('/hype', hypeRoutes);
-app.use('/leaderboard', leaderboardRoutes);
+app.use("/users", userRoutes);
+app.use("/users", badgesRoutes);
+app.use("/users", dailyChallengesRoutes);
+app.use("/users", dailyStepsRoutes);
+app.use("/friends", friendRoutes);
+app.use("/workouts", workoutRoutes);
+app.use("/competitions", competitionRoutes);
+app.use("/devices", deviceRoutes);
+app.use("/notifications", notificationRoutes);
+app.use("/hype", hypeRoutes);
+app.use("/posts", postsRoutes);
+app.use("/blocks", blocksRoutes);
+app.use("/leaderboard", leaderboardRoutes);
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-	console.error('Error:', err.message);
+  console.error("Error:", err.message);
 
-	res.status(500).json({
-		error: 'Internal Server Error',
-		message: err.message
-	});
+  res.status(500).json({
+    error: "Internal Server Error",
+    message: err.message,
+  });
 });
 
 const server = http.createServer(app);
-server.listen(PORT, '0.0.0.0', () => {
-	console.log(`Server running on port ${PORT}`);
-	startCompetitionCron();
-	startNotificationCron();
-	startSilentSyncCron();
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
+  startCompetitionCron();
+  startNotificationCron();
+  startSilentSyncCron();
+  startStoriesCron();
 });

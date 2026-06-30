@@ -15,6 +15,13 @@
       "when": 1781649109407,
       "tag": "0001_optimal_mercury",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782788263312,
+      "tag": "0002_early_screwball",
+      "breakpoints": true
     }
   ]
 }
