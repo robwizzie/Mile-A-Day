@@ -379,6 +379,8 @@ async function computeProgress(
       return Math.min((await distinctHypesToday(userId, localDate)) / 3.0, 1.0);
     case "share_journey":
       return (await hasPostToday(userId, localDate)) ? 1.0 : 0;
+    case "wingman":
+      return Math.min((await nudgesToday(userId, localDate)) / 1.0, 1.0);
     case "head_to_head": {
       const opp = await buildOpponent(userId, localDate);
       if (!opp) return 0;
@@ -529,6 +531,9 @@ async function evaluatePredicate(
     case "share_journey":
       return await hasPostToday(userId, localDate);
 
+    case "wingman":
+      return (await nudgesToday(userId, localDate)) >= 1;
+
     case "head_to_head": {
       const opp = await buildOpponent(userId, localDate);
       if (!opp) return false;
@@ -577,6 +582,25 @@ async function distinctHypesToday(
 				AND (created_at + (COALESCE(
 					(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1), 0
 				) || ' minutes')::interval)::date = $2::date`,
+      [userId, localDate],
+    );
+    return parseInt(rows[0]?.c ?? "0", 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Distinct friends the user nudged on `localDate` (friend + competition nudges). */
+async function nudgesToday(userId: string, localDate: string): Promise<number> {
+  try {
+    const tzExpr = `(created_at + (COALESCE(
+				(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1), 0
+			) || ' minutes')::interval)::date = $2::date`;
+    const rows = await db.query<{ c: string }>(
+      `SELECT (
+				(SELECT COUNT(*) FROM friend_nudge_log WHERE sender_id = $1 AND ${tzExpr})
+				+ (SELECT COUNT(*) FROM nudge_log WHERE sender_id = $1 AND ${tzExpr})
+			)::text AS c`,
       [userId, localDate],
     );
     return parseInt(rows[0]?.c ?? "0", 10) || 0;
@@ -735,6 +759,7 @@ const SOCIAL_CHALLENGE_KEYS = new Set([
   "hype_squad",
   "share_journey",
   "head_to_head",
+  "wingman",
 ]);
 
 async function getAcceptedFriendCount(userId: string): Promise<number> {
@@ -1066,6 +1091,16 @@ const EXTRA_CHALLENGES: Array<{
     gradientEnd: "#5856D6",
     type: "social",
     rotationIndex: 12,
+  },
+  {
+    key: "wingman",
+    title: "Wingman",
+    description: "Nudge a friend to get their mile in today",
+    icon: "hand.wave.fill",
+    gradientStart: "#FF9500",
+    gradientEnd: "#FF2D55",
+    type: "social",
+    rotationIndex: 13,
   },
 ];
 

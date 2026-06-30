@@ -7,6 +7,7 @@ export type BadgeCategory =
   | "special"
   | "story"
   | "hype"
+  | "nudge"
   | "competition";
 export type BadgeRarity = "common" | "rare" | "legendary";
 export type DailyChallengeType =
@@ -125,6 +126,7 @@ export interface UserAggregates {
   // Social / app-function aggregates (v2 medals)
   storyPostsCount: number;
   hypesGivenCount: number;
+  nudgesSentCount: number;
   competitionsStarted: number;
   competitionsEntered: number;
   competitionsWon: number;

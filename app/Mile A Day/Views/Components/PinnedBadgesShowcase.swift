@@ -335,6 +335,8 @@ func iconName(for badge: Badge) -> String {
         return "camera.fill"
     } else if badge.id.starts(with: "hype_") {
         return "hands.clap.fill"
+    } else if badge.id.starts(with: "nudge_") {
+        return "hand.wave.fill"
     } else if badge.id.starts(with: "comp_won_") {
         return "crown.fill"
     } else if badge.id.starts(with: "comp_started_") {

@@ -141,6 +141,7 @@ export async function computeAggregates(
 async function computeSocialAggregates(userId: string): Promise<{
   storyPostsCount: number;
   hypesGivenCount: number;
+  nudgesSentCount: number;
   competitionsStarted: number;
   competitionsEntered: number;
   competitionsWon: number;
@@ -148,12 +149,13 @@ async function computeSocialAggregates(userId: string): Promise<{
   const zero = {
     storyPostsCount: 0,
     hypesGivenCount: 0,
+    nudgesSentCount: 0,
     competitionsStarted: 0,
     competitionsEntered: 0,
     competitionsWon: 0,
   };
   try {
-    const [stories, hypes, started, entered, won] = await Promise.all([
+    const [stories, hypes, nudges, started, entered, won] = await Promise.all([
       db
         .query<{
           count: string;
@@ -167,6 +169,19 @@ async function computeSocialAggregates(userId: string): Promise<{
           count: string;
         }>(
           `SELECT COUNT(*)::text AS count FROM hype_log WHERE sender_id = $1`,
+          [userId],
+        )
+        .catch(() => [{ count: "0" }]),
+      // Nudges sent — both friend nudges and competition nudges promote the
+      // same social behavior, so a "nudge" is counted from both logs.
+      db
+        .query<{
+          count: string;
+        }>(
+          `SELECT (
+            (SELECT COUNT(*) FROM friend_nudge_log WHERE sender_id = $1)
+            + (SELECT COUNT(*) FROM nudge_log WHERE sender_id = $1)
+          )::text AS count`,
           [userId],
         )
         .catch(() => [{ count: "0" }]),
@@ -198,6 +213,7 @@ async function computeSocialAggregates(userId: string): Promise<{
     return {
       storyPostsCount: parseInt(stories[0]?.count ?? "0", 10) || 0,
       hypesGivenCount: parseInt(hypes[0]?.count ?? "0", 10) || 0,
+      nudgesSentCount: parseInt(nudges[0]?.count ?? "0", 10) || 0,
       competitionsStarted: parseInt(started[0]?.count ?? "0", 10) || 0,
       competitionsEntered: parseInt(entered[0]?.count ?? "0", 10) || 0,
       competitionsWon: parseInt(won[0]?.count ?? "0", 10) || 0,
@@ -381,6 +397,11 @@ function evaluatePredicate(
         earned: req !== null && agg.hypesGivenCount >= req,
         aggregateOnly: true,
       };
+    case "nudge":
+      return {
+        earned: req !== null && agg.nudgesSentCount >= req,
+        aggregateOnly: true,
+      };
     case "competition": {
       // One category, three families distinguished by badgeId prefix.
       if (req === null) return { earned: false, aggregateOnly: true };
@@ -523,6 +544,47 @@ const EXTRA_BADGES: Array<{
     rarity: "legendary",
     requirement: 500,
     sortOrder: 913,
+  },
+  // Nudges (accountability — reminding friends to get their mile in)
+  {
+    badgeId: "nudge_1",
+    category: "nudge",
+    name: "First Nudge",
+    description: "Nudged a friend to get their mile in",
+    icon: "hand.wave.fill",
+    rarity: "common",
+    requirement: 1,
+    sortOrder: 950,
+  },
+  {
+    badgeId: "nudge_25",
+    category: "nudge",
+    name: "Motivator",
+    description: "Sent 25 nudges",
+    icon: "bell.badge.fill",
+    rarity: "common",
+    requirement: 25,
+    sortOrder: 951,
+  },
+  {
+    badgeId: "nudge_100",
+    category: "nudge",
+    name: "Accountability Partner",
+    description: "Sent 100 nudges",
+    icon: "bell.badge.fill",
+    rarity: "rare",
+    requirement: 100,
+    sortOrder: 952,
+  },
+  {
+    badgeId: "nudge_500",
+    category: "nudge",
+    name: "Hype Coach",
+    description: "Sent 500 nudges",
+    icon: "megaphone.fill",
+    rarity: "legendary",
+    requirement: 500,
+    sortOrder: 953,
   },
   // Competitions started
   {

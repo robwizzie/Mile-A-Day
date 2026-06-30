@@ -33,7 +33,8 @@ INSERT INTO daily_challenges (challenge_key, title, description_template, icon, 
   ('two_a_day',      'Two-a-Day',               'Log two separate workouts today',                     'arrow.triangle.2.circlepath', '#5AC8FA', '#34C759', 'activity', TRUE, 9),
   ('hype_squad',     'Hype Squad',              'Cheer on 3 different friends today',                   'hands.clap.fill',         '#FF2D55', '#FF9500', 'social',   TRUE, 10),
   ('share_journey',  'Share the Journey',       'Post a photo to the feed today',                      'camera.fill',             '#007AFF', '#AF52DE', 'social',   TRUE, 11),
-  ('head_to_head',   'Head-to-Head',            'Out-run a friend today — log more miles than them!',  'flag.2.crossed.fill',     '#FF3B30', '#5856D6', 'social',   TRUE, 12)
+  ('head_to_head',   'Head-to-Head',            'Out-run a friend today — log more miles than them!',  'flag.2.crossed.fill',     '#FF3B30', '#5856D6', 'social',   TRUE, 12),
+  ('wingman',        'Wingman',                 'Nudge a friend to get their mile in today',            'hand.wave.fill',          '#FF9500', '#FF2D55', 'social',   TRUE, 13)
 ON CONFLICT (challenge_key) DO UPDATE SET
   title                = EXCLUDED.title,
   description_template = EXCLUDED.description_template,
