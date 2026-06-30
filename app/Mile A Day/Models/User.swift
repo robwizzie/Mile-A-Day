@@ -722,6 +722,11 @@ struct Badge: Identifiable, Codable {
             if n >= 100 { return .rare }
             return .common
         }
+        if id.starts(with: "nudge_") {
+            if n >= 500 { return .legendary }
+            if n >= 100 { return .rare }
+            return .common
+        }
         if id.starts(with: "comp_won_") {
             return n >= 5 ? .legendary : .rare
         }

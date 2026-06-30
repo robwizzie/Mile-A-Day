@@ -49,44 +49,8 @@ struct BadgeRowCard: View {
             isShowingDetail = true
         } label: {
             HStack(spacing: MADTheme.Spacing.md) {
-                // Mini medal
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: badge.isLocked
-                                    ? [Color(white: 0.25), Color(white: 0.15)]
-                                    : medalGradientColors,
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 40, height: 40)
-                        .overlay(
-                            Circle()
-                                .stroke(
-                                    badge.isLocked
-                                        ? Color.white.opacity(0.08)
-                                        : Color.white.opacity(0.3),
-                                    lineWidth: 1
-                                )
-                        )
-                        .shadow(
-                            color: badge.isLocked ? .clear : badge.rarity.color.opacity(0.3),
-                            radius: 6, x: 0, y: 3
-                        )
-
-                    if badge.isLocked {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(.white.opacity(0.3))
-                    } else {
-                        Image(systemName: badgeIcon)
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundColor(.white)
-                            .shadow(color: .black.opacity(0.3), radius: 1, x: 0, y: 1)
-                    }
-                }
+                // Mini medal — shared premium look (no shimmer at this small size).
+                MedalView(badge: badge, size: 44, showShimmer: false)
 
                 // Name & rarity
                 VStack(alignment: .leading, spacing: 2) {

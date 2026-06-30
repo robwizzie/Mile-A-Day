@@ -163,52 +163,8 @@ private struct PinnedBadgeSlotFilled: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [badge.rarity.color.opacity(0.35), badge.rarity.color.opacity(0)],
-                            center: .center,
-                            startRadius: 15,
-                            endRadius: 45
-                        )
-                    )
-                    .frame(width: 90, height: 90)
-
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: medalGradientColors(for: badge),
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 64, height: 64)
-                    .overlay(
-                        Circle()
-                            .stroke(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.55), badge.rarity.color.opacity(0.35)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 2
-                            )
-                    )
-                    .shadow(color: badge.rarity.color.opacity(0.4), radius: 10, x: 0, y: 4)
-
-                Image(systemName: iconName(for: badge))
-                    .font(.system(size: 26, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.white, .white.opacity(0.85)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 2)
-            }
-            .frame(width: 90, height: 90)
+            MedalView(badge: badge, size: 72)
+                .frame(width: 90, height: 90)
 
             Text(badge.name)
                 .font(.system(size: 11, weight: .bold, design: .rounded))

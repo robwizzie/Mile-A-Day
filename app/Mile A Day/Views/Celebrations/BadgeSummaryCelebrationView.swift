@@ -97,19 +97,9 @@ struct BadgeSummaryCelebrationView: View {
     }
 
     private func miniMedal(_ badge: Badge) -> some View {
-        ZStack {
-            Circle()
-                .fill(RadialGradient(colors: [badge.rarity.color.opacity(0.4), .clear], center: .center, startRadius: 8, endRadius: 44))
-                .frame(width: 88, height: 88)
-            Circle()
-                .fill(LinearGradient(colors: medalGradientColors(for: badge), startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: 60, height: 60)
-                .overlay(Circle().stroke(Color.white.opacity(0.5), lineWidth: 2))
-                .shadow(color: badge.rarity.color.opacity(0.5), radius: 8, y: 3)
-            Image(systemName: iconName(for: badge))
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(LinearGradient(colors: [.white, .white.opacity(0.85)], startPoint: .top, endPoint: .bottom))
-        }
+        // Shared premium medal; shimmer off so the stacked row stays calm.
+        MedalView(badge: badge, size: 72, showShimmer: false)
+            .frame(width: 88, height: 88)
     }
 
     private func runSequence() {

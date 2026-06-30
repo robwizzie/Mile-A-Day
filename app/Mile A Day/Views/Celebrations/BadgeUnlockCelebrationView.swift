@@ -19,6 +19,8 @@ struct BadgeUnlockCelebrationView: View {
     @State private var iconRotation: Double = -30
     @State private var showRarityBanner = false
     @State private var showConfetti = false
+    @State private var showBurst = false
+    @State private var showRays = false
     @State private var showContent = false
     @State private var showButtons = false
     @State private var hasStartedAnimation: Bool = false
@@ -70,17 +72,19 @@ struct BadgeUnlockCelebrationView: View {
     
     var confettiCount: Int {
         switch badge.rarity {
-        case .common: return 20
-        case .rare: return 30
-        case .legendary: return 40
+        case .common: return 36
+        case .rare: return 55
+        case .legendary: return 80
         }
     }
 
-    var ringCount: Int {
+    // Rotating light rays behind the medal — reserved for rare/legendary so common
+    // unlocks stay clean.
+    var rayCount: Int {
         switch badge.rarity {
-        case .common: return 1
-        case .rare: return 2
-        case .legendary: return 3
+        case .common: return 0
+        case .rare: return 10
+        case .legendary: return 16
         }
     }
     
@@ -121,65 +125,36 @@ struct BadgeUnlockCelebrationView: View {
 
                             // Badge display
                             ZStack {
-                                // Subtle ambient glow
+                                // Rotating light rays (rare/legendary only)
+                                if showRays && rayCount > 0 {
+                                    LightRays(color: rarityColor, rayCount: rayCount)
+                                        .frame(width: 340, height: 340)
+                                        .transition(.opacity)
+                                }
+
+                                // Ambient glow
                                 Circle()
                                     .fill(
                                         RadialGradient(
-                                            colors: [rarityColor.opacity(0.35), rarityColor.opacity(0)],
+                                            colors: [rarityColor.opacity(0.4), rarityColor.opacity(0)],
                                             center: .center,
                                             startRadius: 40,
-                                            endRadius: 110
+                                            endRadius: 130
                                         )
                                     )
-                                    .frame(width: 220, height: 220)
+                                    .frame(width: 240, height: 240)
 
-                                // Medal
-                                ZStack {
-                                    // Main medal
-                                    Circle()
-                                        .fill(
-                                            LinearGradient(
-                                                colors: medalGradient,
-                                                startPoint: .topLeading,
-                                                endPoint: .bottomTrailing
-                                            )
-                                        )
-                                        .frame(width: 160, height: 160)
-                                        .overlay(
-                                            Circle()
-                                                .stroke(
-                                                    LinearGradient(
-                                                        colors: [Color.white.opacity(0.6), rarityColor.opacity(0.3)],
-                                                        startPoint: .topLeading,
-                                                        endPoint: .bottomTrailing
-                                                    ),
-                                                    lineWidth: 3
-                                                )
-                                        )
-                                        .shadow(color: rarityColor.opacity(0.5), radius: 20, x: 0, y: 10)
-
-                                    // Inner ring
-                                    Circle()
-                                        .stroke(Color.white.opacity(0.3), lineWidth: 1.5)
-                                        .frame(width: 130, height: 130)
-
-                                    // Badge icon
-                                    Image(systemName: badgeIcon)
-                                        .font(.system(size: 64, weight: .semibold))
-                                        .foregroundStyle(
-                                            LinearGradient(
-                                                colors: [.white, .white.opacity(0.85)],
-                                                startPoint: .top,
-                                                endPoint: .bottom
-                                            )
-                                        )
-                                        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 3)
-                                        .scaleEffect(iconScale)
-                                        .rotationEffect(.degrees(iconRotation))
-                                        .opacity(showIcon ? 1 : 0)
+                                // Radial burst at the reveal moment
+                                if showBurst {
+                                    BurstEffect(colors: confettiColors, particleCount: 26)
+                                        .frame(width: 280, height: 280)
+                                        .allowsHitTesting(false)
                                 }
-                                .scaleEffect(medalScale)
-                                .opacity(showMedal ? 1 : 0)
+
+                                // Premium tiltable medal
+                                TiltableMedal(badge: badge, size: 172)
+                                    .scaleEffect(medalScale)
+                                    .opacity(showMedal ? 1 : 0)
                             }
 
                             // Badge info content
@@ -409,25 +384,22 @@ struct BadgeUnlockCelebrationView: View {
             }
         }
 
-        // Phase 2: Medal + icon appear together
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.55)) {
+        // Phase 2: Light rays fade in behind, then the medal punches in with a burst.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            withAnimation(.easeOut(duration: 0.6)) { showRays = true }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.52)) {
                 showMedal = true
                 medalScale = 1.0
             }
+            showBurst = true
             notificationGenerator.notificationOccurred(.success)
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
-            withAnimation(.spring(response: 0.4, dampingFraction: 0.5)) {
-                showIcon = true
-                iconScale = 1.0
-                iconRotation = 0
-            }
-            impactGenerator.impactOccurred(intensity: 0.8)
+            impactGenerator.impactOccurred(intensity: 1.0)
         }
 
-        // Phase 3: Confetti
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+        // Phase 3: Confetti rains down
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             showConfetti = true
         }
 
@@ -524,6 +496,43 @@ struct RarityBannerView: View {
     }
 }
 
+
+// MARK: - Light Rays
+
+/// Slowly rotating volumetric light rays behind the medal. Masked to fade out at
+/// the center (behind the medal) and the edges so it reads as a soft halo of
+/// god-rays rather than a hard pinwheel.
+struct LightRays: View {
+    let color: Color
+    var rayCount: Int = 12
+
+    @State private var angle: Double = 0
+
+    private var rayColors: [Color] {
+        (0..<max(1, rayCount)).flatMap { _ in [color.opacity(0), color.opacity(0.32)] }
+    }
+
+    var body: some View {
+        AngularGradient(gradient: Gradient(colors: rayColors), center: .center)
+            .blur(radius: 5)
+            .mask(
+                RadialGradient(
+                    colors: [.clear, .white, .clear],
+                    center: .center,
+                    startRadius: 50,
+                    endRadius: 170
+                )
+            )
+            .blendMode(.screen)
+            .rotationEffect(.degrees(angle))
+            .onAppear {
+                withAnimation(.linear(duration: 18).repeatForever(autoreverses: false)) {
+                    angle = 360
+                }
+            }
+            .allowsHitTesting(false)
+    }
+}
 
 // MARK: - Confetti Cannon
 
