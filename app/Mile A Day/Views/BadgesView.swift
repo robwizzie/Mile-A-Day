@@ -31,7 +31,13 @@ struct BadgesView: View {
                     
                     // Filter section
                     filterSection
-                    
+
+                    // Per-category progress (skipped for All — header covers it —
+                    // and New, which is inherently all-earned).
+                    if selectedFilter != .all && selectedFilter != .new {
+                        filterProgressCaption
+                    }
+
                     // Badges grid
                     if filteredBadges.isEmpty {
                         emptyStateView
@@ -222,13 +228,43 @@ struct BadgesView: View {
             return allBadges.filter { $0.id.starts(with: "daily_") }
         case .challenges:
             return allBadges.filter { $0.id.starts(with: "challenge_") }
+        case .social:
+            // Story / hype / nudge / competition medals, grouped by family then
+            // by tier so the progression reads cleanly.
+            return allBadges
+                .filter { b in BadgeFilter.socialPrefixes.contains { b.id.hasPrefix($0) } }
+                .sorted { Self.socialSortKey($0.id) < Self.socialSortKey($1.id) }
         case .new:
             // Use the on-open snapshot so the list survives mark-as-viewed.
             let snapshot = newBadgeIdsAtOpen
             return allBadges.filter { ($0.isNew || snapshot.contains($0.id)) && !$0.isLocked }
         }
     }
-    
+
+    /// Orders a social badge by family (story → hype → nudge → competitions),
+    /// then by numeric tier within the family.
+    private static func socialSortKey(_ id: String) -> (Int, Int) {
+        let family = BadgeFilter.socialPrefixes.firstIndex { id.hasPrefix($0) }
+            ?? BadgeFilter.socialPrefixes.count
+        let tier = Int(id.split(separator: "_").last ?? "") ?? 0
+        return (family, tier)
+    }
+
+    private var filterProgressCaption: some View {
+        let earned = filteredBadges.filter { !$0.isLocked }.count
+        let total = filteredBadges.count
+        return HStack(spacing: 6) {
+            Image(systemName: earned == total && total > 0 ? "checkmark.seal.fill" : selectedFilter.icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(earned == total && total > 0 ? .green : MADTheme.Colors.madRed)
+            Text("\(earned) of \(total) \(selectedFilter.title.lowercased()) medals earned")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.6))
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.horizontal)
+    }
+
     private var badgesGridView: some View {
         LazyVGrid(
             columns: [
@@ -527,7 +563,7 @@ struct FilterChip: View {
 // MARK: - Badge Filter
 
 enum BadgeFilter: CaseIterable {
-    case all, streak, miles, speed, distance, challenges, new
+    case all, streak, miles, speed, distance, challenges, social, new
 
     var title: String {
         switch self {
@@ -537,6 +573,7 @@ enum BadgeFilter: CaseIterable {
         case .speed: return "Speed"
         case .distance: return "Distance"
         case .challenges: return "Challenges"
+        case .social: return "Social"
         case .new: return "New"
         }
     }
@@ -549,9 +586,17 @@ enum BadgeFilter: CaseIterable {
         case .speed: return "bolt.fill"
         case .distance: return "road.lanes"
         case .challenges: return "trophy.fill"
+        case .social: return "person.2.fill"
         case .new: return "sparkles"
         }
     }
+
+    /// Badge-id prefixes that count as "social / app-function" medals, in the
+    /// order they should appear under the Social filter.
+    static let socialPrefixes = [
+        "story_", "hype_", "nudge_",
+        "comp_started_", "comp_entered_", "comp_won_", "comp_",
+    ]
 }
 
 // MARK: - Badge Card Button Style
