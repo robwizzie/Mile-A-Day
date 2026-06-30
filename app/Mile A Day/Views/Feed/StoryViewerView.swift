@@ -134,6 +134,9 @@ struct StoryViewerView: View {
     @ViewBuilder
     private func footer(_ post: PostItem) -> some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let stats = post.stats_snapshot {
+                PostStatStrip(stats: stats, onPhoto: true)
+            }
             if let caption = post.caption, !caption.isEmpty {
                 Text(caption)
                     .font(.system(size: 14, weight: .medium, design: .rounded))

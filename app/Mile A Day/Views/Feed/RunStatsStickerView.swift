@@ -338,6 +338,9 @@ struct RunStatsStickerView: View {
 /// photo overlay is small or turned off. Renders nothing when there's no data.
 struct PostStatStrip: View {
     let stats: PostStats
+    /// When shown over a photo (story viewer), use a darker chip + shadow so the
+    /// text stays legible on any image. Default keeps the feed-card appearance.
+    var onPhoto: Bool = false
 
     private struct Item: Identifiable { let id = UUID(); let icon: String; let text: String; let tint: Color }
 
@@ -365,7 +368,8 @@ struct PostStatStrip: View {
                     }
                     .foregroundColor(item.tint)
                     .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Capsule().fill(Color.white.opacity(0.06)))
+                    .background(Capsule().fill(onPhoto ? Color.black.opacity(0.45) : Color.white.opacity(0.06)))
+                    .shadow(color: onPhoto ? .black.opacity(0.5) : .clear, radius: onPhoto ? 4 : 0)
                 }
             }
         }
