@@ -260,6 +260,9 @@ enum CelebrationType: Identifiable, Equatable {
     case milestone(title: String, description: String, icon: String)
     /// Headline yearly streak celebration — fired at every multiple of 365 days.
     case yearMilestone(info: YearlyMilestoneInfo)
+    /// One-time welcome summary for a new account with historical data — shows
+    /// the COUNT of badges unlocked instead of spamming a popup per badge.
+    case badgeSummary(count: Int, badges: [Badge])
 
     var id: String {
         switch self {
@@ -273,6 +276,8 @@ enum CelebrationType: Identifiable, Equatable {
             return "milestone-\(title)"
         case .yearMilestone(let info):
             return "year-milestone-\(info.years)"
+        case .badgeSummary:
+            return "badge-summary"
         }
     }
 
@@ -288,6 +293,8 @@ enum CelebrationType: Identifiable, Equatable {
             return t1 == t2
         case (.yearMilestone(let i1), .yearMilestone(let i2)):
             return i1.years == i2.years
+        case (.badgeSummary, .badgeSummary):
+            return true // only one welcome summary
         default:
             return false
         }

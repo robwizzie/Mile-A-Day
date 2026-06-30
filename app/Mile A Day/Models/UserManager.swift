@@ -80,7 +80,10 @@ class UserManager: ObservableObject {
             guard let self else { return }
             Task {
                 await self.refreshBadgesFromServer()
-                await MainActor.run { self.hasCompletedInitialBadgeSync = true }
+                await MainActor.run {
+                    self.hasCompletedInitialBadgeSync = true
+                    self.presentInitialBadgeSummaryIfNeeded()
+                }
             }
         }
         #endif
@@ -473,6 +476,7 @@ class UserManager: ObservableObject {
                     let sync = WorkoutSyncService.shared
                     if !sync.isFirstTimeSync(), !sync.isInitialSyncIncomplete(), !sync.isSyncing {
                         hasCompletedInitialBadgeSync = true
+                        presentInitialBadgeSummaryIfNeeded()
                     }
                     return
                 }
@@ -513,6 +517,24 @@ class UserManager: ObservableObject {
     /// path itself: an early fetch (e.g. MainTabView's retroactive check) racing the
     /// batched initial upload is exactly what caused the one-by-one badge flood.
     @AppStorage("hasCompletedInitialBadgeSync") private var hasCompletedInitialBadgeSync: Bool = false
+
+    /// Guards the one-time welcome badge summary so a new account with history
+    /// sees a single "You unlocked N badges" instead of a popup per badge.
+    @AppStorage("hasShownInitialBadgeSummary") private var hasShownInitialBadgeSummary: Bool = false
+
+    /// Show the welcome summary once, when the initial sync completes and the
+    /// user already has a batch of retroactively-earned badges. Small counts
+    /// (a fresh user with little/no history) are skipped — they'll get normal
+    /// unlock celebrations going forward.
+    func presentInitialBadgeSummaryIfNeeded() {
+        guard !hasShownInitialBadgeSummary else { return }
+        hasShownInitialBadgeSummary = true
+        let earned = currentUser.badges
+        guard earned.count >= 3 else { return }
+        CelebrationManager.shared.addCelebration(
+            .badgeSummary(count: earned.count, badges: Array(earned.prefix(12)))
+        )
+    }
 
     /// Returns true if a yearly celebration was queued.
     @discardableResult

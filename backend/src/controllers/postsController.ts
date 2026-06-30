@@ -26,6 +26,7 @@ import {
 } from "../services/moderationService.js";
 import { getDailyGoalStatus } from "../services/workoutService.js";
 import { hasUnlimitedActions } from "../services/privilegedUsers.js";
+import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 
 const POSTS_MEDIA_PREFIX = "/uploads/posts/";
 const MAX_CAPTION = 280;
@@ -143,6 +144,10 @@ export async function createPostController(
     // friend_posts_enabled setting). Never blocks the response.
     if (shareToFeed) {
       notifyFriendsOfPost(userId, post.caption).catch(() => {});
+    }
+    // Re-evaluate story badges (first story, X stories) in the background.
+    if (shareToStory) {
+      evaluateSocialBadgesForUser(userId).catch(() => {});
     }
 
     res.status(201).json(post);

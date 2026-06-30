@@ -25,6 +25,7 @@ import { startCompetitionCron } from "./cron/competitionCron.js";
 import { startNotificationCron } from "./cron/notificationCron.js";
 import { startSilentSyncCron } from "./cron/silentSyncCron.js";
 import { startStoriesCron } from "./cron/storiesCron.js";
+import { seedExtraBadges } from "./services/badgeService.js";
 import { PostgresService } from "./services/DbService.js";
 import { webcrypto } from "node:crypto";
 
@@ -132,4 +133,6 @@ server.listen(PORT, "0.0.0.0", () => {
   startNotificationCron();
   startSilentSyncCron();
   startStoriesCron();
+  // Idempotently ensure the v2 social/app-function badges exist in the catalog.
+  seedExtraBadges();
 });

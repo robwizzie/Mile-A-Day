@@ -376,19 +376,9 @@ struct BadgeUnlockCelebrationView: View {
     // MARK: - Badge Icon
     
     private var badgeIcon: String {
-        if badge.id.starts(with: "streak_") || badge.id.starts(with: "consistency_") {
-            return "flame.fill"
-        } else if badge.id.starts(with: "miles_") {
-            return "figure.run"
-        } else if badge.id.starts(with: "pace_") {
-            return "bolt.fill"
-        } else if badge.id.starts(with: "daily_") {
-            return "figure.run.circle.fill"
-        } else if badge.id.starts(with: "special_") {
-            return "sparkles"
-        } else {
-            return "star.fill"
-        }
+        // Shared resolver (PinnedBadgesShowcase.swift) covers every category,
+        // incl. story / hype / competition badges.
+        iconName(for: badge)
     }
     
     // MARK: - Confetti Colors

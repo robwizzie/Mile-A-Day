@@ -478,6 +478,40 @@ struct User: Identifiable, Codable {
             }
         }
 
+        // Social & competition badges (app-function). Mirrors the backend
+        // catalog seeded in badgeService.seedExtraBadges().
+        let socialBadges: [(String, String, String)] = [
+            ("story_1", "First Story", "Shared your first story photo"),
+            ("story_5", "Storyteller", "Shared 5 story photos"),
+            ("story_25", "Documentarian", "Shared 25 story photos"),
+            ("story_100", "Highlight Reel", "Shared 100 story photos"),
+            ("hype_1", "First Hype", "Hyped a friend for the first time"),
+            ("hype_25", "Hype Man", "Sent 25 hypes"),
+            ("hype_100", "Cheerleader", "Sent 100 hypes"),
+            ("hype_500", "Hype Machine", "Sent 500 hypes"),
+            ("comp_started_1", "Game On", "Started your first competition"),
+            ("comp_started_10", "Organizer", "Started 10 competitions"),
+            ("comp_entered_1", "Challenger", "Joined your first competition"),
+            ("comp_entered_10", "Competitor", "Competed in 10 competitions"),
+            ("comp_entered_50", "Seasoned", "Competed in 50 competitions"),
+            ("comp_won_1", "Champion", "Won your first competition"),
+            ("comp_won_5", "Dominator", "Won 5 competitions"),
+            ("comp_won_25", "Hall of Famer", "Won 25 competitions")
+        ]
+
+        for (badgeId, name, description) in socialBadges {
+            if !hasBadge(id: badgeId) {
+                lockedBadges.append(Badge(
+                    id: badgeId,
+                    name: name,
+                    description: description,
+                    dateAwarded: Date.distantFuture,
+                    isNew: false,
+                    isLocked: true
+                ))
+            }
+        }
+
         // Note: Hidden badges are NOT shown in locked list - they're surprises!
 
         return lockedBadges
@@ -672,6 +706,27 @@ struct Badge: Identifiable, Codable {
         if id.starts(with: "challenge_") {
             if n >= 100 { return .legendary }
             if n >= 25 { return .rare }
+            return .common
+        }
+        if id.starts(with: "story_") {
+            if n >= 100 { return .legendary }
+            if n >= 25 { return .rare }
+            return .common
+        }
+        if id.starts(with: "hype_") {
+            if n >= 500 { return .legendary }
+            if n >= 100 { return .rare }
+            return .common
+        }
+        if id.starts(with: "comp_won_") {
+            return n >= 5 ? .legendary : .rare
+        }
+        if id.starts(with: "comp_started_") {
+            return n >= 10 ? .rare : .common
+        }
+        if id.starts(with: "comp_entered_") || id.starts(with: "comp_") {
+            if n >= 50 { return .legendary }
+            if n >= 10 { return .rare }
             return .common
         }
         if id.starts(with: "special_") {

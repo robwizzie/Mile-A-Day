@@ -280,21 +280,8 @@ struct PremiumBadgeCard: View {
     let badge: Badge
     
     private var badgeIcon: String {
-        if badge.id.starts(with: "streak_") || badge.id.starts(with: "consistency_") {
-            return "flame.fill"
-        } else if badge.id.starts(with: "miles_") {
-            return "figure.run"
-        } else if badge.id.starts(with: "pace_") {
-            return "bolt.fill"
-        } else if badge.id.starts(with: "daily_") {
-            return "figure.run.circle.fill"
-        } else if badge.id.starts(with: "challenge_") {
-            return "trophy.fill"
-        } else if badge.id.starts(with: "special_") {
-            return "sparkles"
-        } else {
-            return "star.fill"
-        }
+        // Shared resolver covers every category, incl. story / hype / competition.
+        iconName(for: badge)
     }
     
     var body: some View {

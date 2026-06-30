@@ -4,7 +4,10 @@ export type BadgeCategory =
   | "pace"
   | "daily_distance"
   | "challenge"
-  | "special";
+  | "special"
+  | "story"
+  | "hype"
+  | "competition";
 export type BadgeRarity = "common" | "rare" | "legendary";
 export type DailyChallengeType =
   | "pace"
@@ -101,4 +104,10 @@ export interface UserAggregates {
   fastestSplitPaceMinMi: number;
   mostMilesInOneDay: number;
   challengeCompletionsCount: number;
+  // Social / app-function aggregates (v2 medals)
+  storyPostsCount: number;
+  hypesGivenCount: number;
+  competitionsStarted: number;
+  competitionsEntered: number;
+  competitionsWon: number;
 }

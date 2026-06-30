@@ -43,6 +43,9 @@ struct CelebrationContainerView: View {
 
         case .yearMilestone(let info):
             YearlyMilestoneCelebrationView(info: info)
+
+        case .badgeSummary(let count, let badges):
+            BadgeSummaryCelebrationView(count: count, badges: badges)
         }
     }
 }
