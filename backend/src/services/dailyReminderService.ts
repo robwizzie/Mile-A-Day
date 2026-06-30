@@ -1,12 +1,12 @@
-import { PostgresService } from './DbService.js';
-import { sendPush } from './pushNotificationService.js';
+import { PostgresService } from "./DbService.js";
+import { sendPush } from "./pushNotificationService.js";
 
 const db = PostgresService.getInstance();
 
 interface ReminderCandidate {
-	user_id: string;
-	goal_miles: string | number;
-	tz_offset: number;
+  user_id: string;
+  goal_miles: string | number;
+  tz_offset: number;
 }
 
 /**
@@ -27,8 +27,8 @@ interface ReminderCandidate {
  *   time from the authoritative workouts table.
  */
 export async function sendPendingDailyReminders(): Promise<void> {
-	const candidates = await db.query<ReminderCandidate>(
-		`
+  const candidates = await db.query<ReminderCandidate>(
+    `
 		WITH user_tz AS (
 			SELECT
 				u.user_id,
@@ -51,30 +51,35 @@ export async function sendPendingDailyReminders(): Promise<void> {
 		  AND COALESCE(
 				(SELECT SUM(w.distance) FROM workouts w
 				 WHERE w.user_id = t.user_id
-				   AND w.local_date = (NOW() + (t.tz_offset || ' minutes')::interval)::date),
+				   AND w.local_date = (NOW() + (t.tz_offset || ' minutes')::interval)::date
+				   AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL),
 				0
 			  ) < t.goal_miles
-		`
-	);
+		`,
+  );
 
-	if (candidates.length === 0) {
-		console.log('[DailyReminder] No users due for a reminder this hour.');
-		return;
-	}
+  if (candidates.length === 0) {
+    console.log("[DailyReminder] No users due for a reminder this hour.");
+    return;
+  }
 
-	console.log(`[DailyReminder] Sending reminders to ${candidates.length} user(s).`);
+  console.log(
+    `[DailyReminder] Sending reminders to ${candidates.length} user(s).`,
+  );
 
-	await Promise.all(
-		candidates.map(async ({ user_id }) => {
-			try {
-				await sendPush(user_id, {
-					title: 'Mile still waiting…',
-					body: "Don't forget to log your daily mile! Lace up and get moving.",
-					type: 'daily_reminder'
-				});
-			} catch (err: any) {
-				console.error(`[DailyReminder] Failed for user ${user_id}: ${err?.message ?? err}`);
-			}
-		})
-	);
+  await Promise.all(
+    candidates.map(async ({ user_id }) => {
+      try {
+        await sendPush(user_id, {
+          title: "Mile still waiting…",
+          body: "Don't forget to log your daily mile! Lace up and get moving.",
+          type: "daily_reminder",
+        });
+      } catch (err: any) {
+        console.error(
+          `[DailyReminder] Failed for user ${user_id}: ${err?.message ?? err}`,
+        );
+      }
+    }),
+  );
 }

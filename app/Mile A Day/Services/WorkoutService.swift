@@ -456,6 +456,40 @@ class WorkoutService: ObservableObject {
             responseType: RecentWorkout.self
         )
     }
+
+    /// Delete a workout. The backend soft-deletes it (so a HealthKit re-sync can't
+    /// resurrect it), recomputes the streak, and revokes any badges the user no
+    /// longer qualifies for. On success the id is tombstoned locally so app-side
+    /// aggregates drop it immediately.
+    func deleteWorkout(workoutId: String) async throws -> WorkoutDeleteResponse {
+        guard let currentUserId = getCurrentUserId() else {
+            throw WorkoutServiceError.notAuthenticated
+        }
+
+        let response: WorkoutDeleteResponse = try await makeRequest(
+            endpoint: "/workouts/\(currentUserId)/workout/\(workoutId)",
+            method: .DELETE,
+            body: nil,
+            responseType: WorkoutDeleteResponse.self
+        )
+
+        DeletedWorkoutRegistry.markDeleted(workoutId)
+        return response
+    }
+}
+
+// MARK: - Delete Response
+
+struct WorkoutDeleteResponse: Codable {
+    let message: String?
+    let currentStreak: Int?
+    let revokedBadges: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case message
+        case currentStreak = "current_streak"
+        case revokedBadges = "revoked_badges"
+    }
 }
 
 // MARK: - Response Models

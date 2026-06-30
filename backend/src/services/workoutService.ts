@@ -19,9 +19,11 @@ export async function uploadWorkouts(
         device_end_date,
         calories,
         total_duration,
-        source
+        source,
+        exclusion_reason,
+        speed_flagged
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       ON CONFLICT (workout_id)
       DO UPDATE SET
         distance = EXCLUDED.distance,
@@ -35,7 +37,11 @@ export async function uploadWorkouts(
         source = CASE
           WHEN workouts.source IN ('manual', 'edited') THEN workouts.source
           ELSE EXCLUDED.source
-        END
+        END,
+        -- Recompute the speed classification from the latest figures, but never
+        -- clear a user soft-delete (deleted_at is intentionally not updated here).
+        exclusion_reason = EXCLUDED.exclusion_reason,
+        speed_flagged = EXCLUDED.speed_flagged
       RETURNING workout_id, (xmax = 0) AS inserted
     `;
 
@@ -51,6 +57,10 @@ export async function uploadWorkouts(
 
   await db.transaction(
     workouts.flatMap((workout: Workout) => {
+      const speed = classifyWorkoutSpeed(
+        workout.distance,
+        workout.totalDuration,
+      );
       return [
         {
           query: workoutQuery,
@@ -66,6 +76,8 @@ export async function uploadWorkouts(
             workout.calories,
             workout.totalDuration,
             workout.source || "healthkit",
+            speed.exclusionReason,
+            speed.speedFlagged,
           ],
         },
         ...workout.splits.map((split) => ({
@@ -83,6 +95,38 @@ export async function uploadWorkouts(
   );
 
   return workouts.map((w) => w.workoutId);
+}
+
+/**
+ * Classify a workout by its average speed to catch "left tracking on in the car".
+ * A human can't run/walk a mile faster than ~15 mph (the mile world record), and
+ * only running/walking workouts ever reach us, so:
+ *   - >= 20 mph  → physically impossible on foot → auto-exclude (does NOT count).
+ *                  Conservative on purpose: zero risk of rejecting a real run.
+ *   - 13–20 mph  → suspicious but theoretically human → flag for the user to
+ *                  review/delete; still counts.
+ * Guards against missing/zero data (returns "not flagged").
+ */
+const VEHICLE_EXCLUDE_MPH = 20;
+const VEHICLE_FLAG_MPH = 13;
+
+function classifyWorkoutSpeed(
+  distance: number | null | undefined,
+  totalDuration: number | null | undefined,
+): { exclusionReason: string | null; speedFlagged: boolean } {
+  const d = Number(distance);
+  const secs = Number(totalDuration);
+  if (!isFinite(d) || !isFinite(secs) || d <= 0 || secs <= 0) {
+    return { exclusionReason: null, speedFlagged: false };
+  }
+  const mph = (d * 3600) / secs;
+  if (mph >= VEHICLE_EXCLUDE_MPH) {
+    return { exclusionReason: "vehicle_speed", speedFlagged: true };
+  }
+  if (mph >= VEHICLE_FLAG_MPH) {
+    return { exclusionReason: null, speedFlagged: true };
+  }
+  return { exclusionReason: null, speedFlagged: false };
 }
 
 function dateStringMinus(dateStr: string, days: number): string {
@@ -120,6 +164,7 @@ export async function getActiveStreak(userId: string) {
     SELECT to_char(local_date, 'YYYY-MM-DD') AS local_date
     FROM workouts
     WHERE user_id = $1
+    AND deleted_at IS NULL AND exclusion_reason IS NULL
     GROUP BY local_date
     HAVING SUM(distance) >= 0.95
     ORDER BY local_date DESC
@@ -169,6 +214,7 @@ export async function getTotalMiles(userId: string, startDate?: string) {
   let distanceQuery = `
     SELECT SUM(distance) FROM workouts
     WHERE user_id = $1
+    AND deleted_at IS NULL AND exclusion_reason IS NULL
     `;
 
   const params: (string | number)[] = [userId];
@@ -185,6 +231,7 @@ export async function getBestMilesDay(userId: string, startDate?: string) {
   let bestDayQuery = `
     SELECT local_date, SUM(distance) as total_distance FROM workouts
     WHERE user_id = $1
+    AND deleted_at IS NULL AND exclusion_reason IS NULL
     `;
 
   const params: (string | number)[] = [userId];
@@ -245,6 +292,7 @@ export async function getRecentWorkouts(
   const recentWorkoutsQuery = `
 	SELECT * FROM workouts
 	WHERE user_id = $1
+	AND deleted_at IS NULL
 	ORDER BY device_end_date DESC
 	LIMIT $2
 	`;
@@ -281,6 +329,7 @@ export async function getTodayMiles(userId: string) {
 	SELECT SUM(w.distance) as total_distance FROM workouts w, user_tz
 	WHERE w.user_id = $1
 	AND w.local_date = (NOW() + (user_tz.tz_offset || ' minutes')::interval)::date
+	AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 	`;
 
   const result = await db.query(todayMilesQuery, [userId]);
@@ -299,7 +348,7 @@ export async function getMilesOnLocalDate(
   const result = await db.query<{ total_distance: string | number | null }>(
     `SELECT COALESCE(SUM(distance), 0) AS total_distance
 		FROM workouts
-		WHERE user_id = $1 AND local_date = $2::date`,
+		WHERE user_id = $1 AND local_date = $2::date AND deleted_at IS NULL AND exclusion_reason IS NULL`,
     [userId, localDate],
   );
   const value = result[0]?.total_distance;
@@ -362,6 +411,7 @@ export async function getTodayStats(userId: string): Promise<TodayStats> {
 		FROM workouts w, user_tz
 		WHERE w.user_id = $1
 			AND w.local_date = (NOW() + (user_tz.tz_offset || ' minutes')::interval)::date
+			AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 	),
 	totals AS (
 		SELECT
@@ -422,6 +472,7 @@ export async function getQuantityDateRange(
 			AND local_date >= $2
 			AND local_date <= $3
 			AND workout_type = ANY($4::text[])
+			AND deleted_at IS NULL AND exclusion_reason IS NULL
 		GROUP BY local_date
 		ORDER BY local_date ASC
 	`;
@@ -468,6 +519,7 @@ export async function getQuantityDateRangeBatch(
 			AND local_date >= $2
 			AND local_date <= $3
 			AND workout_type = ANY($4::text[])
+			AND deleted_at IS NULL AND exclusion_reason IS NULL
 		GROUP BY user_id, local_date
 		ORDER BY user_id, local_date ASC
 	`;
@@ -507,7 +559,8 @@ export async function getUsersWithManualWorkouts(
 		 WHERE user_id = ANY($1::text[])
 			AND local_date >= $2
 			AND local_date <= $3
-			AND source IN ('manual', 'edited')`,
+			AND source IN ('manual', 'edited')
+			AND deleted_at IS NULL AND exclusion_reason IS NULL`,
     [userIds, startDate, endDate],
   );
 
@@ -594,6 +647,7 @@ export async function computePersonalRecords(
 	       to_char(w.local_date, 'YYYY-MM-DD') AS best_day_date
 	   FROM workouts w
 	   WHERE w.user_id = $1 ${excludeClause}
+	       AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 	   GROUP BY w.local_date
 	   ORDER BY SUM(w.distance) DESC, w.local_date DESC
 	   LIMIT 1`;

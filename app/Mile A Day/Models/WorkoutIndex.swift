@@ -63,6 +63,29 @@ struct ManualWorkoutRegistry {
     }
 }
 
+/// Workouts the user deleted in Mile A Day. Apple Health is read-only to us, so a
+/// deleted HealthKit workout still exists on device and would otherwise re-appear
+/// on every index rebuild (and re-upload on the next sync). We tombstone its id
+/// locally so it's excluded from all app-side aggregates; the backend keeps its
+/// own tombstone so it never counts there either.
+struct DeletedWorkoutRegistry {
+    private static let key = "com.mileaday.deletedWorkoutIds"
+
+    static func markDeleted(_ workoutId: String) {
+        var ids = all
+        ids.insert(workoutId)
+        UserDefaults.standard.set(Array(ids), forKey: key)
+    }
+
+    static func contains(_ workoutId: String) -> Bool {
+        all.contains(workoutId)
+    }
+
+    static var all: Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: key) ?? [])
+    }
+}
+
 /// ARCHITECTURAL IMPROVEMENT: Single Source of Truth for Workout Data
 /// This index pre-computes and caches workout data to eliminate:
 /// - Race conditions and data inconsistencies

@@ -371,6 +371,7 @@ export async function getUnifiedFeed(
 			LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
 			WHERE w.user_id NOT IN (SELECT uid FROM blocked)
 				AND COALESCE(ns.share_workouts_to_feed, true) = true
+				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 				AND NOT EXISTS (
 					SELECT 1 FROM posts p2
 					WHERE p2.workout_id = w.workout_id AND p2.deleted_at IS NULL AND p2.share_to_feed

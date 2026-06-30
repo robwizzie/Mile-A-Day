@@ -1,51 +1,60 @@
-import { Friendship, User } from '../types/user.js';
-import { PostgresService } from './DbService.js';
+import { Friendship, User } from "../types/user.js";
+import { PostgresService } from "./DbService.js";
 
 const db = PostgresService.getInstance();
 
 type ErrorReturn = {
-	error: string;
+  error: string;
 };
 
 type MessageReturn = {
-	message: string;
+  message: string;
 };
 
-export async function areFriends(user1: string, user2: string): Promise<boolean> {
-	if (user1 === user2) return true;
-	const rows = await db.query<{ status: string }>(
-		`SELECT status FROM friendships
+export async function areFriends(
+  user1: string,
+  user2: string,
+): Promise<boolean> {
+  if (user1 === user2) return true;
+  const rows = await db.query<{ status: string }>(
+    `SELECT status FROM friendships
 		WHERE ((user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1))
 		  AND status = 'accepted'
 		LIMIT 1`,
-		[user1, user2]
-	);
-	return rows.length > 0;
+    [user1, user2],
+  );
+  return rows.length > 0;
 }
 
-export async function getFriendship(user1: string, user2: string): Promise<Friendship | ErrorReturn | null> {
-	try {
-		const existingFriendship = await db.query(
-			'SELECT * FROM friendships WHERE (user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1)',
-			[user1, user2]
-		);
+export async function getFriendship(
+  user1: string,
+  user2: string,
+): Promise<Friendship | ErrorReturn | null> {
+  try {
+    const existingFriendship = await db.query(
+      "SELECT * FROM friendships WHERE (user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1)",
+      [user1, user2],
+    );
 
-		return existingFriendship.find(friendship => friendship.user_id === user1) ?? existingFriendship[0];
-	} catch (err: any) {
-		return { error: err.message };
-	}
+    return (
+      existingFriendship.find((friendship) => friendship.user_id === user1) ??
+      existingFriendship[0]
+    );
+  } catch (err: any) {
+    return { error: err.message };
+  }
 }
 
 export async function getFriends(user: string): Promise<User[]> {
-	// Safe column set only — never expose a real email through friend lists
-	// (these are viewable by other users, not just the owner).
-	// BACKWARDS COMPAT: the shipped App Store app decodes friends into a
-	// BackendUser whose `email` is a NON-optional String, so a missing key
-	// hard-fails Codable and breaks the friends list. Return an empty-string
-	// email — present for the old client, leaks nothing. Drop it once the
-	// email-optional app build has fully rolled out.
-	const friends = await db.query(
-		`
+  // Safe column set only — never expose a real email through friend lists
+  // (these are viewable by other users, not just the owner).
+  // BACKWARDS COMPAT: the shipped App Store app decodes friends into a
+  // BackendUser whose `email` is a NON-optional String, so a missing key
+  // hard-fails Codable and breaks the friends list. Return an empty-string
+  // email — present for the old client, leaks nothing. Drop it once the
+  // email-optional app build has fully rolled out.
+  const friends = await db.query(
+    `
 		SELECT u.user_id, u.username, u.first_name, u.last_name, u.bio,
 			u.profile_image_url, u.current_streak, '' AS email
 		FROM friendships f
@@ -53,87 +62,95 @@ export async function getFriends(user: string): Promise<User[]> {
 		WHERE f.user_id = $1
 			AND f.status = 'accepted'
 		`,
-		[user]
-	);
+    [user],
+  );
 
-	return friends;
+  return friends;
 }
 
 export async function getSentRequests(user: string): Promise<User[]> {
-	const sentRequests = await db.query(
-		`
+  const sentRequests = await db.query(
+    `
 		SELECT u.* FROM friendships f
 		JOIN users u ON u.user_id = f.friend_id
 		WHERE f.user_id = $1
 			AND f.status in ( 'pending', 'ignored' ) 
 		`,
-		[user]
-	);
+    [user],
+  );
 
-	return sentRequests;
+  return sentRequests;
 }
 
 type FriendRequestsReturn = {
-	requests: User[];
-	ignored_requests: User[];
+  requests: User[];
+  ignored_requests: User[];
 };
 
-export async function getFriendRequests(user: string): Promise<FriendRequestsReturn> {
-	const friendRequests = await db.query(
-		`
+export async function getFriendRequests(
+  user: string,
+): Promise<FriendRequestsReturn> {
+  const friendRequests = await db.query(
+    `
 		SELECT u.*, f.status FROM friendships f
 		JOIN users u ON u.user_id = f.user_id
 		WHERE f.friend_id = $1
 			AND f.status in ( 'pending', 'ignored' ) 
 		`,
-		[user]
-	);
+    [user],
+  );
 
-	const requests: User[] = [];
-	const ignored_requests: User[] = [];
+  const requests: User[] = [];
+  const ignored_requests: User[] = [];
 
-	friendRequests.forEach(request => {
-		const { status, ...user }: { status: 'pending' | 'ignored' } & User = request;
-		if (status === 'pending') {
-			requests.push(user);
-		} else if (status === 'ignored') {
-			ignored_requests.push(user);
-		}
-	});
+  friendRequests.forEach((request) => {
+    const { status, ...user }: { status: "pending" | "ignored" } & User =
+      request;
+    if (status === "pending") {
+      requests.push(user);
+    } else if (status === "ignored") {
+      ignored_requests.push(user);
+    }
+  });
 
-	return { requests, ignored_requests };
+  return { requests, ignored_requests };
 }
 
-export async function sendFriendRequest(user1: string, user2: string): Promise<MessageReturn | ErrorReturn> {
-	try {
-		await db.query(
-			`
+export async function sendFriendRequest(
+  user1: string,
+  user2: string,
+): Promise<MessageReturn | ErrorReturn> {
+  try {
+    await db.query(
+      `
 			INSERT INTO friendships (user_id, friend_id, status)
 			VALUES ($1, $2, 'pending')
 			ON CONFLICT (user_id, friend_id) DO NOTHING
 			`,
-			[user1, user2]
-		);
+      [user1, user2],
+    );
 
-		return { message: 'Successfully sent friend request' };
-	} catch (err: any) {
-		return { error: err.message };
-	}
+    return { message: "Successfully sent friend request" };
+  } catch (err: any) {
+    return { error: err.message };
+  }
 }
 
 export interface FriendActivity {
-	user_id: string;
-	username: string | null;
-	first_name: string | null;
-	last_name: string | null;
-	profile_image_url: string | null;
-	today_miles: number;
-	completed_today: boolean;
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+  today_miles: number;
+  completed_today: boolean;
 }
 
-export async function getFriendsActivityToday(userId: string): Promise<FriendActivity[]> {
-	const results = await db.query(
-		`
+export async function getFriendsActivityToday(
+  userId: string,
+): Promise<FriendActivity[]> {
+  const results = await db.query(
+    `
 		SELECT
 			u.user_id,
 			u.username,
@@ -152,6 +169,7 @@ export async function getFriendsActivityToday(userId: string): Promise<FriendAct
 						) || ' minutes'
 					)::interval
 				)::date
+				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 			), 0)::float as today_miles
 		FROM friendships f
 		JOIN users u ON u.user_id = f.friend_id
@@ -159,26 +177,26 @@ export async function getFriendsActivityToday(userId: string): Promise<FriendAct
 			AND f.status = 'accepted'
 		ORDER BY today_miles DESC
 		`,
-		[userId]
-	);
+    [userId],
+  );
 
-	return results.map((r: any) => ({
-		...r,
-		today_miles: parseFloat(r.today_miles) || 0,
-		completed_today: parseFloat(r.today_miles) >= 1.0
-	}));
+  return results.map((r: any) => ({
+    ...r,
+    today_miles: parseFloat(r.today_miles) || 0,
+    completed_today: parseFloat(r.today_miles) >= 1.0,
+  }));
 }
 
 export interface FriendSuggestion {
-	user_id: string;
-	username: string | null;
-	first_name: string | null;
-	last_name: string | null;
-	bio: string | null;
-	profile_image_url: string | null;
-	current_streak: number;
-	mutual_friends: number;
-	shared_competitions: number;
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  bio: string | null;
+  profile_image_url: string | null;
+  current_streak: number;
+  mutual_friends: number;
+  shared_competitions: number;
 }
 
 /**
@@ -190,9 +208,12 @@ export interface FriendSuggestion {
  * one-way from the sender; rejected/removed rows are deleted — so a single
  * either-direction check covers every live relationship state).
  */
-export async function getFriendSuggestions(userId: string, limit: number = 20): Promise<FriendSuggestion[]> {
-	const suggestions = await db.query<FriendSuggestion>(
-		`
+export async function getFriendSuggestions(
+  userId: string,
+  limit: number = 20,
+): Promise<FriendSuggestion[]> {
+  const suggestions = await db.query<FriendSuggestion>(
+    `
 		WITH my_friends AS (
 			-- Accepted friendships are stored bidirectionally, so one
 			-- direction is enough to enumerate the friend set.
@@ -247,19 +268,19 @@ export async function getFriendSuggestions(userId: string, limit: number = 20): 
 			u.username ASC
 		LIMIT $2
 		`,
-		[userId, limit]
-	);
+    [userId, limit],
+  );
 
-	// Cold-start fallback: a sparse social graph (no friends-of-friends, no
-	// shared competitions) yields an empty list, leaving "People You May Know"
-	// blank. Top up with the most active runners the user isn't already
-	// connected to so there's always something to discover.
-	if (suggestions.length >= limit) {
-		return suggestions;
-	}
+  // Cold-start fallback: a sparse social graph (no friends-of-friends, no
+  // shared competitions) yields an empty list, leaving "People You May Know"
+  // blank. Top up with the most active runners the user isn't already
+  // connected to so there's always something to discover.
+  if (suggestions.length >= limit) {
+    return suggestions;
+  }
 
-	const fallback = await db.query<FriendSuggestion>(
-		`
+  const fallback = await db.query<FriendSuggestion>(
+    `
 		SELECT u.user_id, u.username, u.first_name, u.last_name, u.bio,
 			u.profile_image_url, u.current_streak,
 			0 AS mutual_friends, 0 AS shared_competitions
@@ -274,38 +295,38 @@ export async function getFriendSuggestions(userId: string, limit: number = 20): 
 		ORDER BY u.current_streak DESC NULLS LAST, u.username ASC
 		LIMIT $2
 		`,
-		// Over-fetch so we can drop anyone already in the graph-based list.
-		[userId, limit + 25]
-	);
+    // Over-fetch so we can drop anyone already in the graph-based list.
+    [userId, limit + 25],
+  );
 
-	const alreadySuggested = new Set(suggestions.map(s => s.user_id));
-	const extras = fallback
-		.filter(u => !alreadySuggested.has(u.user_id))
-		.slice(0, limit - suggestions.length);
+  const alreadySuggested = new Set(suggestions.map((s) => s.user_id));
+  const extras = fallback
+    .filter((u) => !alreadySuggested.has(u.user_id))
+    .slice(0, limit - suggestions.length);
 
-	return [...suggestions, ...extras];
+  return [...suggestions, ...extras];
 }
 
 export interface FeedWorkout {
-	workout_id: string;
-	user_id: string;
-	username: string | null;
-	first_name: string | null;
-	last_name: string | null;
-	profile_image_url: string | null;
-	workout_type: string;
-	distance: number;
-	completed_at: string;
-	is_self: boolean;
-	is_hyped: boolean;
-	// Detail fields — let the client surface duration/pace/calories/steps
-	// inline without an extra round trip. Additive; older clients ignore them.
-	total_duration: number;
-	calories: number;
-	steps: number | null;
-	// Social-proof tally: total hypes this specific workout has received from
-	// anyone (not just the viewer). Powers the "👏 N" badge on each feed row.
-	hype_count: number;
+  workout_id: string;
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+  workout_type: string;
+  distance: number;
+  completed_at: string;
+  is_self: boolean;
+  is_hyped: boolean;
+  // Detail fields — let the client surface duration/pace/calories/steps
+  // inline without an extra round trip. Additive; older clients ignore them.
+  total_duration: number;
+  calories: number;
+  steps: number | null;
+  // Social-proof tally: total hypes this specific workout has received from
+  // anyone (not just the viewer). Powers the "👏 N" badge on each feed row.
+  hype_count: number;
 }
 
 /**
@@ -315,9 +336,11 @@ export interface FeedWorkout {
  * on workout_id) so the UI can show a one-shot hype button, plus the total
  * hype tally for that workout.
  */
-export async function getFriendsWorkoutFeed(userId: string): Promise<FeedWorkout[]> {
-	const rows = await db.query<FeedWorkout>(
-		`
+export async function getFriendsWorkoutFeed(
+  userId: string,
+): Promise<FeedWorkout[]> {
+  const rows = await db.query<FeedWorkout>(
+    `
 		WITH circle AS (
 			SELECT friend_id AS uid FROM friendships
 			WHERE user_id = $1 AND status = 'accepted'
@@ -354,117 +377,127 @@ export async function getFriendsWorkoutFeed(userId: string): Promise<FeedWorkout
 		JOIN circle c ON c.uid = w.user_id
 		JOIN users u ON u.user_id = w.user_id
 		WHERE w.device_end_date >= NOW() - INTERVAL '48 hours'
+		AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 		ORDER BY w.device_end_date DESC
 		LIMIT 100
 		`,
-		[userId]
-	);
-	return rows;
+    [userId],
+  );
+  return rows;
 }
 
 /**
  * Number of accepted friends shared between the viewer and another user —
  * the "X mutual friends" line shown on a profile.
  */
-export async function getMutualFriendCount(viewerId: string, otherId: string): Promise<number> {
-	if (viewerId === otherId) return 0;
-	const rows = await db.query<{ count: number }>(
-		`
+export async function getMutualFriendCount(
+  viewerId: string,
+  otherId: string,
+): Promise<number> {
+  if (viewerId === otherId) return 0;
+  const rows = await db.query<{ count: number }>(
+    `
 		SELECT COUNT(*)::int AS count
 		FROM friendships a
 		JOIN friendships b ON a.friend_id = b.friend_id
 		WHERE a.user_id = $1 AND a.status = 'accepted'
 			AND b.user_id = $2 AND b.status = 'accepted'
 		`,
-		[viewerId, otherId]
-	);
-	return rows[0]?.count ?? 0;
+    [viewerId, otherId],
+  );
+  return rows[0]?.count ?? 0;
 }
 
 export async function updateFriendship(
-	user1: string,
-	user2: string,
-	status: 'accepted' | 'rejected' | 'ignored' | 'removed'
+  user1: string,
+  user2: string,
+  status: "accepted" | "rejected" | "ignored" | "removed",
 ): Promise<MessageReturn | ErrorReturn> {
-	try {
-		const existingFriendship = await getFriendship(user1, user2);
+  try {
+    const existingFriendship = await getFriendship(user1, user2);
 
-		if (!existingFriendship) {
-			throw new Error(`No friendship found between ${user1} and ${user2}`);
-		}
+    if (!existingFriendship) {
+      throw new Error(`No friendship found between ${user1} and ${user2}`);
+    }
 
-		if ('error' in existingFriendship) {
-			throw new Error(existingFriendship.error);
-		}
+    if ("error" in existingFriendship) {
+      throw new Error(existingFriendship.error);
+    }
 
-		if (existingFriendship.status === status) {
-			throw new Error(`Friendship already has status ${status}`);
-		} else if (
-			(status === 'removed' && existingFriendship.status === 'accepted') ||
-			(status === 'rejected' && (existingFriendship.status === 'pending' || existingFriendship.status === 'ignored'))
-		) {
-			await db.query(
-				`
+    if (existingFriendship.status === status) {
+      throw new Error(`Friendship already has status ${status}`);
+    } else if (
+      (status === "removed" && existingFriendship.status === "accepted") ||
+      (status === "rejected" &&
+        (existingFriendship.status === "pending" ||
+          existingFriendship.status === "ignored"))
+    ) {
+      await db.query(
+        `
 				DELETE FROM friendships
 				WHERE (user_id = $1 AND friend_id = $2)
 					OR (user_id = $2 AND friend_id = $1)
 				`,
-				[user1, user2]
-			);
+        [user1, user2],
+      );
 
-			await db.query(
-				`
+      await db.query(
+        `
 				DELETE FROM close_friends
 				WHERE (user_id = $1 AND close_friend_id = $2)
 					OR (user_id = $2 AND close_friend_id = $1)
 				`,
-				[user1, user2]
-			);
+        [user1, user2],
+      );
 
-			return {
-				message: status === 'rejected' ? 'Successfully rejected friend request' : 'Successfully deleted friendship'
-			};
-		} else if (existingFriendship.user_id === user1) {
-			throw new Error(`User can't update a request they sent`);
-		} else if (
-			status === 'accepted' &&
-			(existingFriendship.status === 'pending' || existingFriendship.status === 'ignored')
-		) {
-			await db.transaction([
-				{
-					query: `
+      return {
+        message:
+          status === "rejected"
+            ? "Successfully rejected friend request"
+            : "Successfully deleted friendship",
+      };
+    } else if (existingFriendship.user_id === user1) {
+      throw new Error(`User can't update a request they sent`);
+    } else if (
+      status === "accepted" &&
+      (existingFriendship.status === "pending" ||
+        existingFriendship.status === "ignored")
+    ) {
+      await db.transaction([
+        {
+          query: `
 					UPDATE friendships
 					SET status = 'accepted'
 					WHERE user_id = $1 AND friend_id = $2
 					`,
-					params: [user2, user1]
-				},
-				{
-					query: `
+          params: [user2, user1],
+        },
+        {
+          query: `
 					INSERT INTO friendships (user_id, friend_id, status)
   					VALUES ($1, $2, 'accepted')
   					ON CONFLICT (user_id, friend_id) DO NOTHING
 					`,
-					params: [user1, user2]
-				}
-			]);
+          params: [user1, user2],
+        },
+      ]);
 
-			return { message: 'Friend request successfully accepted' };
-		} else if (status === 'ignored') {
-			await db.query(
-				`
+      return { message: "Friend request successfully accepted" };
+    } else if (status === "ignored") {
+      await db.query(
+        `
 				UPDATE friendships
 				SET status = 'ignored'
 				WHERE user_id = $1 AND friend_id = $2
 				`,
-				[user2, user1]
-			);
+        [user2, user1],
+      );
 
-			return { message: 'Friend request successfully ignored' };
-		} else {
-			throw new Error('Invalid status.');
-		}
-	} catch (err: any) {
-		return { error: err.message };
-	}
+      return { message: "Friend request successfully ignored" };
+    } else {
+      throw new Error("Invalid status.");
+    }
+  } catch (err: any) {
+    return { error: err.message };
+  }
 }

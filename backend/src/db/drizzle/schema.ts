@@ -164,6 +164,17 @@ export const workouts = pgTable(
     originalDistance: doublePrecision("original_distance"),
     originalDuration: doublePrecision("original_duration"),
     steps: integer(),
+    // User soft-delete: a deleted workout stops counting toward streaks/miles/
+    // badges/competitions but is kept (and kept tombstoned) so a HealthKit
+    // re-sync can't resurrect it.
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "string" }),
+    // Auto-exclusion: set to a reason (e.g. 'vehicle_speed') when a workout's
+    // average speed is physically impossible on foot. Excluded workouts don't
+    // count but stay visible so the user can see why.
+    exclusionReason: text("exclusion_reason"),
+    // Soft flag for the suspicious-but-possible speed band — still counts, just
+    // surfaced in the UI for the user to review.
+    speedFlagged: boolean("speed_flagged").default(false).notNull(),
   },
   (table) => [
     index("idx_workouts_local_date_user_id").using(
