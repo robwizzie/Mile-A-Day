@@ -39,7 +39,7 @@ struct ProfileView: View {
     @State private var profileTab: OwnProfileTab = .activity
 
     enum OwnProfileTab: Hashable {
-        case activity, stats, badges, settings
+        case activity, posts, stats, badges, settings
     }
 
     enum ProfileSheetType: String, Identifiable {
@@ -75,6 +75,7 @@ struct ProfileView: View {
                         selection: $profileTab,
                         options: [
                             .init(id: .activity, title: "Activity", systemImage: "flame.fill"),
+                            .init(id: .posts, title: "Posts", systemImage: "square.grid.3x3.fill"),
                             .init(id: .stats, title: "Stats", systemImage: "chart.bar.fill"),
                             .init(id: .badges, title: "Badges", systemImage: "trophy.fill"),
                             .init(id: .settings, title: "Settings", systemImage: "gearshape.fill")
@@ -84,6 +85,7 @@ struct ProfileView: View {
                     Group {
                         switch profileTab {
                         case .activity: ownActivityTabContent
+                        case .posts: ownPostsTabContent
                         case .stats: ownStatsTabContent
                         case .badges: ownBadgesTabContent
                         case .settings: ownSettingsTabContent
@@ -313,6 +315,19 @@ struct ProfileView: View {
     private var ownStatsTabContent: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
             performanceSection
+        }
+    }
+
+    /// Instagram-style grid of the user's own posts.
+    @ViewBuilder
+    private var ownPostsTabContent: some View {
+        if let uid = userManager.currentUser.backendUserId {
+            ProfilePostsGridView(userId: uid, isSelf: true)
+        } else {
+            Text("Sign in to see your posts.")
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .padding(.top, MADTheme.Spacing.xl)
         }
     }
 

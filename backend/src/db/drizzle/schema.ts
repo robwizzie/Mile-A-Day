@@ -217,6 +217,11 @@ export const notificationSettings = pgTable("notification_settings", {
   dailyReminderEnabled: boolean("daily_reminder_enabled").default(true),
   dailyReminderHour: integer("daily_reminder_hour").default(18),
   timezoneOffsetMinutes: integer("timezone_offset_minutes"),
+  // Social feed settings (added v2). share_workouts_to_feed: include my raw
+  // walks/runs as activity cards in friends' unified feed. friend_posts_enabled:
+  // notify me when a friend shares a new photo post.
+  shareWorkoutsToFeed: boolean("share_workouts_to_feed").default(true),
+  friendPostsEnabled: boolean("friend_posts_enabled").default(true),
 });
 
 export const competitions = pgTable(

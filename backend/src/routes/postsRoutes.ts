@@ -7,6 +7,8 @@ import {
   getUserStoriesController,
   markStoryViewedController,
   getFeedController,
+  getUnifiedFeedController,
+  getUserPostsController,
   deletePostController,
   reportPostController,
   getTermsStatusController,
@@ -41,8 +43,12 @@ router.get("/stories", getStoriesRailController);
 router.get("/stories/:userId", getUserStoriesController);
 router.post("/stories/:postId/view", markStoryViewedController);
 
-// Persistent feed.
+// Persistent feed (photo-only) + unified feed (posts + workout activity).
 router.get("/feed", getFeedController);
+router.get("/feed/unified", getUnifiedFeedController);
+
+// A user's posts for the Instagram-style profile grid.
+router.get("/user/:userId", getUserPostsController);
 
 // Per-post actions.
 router.post("/:postId/report", reportPostController);

@@ -1,21 +1,22 @@
 import SwiftUI
 
-/// The social surface inside the Friends tab: a stories rail on top, a paginated
-/// photo feed below, and a compose button. Posting is gated on completing the
-/// daily mile (cosmetic here — the server re-verifies) and on a one-time terms
-/// acceptance. Reads the shared HealthKit/User singletons for stats + gating.
+/// The single social surface inside the Friends tab: a stories rail, an optional
+/// "On this day" memories card, then one unified, infinitely-scrollable feed of
+/// photo posts AND raw walk/run activity. Posting and viewing friends' stories
+/// are both gated on completing today's mile (the server re-verifies posting).
 struct SocialFeedView: View {
     @StateObject private var healthManager = HealthKitManager.shared
     @StateObject private var userManager = UserManager.shared
 
-    @State private var feed: [PostItem] = []
+    @State private var feed: [FeedEntry] = []
     @State private var stories: [StoryGroup] = []
+    @State private var memories: [MemoryItem] = []
     @State private var nextBefore: String?
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var loadedOnce = false
 
-    @State private var hypingPostIds: Set<String> = []
+    @State private var hypingIds: Set<String> = []
     @State private var termsAccepted: Bool?
 
     // Presentation
@@ -24,18 +25,16 @@ struct SocialFeedView: View {
     @State private var reportingPost: PostItem?
     @State private var showTermsGate = false
     @State private var showMileHint = false
+    @State private var showMemories = false
 
     private var currentUserId: String? { UserDefaults.standard.string(forKey: "backendUserId") }
-    private var canPost: Bool { healthManager.todaysDistance >= userManager.currentUser.goalMiles }
+    /// Completing the daily mile unlocks posting AND viewing friends' stories.
+    private var mileDone: Bool { healthManager.todaysDistance >= userManager.currentUser.goalMiles }
 
     private var statsInput: RunStatsInput {
         let user = userManager.currentUser
-        // Pull today's real run data from HealthKit so users can show pace, time,
-        // calories and steps — not just distance. Zero/absent values are dropped
-        // by RunStatsInput.datum(for:), so only meaningful stats are offered.
         let duration = healthManager.todaysTotalDuration
-        // todaysAveragePace is MINUTES per mile; the sticker + snapshot use
-        // SECONDS per mile, so convert here.
+        // todaysAveragePace is MINUTES per mile; sticker/snapshot use SECONDS.
         let paceSecPerMile = healthManager.todaysAveragePace.map { $0 * 60 }
         let calories = healthManager.todaysTotalCalories
         let steps = healthManager.todaysSteps
@@ -59,10 +58,17 @@ struct SocialFeedView: View {
                     currentUserId: currentUserId,
                     myName: userManager.currentUser.username ?? userManager.currentUser.name,
                     myImageURL: userManager.currentUser.profileImageUrl,
-                    canPost: canPost,
+                    canPost: mileDone,
+                    canViewStories: mileDone,
                     onTapAdd: handleCompose,
-                    onTapGroup: { viewerGroup = $0 }
+                    onTapGroup: { viewerGroup = $0 },
+                    onLockedStoryTap: { showMileHint = true }
                 )
+
+                if !memories.isEmpty {
+                    MemoriesCardView(memories: memories) { showMemories = true }
+                        .padding(.horizontal, MADTheme.Spacing.md)
+                }
 
                 Divider().overlay(Color.white.opacity(0.08))
 
@@ -73,17 +79,10 @@ struct SocialFeedView: View {
                 } else if feed.isEmpty {
                     emptyState
                 } else {
-                    ForEach(feed) { post in
-                        PostCardView(
-                            post: post,
-                            isHyping: hypingPostIds.contains(post.post_id),
-                            onHype: { Task { await hype(post) } },
-                            onReport: { reportingPost = post },
-                            onBlock: { Task { await block(post) } },
-                            onDelete: { Task { await deletePost(post) } }
-                        )
-                        .onAppear { if post.id == feed.last?.id { Task { await loadMore() } } }
-                        .padding(.horizontal, MADTheme.Spacing.md)
+                    ForEach(feed) { entry in
+                        feedCard(entry)
+                            .onAppear { if entry.id == feed.last?.id { Task { await loadMore() } } }
+                            .padding(.horizontal, MADTheme.Spacing.md)
                     }
                     if isLoadingMore {
                         ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
@@ -96,7 +95,7 @@ struct SocialFeedView: View {
         .scrollIndicators(.hidden)
         .refreshable { await refresh() }
         .overlay(alignment: .bottomTrailing) { composeButton }
-        .task { if !loadedOnce { await refresh(); await loadTermsStatus() } }
+        .task { if !loadedOnce { await refresh(); await loadTermsStatus(); loadMemories() } }
         .fullScreenCover(item: $viewerGroup) { group in
             StoryViewerView(group: group, currentUserId: currentUserId) { changed in
                 viewerGroup = nil
@@ -117,21 +116,44 @@ struct SocialFeedView: View {
                 presentingComposer = true
             }
         }
+        .sheet(isPresented: $showMemories) {
+            MemoriesDetailView(memories: memories)
+        }
         .alert("Finish today's mile first", isPresented: $showMileHint) {
             Button("Got it", role: .cancel) {}
         } message: {
-            Text("Complete your daily mile to share a post or story today. Keep going — you've got this! 🏃")
+            Text("Complete your daily mile to post and to see your friends' stories today. Keep going — you've got this! 🏃")
+        }
+    }
+
+    @ViewBuilder
+    private func feedCard(_ entry: FeedEntry) -> some View {
+        if entry.isPost, let post = entry.asPostItem() {
+            PostCardView(
+                post: post,
+                isHyping: hypingIds.contains(entry.id),
+                onHype: { Task { await hype(entry) } },
+                onReport: { reportingPost = post },
+                onBlock: { Task { await block(entry) } },
+                onDelete: { Task { await deletePost(entry) } }
+            )
+        } else {
+            ActivityCardView(
+                entry: entry,
+                isHyping: hypingIds.contains(entry.id),
+                onHype: { Task { await hype(entry) } }
+            )
         }
     }
 
     private var composeButton: some View {
         Button(action: handleCompose) {
-            Image(systemName: canPost ? "plus" : "lock.fill")
+            Image(systemName: mileDone ? "plus" : "lock.fill")
                 .font(.system(size: 20, weight: .bold))
                 .foregroundColor(.white)
                 .frame(width: 56, height: 56)
                 .background(
-                    Circle().fill(canPost ? AnyShapeStyle(MADTheme.Colors.redGradient) : AnyShapeStyle(Color.gray.opacity(0.6)))
+                    Circle().fill(mileDone ? AnyShapeStyle(MADTheme.Colors.redGradient) : AnyShapeStyle(Color.gray.opacity(0.6)))
                 )
                 .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
         }
@@ -141,13 +163,13 @@ struct SocialFeedView: View {
 
     private var emptyState: some View {
         VStack(spacing: MADTheme.Spacing.md) {
-            Image(systemName: "camera.on.rectangle")
+            Image(systemName: "figure.run.circle")
                 .font(.system(size: 40))
                 .foregroundColor(.white.opacity(0.3))
-            Text("No posts yet")
+            Text("No activity yet")
                 .font(.system(size: 17, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
-            Text("Finish your mile, then share a photo of today's walk or run.")
+            Text("Walks, runs, and photos from you and your friends show up here. Add friends and get moving!")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.5))
                 .multilineTextAlignment(.center)
@@ -159,7 +181,7 @@ struct SocialFeedView: View {
     // MARK: - Compose flow
 
     private func handleCompose() {
-        guard canPost else { showMileHint = true; return }
+        guard mileDone else { showMileHint = true; return }
         if termsAccepted == true {
             presentingComposer = true
         } else {
@@ -173,11 +195,15 @@ struct SocialFeedView: View {
         }
     }
 
+    private func loadMemories() {
+        memories = MemoriesService.onThisDay(using: healthManager)
+    }
+
     // MARK: - Data
 
     private func refresh() async {
         await MainActor.run { isLoading = feed.isEmpty }
-        let feedResponse = try? await PostService.fetchFeed(before: nil)
+        let feedResponse = try? await PostService.fetchUnifiedFeed(before: nil)
         let storyGroups = try? await PostService.fetchStoriesRail()
         await MainActor.run {
             if let feedResponse {
@@ -193,11 +219,11 @@ struct SocialFeedView: View {
     private func loadMore() async {
         guard let before = nextBefore, !isLoadingMore else { return }
         await MainActor.run { isLoadingMore = true }
-        let response = try? await PostService.fetchFeed(before: before)
+        let response = try? await PostService.fetchUnifiedFeed(before: before)
         await MainActor.run {
             if let response {
-                let existing = Set(feed.map(\.post_id))
-                feed.append(contentsOf: response.items.filter { !existing.contains($0.post_id) })
+                let existing = Set(feed.map(\.id))
+                feed.append(contentsOf: response.items.filter { !existing.contains($0.id) })
                 nextBefore = response.next_before
             }
             isLoadingMore = false
@@ -206,42 +232,45 @@ struct SocialFeedView: View {
 
     // MARK: - Actions
 
-    private func hype(_ post: PostItem) async {
-        guard !post.is_self, !post.is_hyped, !hypingPostIds.contains(post.post_id) else { return }
-        await MainActor.run { _ = hypingPostIds.insert(post.post_id) }
-        defer { Task { @MainActor in hypingPostIds.remove(post.post_id) } }
+    private func hype(_ entry: FeedEntry) async {
+        guard !entry.is_self, !entry.is_hyped, !hypingIds.contains(entry.id) else { return }
+        await MainActor.run { _ = hypingIds.insert(entry.id) }
+        defer { Task { @MainActor in hypingIds.remove(entry.id) } }
+        let ctxType = entry.isPost ? "post" : "mile"
+        let label = entry.isPost
+            ? (entry.caption ?? entry.displayName)
+            : "\(ActivityCardView.verb(entry.workout_type)) \(String(format: "%.2f", entry.distance ?? 0)) mi"
         do {
             _ = try await HypeService.sendHype(
-                targetUserId: post.user_id,
-                context: HypeContext(
-                    contextType: "post",
-                    contextId: post.post_id,
-                    contextLabel: post.caption ?? post.displayName
-                )
+                targetUserId: entry.user_id,
+                context: HypeContext(contextType: ctxType, contextId: entry.entryId, contextLabel: label)
             )
-            await MainActor.run { updatePost(post.post_id) { $0.is_hyped = true; $0.hype_count = ($0.hype_count ?? 0) + 1 } }
+            await MainActor.run {
+                updateEntry(entry.id) { $0.is_hyped = true; $0.hype_count = ($0.hype_count ?? 0) + 1 }
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
         } catch {
-            // conflict / rate-limited — leave as-is.
+            // conflict (already hyped) / rate-limited — leave as-is.
         }
     }
 
-    private func block(_ post: PostItem) async {
+    private func block(_ entry: FeedEntry) async {
         do {
-            try await BlockService.block(userId: post.user_id)
-            await MainActor.run { feed.removeAll { $0.user_id == post.user_id } }
+            try await BlockService.block(userId: entry.user_id)
+            await MainActor.run { feed.removeAll { $0.user_id == entry.user_id } }
             await refresh()
         } catch {}
     }
 
-    private func deletePost(_ post: PostItem) async {
+    private func deletePost(_ entry: FeedEntry) async {
         do {
-            try await PostService.deletePost(postId: post.post_id)
-            await MainActor.run { feed.removeAll { $0.post_id == post.post_id } }
+            try await PostService.deletePost(postId: entry.entryId)
+            await MainActor.run { feed.removeAll { $0.id == entry.id } }
         } catch {}
     }
 
-    private func updatePost(_ id: String, _ mutate: (inout PostItem) -> Void) {
-        guard let idx = feed.firstIndex(where: { $0.post_id == id }) else { return }
+    private func updateEntry(_ id: String, _ mutate: (inout FeedEntry) -> Void) {
+        guard let idx = feed.firstIndex(where: { $0.id == id }) else { return }
         mutate(&feed[idx])
     }
 

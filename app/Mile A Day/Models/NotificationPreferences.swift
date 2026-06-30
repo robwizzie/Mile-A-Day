@@ -32,6 +32,12 @@ struct NotificationPreferences: Codable {
     // Friend nudge notifications
     var friendNudgeEnabled: Bool = true
 
+    // Feed & Stories (v2)
+    /// Include my raw walks/runs as activity cards in friends' feed.
+    var shareWorkoutsToFeed: Bool = true
+    /// Notify me when a friend shares a new photo post.
+    var friendPostsEnabled: Bool = true
+
     // Do Not Disturb schedule
     var dndEnabled: Bool = false
     var dndStartHour: Int = 22  // 10 PM

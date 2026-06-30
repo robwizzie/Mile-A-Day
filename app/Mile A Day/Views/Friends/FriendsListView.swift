@@ -3,13 +3,12 @@ import SwiftUI
 /// Top-level mode for the Friends tab: either the existing friends/requests
 /// management UI, or the new global/friends leaderboard.
 private enum FriendsTabMode: String, CaseIterable, Identifiable {
-    case friends, feed, today, leaderboard
+    case friends, feed, leaderboard
     var id: String { rawValue }
     var displayName: String {
         switch self {
         case .friends: return "Friends"
         case .feed: return "Feed"
-        case .today: return "Today"
         case .leaderboard: return "Leaderboard"
         }
     }
@@ -72,8 +71,6 @@ struct FriendsListView: View {
                         friendService: friendService,
                         onAddFriends: { showingSearch = true }
                     )
-                case .today:
-                    feedView
                 case .feed:
                     SocialFeedView()
                 case .friends:
@@ -145,11 +142,6 @@ struct FriendsListView: View {
             await loadNudgeStatuses()
             await loadMyRank()
             await loadFeed()
-        }
-        .onChange(of: topMode) { _, newMode in
-            if newMode == .today {
-                Task { await loadFeed() }
-            }
         }
         .onReceive(DeepLinkRouter.shared.$pendingProfileUsername) { username in
             guard let username else { return }
@@ -252,8 +244,7 @@ struct FriendsListView: View {
             selection: $topMode,
             options: [
                 .init(id: .friends, title: "Friends", systemImage: "person.2.fill"),
-                .init(id: .feed, title: "Feed", systemImage: "photo.stack"),
-                .init(id: .today, title: "Today", systemImage: "flame.fill"),
+                .init(id: .feed, title: "Feed", systemImage: "square.stack.fill"),
                 .init(id: .leaderboard, title: "Leaderboard", systemImage: "trophy.fill")
             ]
         )

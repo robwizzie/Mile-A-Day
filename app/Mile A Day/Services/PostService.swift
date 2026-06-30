@@ -78,6 +78,73 @@ struct FeedResponse: Decodable {
     let next_before: String?
 }
 
+/// One row of the unified feed: either a photo `post` or a raw `workout`
+/// activity. Type-specific fields are nil for the other kind. Decodes the
+/// backend's `id` into `entryId` (Identifiable's `id` combines kind + entryId).
+struct FeedEntry: Codable, Identifiable {
+    let kind: String            // "post" | "workout"
+    let entryId: String
+    let sort_ts: String
+    let user_id: String
+    let username: String?
+    let first_name: String?
+    let last_name: String?
+    let profile_image_url: String?
+    // post-only
+    let media_url: String?
+    let caption: String?
+    let stats_snapshot: PostStats?
+    // workout-only
+    let workout_type: String?
+    let distance: Double?
+    let total_duration: Double?
+    let calories: Double?
+    let steps: Int?
+    // shared
+    let is_self: Bool
+    var is_hyped: Bool
+    var hype_count: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case entryId = "id"
+        case sort_ts, user_id, username, first_name, last_name, profile_image_url
+        case media_url, caption, stats_snapshot
+        case workout_type, distance, total_duration, calories, steps
+        case is_self, is_hyped, hype_count
+    }
+
+    var id: String { "\(kind)-\(entryId)" }
+    var isPost: Bool { kind == "post" }
+
+    var displayName: String {
+        if let username, !username.isEmpty { return username }
+        if let first_name, !first_name.isEmpty { return first_name }
+        return "Someone"
+    }
+
+    var relativeTime: String { RelativeTime.short(from: sort_ts) }
+
+    /// Render a post-kind entry through the existing PostCardView.
+    func asPostItem() -> PostItem? {
+        guard kind == "post", let media = media_url else { return nil }
+        return PostItem(
+            post_id: entryId, user_id: user_id, username: username,
+            first_name: first_name, last_name: last_name,
+            profile_image_url: profile_image_url, media_url: media, caption: caption,
+            workout_id: nil, stats_snapshot: stats_snapshot, local_date: nil,
+            share_to_feed: true, share_to_story: nil, story_expires_at: nil,
+            created_at: sort_ts, is_self: is_self, is_hyped: is_hyped,
+            hype_count: hype_count, is_viewed: nil
+        )
+    }
+}
+
+struct UnifiedFeedResponse: Decodable {
+    let items: [FeedEntry]
+    let next_before: String?
+}
+
 /// Generic `{ ok: true }` / `{ accepted: ... }` acknowledgements.
 private struct OKResponse: Decodable {
     let ok: Bool?
@@ -201,6 +268,24 @@ enum PostService {
     /// One page of the feed. Pass the previous page's `next_before` to paginate.
     static func fetchFeed(before: String? = nil) async throws -> FeedResponse {
         var endpoint = "/posts/feed?limit=20"
+        if let before, let encoded = before.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            endpoint += "&before=\(encoded)"
+        }
+        return try await APIClient.fancyFetch(endpoint: endpoint, responseType: FeedResponse.self)
+    }
+
+    /// The unified feed: photo posts + workout activity interleaved, paginated.
+    static func fetchUnifiedFeed(before: String? = nil) async throws -> UnifiedFeedResponse {
+        var endpoint = "/posts/feed/unified?limit=20"
+        if let before, let encoded = before.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            endpoint += "&before=\(encoded)"
+        }
+        return try await APIClient.fancyFetch(endpoint: endpoint, responseType: UnifiedFeedResponse.self)
+    }
+
+    /// A user's permanent posts for the Instagram-style profile grid.
+    static func fetchUserPosts(userId: String, before: String? = nil) async throws -> FeedResponse {
+        var endpoint = "/posts/user/\(userId)?limit=24"
         if let before, let encoded = before.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
             endpoint += "&before=\(encoded)"
         }

@@ -49,7 +49,7 @@ struct UserProfileDetailView: View {
     @State private var profileTab: FriendProfileTab = .activity
 
     enum FriendProfileTab: Hashable {
-        case activity, stats, badges
+        case activity, posts, stats, badges
     }
 
     private var canLoadMore: Bool {
@@ -76,6 +76,7 @@ struct UserProfileDetailView: View {
                             selection: $profileTab,
                             options: [
                                 .init(id: .activity, title: "Activity", systemImage: "flame.fill"),
+                                .init(id: .posts, title: "Posts", systemImage: "square.grid.3x3.fill"),
                                 .init(id: .stats, title: "Stats", systemImage: "chart.bar.fill"),
                                 .init(id: .badges, title: "Badges", systemImage: "trophy.fill")
                             ]
@@ -85,6 +86,7 @@ struct UserProfileDetailView: View {
                         Group {
                             switch profileTab {
                             case .activity: activityTabContent
+                            case .posts: ProfilePostsGridView(userId: user.user_id, isSelf: isCurrentUser())
                             case .stats: statsTabContent
                             case .badges: badgesTabContent
                             }
