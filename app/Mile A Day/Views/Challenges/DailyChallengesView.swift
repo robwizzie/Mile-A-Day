@@ -10,6 +10,8 @@ struct DailyChallengesView: View {
     @State private var tomorrowsChallenge: DailyChallenge?
     @State private var todayProgress: Double = 0
     @State private var isTodayComplete: Bool = false
+    @State private var opponent: ChallengeOpponent?
+    @State private var challengeStreak: Int = ChallengeService.shared.currentChallengeStreak()
 
     private static let milestones: [(threshold: Int, id: String, name: String)] = [
         (1,   "challenge_1",   "Challenge Accepted"),
@@ -79,7 +81,9 @@ struct DailyChallengesView: View {
             tomorrowsChallenge = remote.tomorrowChallenge
             todayProgress = remote.todayProgress
             isTodayComplete = remote.todayCompleted
+            opponent = remote.todayOpponent
         }
+        challengeStreak = ChallengeService.shared.currentChallengeStreak()
     }
 
     // MARK: - Tomorrow Preview
@@ -194,6 +198,10 @@ struct DailyChallengesView: View {
                 }
                 .frame(height: 8)
 
+                if challenge.key == "head_to_head", let opp = opponent {
+                    HeadToHeadStrip(opponent: opp, accent: challenge.gradient.first ?? .orange)
+                }
+
                 HStack(spacing: 6) {
                     Image(systemName: "trophy.fill")
                         .font(.system(size: 11, weight: .bold))
@@ -238,6 +246,7 @@ struct DailyChallengesView: View {
     private var statsRow: some View {
         HStack(spacing: 12) {
             statTile(icon: "checkmark.seal.fill", color: .yellow, value: "\(totalCompletions)", label: "Completed")
+            statTile(icon: "flame.fill", color: .orange, value: "\(challengeStreak)", label: "Day Streak")
             statTile(icon: "trophy.fill", color: MADTheme.Colors.madRed, value: "\(earnedMedalsCount)/\(Self.milestones.count)", label: "Medals")
         }
     }
