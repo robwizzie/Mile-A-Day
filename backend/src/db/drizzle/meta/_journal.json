@@ -43,6 +43,13 @@
       "when": 1782858885571,
       "tag": "0005_lame_marvex",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1782871587357,
+      "tag": "0006_mean_lizard",
+      "breakpoints": true
     }
   ]
 }

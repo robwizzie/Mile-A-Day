@@ -232,25 +232,26 @@ export async function notifyFriendsOfMileCompletion(
       return true;
     }
 
-    const allowedRecipients = await getFriendActivityRecipientPool(
-      userId,
-      outgoing,
-      "mile_completed",
-      audienceActivity,
+    // Defer + merge: instead of pushing now, queue a single notification for
+    // ~10 minutes out. This gives the runner a window to snap a post-run photo
+    // that rides along as ONE feed item + ONE push (no "completed a mile" now
+    // followed by "shared a photo" later). The pending-send cron recomputes the
+    // recipient pool and delivers. The daily dedup slot above ensures we queue
+    // at most once per day.
+    await db.query(
+      `INSERT INTO pending_friend_notifications
+			 (user_id, event_type, activity_type, workout_id, payload, local_date, send_after_at)
+			 VALUES ($1, 'mile_completed', $2, $3, $4::jsonb, $5::date, NOW() + INTERVAL '10 minutes')
+			 ON CONFLICT (user_id, event_type, workout_id)
+			 WHERE workout_id IS NOT NULL AND status = 'pending' DO NOTHING`,
+      [
+        userId,
+        audienceActivity,
+        recentWorkout?.workout_id ?? null,
+        JSON.stringify(payload),
+        localDate,
+      ],
     );
-    if (allowedRecipients.length === 0) return true;
-
-    for (const recipientId of allowedRecipients) {
-      sendPush(recipientId, payload).catch((err) =>
-        console.error("[Push] Error sending friend activity:", err.message),
-      );
-    }
-
-    if (allowedRecipients.length > 0) {
-      console.log(
-        `[Notifications] Sent mile completion to ${allowedRecipients.length} recipients of ${user.username}`,
-      );
-    }
     return true;
   } catch (err: any) {
     console.error(

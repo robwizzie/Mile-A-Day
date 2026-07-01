@@ -117,6 +117,14 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
 				CASE WHEN $8 THEN NOW() + INTERVAL '24 hours' ELSE NULL END
 			)
+				ON CONFLICT (workout_id) WHERE (deleted_at IS NULL AND workout_id IS NOT NULL)
+				DO UPDATE SET
+					media_url = EXCLUDED.media_url,
+					caption = COALESCE(EXCLUDED.caption, posts.caption),
+					stats_snapshot = COALESCE(EXCLUDED.stats_snapshot, posts.stats_snapshot),
+					share_to_feed = EXCLUDED.share_to_feed,
+					share_to_story = EXCLUDED.share_to_story,
+					story_expires_at = CASE WHEN EXCLUDED.share_to_story THEN NOW() + INTERVAL '24 hours' ELSE NULL END
 			RETURNING *
 		)
 		SELECT

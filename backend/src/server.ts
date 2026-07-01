@@ -25,6 +25,7 @@ import { startCompetitionCron } from "./cron/competitionCron.js";
 import { startNotificationCron } from "./cron/notificationCron.js";
 import { startSilentSyncCron } from "./cron/silentSyncCron.js";
 import { startStoriesCron } from "./cron/storiesCron.js";
+import { startPendingSendCron } from "./cron/pendingSendCron.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
 import { PostgresService } from "./services/DbService.js";
@@ -134,6 +135,7 @@ server.listen(PORT, "0.0.0.0", () => {
   startNotificationCron();
   startSilentSyncCron();
   startStoriesCron();
+  startPendingSendCron();
   // Idempotently ensure the v2 social/app-function badges exist in the catalog.
   seedExtraBadges();
   // Idempotently ensure the v2 daily challenges (5K/10K/social) exist.
