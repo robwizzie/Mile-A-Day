@@ -22,7 +22,17 @@ struct StoryViewerView: View {
     @State private var imageReady = false
 
     @State private var showReport = false
-    @State private var hyping = false
+    /// postId → emoji the viewer sent this session (server keeps one per story).
+    @State private var myReactions: [String: String] = [:]
+    /// Own-story extras: seen-by counts per post + the viewers sheet.
+    @State private var viewerCounts: [String: Int] = [:]
+    @State private var viewersSheetFor: PostItem?
+    /// Stories promoted to the feed this session ("Add to feed").
+    @State private var promotedIds: Set<String> = []
+    @State private var promoting = false
+
+    /// The emoji palette — must match the backend's ALLOWED_STORY_REACTIONS.
+    private let reactionEmojis = ["❤️", "🔥", "👏", "💪", "😮"]
 
     private let stepDuration: CGFloat = 5.0
     private let tick = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
@@ -76,6 +86,16 @@ struct StoryViewerView: View {
         .sheet(isPresented: $showReport, onDismiss: { paused = false }) {
             if let post = current {
                 ReportPostSheet(postId: post.post_id) { showReport = false }
+            }
+        }
+        .sheet(item: $viewersSheetFor, onDismiss: { paused = false }) { post in
+            StoryViewersSheet(postId: post.post_id)
+        }
+        .task(id: current?.post_id) {
+            // Own story: load who's seen it so the "Seen by" pill has a count.
+            guard let post = current, post.is_self else { return }
+            if let resp = try? await PostService.storyViewers(postId: post.post_id) {
+                viewerCounts[post.post_id] = resp.count
             }
         }
         .statusBarHidden(true)
@@ -152,12 +172,12 @@ struct StoryViewerView: View {
         .shadow(color: .black.opacity(0.4), radius: 6)
     }
 
-    // Instagram-style footer: caption bottom-left, hype bottom-right, over a soft
-    // bottom scrim. The run stats already live in the photo's baked-in overlay,
-    // so we don't repeat them here.
+    // Instagram-style footer over a soft bottom scrim: caption on top, then the
+    // ephemeral controls — emoji reactions on a friend's story, "Seen by" +
+    // "Add to feed" on your own. (Hype stays the feed's currency.)
     @ViewBuilder
     private func footer(_ post: PostItem) -> some View {
-        HStack(alignment: .bottom, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             if let caption = post.caption, !caption.isEmpty {
                 Text(caption)
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
@@ -165,14 +185,16 @@ struct StoryViewerView: View {
                     .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Spacer(minLength: 0)
             }
 
-            if !post.is_self {
-                HypeButton(isHyped: post.is_hyped, isBusy: hyping) {
-                    Task { await hype(post) }
+            if post.is_self {
+                HStack(spacing: 10) {
+                    seenByPill(post)
+                    if canPromote(post) { addToFeedPill(post) }
+                    Spacer(minLength: 0)
                 }
+            } else {
+                reactionBar(post)
             }
         }
         .padding(.horizontal, 16)
@@ -185,6 +207,86 @@ struct StoryViewerView: View {
                 .allowsHitTesting(false)
                 .ignoresSafeArea()
         )
+    }
+
+    /// Ephemeral emoji reactions — the story counterpart to feed hype.
+    private func reactionBar(_ post: PostItem) -> some View {
+        HStack(spacing: 10) {
+            ForEach(reactionEmojis, id: \.self) { emoji in
+                let selected = myReactions[post.post_id] == emoji
+                Button {
+                    react(post, emoji)
+                } label: {
+                    Text(emoji)
+                        .font(.system(size: selected ? 26 : 22))
+                        .frame(width: 44, height: 44)
+                        .background(
+                            Circle().fill(selected ? Color.white.opacity(0.25) : Color.black.opacity(0.35))
+                        )
+                        .overlay(
+                            Circle().strokeBorder(Color.white.opacity(selected ? 0.7 : 0.15), lineWidth: 1)
+                        )
+                        .scaleEffect(selected ? 1.08 : 1.0)
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: myReactions)
+    }
+
+    private func seenByPill(_ post: PostItem) -> some View {
+        Button {
+            paused = true
+            viewersSheetFor = post
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "eye.fill")
+                    .font(.system(size: 12, weight: .bold))
+                if let count = viewerCounts[post.post_id] {
+                    Text(count == 1 ? "Seen by 1" : "Seen by \(count)")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                } else {
+                    Text("Seen by")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                }
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Capsule().fill(Color.black.opacity(0.4)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// A story photo can be promoted into the permanent feed — it replaces the
+    /// run's auto route/stats card in place (upsert by workout).
+    private func canPromote(_ post: PostItem) -> Bool {
+        post.share_to_feed != true && !promotedIds.contains(post.post_id)
+    }
+
+    private func addToFeedPill(_ post: PostItem) -> some View {
+        Button {
+            Task { await promoteToFeed(post) }
+        } label: {
+            HStack(spacing: 6) {
+                if promoting {
+                    ProgressView().tint(.white).scaleEffect(0.7)
+                } else {
+                    Image(systemName: "square.stack.badge.plus")
+                        .font(.system(size: 12, weight: .bold))
+                }
+                Text("Add to feed")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Capsule().fill(MADTheme.Colors.madRed.opacity(0.85)))
+        }
+        .buttonStyle(.plain)
+        .disabled(promoting)
     }
 
     @ViewBuilder
@@ -258,27 +360,36 @@ struct StoryViewerView: View {
         }
     }
 
-    private func hype(_ post: PostItem) async {
-        guard !hyping, !post.is_hyped else { return }
-        hyping = true
-        defer { hyping = false }
+    private func react(_ post: PostItem, _ emoji: String) {
+        // Optimistic — the server keeps one reaction per story and swapping is
+        // idempotent, so a failed call just means no push went out.
+        myReactions[post.post_id] = emoji
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        Task { try? await PostService.reactToStory(postId: post.post_id, emoji: emoji) }
+    }
+
+    private func promoteToFeed(_ post: PostItem) async {
+        guard !promoting else { return }
+        promoting = true
+        defer { promoting = false }
         do {
-            _ = try await HypeService.sendHype(
-                targetUserId: post.user_id,
-                context: HypeContext(
-                    contextType: "post",
-                    contextId: post.post_id,
-                    contextLabel: post.caption ?? group.displayName
-                )
+            // Carries the workout id, so this upserts the photo into the run's
+            // existing feed post (replacing the auto route/stats card in place).
+            _ = try await PostService.createPost(
+                mediaUrl: post.media_url,
+                caption: post.caption,
+                workoutId: post.workout_id,
+                shareToFeed: true,
+                shareToStory: false,
+                stats: post.stats_snapshot
             )
             await MainActor.run {
-                if stories.indices.contains(index) {
-                    stories[index].is_hyped = true
-                    stories[index].hype_count = (stories[index].hype_count ?? 0) + 1
-                }
+                promotedIds.insert(post.post_id)
+                changed = true
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
         } catch {
-            // conflict (already hyped) / rate-limited — leave button as-is.
+            print("[StoryViewer] ❌ Add to feed failed: \(error)")
         }
     }
 
@@ -302,5 +413,90 @@ struct StoryViewerView: View {
             changed = true
             await MainActor.run { close() }
         } catch {}
+    }
+}
+
+/// "Seen by" list for the author's own story: who watched, when, and any emoji
+/// reaction they left (reactors sort first, matching the server order).
+struct StoryViewersSheet: View {
+    let postId: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var viewers: [StoryViewer] = []
+    @State private var loaded = false
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
+                Group {
+                    if !loaded {
+                        ProgressView().tint(.white)
+                    } else if viewers.isEmpty {
+                        VStack(spacing: MADTheme.Spacing.sm) {
+                            Image(systemName: "eye.slash")
+                                .font(.system(size: 30))
+                                .foregroundColor(.white.opacity(0.3))
+                            Text("No views yet")
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                            Text("Friends see your story once they've done their mile today.")
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundColor(.white.opacity(0.5))
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, MADTheme.Spacing.xl)
+                        }
+                    } else {
+                        ScrollView {
+                            VStack(spacing: MADTheme.Spacing.sm) {
+                                ForEach(viewers) { viewer in
+                                    row(viewer)
+                                }
+                            }
+                            .padding(MADTheme.Spacing.md)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(loaded && !viewers.isEmpty ? "Seen by \(viewers.count)" : "Seen by")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .task {
+            if let resp = try? await PostService.storyViewers(postId: postId) {
+                viewers = resp.viewers
+            }
+            loaded = true
+        }
+    }
+
+    private func row(_ viewer: StoryViewer) -> some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            AvatarView(name: viewer.displayName, imageURL: viewer.profile_image_url, size: 44)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(viewer.displayName)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Text(viewer.relativeTime)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            Spacer()
+            if let emoji = viewer.emoji {
+                Text(emoji)
+                    .font(.system(size: 24))
+            }
+        }
+        .padding(.horizontal, MADTheme.Spacing.md)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
     }
 }

@@ -62,12 +62,51 @@ struct RunStatsInput {
     }
 }
 
+/// Where a post goes. Stories are the ephemeral 24h moment; the feed is the
+/// permanent record. Cross-posting is a deliberate "Both" choice, not the default.
+enum PostDestination: String, CaseIterable, Identifiable {
+    case story, feed, both
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .story: return "Story"
+        case .feed: return "Feed"
+        case .both: return "Both"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .story: return "circle.dashed"
+        case .feed: return "square.stack"
+        case .both: return "square.on.circle"
+        }
+    }
+
+    var footnote: String {
+        switch self {
+        case .story: return "Disappears in 24 hours — friends who've done their mile can watch."
+        case .feed: return "Stays on your profile and in friends' feeds."
+        case .both: return "Posts to your story and your permanent feed."
+        }
+    }
+
+    var toStory: Bool { self != .feed }
+    var toFeed: Bool { self != .story }
+}
+
+/// What the composer did, reported back to the presenter.
+enum PostComposeOutcome {
+    case cancelled
+    case published(toFeed: Bool, toStory: Bool)
+}
+
 @MainActor
 final class PostComposerViewModel: ObservableObject {
     @Published var pickedImage: UIImage?
     @Published var caption: String = ""
-    @Published var shareToStory: Bool = true
-    @Published var shareToFeed: Bool = true
+    @Published var destination: PostDestination
     @Published var stickerEnabled: Bool = true
     /// Sticker center in normalized canvas coordinates (0…1).
     @Published var stickerPos: CGPoint = CGPoint(x: 0.5, y: 0.82)
@@ -80,8 +119,9 @@ final class PostComposerViewModel: ObservableObject {
     /// Captured on-screen canvas size (points), reused to render the composite.
     var canvasSize: CGSize = .zero
 
-    init(stats: RunStatsInput) {
+    init(stats: RunStatsInput, destination: PostDestination) {
         self.stats = stats
+        self.destination = destination
         var cfg = StickerConfig.load()
         // Drop any remembered stats that aren't available today, and make sure
         // at least one available stat is shown.
@@ -92,7 +132,7 @@ final class PostComposerViewModel: ObservableObject {
     }
 
     var canPublish: Bool {
-        pickedImage != nil && (shareToStory || shareToFeed) && !isPublishing
+        pickedImage != nil && !isPublishing
     }
 
     /// Render the on-screen canvas (photo + sticker) to a flat JPEG-ready image
@@ -131,8 +171,8 @@ final class PostComposerViewModel: ObservableObject {
                 mediaUrl: mediaUrl,
                 caption: caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : caption,
                 workoutId: stats.workoutId,
-                shareToFeed: shareToFeed,
-                shareToStory: shareToStory,
+                shareToFeed: destination.toFeed,
+                shareToStory: destination.toStory,
                 stats: stats.snapshot
             )
             if stickerEnabled { config.save() } // remember the user's overlay style
@@ -188,11 +228,16 @@ struct PostComposerView: View {
     /// Launch straight into the camera on first appear (post-run prompt flow) —
     /// the user already tapped "Take a photo" once to get here.
     let autoOpenCamera: Bool
-    let onFinished: (Bool) -> Void
+    let onFinished: (PostComposeOutcome) -> Void
     @Environment(\.dismiss) private var dismiss
 
-    init(stats: RunStatsInput, autoOpenCamera: Bool = false, onFinished: @escaping (Bool) -> Void) {
-        _vm = StateObject(wrappedValue: PostComposerViewModel(stats: stats))
+    init(
+        stats: RunStatsInput,
+        destination: PostDestination = .feed,
+        autoOpenCamera: Bool = false,
+        onFinished: @escaping (PostComposeOutcome) -> Void
+    ) {
+        _vm = StateObject(wrappedValue: PostComposerViewModel(stats: stats, destination: destination))
         self.autoOpenCamera = autoOpenCamera
         self.onFinished = onFinished
     }
@@ -223,7 +268,7 @@ struct PostComposerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { onFinished(false); dismiss() }
+                    Button("Cancel") { onFinished(.cancelled); dismiss() }
                         .foregroundColor(.white)
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -233,7 +278,13 @@ struct PostComposerView: View {
                         Button("Share") {
                             Task {
                                 let ok = await vm.publish()
-                                if ok { onFinished(true); dismiss() }
+                                if ok {
+                                    onFinished(.published(
+                                        toFeed: vm.destination.toFeed,
+                                        toStory: vm.destination.toStory
+                                    ))
+                                    dismiss()
+                                }
                             }
                         }
                         .fontWeight(.bold)
@@ -497,28 +548,43 @@ struct PostComposerView: View {
         }
     }
 
+    /// Story / Feed / Both — a single deliberate destination choice, so the
+    /// story stays the ephemeral moment and the feed stays the curated record.
     private var destinationToggles: some View {
-        VStack(spacing: MADTheme.Spacing.sm) {
-            Toggle(isOn: $vm.shareToStory) {
-                Label("Share to Story", systemImage: "circle.dashed")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            editorLabel("SHARE TO")
+            HStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(PostDestination.allCases) { dest in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { vm.destination = dest }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: dest.icon)
+                                .font(.system(size: 16, weight: .bold))
+                            Text(dest.title)
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                        }
+                        .foregroundColor(vm.destination == dest ? .white : .white.opacity(0.55))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                                .fill(vm.destination == dest
+                                    ? AnyShapeStyle(MADTheme.Colors.redGradient)
+                                    : AnyShapeStyle(Color.white.opacity(0.06)))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                                .strokeBorder(Color.white.opacity(vm.destination == dest ? 0 : 0.1), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .tint(MADTheme.Colors.madRed)
-
-            Toggle(isOn: $vm.shareToFeed) {
-                Label("Share to Feed", systemImage: "square.stack")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
-            }
-            .tint(MADTheme.Colors.madRed)
-
-            if !vm.shareToStory && !vm.shareToFeed {
-                Text("Pick at least one place to share.")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(MADTheme.Colors.warning)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            Text(vm.destination.footnote)
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(MADTheme.Spacing.md)
         .background(

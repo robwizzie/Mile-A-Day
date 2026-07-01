@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// A walk/run the user did on today's calendar day in a previous year.
+/// A walk/run the user did on today's calendar day in a previous year — or a
+/// past post photo (a week / a month / years ago) resurfaced from the server.
 struct MemoryItem: Identifiable {
     let id = UUID()
     let date: Date
@@ -8,8 +9,16 @@ struct MemoryItem: Identifiable {
     let miles: Double
     let workoutType: String
     let durationSeconds: Double
+    /// The story/feed photo from that day, when one exists. Expired stories
+    /// live on here — the photo outlasts its 24 hours.
+    var photoURL: URL? = nil
+    /// Overrides the "N years ago" label for sub-year memories ("1 week ago").
+    var agoOverride: String? = nil
 
-    var yearsAgoText: String { yearsAgo == 1 ? "1 year ago" : "\(yearsAgo) years ago" }
+    var yearsAgoText: String {
+        if let agoOverride { return agoOverride }
+        return yearsAgo == 1 ? "1 year ago" : "\(yearsAgo) years ago"
+    }
 }
 
 /// Builds "On this day" memories from the locally-cached HealthKit workout
@@ -41,6 +50,54 @@ enum MemoriesService {
         }
         return out.sorted { $0.yearsAgo < $1.yearsAgo }
     }
+
+    /// Blend the server's photo memories (this day in past years, a week ago,
+    /// a month ago) into the local HealthKit ones: matching days get the photo
+    /// attached; days we have no workout record for become photo-only items.
+    static func mergingPostMemories(_ posts: [PostItem], into items: [MemoryItem]) -> [MemoryItem] {
+        var merged = items
+        let cal = Calendar.current
+        let parser: DateFormatter = {
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd"
+            return f
+        }()
+        let today = cal.startOfDay(for: Date())
+
+        for post in posts {
+            guard let localDate = post.local_date, let date = parser.date(from: localDate),
+                  let photoURL = post.mediaURL else { continue }
+            let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: today).day ?? 0
+            guard days > 0 else { continue }
+
+            let ago: String? = {
+                if days == 7 { return "1 week ago" }
+                if days < 360 { return "1 month ago" }
+                return nil // exact-year memories use the standard label
+            }()
+            let years = cal.dateComponents([.year], from: date, to: today).year ?? 0
+
+            if let idx = merged.firstIndex(where: { cal.isDate($0.date, inSameDayAs: date) }) {
+                if merged[idx].photoURL == nil { merged[idx].photoURL = photoURL }
+                if merged[idx].agoOverride == nil, let ago { merged[idx].agoOverride = ago }
+            } else {
+                merged.append(MemoryItem(
+                    date: date,
+                    yearsAgo: max(years, 0),
+                    miles: post.stats_snapshot?.distance ?? 0,
+                    workoutType: "running",
+                    durationSeconds: post.stats_snapshot?.duration ?? 0,
+                    photoURL: photoURL,
+                    agoOverride: ago
+                ))
+            }
+        }
+        // Freshest memories first: sub-year (week/month) photos, then by years.
+        return merged.sorted {
+            if ($0.agoOverride != nil) != ($1.agoOverride != nil) { return $0.agoOverride != nil }
+            return $0.yearsAgo < $1.yearsAgo
+        }
+    }
 }
 
 /// Compact "On this day" card shown at the top of the feed when memories exist.
@@ -51,11 +108,23 @@ struct MemoriesCardView: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: MADTheme.Spacing.md) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(.white)
+                if let photoURL = memories.first(where: { $0.photoURL != nil })?.photoURL {
+                    AsyncImage(url: photoURL) { phase in
+                        if case .success(let image) = phase {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Color.white.opacity(0.06)
+                        }
+                    }
                     .frame(width: 44, height: 44)
-                    .background(Circle().fill(MADTheme.Colors.redGradient))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                } else {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 44, height: 44)
+                        .background(Circle().fill(MADTheme.Colors.redGradient))
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("On this day")
@@ -129,11 +198,26 @@ struct MemoriesDetailView: View {
 
     private func row(_ memory: MemoryItem) -> some View {
         HStack(spacing: MADTheme.Spacing.md) {
-            Image(systemName: ActivityCardView.icon(memory.workoutType))
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(ActivityCardView.color(memory.workoutType))
-                .frame(width: 44, height: 44)
-                .background(Circle().fill(Color.white.opacity(0.06)))
+            if let photoURL = memory.photoURL {
+                AsyncImage(url: photoURL) { phase in
+                    if case .success(let image) = phase {
+                        image.resizable().scaledToFill()
+                    } else {
+                        ZStack {
+                            Color.white.opacity(0.06)
+                            Image(systemName: "photo").foregroundColor(.white.opacity(0.3))
+                        }
+                    }
+                }
+                .frame(width: 56, height: 70)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            } else {
+                Image(systemName: ActivityCardView.icon(memory.workoutType))
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(ActivityCardView.color(memory.workoutType))
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(Color.white.opacity(0.06)))
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(memory.yearsAgoText)

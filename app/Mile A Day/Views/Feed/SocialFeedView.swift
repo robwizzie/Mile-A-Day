@@ -105,8 +105,8 @@ struct SocialFeedView: View {
             }
         }
         .sheet(isPresented: $presentingComposer) {
-            PostComposerView(stats: statsInput) { success in
-                if success { Task { await refresh() } }
+            PostComposerView(stats: statsInput, destination: .feed) { outcome in
+                if case .published = outcome { Task { await refresh() } }
             }
         }
         .sheet(item: $reportingPost) { post in
@@ -133,6 +133,7 @@ struct SocialFeedView: View {
         if entry.isPost, let post = entry.asPostItem() {
             PostCardView(
                 post: post,
+                storyPhotoURL: entry.storyPhotoURL,
                 isHyping: hypingIds.contains(entry.id),
                 onHype: { Task { await hype(entry) } },
                 onReport: { reportingPost = post },
@@ -198,7 +199,16 @@ struct SocialFeedView: View {
     }
 
     private func loadMemories() {
+        // Local HealthKit memories show instantly; past post photos (this day
+        // in past years, a week ago, a month ago) blend in when they arrive.
         memories = MemoriesService.onThisDay(using: healthManager)
+        Task {
+            if let posts = try? await PostService.fetchPostMemories(), !posts.isEmpty {
+                await MainActor.run {
+                    memories = MemoriesService.mergingPostMemories(posts, into: memories)
+                }
+            }
+        }
     }
 
     // MARK: - Data

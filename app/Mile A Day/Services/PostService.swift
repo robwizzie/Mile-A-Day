@@ -94,6 +94,9 @@ struct FeedEntry: Codable, Identifiable {
     let media_url: String?
     let caption: String?
     let stats_snapshot: PostStats?
+    /// The run's story-only photo, when one exists — powers the photo/route
+    /// flip on the feed card without duplicating the run in the feed.
+    let story_photo_url: String?
     // workout-only
     let workout_type: String?
     let distance: Double?
@@ -109,13 +112,18 @@ struct FeedEntry: Codable, Identifiable {
         case kind
         case entryId = "id"
         case sort_ts, user_id, username, first_name, last_name, profile_image_url
-        case media_url, caption, stats_snapshot
+        case media_url, caption, stats_snapshot, story_photo_url
         case workout_type, distance, total_duration, calories, steps
         case is_self, is_hyped, hype_count
     }
 
     var id: String { "\(kind)-\(entryId)" }
     var isPost: Bool { kind == "post" }
+
+    var storyPhotoURL: URL? {
+        guard let story_photo_url, story_photo_url != media_url else { return nil }
+        return ProfileImageService.fullImageURL(for: story_photo_url)
+    }
 
     var displayName: String {
         if let username, !username.isEmpty { return username }
@@ -143,6 +151,32 @@ struct FeedEntry: Codable, Identifiable {
 struct UnifiedFeedResponse: Decodable {
     let items: [FeedEntry]
     let next_before: String?
+}
+
+/// One viewer of the caller's own story, with any emoji reaction they left.
+struct StoryViewer: Codable, Identifiable {
+    let user_id: String
+    let username: String?
+    let first_name: String?
+    let last_name: String?
+    let profile_image_url: String?
+    let viewed_at: String
+    let emoji: String?
+
+    var id: String { user_id }
+
+    var displayName: String {
+        if let username, !username.isEmpty { return username }
+        if let first_name, !first_name.isEmpty { return first_name }
+        return "Someone"
+    }
+
+    var relativeTime: String { RelativeTime.short(from: viewed_at) }
+}
+
+struct StoryViewersResponse: Decodable {
+    let viewers: [StoryViewer]
+    let count: Int
 }
 
 /// Generic `{ ok: true }` / `{ accepted: ... }` acknowledgements.
@@ -263,6 +297,36 @@ enum PostService {
             method: .POST,
             responseType: OKResponse.self
         )
+    }
+
+    /// Who saw the caller's own story, with any emoji reactions (reactors first).
+    static func storyViewers(postId: String) async throws -> StoryViewersResponse {
+        try await APIClient.fancyFetch(
+            endpoint: "/posts/stories/\(postId)/viewers",
+            responseType: StoryViewersResponse.self
+        )
+    }
+
+    /// Emoji-react to a friend's story. Re-reacting swaps the emoji.
+    static func reactToStory(postId: String, emoji: String) async throws {
+        struct Body: Encodable { let emoji: String }
+        let bodyData = try JSONEncoder().encode(Body(emoji: emoji))
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/stories/\(postId)/react",
+            method: .POST,
+            body: bodyData,
+            responseType: OKResponse.self
+        )
+    }
+
+    /// The caller's own post photos from this day in past years / a week ago /
+    /// a month ago — fuel for the "On this day" memories surface.
+    static func fetchPostMemories() async throws -> [PostItem] {
+        struct MemoriesResponse: Decodable { let items: [PostItem] }
+        return try await APIClient.fancyFetch(
+            endpoint: "/posts/memories",
+            responseType: MemoriesResponse.self
+        ).items
     }
 
     /// One page of the feed. Pass the previous page's `next_before` to paginate.

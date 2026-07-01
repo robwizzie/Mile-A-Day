@@ -6,6 +6,9 @@ import {
   getStoriesRailController,
   getUserStoriesController,
   markStoryViewedController,
+  getStoryViewersController,
+  reactToStoryController,
+  getPostMemoriesController,
   getFeedController,
   getUnifiedFeedController,
   getUserPostsController,
@@ -42,6 +45,11 @@ router.post("/", createPostController);
 router.get("/stories", getStoriesRailController);
 router.get("/stories/:userId", getUserStoriesController);
 router.post("/stories/:postId/view", markStoryViewedController);
+router.get("/stories/:postId/viewers", getStoryViewersController);
+router.post("/stories/:postId/react", reactToStoryController);
+
+// "On this day" — the caller's own past post photos.
+router.get("/memories", getPostMemoriesController);
 
 // Persistent feed (photo-only) + unified feed (posts + workout activity).
 router.get("/feed", getFeedController);

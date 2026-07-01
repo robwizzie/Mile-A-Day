@@ -1,5 +1,6 @@
 import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
+import { shouldSendNotification } from "./notificationSettingsService.js";
 
 const db = PostgresService.getInstance();
 
@@ -106,6 +107,12 @@ export interface CreatePostInput {
  * story_expires_at is set to now()+24h only when the post is shared to a story.
  */
 export async function createPost(input: CreatePostInput): Promise<PostRow> {
+  // A workout can have ONE live feed post and ONE live story-only photo
+  // (separate partial unique indexes); pick the arbiter matching the row
+  // being inserted so re-posting replaces the right one in place.
+  const conflictTarget = input.shareToFeed
+    ? `(workout_id) WHERE (deleted_at IS NULL AND workout_id IS NOT NULL AND share_to_feed)`
+    : `(workout_id) WHERE (deleted_at IS NULL AND workout_id IS NOT NULL AND share_to_story AND NOT share_to_feed)`;
   const rows = await db.query<PostRow>(
     `
 		WITH inserted AS (
@@ -117,7 +124,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
 				CASE WHEN $8 THEN NOW() + INTERVAL '24 hours' ELSE NULL END
 			)
-				ON CONFLICT (workout_id) WHERE (deleted_at IS NULL AND workout_id IS NOT NULL)
+				ON CONFLICT ${conflictTarget}
 				DO UPDATE SET
 					media_url = EXCLUDED.media_url,
 					caption = COALESCE(EXCLUDED.caption, posts.caption),
@@ -262,6 +269,158 @@ export async function markStoryViewed(
   );
 }
 
+/** One row in a story's "seen by" list, with any emoji reaction. */
+export interface StoryViewerRow {
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+  viewed_at: string;
+  emoji: string | null;
+}
+
+/**
+ * Who viewed the caller's story (with their reactions), newest first. Returns
+ * null when the post isn't the caller's own story — the controller maps that
+ * to 404 so viewers stay private.
+ */
+export async function getStoryViewers(
+  authorId: string,
+  postId: string,
+): Promise<StoryViewerRow[] | null> {
+  const own = await db.query(
+    `SELECT 1 FROM posts
+		 WHERE post_id = $1 AND user_id = $2 AND share_to_story AND deleted_at IS NULL`,
+    [postId, authorId],
+  );
+  if (own.length === 0) return null;
+
+  return db.query<StoryViewerRow>(
+    `
+		SELECT u.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
+			sv.viewed_at, sr.emoji
+		FROM story_views sv
+		JOIN users u ON u.user_id = sv.viewer_id
+		LEFT JOIN story_reactions sr ON sr.post_id = sv.post_id AND sr.user_id = sv.viewer_id
+		WHERE sv.post_id = $1 AND sv.viewer_id <> $2
+		ORDER BY sr.emoji IS NULL, sv.viewed_at DESC
+		LIMIT 200
+		`,
+    [postId, authorId],
+  );
+}
+
+/** The ephemeral counterpart to feed hype — one emoji per (story, viewer). */
+export const ALLOWED_STORY_REACTIONS = new Set([
+  "\u2764\uFE0F",
+  "\uD83D\uDD25",
+  "\uD83D\uDC4F",
+  "\uD83D\uDCAA",
+  "\uD83D\uDE2E",
+]);
+
+/**
+ * React to a friend's active story with an emoji. Re-reacting replaces the
+ * previous emoji. Pushes a lightweight notification to the author (respects
+ * their per-friend "hype" notification preference). Returns a status the
+ * controller maps to HTTP.
+ */
+export async function reactToStory(
+  senderId: string,
+  postId: string,
+  emoji: string,
+): Promise<"ok" | "not_found" | "forbidden"> {
+  const rows = await db.query<{ user_id: string }>(
+    `SELECT user_id FROM posts
+		 WHERE post_id = $1 AND share_to_story AND deleted_at IS NULL
+			 AND story_expires_at > NOW()`,
+    [postId],
+  );
+  const authorId = rows[0]?.user_id;
+  if (!authorId) return "not_found";
+  if (authorId === senderId) return "forbidden";
+
+  // Sender must be an accepted friend of the author (stories are circle-only)
+  // with no block in either direction.
+  const allowed = await db.query(
+    `SELECT 1 FROM friendships f
+		 WHERE f.user_id = $1 AND f.friend_id = $2 AND f.status = 'accepted'
+			 AND NOT EXISTS (
+				 SELECT 1 FROM user_blocks b
+				 WHERE (b.blocker_id = $1 AND b.blocked_id = $2)
+						OR (b.blocker_id = $2 AND b.blocked_id = $1)
+			 )`,
+    [authorId, senderId],
+  );
+  if (allowed.length === 0) return "forbidden";
+
+  const inserted = await db.query<{ inserted: boolean }>(
+    `INSERT INTO story_reactions (post_id, user_id, emoji)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (post_id, user_id)
+		 DO UPDATE SET emoji = EXCLUDED.emoji, created_at = NOW()
+		 RETURNING (xmax = 0) AS inserted`,
+    [postId, senderId, emoji],
+  );
+
+  // Notify only on the FIRST reaction to this story (emoji swaps stay quiet).
+  if (inserted[0]?.inserted) {
+    try {
+      const shouldSend = await shouldSendNotification(authorId, senderId, "hype");
+      if (shouldSend) {
+        const sender = await db.query<{ username: string | null }>(
+          `SELECT username FROM users WHERE user_id = $1`,
+          [senderId],
+        );
+        const name = sender[0]?.username ?? "A friend";
+        sendPush(authorId, {
+          title: `${name} reacted ${emoji}`,
+          body: "to your story",
+          type: "story_reaction",
+          data: { user_id: senderId, post_id: postId },
+        }).catch((e: any) =>
+          console.error("[reactToStory] push failed:", e?.message ?? e),
+        );
+      }
+    } catch (e: any) {
+      console.error("[reactToStory] notify failed:", e?.message ?? e);
+    }
+  }
+  return "ok";
+}
+
+/**
+ * The caller's own past post photos for the "On this day" memories surface:
+ * same calendar day in previous years, plus exactly one week and one month
+ * ago. Story-only photos count — expiry hides them from the rail, not from
+ * the author's memories.
+ */
+export async function getOwnPostMemories(
+  userId: string,
+  localDate: string,
+): Promise<PostRow[]> {
+  return db.query<PostRow>(
+    `
+		SELECT ${POST_SELECT}
+		FROM posts p
+		JOIN users u ON u.user_id = p.user_id
+		WHERE p.user_id = $1
+			AND p.deleted_at IS NULL
+			AND p.local_date < $2::date
+			AND (
+				(EXTRACT(MONTH FROM p.local_date) = EXTRACT(MONTH FROM $2::date)
+					AND EXTRACT(DAY FROM p.local_date) = EXTRACT(DAY FROM $2::date))
+				OR p.local_date = ($2::date - INTERVAL '1 month')::date
+				OR p.local_date = ($2::date - INTERVAL '7 days')::date
+			)
+		ORDER BY p.local_date DESC
+		LIMIT 12
+		`,
+    [userId, localDate],
+  );
+}
+
 /**
  * Persistent feed: photo posts from the viewer's circle, newest first, keyset
  * paginated on created_at. Pass `before` (an ISO timestamp) to fetch older.
@@ -305,6 +464,9 @@ export interface FeedEntryRow {
   media_url: string | null;
   caption: string | null;
   stats_snapshot: PostStatsSnapshot | null;
+  // The run's story-only photo (if one exists) so the feed card can offer a
+  // photo/route flip without duplicating the run in the feed.
+  story_photo_url: string | null;
   // workout-only
   workout_type: string | null;
   distance: number | null;
@@ -339,6 +501,17 @@ export async function getUnifiedFeed(
 				p.created_at AS sort_ts,
 				p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
 				p.media_url, p.caption, p.stats_snapshot,
+				(
+					SELECT p3.media_url FROM posts p3
+					WHERE p.workout_id IS NOT NULL
+						AND p3.workout_id = p.workout_id
+						AND p3.user_id = p.user_id
+						AND p3.post_id <> p.post_id
+						AND p3.deleted_at IS NULL
+						AND p3.share_to_story AND NOT p3.share_to_feed
+					ORDER BY p3.created_at DESC
+					LIMIT 1
+				) AS story_photo_url,
 				NULL::varchar AS workout_type,
 				NULL::double precision AS distance,
 				NULL::double precision AS total_duration,
@@ -366,6 +539,7 @@ export async function getUnifiedFeed(
 				w.device_end_date AS sort_ts,
 				w.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
 				NULL::text AS media_url, NULL::text AS caption, NULL::jsonb AS stats_snapshot,
+				NULL::text AS story_photo_url,
 				w.workout_type,
 				w.distance::double precision,
 				w.total_duration::double precision,

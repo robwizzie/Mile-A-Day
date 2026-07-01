@@ -985,12 +985,21 @@ export const posts = pgTable(
         table.storyExpiresAt.asc().nullsLast(),
       )
       .where(sql`(deleted_at IS NULL AND share_to_story)`),
-    // One live post per workout — lets a run's auto route/stats post be replaced
-    // in place by a photo (upsert by workout_id) instead of creating a second
-    // feed item. NULL workout_ids (manual composer posts) don't conflict.
+    // One live FEED post per workout — lets a run's auto route/stats post be
+    // replaced in place by a promoted photo (upsert by workout_id) instead of
+    // creating a second feed item. Story-only posts are exempt so a run can
+    // have both its feed record and an ephemeral story photo.
     uniqueIndex("uq_posts_workout_active")
       .on(table.workoutId)
-      .where(sql`(deleted_at IS NULL AND workout_id IS NOT NULL)`),
+      .where(
+        sql`(deleted_at IS NULL AND workout_id IS NOT NULL AND share_to_feed)`,
+      ),
+    // ...and one live story-only photo per workout (retakes replace in place).
+    uniqueIndex("uq_posts_workout_story")
+      .on(table.workoutId)
+      .where(
+        sql`(deleted_at IS NULL AND workout_id IS NOT NULL AND share_to_story AND NOT share_to_feed)`,
+      ),
     foreignKey({
       columns: [table.userId],
       foreignColumns: [users.userId],
@@ -1029,6 +1038,37 @@ export const storyViews = pgTable(
     primaryKey({
       columns: [table.postId, table.viewerId],
       name: "story_views_pkey",
+    }),
+  ],
+);
+
+// One emoji reaction per (story, user) — the ephemeral counterpart to feed
+// hype. Re-reacting replaces the emoji. Shown to the author in the
+// "seen by" list and pushed as a lightweight notification.
+export const storyReactions = pgTable(
+  "story_reactions",
+  {
+    postId: uuid("post_id").notNull(),
+    userId: text("user_id").notNull(),
+    emoji: varchar({ length: 16 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.postId],
+      foreignColumns: [posts.postId],
+      name: "story_reactions_post_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "story_reactions_user_id_fkey",
+    }).onDelete("cascade"),
+    primaryKey({
+      columns: [table.postId, table.userId],
+      name: "story_reactions_pkey",
     }),
   ],
 );

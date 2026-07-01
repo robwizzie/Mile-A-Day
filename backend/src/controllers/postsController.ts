@@ -17,6 +17,10 @@ import {
   moderatorDeletePost,
   hasAcceptedTerms,
   acceptTerms,
+  getStoryViewers,
+  reactToStory,
+  getOwnPostMemories,
+  ALLOWED_STORY_REACTIONS,
   PostStatsSnapshot,
 } from "../services/postService.js";
 import {
@@ -200,6 +204,66 @@ export async function markStoryViewedController(
   } catch (error: any) {
     console.error("Error marking story viewed:", error.message);
     res.status(500).json({ error: "Error marking story viewed" });
+  }
+}
+
+/** Who saw the caller's own story (with reactions). 404 unless it's theirs. */
+export async function getStoryViewersController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const viewers = await getStoryViewers(req.userId!, req.params.postId);
+    if (viewers === null) {
+      return res.status(404).json({ error: "story_not_found" });
+    }
+    res.json({ viewers, count: viewers.length });
+  } catch (error: any) {
+    console.error("Error getting story viewers:", error.message);
+    res.status(500).json({ error: "Error getting story viewers" });
+  }
+}
+
+/** Emoji-react to a friend's active story. Re-reacting swaps the emoji. */
+export async function reactToStoryController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const emoji = typeof req.body?.emoji === "string" ? req.body.emoji : "";
+    if (!ALLOWED_STORY_REACTIONS.has(emoji)) {
+      return res.status(400).json({ error: "invalid_reaction" });
+    }
+    const result = await reactToStory(req.userId!, req.params.postId, emoji);
+    if (result === "not_found") {
+      return res.status(404).json({ error: "story_not_found" });
+    }
+    if (result === "forbidden") {
+      return res.status(403).json({ error: "not_allowed" });
+    }
+    res.json({ ok: true });
+  } catch (error: any) {
+    console.error("Error reacting to story:", error.message);
+    res.status(500).json({ error: "Error reacting to story" });
+  }
+}
+
+/**
+ * The caller's own post photos from this day in past years / a week ago / a
+ * month ago, for the "On this day" memories surface. Uses the same
+ * timezone-aware local date as posting.
+ */
+export async function getPostMemoriesController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const goal = await getDailyGoalStatus(req.userId!);
+    const items = await getOwnPostMemories(req.userId!, goal.localDate);
+    res.json({ items });
+  } catch (error: any) {
+    console.error("Error getting post memories:", error.message);
+    res.status(500).json({ error: "Error getting post memories" });
   }
 }
 
