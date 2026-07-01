@@ -42,7 +42,7 @@ struct PostRunPhotoPromptView: View {
                     Text(isWalk ? "Capture your walk" : "Capture your run")
                         .font(.system(size: 26, weight: .black, design: .rounded))
                         .foregroundColor(.white)
-                    Text("Add a photo to today's mile — it shares to your feed either way. Snap one before your friends get the heads-up.")
+                    Text("Snap a photo for your story — it disappears in 24 hours. Your run's route and stats post to the feed either way.")
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.6))
                         .multilineTextAlignment(.center)
@@ -75,12 +75,19 @@ struct PostRunPhotoPromptView: View {
         }
         .onAppear { withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { appeared = true } }
         .fullScreenCover(isPresented: $showComposer) {
-            PostComposerView(stats: RunPostService.todayStats(workoutId: workoutId), autoOpenCamera: true) { success in
+            PostComposerView(
+                stats: RunPostService.todayStats(workoutId: workoutId),
+                destination: .story,
+                autoOpenCamera: true
+            ) { outcome in
                 showComposer = false
                 didAct = true
-                // Cancelled the camera? Still publish the auto route/stats post so
-                // the run gets one nice feed item.
-                if !success {
+                // The feed always gets the run's route/stats card UNLESS the
+                // photo itself was sent to the feed (then it IS the feed item).
+                switch outcome {
+                case .published(let toFeed, _) where toFeed:
+                    break
+                default:
                     Task { await RunPostService.autoPostMile(workoutId: workoutId, workoutType: workoutType) }
                 }
                 finish()

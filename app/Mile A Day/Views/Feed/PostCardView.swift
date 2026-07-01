@@ -2,13 +2,19 @@ import SwiftUI
 
 /// A single post in the social feed: author header, photo (overlay already
 /// baked in), caption, hype + social-proof tally, and a report/block/delete menu.
+/// When the run also has a story photo, a corner thumbnail flips the card
+/// between the route/stats image and the photo.
 struct PostCardView: View {
     let post: PostItem
+    /// The run's story-only photo, when different from the post media.
+    var storyPhotoURL: URL? = nil
     var isHyping: Bool = false
     let onHype: () -> Void
     let onReport: () -> Void
     let onBlock: () -> Void
     let onDelete: () -> Void
+
+    @State private var showAltPhoto = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
@@ -66,8 +72,45 @@ struct PostCardView: View {
         }
     }
 
+    private var heroURL: URL? {
+        showAltPhoto ? storyPhotoURL : post.mediaURL
+    }
+    private var thumbURL: URL? {
+        showAltPhoto ? post.mediaURL : storyPhotoURL
+    }
+
     private var photo: some View {
-        AsyncImage(url: post.mediaURL) { phase in
+        cardImage(heroURL)
+            .frame(maxWidth: .infinity)
+            .aspectRatio(4.0 / 5.0, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+            .overlay(alignment: .bottomTrailing) {
+                // Corner thumbnail flips between the route/stats card and the
+                // run's story photo (BeReal-style).
+                if storyPhotoURL != nil {
+                    Button {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            showAltPhoto.toggle()
+                        }
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        cardImage(thumbURL)
+                            .frame(width: 64, height: 80)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.9), lineWidth: 1.5)
+                            )
+                            .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(10)
+                }
+            }
+    }
+
+    private func cardImage(_ url: URL?) -> some View {
+        AsyncImage(url: url) { phase in
             switch phase {
             case .success(let image):
                 image.resizable().scaledToFill()
@@ -80,9 +123,6 @@ struct PostCardView: View {
                 ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
             }
         }
-        .frame(maxWidth: .infinity)
-        .aspectRatio(4.0 / 5.0, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
     }
 
     private var footer: some View {

@@ -147,7 +147,7 @@ struct NotificationSettingsView: View {
                             description: "Friends see your activity in the unified feed")
                         settingsDivider
                         settingsToggle("Photo prompt after a run", isOn: $autoShareRunsToFeed,
-                            description: "Snap a photo of your mile — skipping shares the route map instead")
+                            description: "Snap a story photo of your mile — the route map posts to the feed either way")
                         settingsDivider
                         settingsToggle("New posts from friends", isOn: $prefs.friendPostsEnabled,
                             description: "Get notified when a friend shares a photo")

@@ -108,6 +108,7 @@ export type NotificationType =
   | "friend_challenge_completed"
   | "hype_received"
   | "friend_post"
+  | "story_reaction"
   | "daily_reminder";
 
 interface PushPayload {

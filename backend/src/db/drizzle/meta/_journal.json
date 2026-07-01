@@ -50,6 +50,13 @@
       "when": 1782871587357,
       "tag": "0006_mean_lizard",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1782945046004,
+      "tag": "0007_tearful_deathbird",
+      "breakpoints": true
     }
   ]
 }
