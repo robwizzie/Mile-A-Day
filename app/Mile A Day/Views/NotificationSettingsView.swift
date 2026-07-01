@@ -3,6 +3,8 @@ import UserNotifications
 
 struct NotificationSettingsView: View {
     @State private var prefs = NotificationPreferences.load()
+    /// Local master switch for the post-run photo prompt + auto-sharing the mile.
+    @AppStorage("autoShareRunsToFeed") private var autoShareRunsToFeed = true
     @ObservedObject private var notificationService = MADNotificationService.shared
     @StateObject private var friendService = FriendService()
 
@@ -143,6 +145,9 @@ struct NotificationSettingsView: View {
                     settingsSection(title: "FEED & STORIES", icon: "square.stack.fill", iconColor: MADTheme.Colors.madRed) {
                         settingsToggle("Share my walks & runs to the feed", isOn: $prefs.shareWorkoutsToFeed,
                             description: "Friends see your activity in the unified feed")
+                        settingsDivider
+                        settingsToggle("Photo prompt after a run", isOn: $autoShareRunsToFeed,
+                            description: "Snap a photo of your mile — skipping shares the route map instead")
                         settingsDivider
                         settingsToggle("New posts from friends", isOn: $prefs.friendPostsEnabled,
                             description: "Get notified when a friend shares a photo")

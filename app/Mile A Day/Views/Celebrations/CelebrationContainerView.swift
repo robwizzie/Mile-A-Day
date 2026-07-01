@@ -52,6 +52,9 @@ struct CelebrationContainerView: View {
 
         case .challengeCompleted(let info):
             ChallengeCompletedCelebrationView(info: info)
+
+        case .postRunPhotoPrompt(let workoutId, let workoutType):
+            PostRunPhotoPromptView(workoutId: workoutId, workoutType: workoutType)
         }
     }
 }
