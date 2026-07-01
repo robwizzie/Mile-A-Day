@@ -666,6 +666,7 @@ struct FriendsListView: View {
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundColor(heroHeadlineColor(isComplete: isComplete))
                             .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                         if streak > 0 {
                             HStack(spacing: 2) {
                                 Image(systemName: "flame.fill")

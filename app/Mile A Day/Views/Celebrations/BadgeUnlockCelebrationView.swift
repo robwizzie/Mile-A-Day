@@ -312,7 +312,10 @@ struct BadgeUnlockCelebrationView: View {
                                 }
                             }
 
-                            Spacer(minLength: 120)
+                            // Clear the floating tab bar + home indicator so the
+                            // buttons are reachable when scrolled to the bottom
+                            // (the celebration ignores the safe area).
+                            Spacer(minLength: geo.safeAreaInsets.bottom + 60)
                         }
                         .padding(.horizontal, 32)
                         .padding(.top, 8)
