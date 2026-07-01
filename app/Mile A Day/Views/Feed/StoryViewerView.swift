@@ -35,6 +35,18 @@ struct StoryViewerView: View {
             } else if let post = current {
                 storyImage(post)
                 tapZones
+
+                // Top scrim so the white progress bars + author stay legible over
+                // bright photos (e.g. a sky).
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.black.opacity(0.5), .clear],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: 150)
+                    Spacer()
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+
                 VStack(spacing: 0) {
                     progressBars
                     header(post)
@@ -131,32 +143,37 @@ struct StoryViewerView: View {
         .shadow(color: .black.opacity(0.4), radius: 6)
     }
 
+    // Instagram-style footer: caption bottom-left, hype bottom-right, over a soft
+    // bottom scrim. The run stats already live in the photo's baked-in overlay,
+    // so we don't repeat them here.
     @ViewBuilder
     private func footer(_ post: PostItem) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let stats = post.stats_snapshot {
-                PostStatStrip(stats: stats, onPhoto: true)
-            }
+        HStack(alignment: .bottom, spacing: 12) {
             if let caption = post.caption, !caption.isEmpty {
                 Text(caption)
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .foregroundColor(.white)
-                    .shadow(color: .black.opacity(0.6), radius: 4)
+                    .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Spacer(minLength: 0)
             }
+
             if !post.is_self {
-                HStack {
-                    Spacer()
-                    HypeButton(isHyped: post.is_hyped, isBusy: hyping) {
-                        Task { await hype(post) }
-                    }
+                HypeButton(isHyped: post.is_hyped, isBusy: hyping) {
+                    Task { await hype(post) }
                 }
             }
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 28)
+        .padding(.bottom, 20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
+                .frame(height: 200)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .allowsHitTesting(false)
                 .ignoresSafeArea()
         )
     }

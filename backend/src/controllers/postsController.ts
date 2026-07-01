@@ -28,6 +28,13 @@ import { getDailyGoalStatus } from "../services/workoutService.js";
 import { hasUnlimitedActions } from "../services/privilegedUsers.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 
+// Friend "new post" push notifications stay OFF until the Feed/Stories feature
+// ships in the App Store build. The backend is already live, but the feed UI is
+// dev-only right now — notifying live users about posts they can't open (the
+// image isn't reachable on their build) is just noise. Flip to true when the
+// iOS feed is released to the App Store.
+const FRIEND_POST_NOTIFICATIONS_ENABLED = false;
+
 const POSTS_MEDIA_PREFIX = "/uploads/posts/";
 const MAX_CAPTION = 280;
 const DEFAULT_FEED_LIMIT = 20;
@@ -142,7 +149,7 @@ export async function createPostController(
 
     // Fire-and-forget: tell friends about a new feed post (respects their
     // friend_posts_enabled setting). Never blocks the response.
-    if (shareToFeed) {
+    if (shareToFeed && FRIEND_POST_NOTIFICATIONS_ENABLED) {
       notifyFriendsOfPost(userId, post.caption).catch(() => {});
     }
     // Re-evaluate story badges (first story, X stories) in the background.
