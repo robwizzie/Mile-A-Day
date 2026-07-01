@@ -147,7 +147,7 @@ export async function evaluateChallengesForBatch(
   const dateRows = await db.query<{ local_date: string }>(
     `SELECT DISTINCT local_date::text AS local_date
 		FROM workouts
-		WHERE user_id = $1 AND workout_id = ANY($2::text[]) AND local_date = $3::date`,
+		WHERE user_id = $1 AND workout_id = ANY($2::text[]) AND local_date = $3::date AND deleted_at IS NULL AND exclusion_reason IS NULL`,
     [userId, newWorkoutIds, todayLocalDate],
   );
 
@@ -238,7 +238,7 @@ async function computeProgress(
     case "walk_it_out": {
       const rows = await db.query<{ total: string | null }>(
         `SELECT COALESCE(SUM(distance),0)::text AS total
-				FROM workouts WHERE user_id = $1 AND local_date = $2 AND workout_type = 'walking'`,
+				FROM workouts WHERE user_id = $1 AND local_date = $2 AND workout_type = 'walking' AND deleted_at IS NULL AND exclusion_reason IS NULL`,
         [userId, localDate],
       );
       const walked = parseFloat(rows[0]?.total ?? "0") || 0;
@@ -285,7 +285,7 @@ async function computeProgress(
         `SELECT
 					(SELECT MIN(s.split_pace) FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
 					 WHERE w.user_id = $1 AND w.local_date = $2 AND s.split_pace > 0 AND s.split_distance >= 0.95)::text AS min_pace,
-					(SELECT COALESCE(SUM(distance),0) FROM workouts WHERE user_id = $1 AND local_date = $2)::text AS day_total`,
+					(SELECT COALESCE(SUM(distance),0) FROM workouts WHERE user_id = $1 AND local_date = $2 AND deleted_at IS NULL AND exclusion_reason IS NULL)::text AS day_total`,
         [userId, localDate],
       );
       const dayTotal = parseFloat(rows[0]?.day_total ?? "0") || 0;
@@ -307,8 +307,9 @@ async function computeProgress(
 						WHERE user_id = $1 AND local_date = $2
 						  AND distance >= $3 * 0.95
 						  AND EXTRACT(HOUR FROM (device_end_date + timezone_offset * INTERVAL '1 minute')) < 12
+					  AND deleted_at IS NULL AND exclusion_reason IS NULL
 					) AS before_noon,
-					(SELECT COALESCE(SUM(distance),0) FROM workouts WHERE user_id = $1 AND local_date = $2)::text AS day_total`,
+					(SELECT COALESCE(SUM(distance),0) FROM workouts WHERE user_id = $1 AND local_date = $2 AND deleted_at IS NULL AND exclusion_reason IS NULL)::text AS day_total`,
         [userId, localDate, goalMiles],
       );
       if (rows[0]?.before_noon) return 1.0;
@@ -331,8 +332,9 @@ async function computeProgress(
 							EXTRACT(HOUR FROM (device_end_date + timezone_offset * INTERVAL '1 minute')) < 9
 							OR EXTRACT(HOUR FROM (device_end_date + timezone_offset * INTERVAL '1 minute')) >= 20
 						  )
+					  AND deleted_at IS NULL AND exclusion_reason IS NULL
 					) AS in_window,
-					(SELECT COALESCE(SUM(distance),0) FROM workouts WHERE user_id = $1 AND local_date = $2)::text AS day_total`,
+					(SELECT COALESCE(SUM(distance),0) FROM workouts WHERE user_id = $1 AND local_date = $2 AND deleted_at IS NULL AND exclusion_reason IS NULL)::text AS day_total`,
         [userId, localDate, goalMiles],
       );
       if (rows[0]?.in_window) return 1.0;
@@ -413,7 +415,7 @@ async function evaluatePredicate(
       const rows = await db.query<{ total: string | null }>(
         `SELECT COALESCE(SUM(distance),0)::text AS total
 				FROM workouts
-				WHERE user_id = $1 AND local_date = $2 AND workout_type = 'walking'`,
+				WHERE user_id = $1 AND local_date = $2 AND workout_type = 'walking' AND deleted_at IS NULL AND exclusion_reason IS NULL`,
         [userId, localDate],
       );
       return parseFloat(rows[0]?.total ?? "0") >= goalMiles * 0.95;
@@ -447,6 +449,7 @@ async function evaluatePredicate(
 					WHERE user_id = $1 AND local_date = $2
 					  AND distance >= $3 * 0.95
 					  AND EXTRACT(HOUR FROM (device_end_date + timezone_offset * INTERVAL '1 minute')) < 12
+					  AND deleted_at IS NULL AND exclusion_reason IS NULL
 				) AS ok`,
         [userId, localDate, goalMiles],
       );
@@ -463,6 +466,7 @@ async function evaluatePredicate(
 						EXTRACT(HOUR FROM (device_end_date + timezone_offset * INTERVAL '1 minute')) < 9
 						OR EXTRACT(HOUR FROM (device_end_date + timezone_offset * INTERVAL '1 minute')) >= 20
 					  )
+					  AND deleted_at IS NULL AND exclusion_reason IS NULL
 				) AS ok`,
         [userId, localDate, goalMiles],
       );
@@ -482,7 +486,7 @@ async function evaluatePredicate(
 					)
 					AND (
 						SELECT COALESCE(SUM(distance),0) >= 1.0
-						FROM workouts WHERE user_id = $1 AND local_date = $2
+						FROM workouts WHERE user_id = $1 AND local_date = $2 AND deleted_at IS NULL AND exclusion_reason IS NULL
 					)
 				) AS ok`,
         [userId, localDate],
@@ -552,7 +556,7 @@ async function dayTotalDistance(
   localDate: string,
 ): Promise<number> {
   const rows = await db.query<{ total: string | null }>(
-    `SELECT COALESCE(SUM(distance),0)::text AS total FROM workouts WHERE user_id = $1 AND local_date = $2`,
+    `SELECT COALESCE(SUM(distance),0)::text AS total FROM workouts WHERE user_id = $1 AND local_date = $2 AND deleted_at IS NULL AND exclusion_reason IS NULL`,
     [userId, localDate],
   );
   return parseFloat(rows[0]?.total ?? "0") || 0;
@@ -563,7 +567,7 @@ async function workoutCountToday(
   localDate: string,
 ): Promise<number> {
   const rows = await db.query<{ c: string }>(
-    `SELECT COUNT(*)::text AS c FROM workouts WHERE user_id = $1 AND local_date = $2 AND distance > 0`,
+    `SELECT COUNT(*)::text AS c FROM workouts WHERE user_id = $1 AND local_date = $2 AND distance > 0 AND deleted_at IS NULL AND exclusion_reason IS NULL`,
     [userId, localDate],
   );
   return parseInt(rows[0]?.c ?? "0", 10) || 0;
@@ -637,7 +641,7 @@ async function todayRunWalkMix(
   }>(
     `SELECT workout_type, COALESCE(SUM(distance),0)::text AS total
 		FROM workouts
-		WHERE user_id = $1 AND local_date = $2
+		WHERE user_id = $1 AND local_date = $2 AND deleted_at IS NULL AND exclusion_reason IS NULL
 		GROUP BY workout_type`,
     [userId, localDate],
   );
@@ -671,7 +675,8 @@ async function crossTrainVariant(
 		FROM workouts
 		WHERE user_id = $1
 		  AND local_date < $2
-		  AND local_date >= ($2::date - INTERVAL '7 days')::date`,
+		  AND local_date >= ($2::date - INTERVAL '7 days')::date
+		  AND deleted_at IS NULL AND exclusion_reason IS NULL`,
     [userId, localDate],
   );
   const run = parseFloat(rows[0]?.run ?? "0") || 0;
@@ -693,6 +698,7 @@ async function findCompletingWorkout(
   const rows = await db.query<{ workout_id: string }>(
     `SELECT workout_id FROM workouts
 		WHERE user_id = $1 AND local_date = $2 AND workout_id = ANY($3::text[])
+		AND deleted_at IS NULL AND exclusion_reason IS NULL
 		ORDER BY device_end_date DESC
 		LIMIT 1`,
     [userId, localDate, newWorkoutIds],

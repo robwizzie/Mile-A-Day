@@ -13,7 +13,29 @@ struct WorkoutDetailView: View {
     @State private var showEditSheet = false
     @State private var routeCoordinates: [CLLocationCoordinate2D]?
     @State private var isLoadingRoute = false
+    @State private var showDeleteConfirm = false
+    @State private var isDeleting = false
+    @State private var deleteError: String?
     @EnvironmentObject var healthManager: HealthKitManager
+
+    private let workoutService = WorkoutService()
+
+    /// Average speed in mph for this workout (0 if we can't compute it).
+    private var averageSpeedMph: Double {
+        guard workout.duration > 0, distanceMiles > 0 else { return 0 }
+        return distanceMiles / (workout.duration / 3600.0)
+    }
+
+    /// A human can't run/walk a mile faster than ~15 mph (world record), so high
+    /// average speeds almost always mean the tracker was left running in a vehicle.
+    /// >20 mph is auto-excluded by the server; 13–20 is flagged for the user.
+    private enum VehicleSuspicion { case none, flagged, excluded }
+    private var vehicleSuspicion: VehicleSuspicion {
+        let mph = averageSpeedMph
+        if mph >= 20 { return .excluded }
+        if mph >= 13 { return .flagged }
+        return .none
+    }
 
     // Timezone-corrected times from index
     private var correctedEndTime: Date {
@@ -86,9 +108,23 @@ struct WorkoutDetailView: View {
 
                         // Mile Splits Section
                         mileSplitsSection
+
+                        // Delete — remove an accidental / vehicle workout.
+                        deleteButton
                     }
                     .padding(MADTheme.Spacing.md)
                 }
+            }
+            .alert("Delete this workout?", isPresented: $showDeleteConfirm) {
+                Button("Delete", role: .destructive) { performDelete() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes the workout from Mile A Day and recalculates your streak and medals. Badges you only earned because of it will be removed. This can't be undone.")
+            }
+            .alert("Couldn't delete workout", isPresented: Binding(get: { deleteError != nil }, set: { if !$0 { deleteError = nil } })) {
+                Button("OK", role: .cancel) { deleteError = nil }
+            } message: {
+                Text(deleteError ?? "")
             }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
@@ -126,6 +162,105 @@ struct WorkoutDetailView: View {
         }
     }
 
+    // MARK: - Vehicle warning
+
+    private var vehicleWarningBanner: some View {
+        let excluded = vehicleSuspicion == .excluded
+        return HStack(spacing: 10) {
+            Image(systemName: "car.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(excluded ? .red : .orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(excluded ? "Not counted — vehicle speed" : "This pace looks unusually fast")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .foregroundColor(.primary)
+                Text(excluded
+                    ? "This workout averages \(Int(averageSpeedMph)) mph, so it doesn't count toward your mile. Delete it to clear it out."
+                    : "Averaging \(Int(averageSpeedMph)) mph. If you left tracking on in a car, delete it so it doesn't count.")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill((excluded ? Color.red : Color.orange).opacity(0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder((excluded ? Color.red : Color.orange).opacity(0.3), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Delete
+
+    private var deleteButton: some View {
+        Button(role: .destructive) {
+            showDeleteConfirm = true
+        } label: {
+            HStack(spacing: 8) {
+                if isDeleting {
+                    ProgressView().tint(.red)
+                } else {
+                    Image(systemName: "trash")
+                }
+                Text(isDeleting ? "Deleting…" : "Delete this workout")
+                    .fontWeight(.semibold)
+            }
+            .font(.system(size: 15, design: .rounded))
+            .foregroundColor(.red)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.red.opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(Color.red.opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+        .disabled(isDeleting)
+        .padding(.top, MADTheme.Spacing.sm)
+    }
+
+    private func performDelete() {
+        guard !isDeleting else { return }
+        isDeleting = true
+        let id = workout.uuid.uuidString
+        Task {
+            do {
+                let resp = try await workoutService.deleteWorkout(workoutId: id)
+                await MainActor.run {
+                    // Rebuild local data excluding the now-tombstoned workout so the
+                    // dashboard/streak/calendar drop it immediately.
+                    WorkoutIndex.clear()
+                    healthManager.workoutIndex = nil
+                    healthManager.fetchAllWorkoutData()
+                    healthManager.fetchTodaysDistance()
+                    if let streak = resp.currentStreak {
+                        healthManager.retroactiveStreak = streak
+                    }
+                    isDeleting = false
+                    dismiss()
+                }
+                // Pull fresh server-authoritative badges + challenge state.
+                await UserManager.shared.refreshBadgesFromServer()
+                if let uid = UserManager.shared.currentUser.backendUserId {
+                    await ChallengeService.refresh(userId: uid)
+                }
+            } catch {
+                await MainActor.run {
+                    isDeleting = false
+                    deleteError = error.localizedDescription
+                }
+            }
+        }
+    }
+
     // MARK: - Hero Card
 
     private var heroCard: some View {
@@ -133,6 +268,11 @@ struct WorkoutDetailView: View {
             // Manual/edited warning banner
             if workoutSource != .healthkit {
                 ManualWorkoutBanner(source: workoutSource)
+            }
+
+            // Vehicle-speed warning — surfaces a likely drive so the user can remove it.
+            if vehicleSuspicion != .none {
+                vehicleWarningBanner
             }
 
             // Workout type badge

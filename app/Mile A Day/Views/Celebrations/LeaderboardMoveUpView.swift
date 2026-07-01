@@ -19,6 +19,16 @@ struct LeaderboardMoveUpView: View {
     private var myRank: Int { (rows.firstIndex { $0.isMe }.map { $0 + 1 }) ?? 0 }
     private var totalCount: Int { rows.count }
 
+    // Rank movement from this just-finished run/walk: compare where I'd sit with my
+    // pre-workout mileage vs now, so we can show "moved up N spots".
+    private var latestWorkoutMiles: Double { stats.latestWorkout?.distance ?? 0 }
+    private var myMiles: Double { rows.first { $0.isMe }?.miles ?? stats.todaysDistance }
+    private var previousMiles: Double { max(0, myMiles - latestWorkoutMiles) }
+    private var previousRank: Int {
+        rows.filter { !$0.isMe && $0.miles > previousMiles }.count + 1
+    }
+    private var spotsMovedUp: Int { max(0, previousRank - myRank) }
+
     struct LBRow: Identifiable {
         let user_id: String
         let name: String
@@ -46,6 +56,13 @@ struct LeaderboardMoveUpView: View {
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
                 .opacity(showOverlay ? 1 : 0)
+
+            // Gold burst when you land #1.
+            if loaded && myRank == 1 && animateMe {
+                BurstEffect(colors: [.yellow, .orange, .white], particleCount: 30)
+                    .frame(height: 320)
+                    .allowsHitTesting(false)
+            }
 
             VStack(spacing: MADTheme.Spacing.lg) {
                 Spacer(minLength: MADTheme.Spacing.xl)
@@ -88,12 +105,37 @@ struct LeaderboardMoveUpView: View {
                 .font(.system(size: 22, weight: .black, design: .rounded))
                 .foregroundColor(.white)
             if loaded && rows.count > 1 {
-                Text(myRank <= 3 ? "You're in the top 3! 🔥" : "You're #\(myRank) of \(totalCount) today")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.65))
+                movementBadge
             }
         }
         .opacity(showBoard ? 1 : 0)
+    }
+
+    @ViewBuilder
+    private var movementBadge: some View {
+        if myRank == 1 {
+            badgePill("👑 You took #1 today!", color: Color(red: 1.0, green: 0.84, blue: 0.0))
+        } else if spotsMovedUp > 0 {
+            badgePill("🚀 Moved up \(spotsMovedUp) spot\(spotsMovedUp == 1 ? "" : "s")!", color: .green)
+        } else if myRank <= 3 {
+            badgePill("🔥 You're on the podium!", color: .orange)
+        } else {
+            badgePill("You're #\(myRank) of \(totalCount)", color: MADTheme.Colors.madRed)
+        }
+    }
+
+    private func badgePill(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 14, weight: .heavy, design: .rounded))
+            .foregroundColor(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(
+                Capsule().fill(color.opacity(0.22))
+                    .overlay(Capsule().strokeBorder(color.opacity(0.6), lineWidth: 1))
+            )
+            .scaleEffect(animateMe ? 1 : 0.7)
+            .opacity(animateMe ? 1 : 0)
     }
 
     private var board: some View {
@@ -254,6 +296,10 @@ struct LeaderboardMoveUpView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                 withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) { animateMe = true }
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
+                // Extra thump when you land the top spot.
+                if myRank == 1 {
+                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) { showButton = true }

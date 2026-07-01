@@ -4,12 +4,23 @@
 <dict>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>org.robertwiscount.Mile-A-Day</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mileaday</string>
+			</array>
+		</dict>
+	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.mileaday.background-refresh</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Mile A Day uses the camera to scan a friend's profile QR code so you can add each other quickly.</string>
+	<string>Mile A Day uses the camera to take photos for your walk and run posts and stories, and to scan a friend's profile QR code so you can add each other quickly.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Mile A Day reads your workouts, walking and running distance, active energy, step count, and workout routes to track your daily mile, calculate streaks, and show your progress. This data is synced to Mile A Day's servers so you can compete with friends and view your history across devices.</string>
 	<key>NSHealthUpdateUsageDescription</key>

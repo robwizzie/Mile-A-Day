@@ -1,0 +1,2 @@
+ALTER TABLE "pending_friend_notifications" ADD COLUMN "send_after_at" timestamp with time zone;--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_posts_workout_active" ON "posts" USING btree ("workout_id") WHERE (deleted_at IS NULL AND workout_id IS NOT NULL);

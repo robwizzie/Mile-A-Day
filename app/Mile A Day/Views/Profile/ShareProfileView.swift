@@ -96,7 +96,7 @@ struct ShareProfileView: View {
         )
 
         VStack(spacing: MADTheme.Spacing.xs) {
-            Text("Have a friend scan this in Mile A Day → Find Friends → Scan")
+            Text("Friends can scan this with their iPhone Camera or in Mile A Day → Find Friends → Scan")
                 .font(.system(size: 13, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.6))
 

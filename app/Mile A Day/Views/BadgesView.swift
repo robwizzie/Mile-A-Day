@@ -322,95 +322,15 @@ struct PremiumBadgeCard: View {
     
     var body: some View {
         VStack(spacing: 14) {
-            // Badge medal — fixed 110pt frame so locked cards (which have no glow) match unlocked
+            // Badge medal — premium shared MedalView in a fixed 110pt frame so
+            // locked and unlocked cards line up.
             ZStack {
-                // Outer glow for unlocked
-                if !badge.isLocked {
-                    Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [badge.rarity.color.opacity(0.4), badge.rarity.color.opacity(0)],
-                                center: .center,
-                                startRadius: 20,
-                                endRadius: 55
-                            )
-                        )
-                        .frame(width: 110, height: 110)
-                }
-                
-                // Medal base
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: badge.isLocked ? [
-                                Color(white: 0.25),
-                                Color(white: 0.15)
-                            ] : medalGradientColors,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 76, height: 76)
-                    .overlay(
-                        Circle()
-                            .stroke(
-                                LinearGradient(
-                                    colors: badge.isLocked ? [
-                                        Color.white.opacity(0.1),
-                                        Color.white.opacity(0.05)
-                                    ] : [
-                                        Color.white.opacity(0.5),
-                                        badge.rarity.color.opacity(0.3)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 2
-                            )
-                    )
-                    .shadow(
-                        color: badge.isLocked ? .clear : badge.rarity.color.opacity(0.4),
-                        radius: 12,
-                        x: 0,
-                        y: 6
-                    )
-                
-                // Inner ring
-                if !badge.isLocked {
-                    Circle()
-                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                        .frame(width: 60, height: 60)
-                }
-                
-                // Icon
-                if badge.isLocked {
-                    ZStack {
-                        Image(systemName: badgeIcon)
-                            .font(.system(size: 28, weight: .medium))
-                            .foregroundColor(.white.opacity(0.15))
-                        
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.4))
-                            .offset(x: 18, y: -18)
-                    }
-                } else {
-                    Image(systemName: badgeIcon)
-                        .font(.system(size: 30, weight: .semibold))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.white, .white.opacity(0.85)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 2)
-                }
-                
-                // Tags
+                MedalView(badge: badge, size: 88)
+
+                // NEW tag
                 if badge.isNew && !badge.isLocked {
                     newTag
-                        .offset(x: 28, y: -28)
+                        .offset(x: 30, y: -34)
                 }
             }
             .frame(width: 110, height: 110)

@@ -144,15 +144,22 @@ export default async function ProfilePage({
 
           <div className="mt-9 space-y-3">
             <a
-              href={APP_STORE_URL}
+              href={`mileaday://u/${encodeURIComponent(profile.username ?? '')}`}
               className="glass-button flex w-full items-center justify-center gap-2 rounded-2xl bg-[#c72554] px-6 py-4 text-[16px] font-semibold text-white transition-transform hover:scale-[1.02]"
             >
+              Open in Mile A Day
+            </a>
+            <a
+              href={APP_STORE_URL}
+              className="glass-button flex w-full items-center justify-center gap-2 rounded-2xl border border-[#c72554]/50 px-6 py-4 text-[16px] font-semibold text-[#f5f5f5] transition-transform hover:scale-[1.02]"
+            >
               <Apple className="h-5 w-5" aria-hidden />
-              Add {profile.first_name ?? profile.username} on Mile A Day
+              Get the app on the App Store
             </a>
             <p className="text-[13px] text-[#a0a0a0]/70">
-              Already have the app? Open this link on your iPhone and it&apos;ll take you straight
-              to {profile.first_name ? `${profile.first_name}’s` : 'their'} profile.
+              Have the app? &ldquo;Open in Mile A Day&rdquo; jumps straight to{' '}
+              {profile.first_name ? `${profile.first_name}’s` : 'their'} profile with an Add
+              Friend button.
             </p>
           </div>
         </div>

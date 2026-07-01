@@ -865,7 +865,8 @@ export async function checkRaceCompletions(userId: string): Promise<void> {
 			WHERE user_id = $1
 				AND local_date >= $2
 				AND local_date <= $3
-				AND workout_type = ANY($4::text[])`,
+				AND workout_type = ANY($4::text[])
+				AND deleted_at IS NULL AND exclusion_reason IS NULL`,
       [userId, startDate, endDate, workoutTypes],
     );
 

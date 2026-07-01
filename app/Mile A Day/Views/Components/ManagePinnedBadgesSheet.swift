@@ -254,30 +254,7 @@ private struct BadgePickerCard: View {
         Button(action: onTap) {
             VStack(spacing: 10) {
                 ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: medalGradientColors(for: badge),
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 64, height: 64)
-                        .overlay(
-                            Circle()
-                                .stroke(Color.white.opacity(0.4), lineWidth: 1.5)
-                        )
-                        .shadow(color: badge.rarity.color.opacity(0.35), radius: 8, x: 0, y: 4)
-
-                    Image(systemName: iconName(for: badge))
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.white, .white.opacity(0.85)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
+                    MedalView(badge: badge, size: 64, showShimmer: false)
 
                     if let idx = selectionIndex {
                         ZStack {

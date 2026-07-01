@@ -97,18 +97,18 @@ export async function computeAggregates(
   const [streakRow, totalsRow, paceRow, bestDayRow, ccRow] = await Promise.all([
     computeCurrentStreak(userId),
     db.query<{ total_miles: string | null }>(
-      `SELECT COALESCE(SUM(distance),0)::text AS total_miles FROM workouts WHERE user_id = $1`,
+      `SELECT COALESCE(SUM(distance),0)::text AS total_miles FROM workouts WHERE user_id = $1 AND deleted_at IS NULL AND exclusion_reason IS NULL`,
       [userId],
     ),
     db.query<{ min_pace: string | null }>(
       `SELECT MIN(s.split_pace)::text AS min_pace
 			FROM workout_splits s JOIN workouts w ON w.workout_id = s.workout_id
-			WHERE w.user_id = $1 AND s.split_pace > 0 AND s.split_distance >= 0.95`,
+			WHERE w.user_id = $1 AND s.split_pace > 0 AND s.split_distance >= 0.95 AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL`,
       [userId],
     ),
     db.query<{ best_day: string | null }>(
       `SELECT COALESCE(MAX(day_total),0)::text AS best_day FROM (
-				SELECT SUM(distance) AS day_total FROM workouts WHERE user_id = $1 GROUP BY local_date
+				SELECT SUM(distance) AS day_total FROM workouts WHERE user_id = $1 AND deleted_at IS NULL AND exclusion_reason IS NULL GROUP BY local_date
 			) t`,
       [userId],
     ),
@@ -229,7 +229,7 @@ async function computeCurrentStreak(userId: string): Promise<number> {
   const rows = await db.query<{ local_date: string; total: string }>(
     `SELECT local_date::text AS local_date, SUM(distance)::text AS total
 		FROM workouts
-		WHERE user_id = $1
+		WHERE user_id = $1 AND deleted_at IS NULL AND exclusion_reason IS NULL
 		GROUP BY local_date
 		ORDER BY local_date DESC`,
     [userId],
@@ -448,6 +448,92 @@ export async function evaluateSocialBadgesForUser(
     console.error("[badges] social evaluation failed:", e?.message ?? e);
     return [];
   }
+}
+
+// ─── Revocation (after a workout is deleted/excluded) ───────────────
+
+/**
+ * Longest run of consecutive qualifying days (SUM(distance) >= 0.95) over the
+ * user's entire ACTIVE history (deleted/excluded workouts already filtered out).
+ * Used for revocation: a streak badge means "you reached N consecutive days at
+ * some point", so we keep it as long as that's still true of the real history —
+ * deleting a bogus drive that bridged a streak correctly drops it, while a real
+ * past streak that simply isn't current is preserved.
+ */
+async function computeMaxEverStreak(userId: string): Promise<number> {
+  const rows = await db.query<{ local_date: string }>(
+    `SELECT to_char(local_date, 'YYYY-MM-DD') AS local_date
+		FROM workouts
+		WHERE user_id = $1 AND deleted_at IS NULL AND exclusion_reason IS NULL
+		GROUP BY local_date
+		HAVING SUM(distance) >= ${STREAK_QUALIFYING_DISTANCE}
+		ORDER BY local_date ASC`,
+    [userId],
+  );
+  let best = 0;
+  let run = 0;
+  let prev: string | undefined;
+  for (const { local_date } of rows) {
+    if (prev !== undefined && isPreviousDay(prev, local_date)) {
+      run++;
+    } else {
+      run = 1;
+    }
+    if (run > best) best = run;
+    prev = local_date;
+  }
+  return best;
+}
+
+/** Social/app-function badges are not workout-derived, so a workout deletion
+ * never revokes them. */
+function isWorkoutDerived(category: BadgeCategory): boolean {
+  return !(
+    category === "story" ||
+    category === "hype" ||
+    category === "nudge" ||
+    category === "competition"
+  );
+}
+
+/**
+ * Remove any earned badges the user no longer qualifies for after their active
+ * workout history changed (a deletion or auto-exclusion). Workout-derived badges
+ * are checked against recomputed aggregates, using the max-ever streak so a real
+ * historical achievement is never stripped. Returns the revoked badge ids.
+ */
+export async function revokeUnearnedBadges(userId: string): Promise<string[]> {
+  const [agg, maxStreak, catalog, earnedRows] = await Promise.all([
+    computeAggregates(userId),
+    computeMaxEverStreak(userId),
+    getCatalog(),
+    db.query<{ badge_id: string }>(
+      `SELECT badge_id FROM user_badges WHERE user_id = $1`,
+      [userId],
+    ),
+  ]);
+  const byId = new Map(catalog.map((b) => [b.badgeId, b]));
+  // For "ever earned" semantics, evaluate streak/special badges against the
+  // best streak the real history can still produce.
+  const aggForEarn: UserAggregates = { ...agg, currentStreak: maxStreak };
+
+  const toRevoke: string[] = [];
+  for (const { badge_id } of earnedRows) {
+    const badge = byId.get(badge_id);
+    if (!badge) continue; // unknown/legacy badge — leave it alone
+    if (!isWorkoutDerived(badge.category)) continue;
+    if (!evaluatePredicate(badge, aggForEarn).earned) {
+      toRevoke.push(badge_id);
+    }
+  }
+
+  if (toRevoke.length > 0) {
+    await db.query(
+      `DELETE FROM user_badges WHERE user_id = $1 AND badge_id = ANY($2::text[])`,
+      [userId, toRevoke],
+    );
+  }
+  return toRevoke;
 }
 
 // ─── Catalog seed for the v2 social / app-function badges ───────────

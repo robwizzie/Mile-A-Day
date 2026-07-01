@@ -5,10 +5,9 @@
 // application/json content type with no file extension, which is what
 // Apple's CDN validator expects.
 //
-// TODO(rob): replace TEAMID with the Apple Developer Team ID
-// (developer.apple.com → Membership) and verify the bundle ID matches the
-// Xcode target. Format: "<TeamID>.<BundleID>".
-const APP_ID = 'TEAMID.com.mileaday'
+// Format: "<TeamID>.<BundleID>" — team + bundle confirmed from the app's
+// provisioning profile.
+const APP_ID = 'NS237SS5KD.org.robertwiscount.Mile-A-Day'
 
 export async function GET() {
   return Response.json({

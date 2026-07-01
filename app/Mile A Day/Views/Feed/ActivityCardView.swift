@@ -64,21 +64,25 @@ struct ActivityCardView: View {
     private var statStrip: some View {
         let items = statItems
         if !items.isEmpty {
-            HStack(spacing: 8) {
-                ForEach(items, id: \.0) { item in
-                    HStack(spacing: 4) {
-                        Image(systemName: item.1).font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.orange)
-                        Text(item.2)
-                            .font(.system(size: 11, weight: .heavy, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundColor(.white.opacity(0.85))
+            // Scrollable so four chips with long values (1:02:15, 10:30 /mi, …)
+            // can never overflow the card on smaller screens.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(items, id: \.0) { item in
+                        HStack(spacing: 4) {
+                            Image(systemName: item.1).font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.orange)
+                            Text(item.2)
+                                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Capsule().fill(Color.white.opacity(0.06)))
                     }
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Capsule().fill(Color.white.opacity(0.06)))
                 }
+                .padding(.horizontal, 2)
             }
-            .padding(.horizontal, 2)
         }
     }
 
@@ -109,7 +113,7 @@ struct ActivityCardView: View {
             out.append(("cal", "bolt.fill", "\(Int(c.rounded())) cal"))
         }
         if let s = entry.steps, s > 0 {
-            out.append(("steps", "shoeprints.fill", "\(s)"))
+            out.append(("steps", "shoeprints.fill", s.formatted(.number.grouping(.automatic))))
         }
         return out
     }

@@ -152,12 +152,14 @@ struct ChallengeCompletedCelebrationView: View {
                                                 startPoint: .top, endPoint: .bottom))
 
             // Completion check badge.
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 40))
-                .foregroundColor(.green)
-                .background(Circle().fill(.white).frame(width: 34, height: 34))
-                .offset(x: 46, y: 46)
-                .scaleEffect(checkScale)
+            ZStack {
+                Circle().fill(.white).frame(width: 32, height: 32)
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 40))
+                    .foregroundColor(.green)
+            }
+            .offset(x: 46, y: 46)
+            .scaleEffect(checkScale)
         }
         .scaleEffect(badgeScale)
     }

@@ -117,6 +117,15 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
 				CASE WHEN $8 THEN NOW() + INTERVAL '24 hours' ELSE NULL END
 			)
+				ON CONFLICT (workout_id) WHERE (deleted_at IS NULL AND workout_id IS NOT NULL)
+				DO UPDATE SET
+					media_url = EXCLUDED.media_url,
+					caption = COALESCE(EXCLUDED.caption, posts.caption),
+					stats_snapshot = COALESCE(EXCLUDED.stats_snapshot, posts.stats_snapshot),
+					share_to_feed = EXCLUDED.share_to_feed,
+					share_to_story = EXCLUDED.share_to_story,
+					story_expires_at = CASE WHEN EXCLUDED.share_to_story THEN NOW() + INTERVAL '24 hours' ELSE NULL END
+				WHERE posts.user_id = $1
 			RETURNING *
 		)
 		SELECT
@@ -138,6 +147,11 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       input.shareToStory,
     ],
   );
+  // Zero rows = the workout_id conflicted with a post the caller doesn't own
+  // (the ownership guard on DO UPDATE skipped it) — reject rather than 500.
+  if (!rows[0]) {
+    throw new Error("workout_already_posted");
+  }
   return rows[0];
 }
 
@@ -371,6 +385,7 @@ export async function getUnifiedFeed(
 			LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
 			WHERE w.user_id NOT IN (SELECT uid FROM blocked)
 				AND COALESCE(ns.share_workouts_to_feed, true) = true
+				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 				AND NOT EXISTS (
 					SELECT 1 FROM posts p2
 					WHERE p2.workout_id = w.workout_id AND p2.deleted_at IS NULL AND p2.share_to_feed

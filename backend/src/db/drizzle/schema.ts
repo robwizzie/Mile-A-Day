@@ -164,6 +164,17 @@ export const workouts = pgTable(
     originalDistance: doublePrecision("original_distance"),
     originalDuration: doublePrecision("original_duration"),
     steps: integer(),
+    // User soft-delete: a deleted workout stops counting toward streaks/miles/
+    // badges/competitions but is kept (and kept tombstoned) so a HealthKit
+    // re-sync can't resurrect it.
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "string" }),
+    // Auto-exclusion: set to a reason (e.g. 'vehicle_speed') when a workout's
+    // average speed is physically impossible on foot. Excluded workouts don't
+    // count but stay visible so the user can see why.
+    exclusionReason: text("exclusion_reason"),
+    // Soft flag for the suspicious-but-possible speed band — still counts, just
+    // surfaced in the UI for the user to review.
+    speedFlagged: boolean("speed_flagged").default(false).notNull(),
   },
   (table) => [
     index("idx_workouts_local_date_user_id").using(
@@ -695,6 +706,13 @@ export const pendingFriendNotifications = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
       .defaultNow()
       .notNull(),
+    // When set, this row is auto-sent by the pending-send cron once NOW() passes
+    // it (used to defer + merge a mile-completion push ~10 min so a photo can
+    // ride along). NULL = the legacy user-confirmation ("ask") flow.
+    sendAfterAt: timestamp("send_after_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
   (table) => [
     index("idx_pending_friend_notif_user").using(
@@ -967,6 +985,12 @@ export const posts = pgTable(
         table.storyExpiresAt.asc().nullsLast(),
       )
       .where(sql`(deleted_at IS NULL AND share_to_story)`),
+    // One live post per workout — lets a run's auto route/stats post be replaced
+    // in place by a photo (upsert by workout_id) instead of creating a second
+    // feed item. NULL workout_ids (manual composer posts) don't conflict.
+    uniqueIndex("uq_posts_workout_active")
+      .on(table.workoutId)
+      .where(sql`(deleted_at IS NULL AND workout_id IS NOT NULL)`),
     foreignKey({
       columns: [table.userId],
       foreignColumns: [users.userId],

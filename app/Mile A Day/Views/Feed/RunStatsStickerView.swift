@@ -142,12 +142,15 @@ struct RunStatsStickerView: View {
     private var cardStyle: some View {
         let hero = data.first
         let rest = Array(data.dropFirst())
+        // Chips wrap into rows of 3 so enabling every stat can't grow the
+        // sticker wider than the photo canvas.
+        let rows = stride(from: 0, to: rest.count, by: 3).map { Array(rest[$0..<min($0 + 3, rest.count)]) }
         return VStack(alignment: .leading, spacing: 8) {
             brandLine
             if let hero { heroValue(hero) }
-            if !rest.isEmpty {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: 14) {
-                    ForEach(rest) { chip($0) }
+                    ForEach(row) { chip($0) }
                 }
             }
         }

@@ -279,6 +279,8 @@ enum CelebrationType: Identifiable, Equatable {
     case badgeSummary(count: Int, badges: [Badge])
     /// Rewarding moment when the user completes today's daily challenge.
     case challengeCompleted(info: ChallengeCelebrationInfo)
+    /// BeReal-style prompt to add a photo to the just-finished mile.
+    case postRunPhotoPrompt(workoutId: String, workoutType: String)
 
     var id: String {
         switch self {
@@ -298,6 +300,8 @@ enum CelebrationType: Identifiable, Equatable {
             return "badge-summary"
         case .challengeCompleted(let info):
             return "challenge-completed-\(info.key)"
+        case .postRunPhotoPrompt(let workoutId, _):
+            return "post-run-photo-\(workoutId)"
         }
     }
 
@@ -319,6 +323,8 @@ enum CelebrationType: Identifiable, Equatable {
             return true // only one welcome summary
         case (.challengeCompleted(let i1), .challengeCompleted(let i2)):
             return i1.key == i2.key // one celebration per challenge per day
+        case (.postRunPhotoPrompt(let w1, _), .postRunPhotoPrompt(let w2, _)):
+            return w1 == w2 // one prompt per workout
         default:
             return false
         }
@@ -490,6 +496,7 @@ class CelebrationManager: ObservableObject {
         case .badgeUnlocked: return 3
         case .milestone: return 4
         case .challengeCompleted: return 5 // celebrate the daily challenge as a finale
+        case .postRunPhotoPrompt: return 6 // BeReal photo prompt — the very last step
         }
     }
 

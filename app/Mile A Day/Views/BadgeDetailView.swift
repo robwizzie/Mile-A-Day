@@ -45,24 +45,26 @@ struct BadgeDetailView: View {
                 ambientGlow
             }
             
-            VStack(spacing: 0) {
-                Spacer()
-                    .frame(height: 16)
-                
-                // Medal display
-                medalSection
-                    .scaleEffect(showMedal ? 1 : 0.5)
-                    .opacity(showMedal ? 1 : 0)
-                
-                Spacer()
-                    .frame(height: 40)
-                
-                // Details section
-                detailsSection
-                    .opacity(showContent ? 1 : 0)
-                    .offset(y: showContent ? 0 : 30)
-                
-                Spacer()
+            // Scrollable so the medal + details always fit on any screen size and
+            // the hero is never clipped under the dynamic island (the ScrollView
+            // respects the top safe area).
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: 12)
+
+                    // Medal display
+                    medalSection
+                        .scaleEffect(showMedal ? 1 : 0.5)
+                        .opacity(showMedal ? 1 : 0)
+
+                    Color.clear.frame(height: 36)
+
+                    // Details section
+                    detailsSection
+                        .opacity(showContent ? 1 : 0)
+                        .offset(y: showContent ? 0 : 30)
+                }
+                .frame(maxWidth: .infinity)
             }
         }
         .onAppear {
@@ -148,91 +150,18 @@ struct BadgeDetailView: View {
                 .opacity(ribbonDrop ? 1 : 0)
                 .offset(y: ribbonDrop ? 0 : -30)
             
-            // Medal
+            // Medal — premium tiltable 3D medal with live shimmer.
             ZStack {
                 // Outer glow rings
                 if !badge.isLocked {
                     ForEach(0..<3, id: \.self) { i in
                         Circle()
                             .stroke(badge.rarity.color.opacity(0.15 - Double(i) * 0.04), lineWidth: 1)
-                            .frame(width: 180 + CGFloat(i * 30), height: 180 + CGFloat(i * 30))
+                            .frame(width: 190 + CGFloat(i * 30), height: 190 + CGFloat(i * 30))
                     }
                 }
-                
-                // Main medal circle
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: badge.isLocked ? [
-                                Color(white: 0.3),
-                                Color(white: 0.18)
-                            ] : medalGradientColors,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 150, height: 150)
-                    .overlay(
-                        Circle()
-                            .stroke(
-                                LinearGradient(
-                                    colors: badge.isLocked ? [
-                                        Color.white.opacity(0.15),
-                                        Color.white.opacity(0.05)
-                                    ] : [
-                                        Color.white.opacity(0.6),
-                                        badge.rarity.color.opacity(0.3)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 3
-                            )
-                    )
-                    .shadow(
-                        color: badge.isLocked ? .black.opacity(0.3) : badge.rarity.color.opacity(0.5),
-                        radius: 25,
-                        x: 0,
-                        y: 15
-                    )
-                
-                // Inner decorative ring
-                Circle()
-                    .stroke(Color.white.opacity(badge.isLocked ? 0.1 : 0.25), lineWidth: 2)
-                    .frame(width: 120, height: 120)
-                
-                // Icon
-                if badge.isLocked {
-                    Image(systemName: "lock.fill")
-                        .font(.system(size: 45, weight: .medium))
-                        .foregroundColor(.white.opacity(0.35))
-                } else {
-                    Image(systemName: resolvedIcon)
-                        .font(.system(size: 55, weight: .semibold))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [.white, .white.opacity(0.85)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .shadow(color: .black.opacity(0.3), radius: 3, x: 0, y: 3)
-                }
-                
-                // Shimmer effect
-                if !badge.isLocked {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [.clear, .white.opacity(0.3), .clear],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: 150, height: 150)
-                        .offset(x: shimmerOffset)
-                        .clipShape(Circle())
-                }
+
+                TiltableMedal(badge: badge, size: 156)
             }
             .offset(y: -15)
         }

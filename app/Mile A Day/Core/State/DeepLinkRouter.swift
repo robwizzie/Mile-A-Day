@@ -24,7 +24,9 @@ final class DeepLinkRouter: ObservableObject {
         if url.scheme == "mileaday", url.host == "u" {
             let candidate = url.lastPathComponent
             raw = candidate.isEmpty ? nil : candidate
-        } else if url.scheme == "https", url.host?.lowercased() == "mileaday.run" {
+        } else if url.scheme == "https",
+                  let host = url.host?.lowercased(),
+                  host == "mileaday.run" || host == "www.mileaday.run" {
             let parts = url.path.split(separator: "/").map(String.init)
             raw = (parts.count == 2 && parts[0] == "u") ? parts[1] : nil
         } else {

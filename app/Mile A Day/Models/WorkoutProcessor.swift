@@ -33,12 +33,16 @@ class WorkoutProcessor {
         var correctionCount = 0
         
         for workout in workouts {
+            // Skip workouts the user deleted in-app — Health still has them, but
+            // they must not count toward streaks, totals, or the calendar.
+            if DeletedWorkoutRegistry.contains(workout.uuid.uuidString) { continue }
+
             let (localDate, offset) = determineLocalDateWithOffset(for: workout)
-            
+
             if offset != 0 {
                 correctionCount += 1
             }
-            
+
             records.append(WorkoutRecord(from: workout, timezoneCorrectedDate: localDate, timezoneOffset: offset))
         }
         

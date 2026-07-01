@@ -77,6 +77,9 @@ struct DashboardView: View {
     /// tour only auto-plays once; users can replay it any time from the
     /// dashboard welcome banner or Help & Support.
     @AppStorage("hasSeenWelcomeTour") private var hasSeenWelcomeTour = false
+    /// Master switch for the post-run photo prompt + auto-sharing the mile to the
+    /// feed. On by default; users can turn the whole flow off in settings.
+    @AppStorage("autoShareRunsToFeed") private var autoShareRunsToFeed = true
     /// Shared with InstructionsBanner — completing the tour hides the banner.
     @AppStorage("hasSeenInstructions") private var hasSeenInstructions = false
     @State private var showWelcomeTour = false
@@ -293,6 +296,14 @@ struct DashboardView: View {
             // Right after the fire/streak screen: show where you land on today's
             // friends leaderboard, animating your climb (Duolingo-style).
             celebrationManager.addCelebration(.leaderboardMoveUp(stats: completionStats))
+
+            // Finale: BeReal-style "add a photo of your run" prompt for the mile
+            // that just completed. Skipping still shares the run (route/stats).
+            if autoShareRunsToFeed, let uuid = healthManager.workoutIndex?.latestWorkoutUUID {
+                let hk = healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
+                let wtype = hk?.workoutActivityType == .walking ? "walking" : "running"
+                celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: uuid, workoutType: wtype))
+            }
         }
     }
 
@@ -310,6 +321,9 @@ struct DashboardView: View {
 
         celebrationManager.lastPostGoalWorkoutCount = healthManager.todaysWorkoutCount
         let stats = buildGoalCompletionStats()
+        // Every extra run/walk also re-runs the today's-miles leaderboard so you
+        // see yourself climb with the added miles, then the extra-mile hype.
+        celebrationManager.addCelebration(.leaderboardMoveUp(stats: stats))
         celebrationManager.addCelebration(.postGoalWorkout(stats: stats))
     }
 

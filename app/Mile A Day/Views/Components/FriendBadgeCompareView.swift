@@ -331,29 +331,7 @@ private struct FriendBadgeDetailView: View {
                                 .frame(width: 200, height: 200)
                         }
 
-                        Circle()
-                            .fill(
-                                LinearGradient(
-                                    colors: badge.isLocked
-                                        ? [Color(white: 0.25), Color(white: 0.15)]
-                                        : medalGradientColors(for: badge),
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .frame(width: 140, height: 140)
-                            .overlay(
-                                Circle()
-                                    .stroke(
-                                        badge.isLocked ? Color.white.opacity(0.1) : Color.white.opacity(0.5),
-                                        lineWidth: 3
-                                    )
-                            )
-                            .shadow(color: badge.isLocked ? .clear : badge.rarity.color.opacity(0.4), radius: 18, x: 0, y: 8)
-
-                        Image(systemName: badge.isLocked ? "lock.fill" : iconName(for: badge))
-                            .font(.system(size: 50, weight: .semibold))
-                            .foregroundColor(badge.isLocked ? .white.opacity(0.35) : .white)
+                        TiltableMedal(badge: badge, size: 144)
                     }
                     .padding(.top, MADTheme.Spacing.lg)
 

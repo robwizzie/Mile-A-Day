@@ -17,6 +17,9 @@ struct StoryViewerView: View {
     @State private var dragOffset: CGFloat = 0
     @State private var changed = false
     @State private var paused = false
+    /// The current photo has rendered (or failed) — the 5s timer holds until
+    /// then so a slow connection can't advance past an image nobody saw.
+    @State private var imageReady = false
 
     @State private var showReport = false
     @State private var hyping = false
@@ -35,6 +38,18 @@ struct StoryViewerView: View {
             } else if let post = current {
                 storyImage(post)
                 tapZones
+
+                // Top scrim so the white progress bars + author stay legible over
+                // bright photos (e.g. a sky).
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.black.opacity(0.5), .clear],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: 150)
+                    Spacer()
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+
                 VStack(spacing: 0) {
                     progressBars
                     header(post)
@@ -56,9 +71,11 @@ struct StoryViewerView: View {
         )
         .task { await load() }
         .onReceive(tick) { _ in advanceProgress() }
-        .sheet(isPresented: $showReport) {
+        // onDismiss also covers swiping the sheet away, which would otherwise
+        // leave `paused` stuck true and freeze the story.
+        .sheet(isPresented: $showReport, onDismiss: { paused = false }) {
             if let post = current {
-                ReportPostSheet(postId: post.post_id) { showReport = false; paused = false }
+                ReportPostSheet(postId: post.post_id) { showReport = false }
             }
         }
         .statusBarHidden(true)
@@ -71,12 +88,16 @@ struct StoryViewerView: View {
             switch phase {
             case .success(let image):
                 image.resizable().scaledToFill()
+                    .onAppear { imageReady = true }
             case .failure:
                 Image(systemName: "photo").font(.largeTitle).foregroundColor(.white.opacity(0.3))
+                    .onAppear { imageReady = true }
             default:
                 ProgressView().tint(.white)
             }
         }
+        // Re-identify per story so the readiness onAppear refires every step.
+        .id(post.post_id)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .ignoresSafeArea()
@@ -131,32 +152,37 @@ struct StoryViewerView: View {
         .shadow(color: .black.opacity(0.4), radius: 6)
     }
 
+    // Instagram-style footer: caption bottom-left, hype bottom-right, over a soft
+    // bottom scrim. The run stats already live in the photo's baked-in overlay,
+    // so we don't repeat them here.
     @ViewBuilder
     private func footer(_ post: PostItem) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let stats = post.stats_snapshot {
-                PostStatStrip(stats: stats, onPhoto: true)
-            }
+        HStack(alignment: .bottom, spacing: 12) {
             if let caption = post.caption, !caption.isEmpty {
                 Text(caption)
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .foregroundColor(.white)
-                    .shadow(color: .black.opacity(0.6), radius: 4)
+                    .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Spacer(minLength: 0)
             }
+
             if !post.is_self {
-                HStack {
-                    Spacer()
-                    HypeButton(isHyped: post.is_hyped, isBusy: hyping) {
-                        Task { await hype(post) }
-                    }
+                HypeButton(isHyped: post.is_hyped, isBusy: hyping) {
+                    Task { await hype(post) }
                 }
             }
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 28)
+        .padding(.bottom, 20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            LinearGradient(colors: [.clear, .black.opacity(0.5)], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [.clear, .black.opacity(0.55)], startPoint: .top, endPoint: .bottom)
+                .frame(height: 200)
+                .frame(maxHeight: .infinity, alignment: .bottom)
+                .allowsHitTesting(false)
                 .ignoresSafeArea()
         )
     }
@@ -193,7 +219,7 @@ struct StoryViewerView: View {
     }
 
     private func advanceProgress() {
-        guard !isLoading, !paused, !showReport, current != nil else { return }
+        guard !isLoading, !paused, !showReport, imageReady, current != nil else { return }
         progress += 0.05 / stepDuration
         if progress >= 1 { step(1) }
     }
@@ -203,6 +229,7 @@ struct StoryViewerView: View {
         let next = index + dir
         if next < 0 { return }
         if next >= stories.count { close(); return }
+        imageReady = false
         index = next
         markViewed()
     }
@@ -263,6 +290,7 @@ struct StoryViewerView: View {
                 stories.removeAll { $0.post_id == post.post_id }
                 if index >= stories.count { index = max(0, stories.count - 1) }
                 progress = 0
+                imageReady = false
                 if stories.isEmpty { close() }
             }
         } catch {}
