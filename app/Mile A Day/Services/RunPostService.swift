@@ -30,6 +30,25 @@ enum RunPostService {
         )
     }
 
+    /// The workout that pushed today's total past the daily goal — the same one
+    /// the post-run prompt auto-posts. Recomputed deterministically (today's
+    /// workouts in start order, first to cross the goal) so a photo shared later
+    /// from the feed composer carries the same workout id and upserts into the
+    /// SAME feed post instead of creating a duplicate.
+    @MainActor
+    static func dailyMileWorkoutId() -> String? {
+        let workouts = HealthKitManager.shared.todaysWorkouts
+            .sorted { $0.startDate < $1.startDate }
+        let goal = UserManager.shared.currentUser.goalMiles
+        var total = 0.0
+        for workout in workouts {
+            total += workout.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
+            if total >= goal { return workout.uuid.uuidString }
+        }
+        // Goal met via non-workout distance — fall back to the latest workout.
+        return workouts.last?.uuid.uuidString
+    }
+
     /// Render the auto image (route map or stats card), upload it, and create the
     /// linked feed post. Called when the user skips the post-run photo prompt.
     @MainActor

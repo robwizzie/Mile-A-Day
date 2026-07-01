@@ -17,6 +17,9 @@ struct StoryViewerView: View {
     @State private var dragOffset: CGFloat = 0
     @State private var changed = false
     @State private var paused = false
+    /// The current photo has rendered (or failed) — the 5s timer holds until
+    /// then so a slow connection can't advance past an image nobody saw.
+    @State private var imageReady = false
 
     @State private var showReport = false
     @State private var hyping = false
@@ -68,9 +71,11 @@ struct StoryViewerView: View {
         )
         .task { await load() }
         .onReceive(tick) { _ in advanceProgress() }
-        .sheet(isPresented: $showReport) {
+        // onDismiss also covers swiping the sheet away, which would otherwise
+        // leave `paused` stuck true and freeze the story.
+        .sheet(isPresented: $showReport, onDismiss: { paused = false }) {
             if let post = current {
-                ReportPostSheet(postId: post.post_id) { showReport = false; paused = false }
+                ReportPostSheet(postId: post.post_id) { showReport = false }
             }
         }
         .statusBarHidden(true)
@@ -83,12 +88,16 @@ struct StoryViewerView: View {
             switch phase {
             case .success(let image):
                 image.resizable().scaledToFill()
+                    .onAppear { imageReady = true }
             case .failure:
                 Image(systemName: "photo").font(.largeTitle).foregroundColor(.white.opacity(0.3))
+                    .onAppear { imageReady = true }
             default:
                 ProgressView().tint(.white)
             }
         }
+        // Re-identify per story so the readiness onAppear refires every step.
+        .id(post.post_id)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
         .ignoresSafeArea()
@@ -210,7 +219,7 @@ struct StoryViewerView: View {
     }
 
     private func advanceProgress() {
-        guard !isLoading, !paused, !showReport, current != nil else { return }
+        guard !isLoading, !paused, !showReport, imageReady, current != nil else { return }
         progress += 0.05 / stepDuration
         if progress >= 1 { step(1) }
     }
@@ -220,6 +229,7 @@ struct StoryViewerView: View {
         let next = index + dir
         if next < 0 { return }
         if next >= stories.count { close(); return }
+        imageReady = false
         index = next
         markViewed()
     }
@@ -280,6 +290,7 @@ struct StoryViewerView: View {
                 stories.removeAll { $0.post_id == post.post_id }
                 if index >= stories.count { index = max(0, stories.count - 1) }
                 progress = 0
+                imageReady = false
                 if stories.isEmpty { close() }
             }
         } catch {}

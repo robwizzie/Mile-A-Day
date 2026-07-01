@@ -45,7 +45,9 @@ struct SocialFeedView: View {
             streak: user.streak,
             calories: calories > 0 ? calories : nil,
             steps: steps > 0 ? steps : nil,
-            workoutId: nil,
+            // Link to the daily-mile workout so this post upserts into the same
+            // feed item as the auto route/stats post — one post per run.
+            workoutId: mileDone ? RunPostService.dailyMileWorkoutId() : nil,
             dateText: Self.todayText()
         )
     }

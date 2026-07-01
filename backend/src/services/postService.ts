@@ -125,6 +125,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 					share_to_feed = EXCLUDED.share_to_feed,
 					share_to_story = EXCLUDED.share_to_story,
 					story_expires_at = CASE WHEN EXCLUDED.share_to_story THEN NOW() + INTERVAL '24 hours' ELSE NULL END
+				WHERE posts.user_id = $1
 			RETURNING *
 		)
 		SELECT
@@ -146,6 +147,11 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       input.shareToStory,
     ],
   );
+  // Zero rows = the workout_id conflicted with a post the caller doesn't own
+  // (the ownership guard on DO UPDATE skipped it) — reject rather than 500.
+  if (!rows[0]) {
+    throw new Error("workout_already_posted");
+  }
   return rows[0];
 }
 

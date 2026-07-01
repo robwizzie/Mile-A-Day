@@ -185,11 +185,15 @@ struct PostComposerView: View {
     @StateObject private var vm: PostComposerViewModel
     @State private var showCamera = false
     @State private var gestureBaseScale: CGFloat = 1.0
+    /// Launch straight into the camera on first appear (post-run prompt flow) —
+    /// the user already tapped "Take a photo" once to get here.
+    let autoOpenCamera: Bool
     let onFinished: (Bool) -> Void
     @Environment(\.dismiss) private var dismiss
 
-    init(stats: RunStatsInput, onFinished: @escaping (Bool) -> Void) {
+    init(stats: RunStatsInput, autoOpenCamera: Bool = false, onFinished: @escaping (Bool) -> Void) {
         _vm = StateObject(wrappedValue: PostComposerViewModel(stats: stats))
+        self.autoOpenCamera = autoOpenCamera
         self.onFinished = onFinished
     }
 
@@ -243,6 +247,11 @@ struct PostComposerView: View {
             .fullScreenCover(isPresented: $showCamera) {
                 CameraPicker(image: $vm.pickedImage)
                     .ignoresSafeArea()
+            }
+            .onAppear {
+                if autoOpenCamera, vm.pickedImage == nil, CameraPicker.isAvailable {
+                    showCamera = true
+                }
             }
         }
     }

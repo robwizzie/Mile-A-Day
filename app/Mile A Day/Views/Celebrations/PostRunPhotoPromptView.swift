@@ -75,7 +75,7 @@ struct PostRunPhotoPromptView: View {
         }
         .onAppear { withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { appeared = true } }
         .fullScreenCover(isPresented: $showComposer) {
-            PostComposerView(stats: RunPostService.todayStats(workoutId: workoutId)) { success in
+            PostComposerView(stats: RunPostService.todayStats(workoutId: workoutId), autoOpenCamera: true) { success in
                 showComposer = false
                 didAct = true
                 // Cancelled the camera? Still publish the auto route/stats post so
