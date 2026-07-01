@@ -321,6 +321,9 @@ struct DashboardView: View {
 
         celebrationManager.lastPostGoalWorkoutCount = healthManager.todaysWorkoutCount
         let stats = buildGoalCompletionStats()
+        // Every extra run/walk also re-runs the today's-miles leaderboard so you
+        // see yourself climb with the added miles, then the extra-mile hype.
+        celebrationManager.addCelebration(.leaderboardMoveUp(stats: stats))
         celebrationManager.addCelebration(.postGoalWorkout(stats: stats))
     }
 
