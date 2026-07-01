@@ -183,7 +183,7 @@ struct PostCanvas: View {
 
 struct PostComposerView: View {
     @StateObject private var vm: PostComposerViewModel
-    @State private var showImagePicker = false
+    @State private var showCamera = false
     @State private var gestureBaseScale: CGFloat = 1.0
     let onFinished: (Bool) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -240,8 +240,9 @@ struct PostComposerView: View {
             }
             .toolbarBackground(.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .sheet(isPresented: $showImagePicker) {
-                ImagePicker(selectedImage: $vm.pickedImage)
+            .fullScreenCover(isPresented: $showCamera) {
+                CameraPicker(image: $vm.pickedImage)
+                    .ignoresSafeArea()
             }
         }
     }
@@ -271,12 +272,17 @@ struct PostComposerView: View {
                     .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous))
                     .onAppear { vm.canvasSize = CGSize(width: width, height: height) }
                     .overlay(alignment: .topTrailing) {
-                        Button { showImagePicker = true } label: {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(.white)
-                                .padding(8)
-                                .background(Circle().fill(.black.opacity(0.45)))
+                        Button { showCamera = true } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "camera.fill")
+                                    .font(.system(size: 12, weight: .bold))
+                                Text("Retake")
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(Capsule().fill(.black.opacity(0.5)))
                         }
                         .padding(10)
                     }
@@ -299,17 +305,41 @@ struct PostComposerView: View {
     }
 
     private var photoPlaceholder: some View {
-        Button { showImagePicker = true } label: {
+        Button { if CameraPicker.isAvailable { showCamera = true } } label: {
             VStack(spacing: MADTheme.Spacing.md) {
-                Image(systemName: "photo.badge.plus")
-                    .font(.system(size: 44, weight: .semibold))
-                    .foregroundStyle(MADTheme.Colors.redGradient)
-                Text("Choose a photo")
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                ZStack {
+                    Circle()
+                        .fill(MADTheme.Colors.redGradient)
+                        .frame(width: 84, height: 84)
+                        .shadow(color: MADTheme.Colors.madRed.opacity(0.4), radius: 16, y: 6)
+                    Image(systemName: "camera.fill")
+                        .font(.system(size: 34, weight: .semibold))
+                        .foregroundColor(.white)
+                }
+
+                VStack(spacing: 4) {
+                    Text(CameraPicker.isAvailable ? "Take a photo" : "Camera unavailable")
+                        .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                    Text(CameraPicker.isAvailable
+                        ? "Snap today's walk or run — camera keeps it real."
+                        : "A camera is required to share a post.")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, MADTheme.Spacing.lg)
+                }
+
+                if CameraPicker.isAvailable {
+                    HStack(spacing: 6) {
+                        Image(systemName: "camera.fill").font(.system(size: 13, weight: .bold))
+                        Text("Open camera").font(.system(size: 14, weight: .bold, design: .rounded))
+                    }
                     .foregroundColor(.white)
-                Text("Share today's walk or run")
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.5))
+                    .padding(.horizontal, 18).padding(.vertical, 10)
+                    .background(Capsule().fill(MADTheme.Colors.redGradient))
+                    .padding(.top, 2)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
@@ -323,6 +353,7 @@ struct PostComposerView: View {
             )
         }
         .buttonStyle(.plain)
+        .disabled(!CameraPicker.isAvailable)
     }
 
     private func stickerGestureLayer(canvas: CGSize) -> some View {
