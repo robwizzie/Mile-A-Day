@@ -20,6 +20,7 @@ struct MainTabView: View {
     // never lose where their walk/run is.
     @StateObject private var trackingManager = WorkoutLocationManager.shared
     @State private var activeWorkoutForBanner: InProgressWorkoutState?
+    @State private var showGuidedTour = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -50,12 +51,20 @@ struct MainTabView: View {
             .badge(competitionService.invites.count)
 
             NavigationStack {
+                SocialFeedView()
+            }
+            .tabItem {
+                Label("Feed", systemImage: "square.stack.fill")
+            }
+            .tag(2)
+
+            NavigationStack {
                 FriendsListView(friendService: friendService)
             }
             .tabItem {
                 Label("Friends", systemImage: "person.2.fill")
             }
-            .tag(2)
+            .tag(3)
             .badge(friendService.friendRequests.count)
 
             NavigationStack {
@@ -65,7 +74,7 @@ struct MainTabView: View {
             .tabItem {
                 Label("Profile", systemImage: "person.fill")
             }
-            .tag(3)
+            .tag(4)
         }
         .tint(MADTheme.Colors.madRed)
         .safeAreaInset(edge: .bottom) {
@@ -91,7 +100,7 @@ struct MainTabView: View {
             // MAD_SwitchTab post fired before this view existed, so read the
             // parked deep link directly. FriendsListView resolves + presents.
             if DeepLinkRouter.shared.pendingProfileUsername != nil {
-                selectedTab = 2
+                selectedTab = 3
             }
             await competitionService.refreshAllData()
             await friendService.refreshAllData()
@@ -116,7 +125,7 @@ struct MainTabView: View {
                 switch type {
                 case "friend_request", "friend_request_accepted":
                     await friendService.refreshAllData()
-                    selectedTab = 2
+                    selectedTab = 3
                 case "competition_invite", "competition_accepted", "competition_started",
                      "competition_finished", "competition_updates", "competition_nudge":
                     await competitionService.refreshAllData()
@@ -154,7 +163,7 @@ struct MainTabView: View {
                 switch newTab {
                 case 1:
                     await competitionService.refreshAllData()
-                case 2:
+                case 3:
                     await friendService.refreshAllData()
                 default:
                     break
@@ -201,6 +210,22 @@ struct MainTabView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 52)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            // Guided app tour overlay — sits above everything, switches
+            // tabs underneath, and shows coach-mark cards.
+            if showGuidedTour {
+                AppGuidedTourView {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        showGuidedTour = false
+                    }
+                }
+                .transition(.opacity)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MAD_StartGuidedTour"))) { _ in
+            withAnimation(.easeIn(duration: 0.25)) {
+                showGuidedTour = true
             }
         }
         .animation(.easeInOut(duration: 0.25), value: trackingManager.isTracking)
@@ -258,7 +283,7 @@ struct MainTabView: View {
             switch type {
             case "friend_request", "friend_request_accepted":
                 await friendService.refreshAllData()
-                selectedTab = 2
+                selectedTab = 3
             case "competition_invite", "competition_accepted", "competition_started",
                  "competition_finished", "competition_updates", "competition_nudge":
                 await competitionService.refreshAllData()

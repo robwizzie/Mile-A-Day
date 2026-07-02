@@ -17,7 +17,7 @@ struct ProfileView: View {
     @State private var isRecalibratingStreak = false
     @State private var recalibrateResultMessage: String?
     @State private var showingShareProfile = false
-    @State private var showAppTour = false
+    @State private var showingSettings = false
 
     // Friends count shown in the header (Instagram-style), tappable through to
     // the friends list. Owns one FriendService for the count + the list link.
@@ -39,7 +39,7 @@ struct ProfileView: View {
     @State private var profileTab: OwnProfileTab = .activity
 
     enum OwnProfileTab: Hashable {
-        case activity, posts, stats, badges, settings
+        case activity, posts, stats, badges
     }
 
     enum ProfileSheetType: String, Identifiable {
@@ -59,8 +59,8 @@ struct ProfileView: View {
                     MADHeaderAction(id: "edit", systemImage: "pencil") {
                         activeSheet = .editProfile
                     },
-                    MADHeaderAction(id: "privacy", systemImage: "lock.shield.fill") {
-                        activeSheet = .privacySettings
+                    MADHeaderAction(id: "settings", systemImage: "gearshape.fill") {
+                        showingSettings = true
                     }
                 ]
             )
@@ -70,15 +70,14 @@ struct ProfileView: View {
                     // Profile Header (matches friend profile style)
                     profileHeader
 
-                    // Tab picker — same grammar as friend profile.
+                    // Tab picker — matches friend profile's 4-tab layout.
                     MADPillPicker(
                         selection: $profileTab,
                         options: [
                             .init(id: .activity, title: "Activity", systemImage: "flame.fill"),
                             .init(id: .posts, title: "Posts", systemImage: "square.grid.3x3.fill"),
                             .init(id: .stats, title: "Stats", systemImage: "chart.bar.fill"),
-                            .init(id: .badges, title: "Badges", systemImage: "trophy.fill"),
-                            .init(id: .settings, title: "Settings", systemImage: "gearshape.fill")
+                            .init(id: .badges, title: "Badges", systemImage: "trophy.fill")
                         ]
                     )
 
@@ -88,7 +87,6 @@ struct ProfileView: View {
                         case .posts: ownPostsTabContent
                         case .stats: ownStatsTabContent
                         case .badges: ownBadgesTabContent
-                        case .settings: ownSettingsTabContent
                         }
                     }
                     .animation(.easeInOut(duration: 0.18), value: profileTab)
@@ -105,6 +103,17 @@ struct ProfileView: View {
         // no-slide-down direction for navigational destinations.
         .navigationDestination(isPresented: $showingShareProfile) {
             ShareProfileView()
+        }
+        .navigationDestination(isPresented: $showingSettings) {
+            ProfileSettingsView(
+                userManager: userManager,
+                friendService: friendService,
+                onLogout: { showingLogoutConfirmation = true },
+                onDeleteAccount: { showingDeleteAccountConfirmation = true },
+                onRecalibrateStreak: { Task { await recalibrateStreak() } },
+                isRecalibratingStreak: isRecalibratingStreak,
+                onPrivacySettings: { activeSheet = .privacySettings }
+            )
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
@@ -128,9 +137,6 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showingManagePins) {
             ManagePinnedBadgesSheet(userManager: userManager)
-        }
-        .fullScreenCover(isPresented: $showAppTour) {
-            WelcomeTourView { showAppTour = false }
         }
         .task {
             await loadOwnFriendCount()
@@ -353,17 +359,6 @@ struct ProfileView: View {
         }
     }
 
-    /// Settings + sign-out + (dev only) developer tools. Own-profile-only
-    /// tab since you can't manage someone else's account.
-    @ViewBuilder
-    private var ownSettingsTabContent: some View {
-        VStack(spacing: MADTheme.Spacing.lg) {
-            settingsSection
-            if showsDevelopmentSection {
-                developmentSection
-            }
-        }
-    }
 
     private func loadOwnFriendCount() async {
         guard let userId = userManager.currentUser.backendUserId else { return }
@@ -687,202 +682,6 @@ struct ProfileView: View {
         .madLiquidGlass()
     }
 
-    // MARK: - Settings
-
-    private var settingsSection: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(MADTheme.Colors.redGradient)
-                Text("Settings")
-                    .font(MADTheme.Typography.headline)
-                    .foregroundColor(.primary)
-                Spacer()
-            }
-
-            VStack(spacing: 0) {
-                NavigationLink(destination: NotificationSettingsView()) {
-                    MADSettingsRow(
-                        icon: "bell.fill",
-                        title: "Notifications",
-                        subtitle: "Daily reminders and alerts",
-                        iconColor: MADTheme.Colors.madRed
-                    )
-                }
-
-                settingsDivider
-
-                Button {
-                    if let url = URL(string: "x-apple-health://") {
-                        UIApplication.shared.open(url)
-                    }
-                } label: {
-                    MADSettingsRow(
-                        icon: "heart.fill",
-                        title: "Health Data",
-                        subtitle: "HealthKit integration",
-                        iconColor: Color.red
-                    )
-                }
-                .buttonStyle(.plain)
-
-                settingsDivider
-
-                Button {
-                    Task { await recalibrateStreak() }
-                } label: {
-                    MADSettingsRow(
-                        icon: "arrow.triangle.2.circlepath",
-                        title: "Recalibrate Streak",
-                        subtitle: isRecalibratingStreak
-                            ? "Re-syncing your workouts…"
-                            : "Fix a streak that looks too low",
-                        iconColor: Color.green
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(isRecalibratingStreak)
-
-                settingsDivider
-
-                NavigationLink(destination: FriendsListView(friendService: friendService)) {
-                    MADSettingsRow(
-                        icon: "person.2.fill",
-                        title: "Friends & Leaderboard",
-                        subtitle: "Social features",
-                        iconColor: Color.blue
-                    )
-                }
-
-                settingsDivider
-
-                Button(action: { activeSheet = .privacySettings }) {
-                    MADSettingsRow(
-                        icon: "lock.shield.fill",
-                        title: "Privacy Settings",
-                        subtitle: "Control what others can see",
-                        iconColor: MADTheme.Colors.madRed
-                    )
-                }
-                .buttonStyle(.plain)
-
-                settingsDivider
-
-                Button { showAppTour = true } label: {
-                    MADSettingsRow(
-                        icon: "figure.run.circle.fill",
-                        title: "App Tour",
-                        subtitle: "Replay the welcome walkthrough",
-                        iconColor: MADTheme.Colors.madRed
-                    )
-                }
-                .buttonStyle(.plain)
-
-                settingsDivider
-
-                NavigationLink(destination: HelpAndSupportView()) {
-                    MADSettingsRow(
-                        icon: "questionmark.circle.fill",
-                        title: "Help & Support",
-                        subtitle: "FAQ and contact",
-                        iconColor: Color.orange
-                    )
-                }
-
-                settingsDivider
-
-                Button {
-                    showingLogoutConfirmation = true
-                } label: {
-                    MADSettingsRow(
-                        icon: "arrow.right.square.fill",
-                        title: "Sign Out",
-                        subtitle: "Sign out and return to login",
-                        iconColor: MADTheme.Colors.madRed
-                    )
-                }
-                .buttonStyle(.plain)
-
-                settingsDivider
-
-                Button {
-                    showingDeleteAccountConfirmation = true
-                } label: {
-                    MADSettingsRow(
-                        icon: "trash.fill",
-                        title: "Delete Account",
-                        subtitle: "Permanently remove your account and data",
-                        iconColor: .red
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(isDeletingAccount)
-            }
-        }
-        .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
-    }
-
-    private var settingsDivider: some View {
-        Divider()
-            .overlay(Color.white.opacity(0.06))
-            .padding(.vertical, MADTheme.Spacing.xs)
-    }
-
-    // MARK: - Development
-
-    private var showsDevelopmentSection: Bool {
-        AppEnvironment.isDevelopment && userManager.currentUser.role == "admin"
-    }
-
-    private var developmentSection: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: "wrench.and.screwdriver")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(MADTheme.Colors.redGradient)
-                Text("Development")
-                    .font(MADTheme.Typography.headline)
-                    .foregroundColor(.primary)
-                Spacer()
-            }
-
-            VStack(spacing: 0) {
-                NavigationLink(destination: DeveloperSettingsView()) {
-                    MADSettingsRow(
-                        icon: "hammer.fill",
-                        title: "Developer Settings",
-                        subtitle: "Debug tools and sync management",
-                        iconColor: MADTheme.Colors.madRed
-                    )
-                }
-
-                settingsDivider
-
-                Button {
-                    appStateManager.resetAppState()
-                } label: {
-                    MADSettingsRow(
-                        icon: "arrow.counterclockwise.circle.fill",
-                        title: "Reset Onboarding",
-                        subtitle: "Return to initial setup flow",
-                        iconColor: .orange
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                .fill(MADTheme.Colors.madRed.opacity(0.05))
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
-                        .stroke(MADTheme.Colors.madRed.opacity(0.15), lineWidth: 0.5)
-                )
-        )
-    }
 
     // MARK: - Helpers
 

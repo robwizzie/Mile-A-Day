@@ -50,21 +50,21 @@ struct BadgeDetailView: View {
             // respects the top safe area).
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    Color.clear.frame(height: 12)
+                    Color.clear.frame(height: 16)
 
-                    // Medal display
+                    // Medal display — centered horizontally
                     medalSection
                         .scaleEffect(showMedal ? 1 : 0.5)
                         .opacity(showMedal ? 1 : 0)
 
-                    Color.clear.frame(height: 36)
+                    Color.clear.frame(height: 32)
 
                     // Details section
                     detailsSection
                         .opacity(showContent ? 1 : 0)
                         .offset(y: showContent ? 0 : 30)
                 }
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .onAppear {
@@ -149,8 +149,9 @@ struct BadgeDetailView: View {
             ribbonView
                 .opacity(ribbonDrop ? 1 : 0)
                 .offset(y: ribbonDrop ? 0 : -30)
-            
+
             // Medal — premium tiltable 3D medal with live shimmer.
+            // Overlaps the bottom of the ribbon slightly so they connect visually.
             ZStack {
                 // Outer glow rings
                 if !badge.isLocked {
@@ -163,8 +164,9 @@ struct BadgeDetailView: View {
 
                 TiltableMedal(badge: badge, size: 156)
             }
-            .offset(y: -15)
+            .offset(y: -12)
         }
+        .frame(maxWidth: .infinity)
     }
     
     private var ribbonView: some View {

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct HelpAndSupportView: View {
-    @State private var showGettingStarted = false
+    @Environment(\.dismiss) private var dismiss
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
@@ -21,7 +21,13 @@ struct HelpAndSupportView: View {
                     // Welcome tour — the same full-screen walkthrough first-time
                     // users see on the dashboard, re-openable any time.
                     Button {
-                        showGettingStarted = true
+                        dismiss()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            NotificationCenter.default.post(
+                                name: NSNotification.Name("MAD_StartGuidedTour"),
+                                object: nil
+                            )
+                        }
                     } label: {
                         HStack(spacing: MADTheme.Spacing.sm) {
                             Image(systemName: "figure.run.circle.fill")
@@ -146,9 +152,6 @@ struct HelpAndSupportView: View {
         .navigationTitle("Help & Support")
         .navigationBarTitleDisplayMode(.large)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .fullScreenCover(isPresented: $showGettingStarted) {
-            WelcomeTourView { showGettingStarted = false }
-        }
     }
 
     private func faqItem(question: String, answer: String) -> some View {

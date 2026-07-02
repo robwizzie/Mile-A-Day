@@ -134,7 +134,7 @@ struct BadgeSummaryCelebrationView: View {
     private func viewAll() {
         dismiss()
         // Route to the Profile tab where the Badges tab lives.
-        NotificationCenter.default.post(name: NSNotification.Name("MAD_SwitchTab"), object: nil, userInfo: ["tab": 3])
+        NotificationCenter.default.post(name: NSNotification.Name("MAD_SwitchTab"), object: nil, userInfo: ["tab": 4])
     }
 
     private func dismiss() {

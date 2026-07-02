@@ -232,7 +232,6 @@ struct DayProgressView: View {
 struct BadgesPreviewCard: View {
     @ObservedObject var userManager: UserManager
     @ObservedObject var healthManager: HealthKitManager
-    @State private var shimmerPhase: CGFloat = -1
     @AppStorage("trackedBadgeIds") private var trackedBadgeIdsRaw: String = ""
     @State private var challengesCompletedCount: Int = ChallengeService.shared.allCompletions().count
 
@@ -373,7 +372,7 @@ struct BadgesPreviewCard: View {
                     // Recent badges row
                     HStack(spacing: 8) {
                         ForEach(recentBadges, id: \.id) { badge in
-                            HomeBadgeItem(badge: badge, shimmerPhase: shimmerPhase)
+                            HomeBadgeItem(badge: badge)
                         }
                     }
                 }
@@ -443,9 +442,6 @@ struct BadgesPreviewCard: View {
         }
         .buttonStyle(PlainButtonStyle())
         .onAppear {
-            withAnimation(.linear(duration: 2.5).repeatForever(autoreverses: false)) {
-                shimmerPhase = 1.5
-            }
             challengesCompletedCount = ChallengeService.shared.allCompletions().count
         }
         .onReceive(NotificationCenter.default.publisher(for: ChallengeService.changedNotification)) { _ in
@@ -457,83 +453,14 @@ struct BadgesPreviewCard: View {
 // MARK: - Home Badge Item
 struct HomeBadgeItem: View {
     let badge: Badge
-    let shimmerPhase: CGFloat
-    
+
     var body: some View {
         VStack(spacing: 10) {
-            ZStack {
-                // Outer glow
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [badge.rarity.color.opacity(0.35), badge.rarity.color.opacity(0)],
-                            center: .center,
-                            startRadius: 15,
-                            endRadius: 35
-                        )
-                    )
-                    .frame(width: 70, height: 70)
-                
-                // Medal base
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: medalGradientColors,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 52, height: 52)
-                    .overlay(
-                        Circle()
-                            .stroke(
-                                LinearGradient(
-                                    colors: [Color.white.opacity(0.5), badge.rarity.color.opacity(0.3)],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                ),
-                                lineWidth: 2
-                            )
-                    )
-                    .shadow(color: badge.rarity.color.opacity(0.4), radius: 8, x: 0, y: 4)
-                
-                // Inner ring
-                Circle()
-                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                    .frame(width: 40, height: 40)
-
-                // Icon
-                Image(systemName: badgeIcon)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.white, .white.opacity(0.85)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .shadow(color: .black.opacity(0.25), radius: 1, x: 0, y: 1)
-                
-                // Shimmer
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.clear, .white.opacity(0.25), .clear],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: 52, height: 52)
-                    .offset(x: (shimmerPhase - 0.25) * 100)
-                    .clipShape(Circle())
-                
-                // Rarity indicator dot
-                Circle()
-                    .fill(badge.rarity.color)
-                    .frame(width: 8, height: 8)
-                    .overlay(Circle().stroke(Color.white.opacity(0.5), lineWidth: 1))
-                    .offset(y: 30)
-            }
+            // Shared MedalView at dashboard size — keeps the look identical to
+            // the grid, detail, and showcase. No shimmer at this compact size
+            // to keep the dashboard lightweight.
+            MedalView(badge: badge, size: 56, showShimmer: false)
+                .frame(width: 70, height: 70)
 
             // Badge name
             Text(badge.name)
@@ -543,44 +470,6 @@ struct HomeBadgeItem: View {
                 .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
-    }
-    
-    private var badgeIcon: String {
-        if badge.id.starts(with: "streak_") || badge.id.starts(with: "consistency_") {
-            return "flame.fill"
-        } else if badge.id.starts(with: "miles_") {
-            return "figure.run"
-        } else if badge.id.starts(with: "pace_") {
-            return "bolt.fill"
-        } else if badge.id.starts(with: "daily_") {
-            return "figure.run.circle.fill"
-        } else if badge.id.starts(with: "challenge_") {
-            return "star.circle.fill"
-        } else if badge.id.starts(with: "special_") {
-            return "sparkles"
-        } else {
-            return "star.fill"
-        }
-    }
-    
-    private var medalGradientColors: [Color] {
-        switch badge.rarity {
-        case .legendary:
-            return [
-                Color(red: 1.0, green: 0.85, blue: 0.4),
-                Color(red: 0.85, green: 0.55, blue: 0.15)
-            ]
-        case .rare:
-            return [
-                Color(red: 0.7, green: 0.5, blue: 0.9),
-                Color(red: 0.5, green: 0.3, blue: 0.75)
-            ]
-        case .common:
-            return [
-                Color(red: 0.45, green: 0.65, blue: 0.95),
-                Color(red: 0.3, green: 0.5, blue: 0.8)
-            ]
-        }
     }
 }
 

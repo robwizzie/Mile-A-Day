@@ -7,6 +7,8 @@ struct ActivityCardView: View {
     let entry: FeedEntry
     var isHyping: Bool = false
     let onHype: () -> Void
+    /// Tap the author's avatar or name to open their profile.
+    var onTapAuthor: (() -> Void)? = nil
 
     private var distance: Double { entry.distance ?? 0 }
     private var completedMile: Bool { distance >= 1.0 }
@@ -27,23 +29,31 @@ struct ActivityCardView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            AvatarView(name: entry.displayName, imageURL: entry.profile_image_url, size: 40)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 5) {
-                    Text(entry.displayName)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                    if completedMile {
-                        Image(systemName: "checkmark.seal.fill")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.green)
+            Button {
+                onTapAuthor?()
+            } label: {
+                HStack(spacing: 10) {
+                    AvatarView(name: entry.displayName, imageURL: entry.profile_image_url, size: 40)
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 5) {
+                            Text(entry.displayName)
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                            if completedMile {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(.green)
+                            }
+                        }
+                        Text(entry.relativeTime)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
                     }
                 }
-                Text(entry.relativeTime)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.5))
             }
+            .buttonStyle(.plain)
+            .disabled(onTapAuthor == nil)
             Spacer()
             Image(systemName: Self.icon(entry.workout_type))
                 .font(.system(size: 16, weight: .bold))

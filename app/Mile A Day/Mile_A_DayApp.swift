@@ -54,7 +54,7 @@ struct Mile_A_DayApp: App {
                         NotificationCenter.default.post(
                             name: NSNotification.Name("MAD_SwitchTab"),
                             object: nil,
-                            userInfo: ["tab": 2]
+                            userInfo: ["tab": 3]
                         )
                         return
                     }

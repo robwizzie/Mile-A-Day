@@ -703,8 +703,12 @@ class HealthKitManager: ObservableObject {
                 return
             }
 
+            #if os(watchOS)
+            let workouts = ((samples as? [HKWorkout]) ?? [])
+            #else
             let workouts = ((samples as? [HKWorkout]) ?? [])
                 .filter { !DeletedWorkoutRegistry.contains($0.uuid.uuidString) }
+            #endif
             guard !workouts.isEmpty else {
                 // Successful query, genuinely no workouts in the window — a real 0.
                 DispatchQueue.main.async {

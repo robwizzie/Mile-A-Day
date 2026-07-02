@@ -94,8 +94,8 @@ struct MedalPalette {
                 faceHi: Color(red: 1.00, green: 0.89, blue: 0.52),
                 faceMid: Color(red: 0.95, green: 0.71, blue: 0.22),
                 faceLo: Color(red: 0.52, green: 0.32, blue: 0.02),
-                iconHi: Color(red: 1.00, green: 0.98, blue: 0.84),
-                iconLo: Color(red: 0.80, green: 0.54, blue: 0.12),
+                iconHi: Color(red: 1.00, green: 1.00, blue: 0.92),
+                iconLo: Color(red: 0.92, green: 0.68, blue: 0.10),
                 glow: Color(red: 1.00, green: 0.76, blue: 0.20)
             )
         case .rare:
@@ -106,8 +106,8 @@ struct MedalPalette {
                 faceHi: Color(red: 0.82, green: 0.64, blue: 1.00),
                 faceMid: Color(red: 0.58, green: 0.36, blue: 0.86),
                 faceLo: Color(red: 0.28, green: 0.12, blue: 0.48),
-                iconHi: Color(red: 0.97, green: 0.93, blue: 1.00),
-                iconLo: Color(red: 0.62, green: 0.42, blue: 0.92),
+                iconHi: Color(red: 1.00, green: 0.97, blue: 1.00),
+                iconLo: Color(red: 0.78, green: 0.56, blue: 1.00),
                 glow: Color(red: 0.62, green: 0.36, blue: 0.96)
             )
         case .common:
@@ -118,8 +118,8 @@ struct MedalPalette {
                 faceHi: Color(red: 0.64, green: 0.81, blue: 1.00),
                 faceMid: Color(red: 0.34, green: 0.56, blue: 0.89),
                 faceLo: Color(red: 0.13, green: 0.29, blue: 0.56),
-                iconHi: Color(red: 0.93, green: 0.97, blue: 1.00),
-                iconLo: Color(red: 0.42, green: 0.62, blue: 0.92),
+                iconHi: Color(red: 1.00, green: 1.00, blue: 1.00),
+                iconLo: Color(red: 0.55, green: 0.75, blue: 1.00),
                 glow: Color(red: 0.30, green: 0.56, blue: 0.96)
             )
         }
@@ -239,21 +239,24 @@ struct MedalView: View {
 
     private var engravedIcon: some View {
         ZStack {
-            // Engrave shadow (down-right) and top highlight (up-left) sandwich the
-            // metallic glyph for a stamped-into-metal look.
+            // Dark inset shadow — sits behind the icon to carve it into the face.
             Image(systemName: icon)
-                .foregroundColor(.black.opacity(0.30))
-                .offset(x: size * 0.008, y: size * 0.012)
+                .foregroundColor(.black.opacity(0.50))
+                .offset(x: size * 0.006, y: size * 0.01)
+            // Bright top-edge highlight for the stamped/embossed look.
             Image(systemName: icon)
-                .foregroundColor(.white.opacity(locked ? 0.10 : 0.30))
-                .offset(x: -size * 0.006, y: -size * 0.01)
+                .foregroundColor(.white.opacity(locked ? 0.12 : 0.45))
+                .offset(x: -size * 0.005, y: -size * 0.008)
+            // Main icon — brighter gradient with more contrast against the face.
             Image(systemName: icon)
                 .foregroundStyle(
                     LinearGradient(colors: [palette.iconHi, palette.iconLo],
-                                   startPoint: .top, endPoint: .bottom)
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
                 )
+                .brightness(locked ? 0 : 0.08)
         }
         .font(.system(size: size * 0.34, weight: .black))
+        .shadow(color: .black.opacity(locked ? 0 : 0.25), radius: size * 0.015, x: 0, y: size * 0.008)
         .opacity(locked ? 0.45 : 1)
     }
 
@@ -274,15 +277,23 @@ struct MedalView: View {
     }
 
     private var shimmerSweep: some View {
+        // Thin specular glint — a narrow blade of light that sweeps across the
+        // face like a camera flash reflecting off polished metal.
         Rectangle()
             .fill(
                 LinearGradient(
-                    colors: [.clear, Color.white.opacity(0.55), .clear],
+                    colors: [
+                        .clear,
+                        Color.white.opacity(0.12),
+                        Color.white.opacity(0.35),
+                        Color.white.opacity(0.12),
+                        .clear
+                    ],
                     startPoint: .leading, endPoint: .trailing
                 )
             )
-            .frame(width: size * 0.5, height: size * 1.6)
-            .rotationEffect(.degrees(28))
+            .frame(width: size * 0.22, height: size * 1.6)
+            .rotationEffect(.degrees(25))
             .offset(x: shimmer * size)
             .blendMode(.screen)
             .mask(Circle().padding(rimWidth * 0.5))

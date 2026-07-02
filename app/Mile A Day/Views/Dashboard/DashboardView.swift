@@ -26,6 +26,7 @@ struct DashboardView: View {
 
     @State private var showConfetti = false
     @State private var showGoalSheet = false
+    @State private var showDashboardSettings = false
     @State private var newGoalMiles: Double = 1.0
     @State private var isRefreshing = false
     @State private var showWorkoutUploadAlert = false
@@ -87,6 +88,10 @@ struct DashboardView: View {
     /// Getting-started checklist dismissal. The card also auto-hides once all
     /// items are complete, so this only matters for users who close it early.
     @AppStorage("gettingStartedDismissed") private var gettingStartedDismissed = false
+    /// Prevents the checklist from flashing on load for established users.
+    /// Starts hidden and only becomes visible after async data (friends,
+    /// competitions, badges) has loaded and we confirm items remain incomplete.
+    @State private var gettingStartedReady = false
 
 
     /// Build goal completion stats for the celebration
@@ -409,6 +414,13 @@ struct DashboardView: View {
                 unreadNotificationCount = newCount
             }
         }
+        .navigationDestination(isPresented: $showDashboardSettings) {
+            DashboardSettingsView(
+                userManager: userManager,
+                currentGoal: userManager.currentUser.goalMiles,
+                onSetGoal: { showGoalSheet = true }
+            )
+        }
             .sheet(isPresented: $showManualWorkoutEntry) {
                 ManualWorkoutEntryView()
             }
@@ -540,6 +552,15 @@ struct DashboardView: View {
                 if isLoaded {
                     applyHealthDataToUserManager()
                     checkAndShowGoalCelebration()
+                    // Defer checklist visibility until data has settled so
+                    // established users never see a single-frame flash.
+                    if !gettingStartedReady && !gettingStartedDismissed {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                gettingStartedReady = true
+                            }
+                        }
+                    }
                 }
             }
             .onChange(of: healthManager.retroactiveStreak) { _, _ in
@@ -787,9 +808,9 @@ struct DashboardView: View {
                 style: .cta
             ) { showManualWorkoutEntry = true },
             MADHeaderAction(
-                id: "goal",
+                id: "settings",
                 systemImage: "gearshape.fill"
-            ) { showGoalSheet = true }
+            ) { showDashboardSettings = true }
         ]
     }
 
@@ -1067,7 +1088,7 @@ struct DashboardView: View {
                     NotificationCenter.default.post(
                         name: NSNotification.Name("MAD_SwitchTab"),
                         object: nil,
-                        userInfo: ["tab": 2]
+                        userInfo: ["tab": 3]
                     )
                 }
             ),
@@ -1098,14 +1119,17 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var gettingStartedSection: some View {
-        let items = gettingStartedItems
-        // Auto-hides for established users (everything done) — only new
-        // users ever see it, and they can dismiss it early.
-        if !gettingStartedDismissed && items.contains(where: { !$0.isDone }) {
-            GettingStartedChecklistCard(items: items) {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    gettingStartedDismissed = true
+        // Hidden until `gettingStartedReady` flips — prevents a single-frame
+        // flash for established users whose async data hasn't arrived yet.
+        if gettingStartedReady, !gettingStartedDismissed {
+            let items = gettingStartedItems
+            if items.contains(where: { !$0.isDone }) {
+                GettingStartedChecklistCard(items: items) {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        gettingStartedDismissed = true
+                    }
                 }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
     }

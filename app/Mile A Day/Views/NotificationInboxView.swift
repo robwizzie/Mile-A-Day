@@ -534,7 +534,7 @@ struct NotificationInboxView: View {
             NotificationCenter.default.post(
                 name: NSNotification.Name("MAD_SwitchTab"),
                 object: nil,
-                userInfo: ["tab": 2]
+                userInfo: ["tab": 3]
             )
         case "competition_invite", "competition_accepted", "competition_started",
              "competition_finished", "competition_nudge", "competition_flex",
@@ -554,7 +554,7 @@ struct NotificationInboxView: View {
             NotificationCenter.default.post(
                 name: NSNotification.Name("MAD_SwitchTab"),
                 object: nil,
-                userInfo: ["tab": 3]
+                userInfo: ["tab": 4]
             )
         default:
             break

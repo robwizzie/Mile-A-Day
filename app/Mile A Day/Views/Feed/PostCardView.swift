@@ -13,6 +13,8 @@ struct PostCardView: View {
     let onReport: () -> Void
     let onBlock: () -> Void
     let onDelete: () -> Void
+    /// Tap the author's avatar or name to open their profile.
+    var onTapAuthor: (() -> Void)? = nil
 
     @State private var showAltPhoto = false
 
@@ -40,16 +42,24 @@ struct PostCardView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(post.displayName)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                Text(post.relativeTime)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.5))
+            Button {
+                onTapAuthor?()
+            } label: {
+                HStack(spacing: 10) {
+                    AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(post.displayName)
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        Text(post.relativeTime)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                }
             }
+            .buttonStyle(.plain)
+            .disabled(onTapAuthor == nil)
             Spacer()
             Menu {
                 if post.is_self {

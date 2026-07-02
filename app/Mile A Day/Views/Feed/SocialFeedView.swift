@@ -26,6 +26,7 @@ struct SocialFeedView: View {
     @State private var showTermsGate = false
     @State private var showMileHint = false
     @State private var showMemories = false
+    @State private var profileUser: BackendUser?
 
     private var currentUserId: String? { UserDefaults.standard.string(forKey: "backendUserId") }
     /// Completing the daily mile unlocks posting AND viewing friends' stories.
@@ -53,49 +54,55 @@ struct SocialFeedView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: MADTheme.Spacing.md) {
-                StoriesRailView(
-                    groups: stories,
-                    currentUserId: currentUserId,
-                    myName: userManager.currentUser.username ?? userManager.currentUser.name,
-                    myImageURL: userManager.currentUser.profileImageUrl,
-                    canPost: mileDone,
-                    canViewStories: mileDone,
-                    onTapAdd: handleCompose,
-                    onTapGroup: { viewerGroup = $0 },
-                    onLockedStoryTap: { showMileHint = true }
-                )
+        VStack(spacing: 0) {
+            MADTabHeader(title: "Feed")
 
-                if !memories.isEmpty {
-                    MemoriesCardView(memories: memories) { showMemories = true }
-                        .padding(.horizontal, MADTheme.Spacing.md)
-                }
+            ScrollView {
+                LazyVStack(spacing: MADTheme.Spacing.md) {
+                    StoriesRailView(
+                        groups: stories,
+                        currentUserId: currentUserId,
+                        myName: userManager.currentUser.username ?? userManager.currentUser.name,
+                        myImageURL: userManager.currentUser.profileImageUrl,
+                        canPost: mileDone,
+                        canViewStories: mileDone,
+                        onTapAdd: handleCompose,
+                        onTapGroup: { viewerGroup = $0 },
+                        onLockedStoryTap: { showMileHint = true }
+                    )
 
-                Divider().overlay(Color.white.opacity(0.08))
-
-                if isLoading && feed.isEmpty {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
-                        .padding(.top, MADTheme.Spacing.xxl)
-                } else if feed.isEmpty {
-                    emptyState
-                } else {
-                    ForEach(feed) { entry in
-                        feedCard(entry)
-                            .onAppear { if entry.id == feed.last?.id { Task { await loadMore() } } }
+                    if !memories.isEmpty {
+                        MemoriesCardView(memories: memories) { showMemories = true }
                             .padding(.horizontal, MADTheme.Spacing.md)
                     }
-                    if isLoadingMore {
-                        ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
+
+                    Divider().overlay(Color.white.opacity(0.08))
+
+                    if isLoading && feed.isEmpty {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
+                            .padding(.top, MADTheme.Spacing.xxl)
+                    } else if feed.isEmpty {
+                        emptyState
+                    } else {
+                        ForEach(feed) { entry in
+                            feedCard(entry)
+                                .onAppear { if entry.id == feed.last?.id { Task { await loadMore() } } }
+                                .padding(.horizontal, MADTheme.Spacing.md)
+                        }
+                        if isLoadingMore {
+                            ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
+                        }
                     }
                 }
+                .padding(.vertical, MADTheme.Spacing.sm)
+                .padding(.bottom, MADTheme.Spacing.xxl)
             }
-            .padding(.vertical, MADTheme.Spacing.sm)
-            .padding(.bottom, MADTheme.Spacing.xxl)
+            .scrollIndicators(.hidden)
+            .refreshable { await refresh() }
         }
-        .scrollIndicators(.hidden)
-        .refreshable { await refresh() }
+        .background(MADTheme.Colors.appBackgroundGradient)
+        .toolbar(.hidden, for: .navigationBar)
         .overlay(alignment: .bottomTrailing) { composeButton }
         .task { if !loadedOnce { await refresh(); await loadTermsStatus(); loadMemories() } }
         .fullScreenCover(item: $viewerGroup) { group in
@@ -121,6 +128,11 @@ struct SocialFeedView: View {
         .sheet(isPresented: $showMemories) {
             MemoriesDetailView(memories: memories)
         }
+        .sheet(item: $profileUser) { user in
+            NavigationStack {
+                UserProfileDetailView(user: user, friendService: FriendService())
+            }
+        }
         .alert("Finish today's mile first", isPresented: $showMileHint) {
             Button("Got it", role: .cancel) {}
         } message: {
@@ -130,6 +142,21 @@ struct SocialFeedView: View {
 
     @ViewBuilder
     private func feedCard(_ entry: FeedEntry) -> some View {
+        let openProfile = {
+            guard !entry.is_self else { return }
+            profileUser = BackendUser(
+                user_id: entry.user_id,
+                username: entry.username,
+                email: nil,
+                first_name: entry.first_name,
+                last_name: entry.last_name,
+                bio: nil,
+                profile_image_url: entry.profile_image_url,
+                apple_id: nil,
+                auth_provider: nil,
+                role: nil
+            )
+        }
         if entry.isPost, let post = entry.asPostItem() {
             PostCardView(
                 post: post,
@@ -138,13 +165,15 @@ struct SocialFeedView: View {
                 onHype: { Task { await hype(entry) } },
                 onReport: { reportingPost = post },
                 onBlock: { Task { await block(entry) } },
-                onDelete: { Task { await deletePost(entry) } }
+                onDelete: { Task { await deletePost(entry) } },
+                onTapAuthor: openProfile
             )
         } else {
             ActivityCardView(
                 entry: entry,
                 isHyping: hypingIds.contains(entry.id),
-                onHype: { Task { await hype(entry) } }
+                onHype: { Task { await hype(entry) } },
+                onTapAuthor: openProfile
             )
         }
     }

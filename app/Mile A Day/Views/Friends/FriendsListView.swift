@@ -3,12 +3,11 @@ import SwiftUI
 /// Top-level mode for the Friends tab: either the existing friends/requests
 /// management UI, or the new global/friends leaderboard.
 private enum FriendsTabMode: String, CaseIterable, Identifiable {
-    case friends, feed, leaderboard
+    case friends, leaderboard
     var id: String { rawValue }
     var displayName: String {
         switch self {
         case .friends: return "Friends"
-        case .feed: return "Feed"
         case .leaderboard: return "Leaderboard"
         }
     }
@@ -71,8 +70,6 @@ struct FriendsListView: View {
                         friendService: friendService,
                         onAddFriends: { showingSearch = true }
                     )
-                case .feed:
-                    SocialFeedView()
                 case .friends:
                     friendsHome
                 }
@@ -244,7 +241,6 @@ struct FriendsListView: View {
             selection: $topMode,
             options: [
                 .init(id: .friends, title: "Friends", systemImage: "person.2.fill"),
-                .init(id: .feed, title: "Feed", systemImage: "square.stack.fill"),
                 .init(id: .leaderboard, title: "Leaderboard", systemImage: "trophy.fill")
             ]
         )
