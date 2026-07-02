@@ -11,6 +11,7 @@ import {
   AudienceEventType,
 } from "./audienceSettingsService.js";
 import { hasUnlimitedActions } from "./privilegedUsers.js";
+import { logError } from "./errorLogService.js";
 import { START_OF_TODAY_ET_SQL } from "./dailyResetTime.js";
 import fs from "fs";
 import path from "path";
@@ -123,7 +124,9 @@ interface PushPayload {
 function sendToDevice(
   deviceToken: string,
   payload: PushPayload,
+  userId?: string,
 ): Promise<boolean> {
+  const tokenTail = deviceToken.slice(-8);
   return new Promise((resolve) => {
     const token = getApnsToken();
     if (!token || !APNS_BUNDLE_ID) {
@@ -149,6 +152,10 @@ function sendToDevice(
 
     client.on("error", (err) => {
       console.error("[Push] HTTP/2 connection error:", err.message);
+      logError("push", `HTTP/2 connection error: ${err.message}`, {
+        userId,
+        context: { type: payload.type, tokenTail, phase: "connect" },
+      });
       client.close();
       resolve(false);
     });
@@ -180,6 +187,15 @@ function sendToDevice(
         resolve(true);
       } else {
         console.error(`[Push] APNs error ${statusCode}: ${responseData}`);
+        logError("push", `APNs error ${statusCode}`, {
+          userId,
+          context: {
+            type: payload.type,
+            tokenTail,
+            statusCode,
+            response: responseData?.slice(0, 500),
+          },
+        });
         // Only delete on 410 Unregistered — that's APNs definitively saying the
         // app was uninstalled, so the token is truly dead. Do NOT delete on
         // 400 BadDeviceToken: that usually means an environment mismatch (a
@@ -197,6 +213,10 @@ function sendToDevice(
 
     req.on("error", (err) => {
       console.error("[Push] Request error:", err.message);
+      logError("push", `Request error: ${err.message}`, {
+        userId,
+        context: { type: payload.type, tokenTail, phase: "request" },
+      });
       client.close();
       resolve(false);
     });
@@ -347,7 +367,9 @@ export async function sendPush(
   }
 
   const results = await Promise.all(
-    tokens.map(({ device_token }) => sendToDevice(device_token, payload)),
+    tokens.map(({ device_token }) =>
+      sendToDevice(device_token, payload, userId),
+    ),
   );
 
   const sent = results.filter(Boolean).length;

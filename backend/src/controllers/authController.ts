@@ -10,6 +10,7 @@ import {
 	revokeAllUserTokens
 } from '../services/refreshTokenService.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
+import { logError } from '../services/errorLogService.js';
 
 export async function signIn(req: Request, res: Response) {
 	if (!hasRequiredKeys(['user_id', 'identity_token', 'authorization_code'], req, res)) return;
@@ -48,6 +49,13 @@ export async function signIn(req: Request, res: Response) {
 		return res.json({ user, accessToken, refreshToken, expiresIn: '30d', expiresAt });
 	} catch (err) {
 		console.error('Apple sign-in failed', err);
+		logError('auth', 'Apple sign-in failed', {
+			userId: (req.body?.user_id as string) ?? null,
+			context: {
+				email: req.body?.email ?? null,
+				reason: err instanceof Error ? err.message : String(err)
+			}
+		});
 		return res.status(401).json({ error: 'Invalid Apple identity token' });
 	}
 }

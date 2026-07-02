@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { jwtVerify } from 'jose';
+import { PostgresService } from '../services/DbService.js';
 
 export interface AuthenticatedRequest extends Request {
 	userId?: string;
@@ -60,4 +61,23 @@ export function requireSelfAccess(paramName: string = 'userId') {
 
 		next();
 	};
+}
+
+// Gate for admin-only routes. Runs AFTER authenticateToken (req.userId set).
+// 403 (authenticated but not allowed) so the app client's 401-only re-login path is not triggered.
+export async function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+	if (!req.userId) {
+		return res.status(401).json({ error: 'Authentication required' });
+	}
+
+	try {
+		const rows = await PostgresService.getInstance().query('SELECT role FROM users WHERE user_id = $1', [req.userId]);
+		if (rows[0]?.role !== 'admin') {
+			return res.status(403).json({ error: 'Admin access required' });
+		}
+		next();
+	} catch (err) {
+		console.error('requireAdmin lookup failed:', err);
+		return res.status(500).json({ error: 'Authorization check failed' });
+	}
 }

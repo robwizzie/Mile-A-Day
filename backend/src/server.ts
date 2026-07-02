@@ -20,7 +20,13 @@ import dailyChallengesRoutes from "./routes/dailyChallengesRoutes.js";
 import dailyStepsRoutes from "./routes/dailyStepsRoutes.js";
 import leaderboardRoutes from "./routes/leaderboardRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
-import { authenticateToken } from "./middleware/auth.js";
+import {
+  authenticateToken,
+  requireAdmin,
+  AuthenticatedRequest,
+} from "./middleware/auth.js";
+import { logError } from "./services/errorLogService.js";
+import adminRoutes, { adminAuthRouter } from "./routes/adminRoutes.js";
 import { startCompetitionCron } from "./cron/competitionCron.js";
 import { startNotificationCron } from "./cron/notificationCron.js";
 import { startSilentSyncCron } from "./cron/silentSyncCron.js";
@@ -103,8 +109,12 @@ app.use("/auth", authRoutes);
 app.use("/dev", devRoutes);
 app.use("/badges", publicBadgesRouter);
 app.use("/public", publicRoutes);
+// Admin login (Apple-web verify) is public — it's how the dashboard gets a token.
+app.use("/admin/auth", adminAuthRouter);
 
 app.use(authenticateToken);
+// Admin dashboard data — authenticated AND role=admin.
+app.use("/admin", requireAdmin, adminRoutes);
 app.use("/users", userRoutes);
 app.use("/users", badgesRoutes);
 app.use("/users", dailyChallengesRoutes);
@@ -119,8 +129,16 @@ app.use("/posts", postsRoutes);
 app.use("/blocks", blocksRoutes);
 app.use("/leaderboard", leaderboardRoutes);
 
-app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   console.error("Error:", err.message);
+  logError("api", err.message || "Unhandled request error", {
+    userId: (req as AuthenticatedRequest).userId ?? null,
+    context: {
+      method: req.method,
+      path: req.originalUrl,
+      stack: err.stack?.slice(0, 1000),
+    },
+  });
 
   res.status(500).json({
     error: "Internal Server Error",
