@@ -55,12 +55,23 @@ export async function uploadWorkouts(
 			split_pace = EXCLUDED.split_pace
       `;
 
+  const routeQuery = `
+        INSERT INTO workout_routes (workout_id, route, point_count, updated_at)
+        VALUES ($1, $2::jsonb, $3, NOW())
+        ON CONFLICT (workout_id)
+        DO UPDATE SET
+			route = EXCLUDED.route,
+			point_count = EXCLUDED.point_count,
+			updated_at = NOW()
+      `;
+
   await db.transaction(
     workouts.flatMap((workout: Workout) => {
       const speed = classifyWorkoutSpeed(
         workout.distance,
         workout.totalDuration,
       );
+      const route = sanitizeRoute(workout.route);
       return [
         {
           query: workoutQuery,
@@ -90,11 +101,61 @@ export async function uploadWorkouts(
             split.pace,
           ],
         })),
+        ...(route
+          ? [
+              {
+                query: routeQuery,
+                params: [
+                  workout.workoutId,
+                  JSON.stringify(route),
+                  route.length,
+                ],
+              },
+            ]
+          : []),
       ];
     }),
   );
 
   return workouts.map((w) => w.workoutId);
+}
+
+// A trace only needs enough fidelity to draw a small map; clients downsample
+// before upload and this is the server-side backstop.
+const MAX_ROUTE_POINTS = 300;
+
+/**
+ * Validate + normalize an uploaded GPS trace. Returns null (skip storage) for
+ * anything that isn't a plausible [[lat, lng], ...] polyline with >= 2 points.
+ * Coordinates are rounded to 5 decimals (~1m) and long traces are downsampled.
+ */
+function sanitizeRoute(route: unknown): [number, number][] | null {
+  if (!Array.isArray(route) || route.length < 2) return null;
+  const points: [number, number][] = [];
+  for (const p of route) {
+    if (!Array.isArray(p) || p.length < 2) return null;
+    const lat = Number(p[0]);
+    const lng = Number(p[1]);
+    if (
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lng) ||
+      Math.abs(lat) > 90 ||
+      Math.abs(lng) > 180
+    ) {
+      return null;
+    }
+    points.push([
+      Math.round(lat * 100000) / 100000,
+      Math.round(lng * 100000) / 100000,
+    ]);
+  }
+  if (points.length <= MAX_ROUTE_POINTS) return points;
+  const stride = (points.length - 1) / (MAX_ROUTE_POINTS - 1);
+  const sampled: [number, number][] = [];
+  for (let i = 0; i < MAX_ROUTE_POINTS; i++) {
+    sampled.push(points[Math.round(i * stride)]);
+  }
+  return sampled;
 }
 
 /**
@@ -521,6 +582,64 @@ export async function getQuantityDateRangeBatch(
 			AND workout_type = ANY($4::text[])
 			AND deleted_at IS NULL AND exclusion_reason IS NULL
 		GROUP BY user_id, local_date
+		ORDER BY user_id, local_date ASC
+	`;
+
+  const todaysDate = new Date().toISOString().split("T")[0];
+  const start = new Date(startDate).toISOString().split("T")[0];
+  const end = endDate
+    ? new Date(endDate).toISOString().split("T")[0]
+    : todaysDate;
+
+  const typeMap: Record<string, "running" | "walking"> = {
+    run: "running",
+    walk: "walking",
+    running: "running",
+    walking: "walking",
+  };
+  const normalizedTypes = (workoutTypes ?? ["running", "walking"])
+    .map((t) => typeMap[t])
+    .filter(Boolean);
+
+  return await db.query(query, [userIds, start, end, normalizedTypes]);
+}
+
+/**
+ * Per-day, per-workout-type distance + workout counts for a set of users —
+ * powers the competition detail view's walk/run breakdown (stats panel,
+ * calendar day detail). Same filters as getQuantityDateRangeBatch, but keeps
+ * workout_type instead of collapsing it.
+ */
+export async function getActivityBreakdownBatch(
+  userIds: string[],
+  startDate: string,
+  endDate?: string,
+  workoutTypes?: ("running" | "walking")[],
+): Promise<
+  {
+    user_id: string;
+    local_date: string;
+    workout_type: string;
+    total_distance: number;
+    workout_count: number;
+  }[]
+> {
+  if (userIds.length === 0) return [];
+
+  const query = `
+		SELECT
+			user_id,
+			TO_CHAR(local_date, 'YYYY-MM-DD') as local_date,
+			workout_type,
+			SUM(distance) as total_distance,
+			COUNT(*)::int as workout_count
+		FROM workouts
+		WHERE user_id = ANY($1::text[])
+			AND local_date >= $2
+			AND local_date <= $3
+			AND workout_type = ANY($4::text[])
+			AND deleted_at IS NULL AND exclusion_reason IS NULL
+		GROUP BY user_id, local_date, workout_type
 		ORDER BY user_id, local_date ASC
 	`;
 

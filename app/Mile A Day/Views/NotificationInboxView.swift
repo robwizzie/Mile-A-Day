@@ -357,11 +357,20 @@ struct NotificationInboxView: View {
         }
     }
 
-    /// Derive hype affordance directly from the notification's type + data payload.
-    /// Independent of server enrichment so the button works against any backend version.
-    /// Returns nil for non-celebratory rows (streak broken, friend requests, competition
+    /// Hype affordance for a notification row. Prefers the server-enriched
+    /// context fields — those use the canonical keys shared with the feed, so a
+    /// hype sent here and one sent from the feed dedupe as the same hype — and
+    /// falls back to local derivation for older backends. Returns nil for
+    /// non-celebratory rows (streak broken, friend requests, competition
     /// notifications, etc.).
     private func hypeAffordance(for notification: InAppNotification) -> HypeContext? {
+        if let type = notification.hype_context_type, !type.isEmpty,
+           let contextId = notification.hype_context_id, !contextId.isEmpty,
+           let label = notification.hype_context_label,
+           notification.hype_target_user_id?.isEmpty == false {
+            return HypeContext(contextType: type, contextId: contextId, contextLabel: label)
+        }
+
         let data = notification.data ?? [:]
 
         switch notification.type {
@@ -422,6 +431,9 @@ struct NotificationInboxView: View {
 
     /// The user_id of the friend we'd hype for this notification (or nil if not hype-able).
     private func hypeTargetUserId(for notification: InAppNotification) -> String? {
+        if let target = notification.hype_target_user_id, !target.isEmpty {
+            return target
+        }
         let data = notification.data ?? [:]
         switch notification.type {
         case "friend_activity":

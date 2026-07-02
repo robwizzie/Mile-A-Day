@@ -361,17 +361,21 @@ export async function getFriendsWorkoutFeed(
 			w.calories::float AS calories,
 			w.steps,
 			(w.user_id = $1) AS is_self,
+			-- Mile hypes are keyed by workout_id (feed) or user:local_date
+			-- (notifications) — match both so the surfaces stay in sync.
 			EXISTS (
 				SELECT 1 FROM hype_log h
 				WHERE h.sender_id = $1
 					AND h.target_id = w.user_id
 					AND h.context_type = 'mile'
-					AND h.context_id = w.workout_id
+					AND (h.context_id = w.workout_id
+						OR h.context_id = (w.user_id || ':' || w.local_date::text))
 			) AS is_hyped,
 			(
 				SELECT COUNT(*)::int FROM hype_log hc
 				WHERE hc.context_type = 'mile'
-					AND hc.context_id = w.workout_id
+					AND (hc.context_id = w.workout_id
+						OR hc.context_id = (w.user_id || ':' || w.local_date::text))
 			) AS hype_count
 		FROM workouts w
 		JOIN circle c ON c.uid = w.user_id

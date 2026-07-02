@@ -1,9 +1,12 @@
 import SwiftUI
+import CoreLocation
 
 /// A single post in the social feed: author header, photo (overlay already
 /// baked in), caption, hype + social-proof tally, and a report/block/delete menu.
 /// When the run also has a story photo, a corner thumbnail flips the card
-/// between the route/stats image and the photo.
+/// between the route/stats image and the photo. When the run has GPS route
+/// data, the photo becomes a swipeable photo → route-map carousel, and tapping
+/// the photo opens a pinch-to-zoom lightbox.
 struct PostCardView: View {
     let post: PostItem
     /// The run's story-only photo, when different from the post media.
@@ -17,11 +20,12 @@ struct PostCardView: View {
     var onTapAuthor: (() -> Void)? = nil
 
     @State private var showAltPhoto = false
+    @State private var showLightbox = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             header
-            photo
+            media
             if let stats = post.stats_snapshot {
                 PostStatStrip(stats: stats).padding(.horizontal, 2)
             }
@@ -38,6 +42,9 @@ struct PostCardView: View {
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
                 .fill(Color.white.opacity(0.04))
         )
+        .fullScreenCover(isPresented: $showLightbox) {
+            PhotoLightboxView(url: heroURL)
+        }
     }
 
     private var header: some View {
@@ -61,6 +68,11 @@ struct PostCardView: View {
             .buttonStyle(.plain)
             .disabled(onTapAuthor == nil)
             Spacer()
+            if let type = post.workout_type {
+                Image(systemName: ActivityCardView.icon(type))
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(ActivityCardView.color(type))
+            }
             Menu {
                 if post.is_self {
                     Button(role: .destructive, action: onDelete) {
@@ -89,11 +101,60 @@ struct PostCardView: View {
         showAltPhoto ? post.mediaURL : storyPhotoURL
     }
 
+    /// Route slide coordinates — hidden for auto posts, whose media already IS
+    /// the rendered route/stats card (a second identical slide would be noise).
+    private var routeSlideCoordinates: [CLLocationCoordinate2D]? {
+        guard post.is_auto != true else { return nil }
+        return post.routeCoordinates
+    }
+
+    /// Photo, or a photo → route-map carousel when the run has a GPS path.
+    @ViewBuilder
+    private var media: some View {
+        if let coords = routeSlideCoordinates {
+            TabView {
+                photo
+                routeSlide(coords)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .always))
+            .indexViewStyle(.page(backgroundDisplayMode: .interactive))
+            .frame(maxWidth: .infinity)
+            .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        } else {
+            photo
+        }
+    }
+
+    private func routeSlide(_ coords: [CLLocationCoordinate2D]) -> some View {
+        WorkoutRouteMapView(
+            coordinates: coords,
+            routeColor: ActivityCardView.color(post.workout_type)
+        )
+        .frame(maxWidth: .infinity)
+        .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+        .overlay(alignment: .topLeading) {
+            HStack(spacing: 5) {
+                Image(systemName: "map.fill")
+                    .font(.system(size: 11, weight: .bold))
+                Text("Route")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.black.opacity(0.55)))
+            .padding(10)
+        }
+    }
+
     private var photo: some View {
         cardImage(heroURL)
             .frame(maxWidth: .infinity)
             .aspectRatio(4.0 / 5.0, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+            .onTapGesture { showLightbox = true }
             .overlay(alignment: .bottomTrailing) {
                 // Corner thumbnail flips between the route/stats card and the
                 // run's story photo (BeReal-style).

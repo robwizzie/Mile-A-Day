@@ -8,6 +8,7 @@
 
 import Foundation
 import HealthKit
+import CoreLocation
 
 // MARK: - Sync Progress Models
 
@@ -507,8 +508,10 @@ class WorkoutSyncService: ObservableObject {
             throw SyncError.notAuthenticated
         }
 
-        // Transform workouts to backend format
-        let workoutData = try await transformWorkoutsForBackend(workouts)
+        // Transform workouts to backend format. GPS routes ride along for
+        // normal (incremental) syncs; the historical backfill skips them —
+        // reading years of HKWorkoutRoute data would make the initial sync crawl.
+        let workoutData = try await transformWorkoutsForBackend(workouts, includeRoutes: !fullSync)
 
         // Make API request using fancyFetch
         let endpoint = fullSync ? "/workouts/\(userId)/upload?fullSync=true" : "/workouts/\(userId)/upload"
@@ -582,11 +585,43 @@ class WorkoutSyncService: ObservableObject {
         }
     }
 
+    /// Cap uploaded routes to a drawing-friendly polyline; the backend stores
+    /// them verbatim (with its own backstop) and feeds them back to feed cards.
+    private static let maxRoutePoints = 150
+    /// Don't fetch routes for oversized batches — that's a backfill, not a
+    /// fresh run, and per-workout route queries would drag the whole upload.
+    private static let maxRouteFetchBatch = 25
+
+    /// The workout's GPS trace as [[lat, lng], ...], downsampled to
+    /// `maxRoutePoints` and rounded to ~1m precision. Nil when the workout has
+    /// no route (indoor/manual).
+    private func simplifiedRoute(for workout: HKWorkout) async -> [[Double]]? {
+        let locations = await HealthKitManager.shared.fetchAllRouteLocations(for: workout)
+        guard locations.count >= 2 else { return nil }
+
+        let sampled: [CLLocation]
+        if locations.count > Self.maxRoutePoints {
+            let stride = Double(locations.count - 1) / Double(Self.maxRoutePoints - 1)
+            sampled = (0..<Self.maxRoutePoints).map { locations[Int((Double($0) * stride).rounded())] }
+        } else {
+            sampled = locations
+        }
+        return sampled.map { location in
+            [
+                (location.coordinate.latitude * 100_000).rounded() / 100_000,
+                (location.coordinate.longitude * 100_000).rounded() / 100_000,
+            ]
+        }
+    }
+
     /// Transform HKWorkout objects to backend format
-    private func transformWorkoutsForBackend(_ workouts: [HKWorkout]) async throws -> [[String:
-        Any]]
+    private func transformWorkoutsForBackend(
+        _ workouts: [HKWorkout],
+        includeRoutes: Bool = false
+    ) async throws -> [[String: Any]]
     {
         var workoutData: [[String: Any]] = []
+        let fetchRoutes = includeRoutes && workouts.count <= Self.maxRouteFetchBatch
 
         for workout in workouts {
             // Get split data for this workout
@@ -616,7 +651,7 @@ class WorkoutSyncService: ObservableObject {
             let calories = await activeEnergyKilocalories(for: workout)
             let distance = workout.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
 
-            let workoutDict: [String: Any] = [
+            var workoutDict: [String: Any] = [
                 "workoutId": workout.uuid.uuidString,
                 "distance": distance,
                 "localDate": localDate,
@@ -629,6 +664,12 @@ class WorkoutSyncService: ObservableObject {
                 "splits": splitsData,
                 "source": "healthkit",
             ]
+
+            // Attach the simplified GPS path when the workout has one, so the
+            // backend can store it and feed cards can draw the mile's route.
+            if fetchRoutes, let route = await simplifiedRoute(for: workout) {
+                workoutDict["route"] = route
+            }
 
             workoutData.append(workoutDict)
         }

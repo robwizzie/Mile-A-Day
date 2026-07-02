@@ -114,6 +114,10 @@ final class PostComposerViewModel: ObservableObject {
     @Published var config: StickerConfig
     @Published var isPublishing = false
     @Published var errorMessage: String?
+    /// Whether the linked workout has a GPS route to offer alongside the photo.
+    @Published var hasRoute = false
+    /// User choice: show the route map with this post (carousel slide 2).
+    @Published var includeRoute = true
 
     let stats: RunStatsInput
     /// Captured on-screen canvas size (points), reused to render the composite.
@@ -133,6 +137,17 @@ final class PostComposerViewModel: ObservableObject {
 
     var canPublish: Bool {
         pickedImage != nil && !isPublishing
+    }
+
+    /// Check whether the linked workout has GPS route data, enabling the
+    /// "Include route map" toggle. No route (indoor/manual) → toggle hidden.
+    func checkRouteAvailability() async {
+        guard let workoutId = stats.workoutId else { return }
+        let workout = HealthKitManager.shared.todaysWorkouts
+            .first { $0.uuid.uuidString == workoutId }
+        guard let workout else { return }
+        let locations = await HealthKitManager.shared.fetchAllRouteLocations(for: workout)
+        hasRoute = locations.count >= 2
     }
 
     /// Render the on-screen canvas (photo + sticker) to a flat JPEG-ready image
@@ -173,7 +188,9 @@ final class PostComposerViewModel: ObservableObject {
                 workoutId: stats.workoutId,
                 shareToFeed: destination.toFeed,
                 shareToStory: destination.toStory,
-                stats: stats.snapshot
+                stats: stats.snapshot,
+                isAuto: false,
+                includeRoute: hasRoute ? includeRoute : true
             )
             if stickerEnabled { config.save() } // remember the user's overlay style
             return true
@@ -182,6 +199,10 @@ final class PostComposerViewModel: ObservableObject {
             return false
         } catch let APIError.apiError(message) where message == "terms_not_accepted" {
             errorMessage = "Please accept the community terms to post."
+            return false
+        } catch APIError.conflict {
+            // One deliberate post per workout — a reward, not a redo.
+            errorMessage = "You've already shared a post for this workout. Delete it first if you want to post a new one."
             return false
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? "Couldn't share your post. Try again."
@@ -251,6 +272,7 @@ struct PostComposerView: View {
                         canvasSection
                         if vm.pickedImage != nil {
                             overlayEditor
+                            if vm.hasRoute { routeToggle }
                             captionField
                             destinationToggles
                         }
@@ -304,7 +326,31 @@ struct PostComposerView: View {
                     showCamera = true
                 }
             }
+            .task { await vm.checkRouteAvailability() }
         }
+    }
+
+    /// Offer to ride the run's GPS route along with the photo (shown as a
+    /// second, swipeable slide on the feed card). Only offered when the linked
+    /// workout actually has route data.
+    private var routeToggle: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: $vm.includeRoute.animation(.easeInOut)) {
+                Label("Include route map", systemImage: "map.fill")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+            }
+            .tint(MADTheme.Colors.madRed)
+            Text("Friends can swipe to see your mile's path next to the photo.")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .fill(Color.white.opacity(0.04))
+        )
     }
 
     // MARK: - Canvas

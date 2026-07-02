@@ -122,6 +122,63 @@ export async function logHypeIfUnderLimit(
   return rows[0] ?? null;
 }
 
+// A 'mile' hype's canonical context id: `<userId>:<YYYY-MM-DD>` — one hype per
+// friend's daily mile, regardless of which surface it was sent from.
+const MILE_COMPOSITE_RE = /:(\d{4}-\d{2}-\d{2})$/;
+
+/**
+ * Canonicalize a 'mile' hype context. The feed historically keys mile hypes by
+ * workout_id while the notifications inbox keys them by `<userId>:<localDate>`;
+ * we resolve a workout_id to the composite form so both surfaces write (and
+ * dedupe on) the same key. Unresolvable ids pass through unchanged.
+ */
+export async function canonicalizeMileContext(
+  targetId: string,
+  context: HypeContext,
+): Promise<HypeContext> {
+  if (context.contextType !== "mile") return context;
+  if (MILE_COMPOSITE_RE.test(context.contextId)) return context;
+  const rows = await db.query<{ local_date: string }>(
+    `SELECT local_date::text AS local_date FROM workouts
+		WHERE workout_id = $1 AND user_id = $2`,
+    [context.contextId, targetId],
+  );
+  const localDate = rows[0]?.local_date;
+  if (!localDate) return context;
+  return { ...context, contextId: `${targetId}:${localDate}` };
+}
+
+/**
+ * Dedupe check for 'mile' contexts that spans BOTH key forms: the canonical
+ * `<userId>:<localDate>` composite and legacy rows keyed by any of the target's
+ * workout ids on that date.
+ */
+export async function hasHypedMile(
+  senderId: string,
+  targetId: string,
+  contextId: string,
+): Promise<boolean> {
+  const match = MILE_COMPOSITE_RE.exec(contextId);
+  if (!match) {
+    return hasHypedContext(senderId, targetId, "mile", contextId);
+  }
+  const localDate = match[1];
+  const rows = await db.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+			SELECT 1 FROM hype_log h
+			WHERE h.sender_id = $1 AND h.target_id = $2
+				AND h.context_type = 'mile'
+				AND (h.context_id = $3
+					OR h.context_id IN (
+						SELECT w.workout_id FROM workouts w
+						WHERE w.user_id = $2 AND w.local_date = $4::date
+					))
+		) AS exists`,
+    [senderId, targetId, contextId, localDate],
+  );
+  return rows[0]?.exists === true;
+}
+
 /**
  * Returns true if the sender has already hyped this exact context.
  * Only meaningful when context is provided; legacy NULL-context hypes are not deduped.

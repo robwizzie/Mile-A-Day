@@ -11,6 +11,8 @@ import {
   getDailyHypeCount,
   getHypeResetsAt,
   hasHypedContext,
+  hasHypedMile,
+  canonicalizeMileContext,
   HYPE_DAILY_LIMIT,
   HypeContext,
   getReceivedHypes,
@@ -152,14 +154,23 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
     // Abuse is bounded by the friend/co-participant gate, per-context dedupe,
     // and the daily hype limit below.
 
+    // Canonicalize mile hypes so the feed (workout_id-keyed) and the
+    // notifications inbox (user:date-keyed) write and dedupe the same context.
+    if (context?.contextType === "mile") {
+      context = await canonicalizeMileContext(targetUserId, context);
+    }
+
     // Context-aware dedupe pre-check (legacy no-context hypes skip this).
     if (context) {
-      const alreadyHyped = await hasHypedContext(
-        senderId,
-        targetUserId,
-        context.contextType,
-        context.contextId,
-      );
+      const alreadyHyped =
+        context.contextType === "mile"
+          ? await hasHypedMile(senderId, targetUserId, context.contextId)
+          : await hasHypedContext(
+              senderId,
+              targetUserId,
+              context.contextType,
+              context.contextId,
+            );
       if (alreadyHyped) {
         return res.status(409).json({ error: "already_hyped" });
       }

@@ -73,13 +73,16 @@ enum RunPostService {
 
         do {
             let mediaUrl = try await PostService.uploadMedia(finalImage)
+            // isAuto — the server may replace this card in place with a later
+            // photo post, but it never counts as the user's one post per workout.
             _ = try await PostService.createPost(
                 mediaUrl: mediaUrl,
                 caption: nil,
                 workoutId: workoutId,
                 shareToFeed: true,
                 shareToStory: false,
-                stats: stats.snapshot
+                stats: stats.snapshot,
+                isAuto: true
             )
         } catch {
             print("[RunPostService] autoPostMile failed: \(error)")
