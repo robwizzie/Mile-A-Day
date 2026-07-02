@@ -602,8 +602,11 @@ export async function getUnifiedFeed(
 				NULL::integer AS steps,
 				-- Auto posts' media already IS the rendered route card, so shipping
 				-- the polyline too would only duplicate pixels and bloat the page.
+				-- Gated on the author's global "Share route maps" consent setting
+				-- on top of the per-post include_route choice.
 				(SELECT wr.route FROM workout_routes wr
 					WHERE p.include_route AND NOT p.is_auto
+						AND (COALESCE(nsp.share_route_maps, true) OR p.user_id = $1)
 						AND wr.workout_id = p.workout_id) AS route,
 				(p.user_id = $1) AS is_self,
 				EXISTS (
@@ -616,6 +619,7 @@ export async function getUnifiedFeed(
 			FROM posts p
 			JOIN circle c ON c.uid = p.user_id
 			JOIN users u ON u.user_id = p.user_id
+			LEFT JOIN notification_settings nsp ON nsp.user_id = p.user_id
 			WHERE p.share_to_feed AND p.deleted_at IS NULL
 				AND p.user_id NOT IN (SELECT uid FROM blocked)
 
@@ -634,7 +638,11 @@ export async function getUnifiedFeed(
 				w.total_duration::double precision,
 				w.calories::double precision,
 				w.steps,
-				(SELECT wr.route FROM workout_routes wr WHERE wr.workout_id = w.workout_id) AS route,
+				-- Raw workout routes respect the owner's "Share route maps" setting
+				-- (the owner always sees their own).
+				(SELECT wr.route FROM workout_routes wr
+					WHERE (COALESCE(ns.share_route_maps, true) OR w.user_id = $1)
+						AND wr.workout_id = w.workout_id) AS route,
 				(w.user_id = $1) AS is_self,
 				-- Mile hypes are keyed two ways historically: by workout_id (feed)
 				-- and by user:local_date (notifications). Match both so a hype from

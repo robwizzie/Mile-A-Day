@@ -255,6 +255,10 @@ export const notificationSettings = pgTable("notification_settings", {
   // notify me when a friend shares a new photo post.
   shareWorkoutsToFeed: boolean("share_workouts_to_feed").default(true),
   friendPostsEnabled: boolean("friend_posts_enabled").default(true),
+  // share_route_maps: expose my GPS route maps (workout_routes traces) on my
+  // feed entries/posts. Explicit consent surface — when off, friends see the
+  // cards without the route slide/map.
+  shareRouteMaps: boolean("share_route_maps").default(true),
 });
 
 export const competitions = pgTable(

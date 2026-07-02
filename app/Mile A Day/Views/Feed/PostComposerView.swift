@@ -143,6 +143,9 @@ final class PostComposerViewModel: ObservableObject {
     /// "Include route map" toggle. No route (indoor/manual) → toggle hidden.
     /// Cheap existence probe — never enumerates the route's locations.
     func checkRouteAvailability() async {
+        // Master "Share route maps" setting off → never offer the per-post
+        // toggle (the server wouldn't ship the route to friends anyway).
+        guard NotificationPreferences.load().shareRouteMaps else { return }
         guard !hasRoute, let workoutId = stats.workoutId else { return }
         let workout = HealthKitManager.shared.todaysWorkouts
             .first { $0.uuid.uuidString == workoutId }
