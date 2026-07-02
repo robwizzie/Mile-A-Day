@@ -1160,6 +1160,24 @@ class HealthKitManager: ObservableObject {
         healthStore.execute(routeQuery)
     }
 
+    /// Whether the workout has ANY GPS route sample — a limit-1 existence probe
+    /// that never enumerates route locations, unlike fetchAllRouteLocations.
+    /// Use for cheap "offer the route toggle?" checks.
+    func hasRouteData(for workout: HKWorkout) async -> Bool {
+        await withCheckedContinuation { continuation in
+            let predicate = HKQuery.predicateForObjects(from: workout)
+            let query = HKAnchoredObjectQuery(
+                type: HKSeriesType.workoutRoute(),
+                predicate: predicate,
+                anchor: nil,
+                limit: 1
+            ) { _, samples, _, _, _ in
+                continuation.resume(returning: (samples?.isEmpty == false))
+            }
+            healthStore.execute(query)
+        }
+    }
+
     /// Fetches all GPS location points from the route associated with a workout.
     /// Returns an empty array if no route data exists (indoor/manual workouts).
     func fetchAllRouteLocations(for workout: HKWorkout) async -> [CLLocation] {

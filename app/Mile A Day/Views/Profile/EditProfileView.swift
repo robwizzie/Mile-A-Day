@@ -50,49 +50,63 @@ struct EditProfileView: View {
     }
 
     var body: some View {
-        NavigationView {
-            ScrollView {
-                VStack(spacing: MADTheme.Spacing.xl) {
-                    // Profile Image
-                    profileImageSection
+        NavigationStack {
+            ZStack {
+                // Full-bleed app backdrop — this is a real screen, not a form card.
+                MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
 
-                    // Name Fields
-                    nameSection
+                ScrollView {
+                    VStack(spacing: MADTheme.Spacing.lg) {
+                        // Profile Image
+                        profileImageSection
+                            .padding(.top, MADTheme.Spacing.md)
 
-                    // Username
-                    usernameSection
+                        // Name Fields
+                        nameSection
 
-                    // Bio
-                    bioSection
+                        // Username
+                        usernameSection
 
-                    // Error
-                    if let error = saveError {
-                        Text(error)
-                            .font(MADTheme.Typography.caption)
-                            .foregroundColor(MADTheme.Colors.error)
-                            .padding(.horizontal, MADTheme.Spacing.md)
+                        // Bio
+                        bioSection
+
+                        // Error
+                        if let error = saveError {
+                            Text(error)
+                                .font(MADTheme.Typography.caption)
+                                .foregroundColor(MADTheme.Colors.error)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, MADTheme.Spacing.md)
+                        }
                     }
+                    .padding(MADTheme.Spacing.lg)
+                    .padding(.bottom, MADTheme.Spacing.xl)
                 }
-                .padding(MADTheme.Spacing.lg)
-                .padding(.bottom, MADTheme.Spacing.xl)
+                .scrollDismissesKeyboard(.interactively)
             }
-            .background(MADTheme.Colors.secondaryBackground)
             .navigationTitle("Edit Profile")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.black, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         onDismiss()
                     }
-                    .foregroundColor(MADTheme.Colors.secondaryText)
+                    .foregroundColor(.white.opacity(0.7))
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        saveProfile()
+                    if isSaving {
+                        ProgressView().tint(.white)
+                    } else {
+                        Button("Save") {
+                            saveProfile()
+                        }
+                        .fontWeight(.bold)
+                        .foregroundColor(canSave ? MADTheme.Colors.madRed : .white.opacity(0.3))
+                        .disabled(!canSave)
                     }
-                    .fontWeight(.semibold)
-                    .foregroundColor(canSave ? MADTheme.Colors.madRed : MADTheme.Colors.secondaryText)
-                    .disabled(!canSave)
                 }
             }
             .sheet(isPresented: $showingImagePicker) {
@@ -132,14 +146,19 @@ struct EditProfileView: View {
         VStack(spacing: MADTheme.Spacing.md) {
             Button(action: { showingImagePicker = true }) {
                 ZStack {
+                    Circle()
+                        .strokeBorder(MADTheme.Colors.redGradient, lineWidth: 3)
+                        .frame(width: 122, height: 122)
+                        .shadow(color: MADTheme.Colors.madRed.opacity(0.35), radius: 14, y: 4)
+
                     if let image = currentProfileImage {
                         Image(uiImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                            .frame(width: 100, height: 100)
+                            .frame(width: 110, height: 110)
                             .clipShape(Circle())
                     } else {
-                        AvatarView(name: userManager.currentUser.name, imageURL: userManager.currentUser.profileImageUrl, size: 100)
+                        AvatarView(name: userManager.currentUser.name, imageURL: userManager.currentUser.profileImageUrl, size: 110)
                     }
 
                     VStack {
@@ -147,84 +166,88 @@ struct EditProfileView: View {
                         HStack {
                             Spacer()
                             Circle()
-                                .fill(Color.black.opacity(0.7))
-                                .frame(width: 28, height: 28)
+                                .fill(MADTheme.Colors.madRed)
+                                .frame(width: 32, height: 32)
                                 .overlay(
                                     Image(systemName: "camera.fill")
-                                        .font(.system(size: 14, weight: .medium))
+                                        .font(.system(size: 14, weight: .semibold))
                                         .foregroundColor(.white)
                                 )
+                                .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1))
                         }
                     }
-                    .frame(width: 100, height: 100)
+                    .frame(width: 116, height: 116)
                 }
             }
             .buttonStyle(.plain)
 
             Text("Change Photo")
-                .font(MADTheme.Typography.caption)
+                .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundColor(MADTheme.Colors.madRed)
         }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Dark form styling
+
+    /// Section label in the app's editor style (caps, dimmed, tracked).
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .heavy, design: .rounded))
+            .tracking(1.2)
+            .foregroundColor(.white.opacity(0.45))
+    }
+
+    /// Dark rounded field backdrop shared by every input on this screen.
+    private func fieldBackground(stroke: Color = Color.white.opacity(0.12)) -> some View {
+        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+            .fill(Color.white.opacity(0.06))
+            .stroke(stroke, lineWidth: 1)
     }
 
     // MARK: - Name Section
 
     private var nameSection: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Name")
-                .font(MADTheme.Typography.headline)
-                .foregroundColor(MADTheme.Colors.primaryText)
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            sectionLabel("NAME")
 
             HStack(spacing: MADTheme.Spacing.md) {
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
-                    Text("First")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(MADTheme.Colors.secondaryText)
-                    TextField("First name", text: $firstName)
-                        .font(MADTheme.Typography.body)
-                        .textFieldStyle(.plain)
-                        .padding(MADTheme.Spacing.md)
-                        .background(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                .fill(MADTheme.Colors.cardBackground)
-                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                        )
-                }
+                TextField("", text: $firstName, prompt: Text("First name").foregroundColor(.white.opacity(0.35)))
+                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .foregroundColor(.white)
+                    .textFieldStyle(.plain)
+                    .padding(MADTheme.Spacing.md)
+                    .background(fieldBackground())
 
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
-                    Text("Last")
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(MADTheme.Colors.secondaryText)
-                    TextField("Last name", text: $lastName)
-                        .font(MADTheme.Typography.body)
-                        .textFieldStyle(.plain)
-                        .padding(MADTheme.Spacing.md)
-                        .background(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                                .fill(MADTheme.Colors.cardBackground)
-                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                        )
-                }
+                TextField("", text: $lastName, prompt: Text("Last name").foregroundColor(.white.opacity(0.35)))
+                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .foregroundColor(.white)
+                    .textFieldStyle(.plain)
+                    .padding(MADTheme.Spacing.md)
+                    .background(fieldBackground())
             }
         }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
     }
 
     // MARK: - Username Section
 
     private var usernameSection: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Username")
-                .font(MADTheme.Typography.headline)
-                .foregroundColor(MADTheme.Colors.primaryText)
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            sectionLabel("USERNAME")
 
-            HStack {
+            HStack(spacing: 4) {
                 Text("@")
-                    .font(MADTheme.Typography.body)
-                    .foregroundColor(MADTheme.Colors.secondaryText)
-                    .padding(.leading, MADTheme.Spacing.md)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.45))
 
-                TextField("Username", text: $username)
-                    .font(MADTheme.Typography.body)
+                TextField("", text: $username, prompt: Text("username").foregroundColor(.white.opacity(0.35)))
+                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .foregroundColor(.white)
                     .textFieldStyle(.plain)
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
@@ -233,49 +256,55 @@ struct EditProfileView: View {
                     }
             }
             .padding(MADTheme.Spacing.md)
-            .padding(.leading, -MADTheme.Spacing.md + 4)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                    .fill(MADTheme.Colors.cardBackground)
-                    .stroke(usernameBorderColor, lineWidth: 2)
-            )
+            .background(fieldBackground(stroke: usernameBorderColor))
 
             if !usernameValidationMessage.isEmpty {
-                HStack {
+                HStack(spacing: 5) {
                     Image(systemName: usernameIcon)
+                        .font(.system(size: 12, weight: .bold))
                         .foregroundColor(usernameColor)
                     Text(usernameValidationMessage)
-                        .font(MADTheme.Typography.caption)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .foregroundColor(usernameColor)
                 }
             }
         }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
     }
 
     // MARK: - Bio Section
 
     private var bioSection: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Text("Bio")
-                .font(MADTheme.Typography.headline)
-                .foregroundColor(MADTheme.Colors.primaryText)
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            sectionLabel("BIO")
 
-            TextField("Tell others about yourself...", text: $bio, axis: .vertical)
-                .font(MADTheme.Typography.body)
-                .textFieldStyle(.plain)
-                .lineLimit(3...6)
-                .padding(MADTheme.Spacing.md)
-                .background(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                        .fill(MADTheme.Colors.cardBackground)
-                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                )
+            TextField(
+                "",
+                text: $bio,
+                prompt: Text("Tell others about yourself…").foregroundColor(.white.opacity(0.35)),
+                axis: .vertical
+            )
+            .font(.system(size: 15, weight: .medium, design: .rounded))
+            .foregroundColor(.white)
+            .textFieldStyle(.plain)
+            .lineLimit(3...6)
+            .padding(MADTheme.Spacing.md)
+            .background(fieldBackground())
 
-            Text("\(bio.count)/150 characters")
-                .font(MADTheme.Typography.caption)
-                .foregroundColor(bio.count > 150 ? MADTheme.Colors.error : MADTheme.Colors.secondaryText)
+            Text("\(bio.count)/150")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundColor(bio.count > 150 ? MADTheme.Colors.error : .white.opacity(0.4))
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
     }
 
     // MARK: - Username Validation

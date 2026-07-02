@@ -47,24 +47,31 @@ struct BadgeDetailView: View {
             
             // Scrollable so the medal + details always fit on any screen size and
             // the hero is never clipped under the dynamic island (the ScrollView
-            // respects the top safe area).
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 0) {
-                    Color.clear.frame(height: 16)
+            // respects the top safe area). The content is min-height-pinned to
+            // the viewport with flexible spacers so that on taller screens the
+            // medal + details sit vertically CENTERED instead of hugging the top.
+            GeometryReader { geo in
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 16)
 
-                    // Medal display — centered horizontally
-                    medalSection
-                        .scaleEffect(showMedal ? 1 : 0.5)
-                        .opacity(showMedal ? 1 : 0)
+                        // Medal display — centered horizontally
+                        medalSection
+                            .scaleEffect(showMedal ? 1 : 0.5)
+                            .opacity(showMedal ? 1 : 0)
 
-                    Color.clear.frame(height: 32)
+                        Color.clear.frame(height: 32)
 
-                    // Details section
-                    detailsSection
-                        .opacity(showContent ? 1 : 0)
-                        .offset(y: showContent ? 0 : 30)
+                        // Details section
+                        detailsSection
+                            .opacity(showContent ? 1 : 0)
+                            .offset(y: showContent ? 0 : 30)
+
+                        Spacer(minLength: 24)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .frame(minHeight: geo.size.height)
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .onAppear {

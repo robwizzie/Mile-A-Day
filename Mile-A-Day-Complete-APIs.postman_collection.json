@@ -652,7 +652,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "[\n  {\n    \"workout_id\": \"workout123\",\n    \"date\": \"2025-01-15\",\n    \"distance\": 3.2,\n    \"duration\": 1800,\n    \"type\": \"run\"\n  },\n  {\n    \"workout_id\": \"workout124\",\n    \"date\": \"2025-01-16\",\n    \"distance\": 5.0,\n    \"duration\": 2400,\n    \"type\": \"run\"\n  }\n]"
+							"raw": "[\n  {\n    \"workoutId\": \"8F2C1D34-5678-4ABC-9DEF-0123456789AB\",\n    \"distance\": 1.25,\n    \"localDate\": \"2026-07-02\",\n    \"date\": \"2026-07-02\",\n    \"timezoneOffset\": -240,\n    \"workoutType\": \"running\",\n    \"deviceEndDate\": \"2026-07-02T12:34:56Z\",\n    \"calories\": 132.5,\n    \"totalDuration\": 780,\n    \"splits\": [\n      {\n        \"splitNumber\": 1,\n        \"distance\": 1.0,\n        \"duration\": 600,\n        \"pace\": 600\n      },\n      {\n        \"splitNumber\": 2,\n        \"distance\": 0.25,\n        \"duration\": 180,\n        \"pace\": 720\n      }\n    ],\n    \"source\": \"healthkit\",\n    \"route\": [\n      [\n        39.9526,\n        -75.1652\n      ],\n      [\n        39.9531,\n        -75.1644\n      ],\n      [\n        39.9537,\n        -75.1639\n      ]\n    ]\n  }\n]"
 						},
 						"url": {
 							"raw": "{{domain}}/workouts/:userId/upload",
@@ -671,7 +671,7 @@
 								}
 							]
 						},
-						"description": "Upload workouts array. Requires self-access."
+						"description": "Upload workouts array. Requires self-access.\n\n`route` is an optional simplified GPS trace ([[lat, lng], ...], max ~300 points) stored in workout_routes and surfaced on feed cards."
 					},
 					"response": []
 				},

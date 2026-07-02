@@ -518,6 +518,36 @@ export async function getTodayStats(userId: string): Promise<TodayStats> {
   };
 }
 
+// Shared normalization for the date-range aggregation queries below: clamp the
+// range to calendar dates (default end = today) and map competition activity
+// aliases (run/walk) onto stored workout_type values. ONE definition so the
+// scoring sum, the per-type breakdown, and the single-user variant can never
+// disagree on what counts.
+function normalizeDateRange(
+  startDate: string,
+  endDate?: string,
+): { start: string; end: string } {
+  const todaysDate = new Date().toISOString().split("T")[0];
+  return {
+    start: new Date(startDate).toISOString().split("T")[0],
+    end: endDate ? new Date(endDate).toISOString().split("T")[0] : todaysDate,
+  };
+}
+
+function normalizeWorkoutTypes(
+  workoutTypes?: ("running" | "walking")[],
+): string[] {
+  const typeMap: Record<string, "running" | "walking"> = {
+    run: "running",
+    walk: "walking",
+    running: "running",
+    walking: "walking",
+  };
+  return (workoutTypes ?? ["running", "walking"])
+    .map((t) => typeMap[t])
+    .filter(Boolean);
+}
+
 export async function getQuantityDateRange(
   userId: string,
   startDate: string,
@@ -538,21 +568,8 @@ export async function getQuantityDateRange(
 		ORDER BY local_date ASC
 	`;
 
-  const todaysDate = new Date().toISOString().split("T")[0];
-  const start = new Date(startDate).toISOString().split("T")[0];
-  const end = endDate
-    ? new Date(endDate).toISOString().split("T")[0]
-    : todaysDate;
-
-  const typeMap: Record<string, "running" | "walking"> = {
-    run: "running",
-    walk: "walking",
-    running: "running",
-    walking: "walking",
-  };
-  const normalizedTypes = (workoutTypes ?? ["running", "walking"])
-    .map((t) => typeMap[t])
-    .filter(Boolean);
+  const { start, end } = normalizeDateRange(startDate, endDate);
+  const normalizedTypes = normalizeWorkoutTypes(workoutTypes);
 
   return await db.query(query, [userId, start, end, normalizedTypes]);
 }
@@ -585,21 +602,8 @@ export async function getQuantityDateRangeBatch(
 		ORDER BY user_id, local_date ASC
 	`;
 
-  const todaysDate = new Date().toISOString().split("T")[0];
-  const start = new Date(startDate).toISOString().split("T")[0];
-  const end = endDate
-    ? new Date(endDate).toISOString().split("T")[0]
-    : todaysDate;
-
-  const typeMap: Record<string, "running" | "walking"> = {
-    run: "running",
-    walk: "walking",
-    running: "running",
-    walking: "walking",
-  };
-  const normalizedTypes = (workoutTypes ?? ["running", "walking"])
-    .map((t) => typeMap[t])
-    .filter(Boolean);
+  const { start, end } = normalizeDateRange(startDate, endDate);
+  const normalizedTypes = normalizeWorkoutTypes(workoutTypes);
 
   return await db.query(query, [userIds, start, end, normalizedTypes]);
 }
@@ -643,21 +647,8 @@ export async function getActivityBreakdownBatch(
 		ORDER BY user_id, local_date ASC
 	`;
 
-  const todaysDate = new Date().toISOString().split("T")[0];
-  const start = new Date(startDate).toISOString().split("T")[0];
-  const end = endDate
-    ? new Date(endDate).toISOString().split("T")[0]
-    : todaysDate;
-
-  const typeMap: Record<string, "running" | "walking"> = {
-    run: "running",
-    walk: "walking",
-    running: "running",
-    walking: "walking",
-  };
-  const normalizedTypes = (workoutTypes ?? ["running", "walking"])
-    .map((t) => typeMap[t])
-    .filter(Boolean);
+  const { start, end } = normalizeDateRange(startDate, endDate);
+  const normalizedTypes = normalizeWorkoutTypes(workoutTypes);
 
   return await db.query(query, [userIds, start, end, normalizedTypes]);
 }

@@ -141,13 +141,13 @@ final class PostComposerViewModel: ObservableObject {
 
     /// Check whether the linked workout has GPS route data, enabling the
     /// "Include route map" toggle. No route (indoor/manual) → toggle hidden.
+    /// Cheap existence probe — never enumerates the route's locations.
     func checkRouteAvailability() async {
-        guard let workoutId = stats.workoutId else { return }
+        guard !hasRoute, let workoutId = stats.workoutId else { return }
         let workout = HealthKitManager.shared.todaysWorkouts
             .first { $0.uuid.uuidString == workoutId }
         guard let workout else { return }
-        let locations = await HealthKitManager.shared.fetchAllRouteLocations(for: workout)
-        hasRoute = locations.count >= 2
+        hasRoute = await HealthKitManager.shared.hasRouteData(for: workout)
     }
 
     /// Render the on-screen canvas (photo + sticker) to a flat JPEG-ready image
@@ -190,7 +190,7 @@ final class PostComposerViewModel: ObservableObject {
                 shareToStory: destination.toStory,
                 stats: stats.snapshot,
                 isAuto: false,
-                includeRoute: hasRoute ? includeRoute : true
+                includeRoute: includeRoute
             )
             if stickerEnabled { config.save() } // remember the user's overlay style
             return true
@@ -327,6 +327,12 @@ struct PostComposerView: View {
                 }
             }
             .task { await vm.checkRouteAvailability() }
+            // Re-probe once a photo lands — todaysWorkouts may not have been
+            // loaded yet when the composer first appeared.
+            .onChange(of: vm.pickedImage) { _, newImage in
+                guard newImage != nil else { return }
+                Task { await vm.checkRouteAvailability() }
+            }
         }
     }
 

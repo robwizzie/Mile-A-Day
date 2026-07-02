@@ -6,6 +6,7 @@ struct ProfileView: View {
     @ObservedObject var healthManager: HealthKitManager
 
     @State private var activeSheet: ProfileSheetType?
+    @State private var showingEditProfile = false
     @State private var showingLogoutConfirmation = false
     @State private var showingDeleteAccountConfirmation = false
     @State private var isDeletingAccount = false
@@ -44,7 +45,7 @@ struct ProfileView: View {
 
     enum ProfileSheetType: String, Identifiable {
         case totalMiles, fastestPace, mostMiles
-        case editProfile, usernameSetup, privacySettings
+        case usernameSetup, privacySettings
         var id: String { rawValue }
     }
 
@@ -57,7 +58,7 @@ struct ProfileView: View {
                         showingShareProfile = true
                     },
                     MADHeaderAction(id: "edit", systemImage: "pencil") {
-                        activeSheet = .editProfile
+                        showingEditProfile = true
                     },
                     MADHeaderAction(id: "settings", systemImage: "gearshape.fill") {
                         showingSettings = true
@@ -123,16 +124,18 @@ struct ProfileView: View {
                 FastestPaceDetailView(healthManager: healthManager, userManager: userManager)
             case .mostMiles:
                 MostMilesDetailView(miles: userManager.currentUser.mostMilesInOneDay, healthManager: healthManager)
-            case .editProfile:
-                EditProfileView(userManager: userManager) {
-                    activeSheet = nil
-                    currentProfileImage = getCustomProfileImage() ?? getAppleProfileImage()
-                }
             case .usernameSetup:
                 UsernameSetupView()
                     .environmentObject(userManager)
             case .privacySettings:
                 PrivacySettingsView()
+            }
+        }
+        // Edit Profile is a real screen, not a form sheet.
+        .fullScreenCover(isPresented: $showingEditProfile) {
+            EditProfileView(userManager: userManager) {
+                showingEditProfile = false
+                currentProfileImage = getCustomProfileImage() ?? getAppleProfileImage()
             }
         }
         .sheet(isPresented: $showingManagePins) {
@@ -399,7 +402,7 @@ struct ProfileView: View {
                 VStack(spacing: MADTheme.Spacing.lg) {
                     // Profile Image with edit overlay
                     Button {
-                        activeSheet = .editProfile
+                        showingEditProfile = true
                     } label: {
                         ZStack {
                             Circle()
@@ -486,7 +489,7 @@ struct ProfileView: View {
 
                     // Edit Profile Button
                     Button {
-                        activeSheet = .editProfile
+                        showingEditProfile = true
                     } label: {
                         HStack(spacing: MADTheme.Spacing.sm) {
                             Image(systemName: "pencil")

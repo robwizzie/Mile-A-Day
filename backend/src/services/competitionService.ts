@@ -227,6 +227,9 @@ const USERS_AGG_SQL = `
 
 export async function getCompetition(
   competitionId: string,
+  {
+    includeActivityBreakdown = false,
+  }: { includeActivityBreakdown?: boolean } = {},
 ): Promise<Competition> {
   const competition = (
     await db.query(
@@ -248,22 +251,25 @@ export async function getCompetition(
 
   // Calculate scores for started competitions (start_date on or before today in ET)
   if (competition.start_date && competition.start_date <= getTodayET()) {
+    // Per-day walk/run breakdown (distance + workout counts) for the detail
+    // view's stats panel and calendar — opt-in because getCompetition is also
+    // on hot paths (nudges, flexes, cron resolution) that never read it.
+    // Steps comps don't read workouts, so they never get one.
+    const withBreakdown =
+      includeActivityBreakdown && competition.options?.unit !== "steps";
     const acceptedIds = competition.users
       .filter((u: CompetitionUser) => u.invite_status === "accepted")
       .map((u: CompetitionUser) => u.user_id);
-    // Per-day walk/run breakdown (distance + workout counts) for the detail
-    // view's stats panel and calendar. Steps comps don't read workouts.
-    const isStepUnit = competition.options?.unit === "steps";
     const [userScores, breakdownRows] = await Promise.all([
       getUserScores(competition),
-      isStepUnit
-        ? Promise.resolve([])
-        : getActivityBreakdownBatch(
+      withBreakdown
+        ? getActivityBreakdownBatch(
             acceptedIds,
             competition.start_date,
             competition.end_date ?? undefined,
             competition.workouts,
-          ),
+          )
+        : Promise.resolve([]),
     ]);
     const activityByUser: Record<
       string,
@@ -280,9 +286,9 @@ export async function getCompetition(
     competition.users = competition.users.map((user: CompetitionUser) => ({
       ...user,
       ...userScores[user.user_id],
-      ...(isStepUnit
-        ? {}
-        : { daily_activity: activityByUser[user.user_id] ?? {} }),
+      ...(withBreakdown
+        ? { daily_activity: activityByUser[user.user_id] ?? {} }
+        : {}),
     }));
   }
 

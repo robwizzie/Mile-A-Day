@@ -52,8 +52,9 @@ struct LeaderboardMoveUpView: View {
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(red: 0.10, green: 0.05, blue: 0.08), .black],
-                           startPoint: .top, endPoint: .bottom)
+            // Match the app's standard backdrop so the celebration doesn't feel
+            // like a different product from the screens around it.
+            MADTheme.Colors.appBackgroundGradient
                 .ignoresSafeArea()
                 .opacity(showOverlay ? 1 : 0)
 

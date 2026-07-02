@@ -127,17 +127,35 @@ export async function logHypeIfUnderLimit(
 const MILE_COMPOSITE_RE = /:(\d{4}-\d{2}-\d{2})$/;
 
 /**
+ * SQL fragment matching a mile hype row against a workout row by EITHER key
+ * form: the legacy workout_id or the canonical user:local_date composite.
+ * Owns the composite encoding so read sites can't drift from the write side.
+ */
+export function mileHypeKeyMatchSql(
+  hypeAlias: string,
+  workoutAlias: string,
+): string {
+  return `(${hypeAlias}.context_id = ${workoutAlias}.workout_id
+		OR ${hypeAlias}.context_id = (${workoutAlias}.user_id || ':' || ${workoutAlias}.local_date::text))`;
+}
+
+/**
  * Canonicalize a 'mile' hype context. The feed historically keys mile hypes by
  * workout_id while the notifications inbox keys them by `<userId>:<localDate>`;
  * we resolve a workout_id to the composite form so both surfaces write (and
- * dedupe on) the same key. Unresolvable ids pass through unchanged.
+ * dedupe on) the same key. A composite id is re-prefixed with the target so a
+ * client can't write a key that pollutes another user's counts. Unresolvable
+ * ids pass through unchanged.
  */
 export async function canonicalizeMileContext(
   targetId: string,
   context: HypeContext,
 ): Promise<HypeContext> {
   if (context.contextType !== "mile") return context;
-  if (MILE_COMPOSITE_RE.test(context.contextId)) return context;
+  const composite = MILE_COMPOSITE_RE.exec(context.contextId);
+  if (composite) {
+    return { ...context, contextId: `${targetId}:${composite[1]}` };
+  }
   const rows = await db.query<{ local_date: string }>(
     `SELECT local_date::text AS local_date FROM workouts
 		WHERE workout_id = $1 AND user_id = $2`,
@@ -146,6 +164,27 @@ export async function canonicalizeMileContext(
   const localDate = rows[0]?.local_date;
   if (!localDate) return context;
   return { ...context, contextId: `${targetId}:${localDate}` };
+}
+
+/**
+ * Of the given canonical `<userId>:<localDate>` mile keys, the ones this
+ * sender has already hyped under the LEGACY workout_id form — maps old
+ * feed-sent hype rows onto canonical keys for batch is_hyped checks.
+ */
+export async function getLegacyHypedMileKeys(
+  senderId: string,
+  compositeKeys: string[],
+): Promise<{ target_id: string; key: string }[]> {
+  if (compositeKeys.length === 0) return [];
+  return db.query<{ target_id: string; key: string }>(
+    `SELECT h.target_id, (w.user_id || ':' || w.local_date::text) AS key
+		FROM hype_log h
+		JOIN workouts w ON w.workout_id = h.context_id
+		WHERE h.sender_id = $1
+			AND h.context_type = 'mile'
+			AND (w.user_id || ':' || w.local_date::text) = ANY($2::text[])`,
+    [senderId, compositeKeys],
+  );
 }
 
 /**

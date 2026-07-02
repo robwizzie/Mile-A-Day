@@ -151,9 +151,11 @@ export async function createPostController(
       shareToFeed,
       shareToStory,
       statsSnapshot: (stats_snapshot ?? null) as PostStatsSnapshot | null,
-      // Absent on legacy clients — createPost keeps the old upsert behavior then.
+      // Absent on legacy clients — createPost keeps the old upsert behavior
+      // and owns the include_route default.
       isAuto: typeof is_auto === "boolean" ? is_auto : undefined,
-      includeRoute: include_route !== false, // default true
+      includeRoute:
+        typeof include_route === "boolean" ? include_route : undefined,
     });
 
     // Fire-and-forget: tell friends about a new feed post (respects their

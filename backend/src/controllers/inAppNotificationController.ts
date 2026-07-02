@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { PostgresService } from "../services/DbService.js";
+import { getLegacyHypedMileKeys } from "../services/hypeService.js";
 
 const db = PostgresService.getInstance();
 
@@ -134,48 +135,44 @@ export async function getInAppNotifications(req: Request, res: Response) {
         id: d.hype.hype_context_id!,
       }));
 
-    const hypedSet = new Set<string>();
-    if (ctxKeys.length > 0) {
-      const targetIds = ctxKeys.map((k) => k.targetId);
-      const types = ctxKeys.map((k) => k.type);
-      const ids = ctxKeys.map((k) => k.id);
-      const hyped = await db.query<{
-        target_id: string;
-        context_type: string;
-        context_id: string;
-      }>(
-        `SELECT target_id, context_type, context_id
-				FROM hype_log
-				WHERE sender_id = $1
-					AND (target_id, context_type, context_id) IN (
-						SELECT * FROM UNNEST($2::text[], $3::text[], $4::text[])
-					)`,
-        [userId, targetIds, types, ids],
-      );
-      for (const h of hyped) {
-        hypedSet.add(`${h.target_id}|${h.context_type}|${h.context_id}`);
-      }
+    const targetIds = ctxKeys.map((k) => k.targetId);
+    const types = ctxKeys.map((k) => k.type);
+    const ids = ctxKeys.map((k) => k.id);
+    // Mile hypes sent from the feed were historically keyed by workout_id
+    // rather than the canonical user:local_date composite -- map those legacy
+    // rows onto the derived composite keys so they read as hyped here too.
+    const mileKeys = ctxKeys.filter((k) => k.type === "mile").map((k) => k.id);
 
-      // Mile hypes sent from the feed were historically keyed by workout_id
-      // rather than the canonical user:local_date composite. Map those legacy
-      // rows onto the composite keys we derived so they read as hyped here too.
-      const mileKeys = ctxKeys
-        .filter((k) => k.type === "mile")
-        .map((k) => k.id);
-      if (mileKeys.length > 0) {
-        const legacy = await db.query<{ target_id: string; key: string }>(
-          `SELECT h.target_id, (w.user_id || ':' || w.local_date::text) AS key
-					FROM hype_log h
-					JOIN workouts w ON w.workout_id = h.context_id
-					WHERE h.sender_id = $1
-						AND h.context_type = 'mile'
-						AND (w.user_id || ':' || w.local_date::text) = ANY($2::text[])`,
-          [userId, mileKeys],
-        );
-        for (const h of legacy) {
-          hypedSet.add(`${h.target_id}|mile|${h.key}`);
-        }
-      }
+    const [hyped, legacyMile, unreadCount] = await Promise.all([
+      ctxKeys.length > 0
+        ? db.query<{
+            target_id: string;
+            context_type: string;
+            context_id: string;
+          }>(
+            `SELECT target_id, context_type, context_id
+					FROM hype_log
+					WHERE sender_id = $1
+						AND (target_id, context_type, context_id) IN (
+							SELECT * FROM UNNEST($2::text[], $3::text[], $4::text[])
+						)`,
+            [userId, targetIds, types, ids],
+          )
+        : Promise.resolve([]),
+      getLegacyHypedMileKeys(userId, mileKeys),
+      db.query(
+        `SELECT COUNT(*) as count FROM in_app_notifications
+			WHERE user_id = $1 AND is_read = FALSE`,
+        [userId],
+      ),
+    ]);
+
+    const hypedSet = new Set<string>();
+    for (const h of hyped) {
+      hypedSet.add(`${h.target_id}|${h.context_type}|${h.context_id}`);
+    }
+    for (const h of legacyMile) {
+      hypedSet.add(`${h.target_id}|mile|${h.key}`);
     }
 
     const notifications = derived.map(({ row, hype }) => {
@@ -201,12 +198,6 @@ export async function getInAppNotifications(req: Request, res: Response) {
         is_hyped: isHyped,
       };
     });
-
-    const unreadCount = await db.query(
-      `SELECT COUNT(*) as count FROM in_app_notifications
-			WHERE user_id = $1 AND is_read = FALSE`,
-      [userId],
-    );
 
     res.json({
       notifications,

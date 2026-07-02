@@ -49,14 +49,7 @@ struct PostItem: Codable, Identifiable {
     var id: String { post_id }
 
     /// Decoded route polyline (nil when absent or degenerate).
-    var routeCoordinates: [CLLocationCoordinate2D]? {
-        guard let route, route.count >= 2 else { return nil }
-        let coords = route.compactMap { pair -> CLLocationCoordinate2D? in
-            guard pair.count >= 2 else { return nil }
-            return CLLocationCoordinate2D(latitude: pair[0], longitude: pair[1])
-        }
-        return coords.count >= 2 ? coords : nil
-    }
+    var routeCoordinates: [CLLocationCoordinate2D]? { decodeRouteCoordinates(route) }
 
     var displayName: String {
         if let username, !username.isEmpty { return username }
@@ -68,6 +61,18 @@ struct PostItem: Codable, Identifiable {
 
     /// Short "2h", "5m", "now" relative time from created_at.
     var relativeTime: String { RelativeTime.short(from: created_at) }
+}
+
+/// Decode a backend `[[lat, lng], ...]` trace into map coordinates. Nil when
+/// absent or degenerate (fewer than 2 valid points) — the single definition of
+/// "drawable route" shared by post and feed-entry models.
+func decodeRouteCoordinates(_ route: [[Double]]?) -> [CLLocationCoordinate2D]? {
+    guard let route, route.count >= 2 else { return nil }
+    let coords = route.compactMap { pair -> CLLocationCoordinate2D? in
+        guard pair.count >= 2 else { return nil }
+        return CLLocationCoordinate2D(latitude: pair[0], longitude: pair[1])
+    }
+    return coords.count >= 2 ? coords : nil
 }
 
 /// One author's worth of active stories in the rail (lazy-loaded on tap).
@@ -142,14 +147,7 @@ struct FeedEntry: Codable, Identifiable {
     var isPost: Bool { kind == "post" }
 
     /// Decoded route polyline (nil when absent or degenerate).
-    var routeCoordinates: [CLLocationCoordinate2D]? {
-        guard let route, route.count >= 2 else { return nil }
-        let coords = route.compactMap { pair -> CLLocationCoordinate2D? in
-            guard pair.count >= 2 else { return nil }
-            return CLLocationCoordinate2D(latitude: pair[0], longitude: pair[1])
-        }
-        return coords.count >= 2 ? coords : nil
-    }
+    var routeCoordinates: [CLLocationCoordinate2D]? { decodeRouteCoordinates(route) }
 
     var storyPhotoURL: URL? {
         guard let story_photo_url, story_photo_url != media_url else { return nil }

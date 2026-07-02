@@ -478,9 +478,14 @@ class WorkoutSyncService: ObservableObject {
     private func uploadBatchWithRetry(_ workouts: [HKWorkout], fullSync: Bool = false) async throws {
         var lastError: Error?
 
+        // Build the payload ONCE — it's deterministic, and the transform now
+        // reads GPS routes from HealthKit, which must not be re-enumerated on
+        // every network retry.
+        let workoutData = try await transformWorkoutsForBackend(workouts, includeRoutes: !fullSync)
+
         for attempt in 1...maxRetries {
             do {
-                try await uploadBatch(workouts, fullSync: fullSync)
+                try await uploadBatch(workoutData, count: workouts.count, fullSync: fullSync)
                 return  // Success!
             } catch {
                 lastError = error
@@ -500,18 +505,13 @@ class WorkoutSyncService: ObservableObject {
         }
     }
 
-    /// Upload a single batch to the backend.
+    /// Upload one pre-transformed batch to the backend.
     /// When `fullSync` is true the request carries ?fullSync=true so the backend
     /// suppresses friend-facing notifications for this historical backfill.
-    private func uploadBatch(_ workouts: [HKWorkout], fullSync: Bool = false) async throws {
+    private func uploadBatch(_ workoutData: [[String: Any]], count: Int, fullSync: Bool = false) async throws {
         guard let userId = currentUserId else {
             throw SyncError.notAuthenticated
         }
-
-        // Transform workouts to backend format. GPS routes ride along for
-        // normal (incremental) syncs; the historical backfill skips them —
-        // reading years of HKWorkoutRoute data would make the initial sync crawl.
-        let workoutData = try await transformWorkoutsForBackend(workouts, includeRoutes: !fullSync)
 
         // Make API request using fancyFetch
         let endpoint = fullSync ? "/workouts/\(userId)/upload?fullSync=true" : "/workouts/\(userId)/upload"
@@ -540,7 +540,7 @@ class WorkoutSyncService: ObservableObject {
                 body: requestBody,
                 responseType: UploadResponse.self
             )
-            print("[WorkoutSyncService] ✅ Uploaded batch of \(workouts.count) workouts")
+            print("[WorkoutSyncService] ✅ Uploaded batch of \(count) workouts")
 
             let badgeCount = response.newlyEarnedBadges?.count ?? 0
             let completionCount = response.newChallengeCompletions?.count ?? 0
