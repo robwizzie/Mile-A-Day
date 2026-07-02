@@ -147,6 +147,15 @@ export function mileHypeKeyMatchSql(
  * client can't write a key that pollutes another user's counts. Unresolvable
  * ids pass through unchanged.
  */
+/** True when the string is a real calendar date, not just \d{4}-\d{2}-\d{2}. */
+function isRealDate(value: string): boolean {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return (
+    !Number.isNaN(parsed.getTime()) &&
+    parsed.toISOString().slice(0, 10) === value
+  );
+}
+
 export async function canonicalizeMileContext(
   targetId: string,
   context: HypeContext,
@@ -154,6 +163,11 @@ export async function canonicalizeMileContext(
   if (context.contextType !== "mile") return context;
   const composite = MILE_COMPOSITE_RE.exec(context.contextId);
   if (composite) {
+    // Shape-valid but impossible dates ('9999-99-99') would blow up the
+    // ::date casts downstream — treat them as invalid context.
+    if (!isRealDate(composite[1])) {
+      throw new Error("invalid_mile_context");
+    }
     return { ...context, contextId: `${targetId}:${composite[1]}` };
   }
   const rows = await db.query<{ local_date: string }>(

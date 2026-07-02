@@ -7,6 +7,27 @@ export async function uploadWorkouts(
   userId: string,
   workouts: Workout[],
 ): Promise<string[]> {
+  // Ownership guard: workout ids are visible to friends in feed payloads, so a
+  // crafted upload could otherwise ON CONFLICT into ANOTHER user's row (and its
+  // splits/route) and corrupt their data. Drop any id already owned by someone
+  // else before building the transaction; the DO UPDATE below is additionally
+  // guarded as a race backstop.
+  if (workouts.length > 0) {
+    const foreign = await db.query<{ workout_id: string }>(
+      `SELECT workout_id FROM workouts
+			WHERE workout_id = ANY($1::text[]) AND user_id <> $2`,
+      [workouts.map((w) => w.workoutId), userId],
+    );
+    if (foreign.length > 0) {
+      const foreignIds = new Set(foreign.map((r) => r.workout_id));
+      console.warn(
+        `[uploadWorkouts] Dropping ${foreign.length} workout(s) owned by another user (uploader ${userId})`,
+      );
+      workouts = workouts.filter((w) => !foreignIds.has(w.workoutId));
+      if (workouts.length === 0) return [];
+    }
+  }
+
   const workoutQuery = `
       INSERT INTO workouts (
         user_id,
@@ -42,6 +63,7 @@ export async function uploadWorkouts(
         -- clear a user soft-delete (deleted_at is intentionally not updated here).
         exclusion_reason = EXCLUDED.exclusion_reason,
         speed_flagged = EXCLUDED.speed_flagged
+      WHERE workouts.user_id = $1
       RETURNING workout_id, (xmax = 0) AS inserted
     `;
 

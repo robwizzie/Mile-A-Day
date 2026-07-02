@@ -195,7 +195,18 @@ final class PostComposerViewModel: ObservableObject {
                 isAuto: false,
                 includeRoute: includeRoute
             )
-            if stickerEnabled { config.save() } // remember the user's overlay style
+            if stickerEnabled {
+                // Remember the user's overlay style — but merge back any stats
+                // that were remembered and merely had no data TODAY (init
+                // filters those out of the session config); otherwise one
+                // treadmill day permanently erases a saved choice like pace.
+                var toSave = config
+                let available = Set(stats.availableStats())
+                let rememberedUnavailable = StickerConfig.load().enabled
+                    .filter { !available.contains($0) }
+                toSave.enabled = config.enabled + rememberedUnavailable
+                toSave.save()
+            }
             return true
         } catch let APIError.apiError(message) where message == "mile_not_completed" {
             errorMessage = "Finish today's mile before you post."
@@ -249,6 +260,9 @@ struct PostComposerView: View {
     @StateObject private var vm: PostComposerViewModel
     @State private var showCamera = false
     @State private var gestureBaseScale: CGFloat = 1.0
+    /// Sticker position at drag start (normalized) — drags apply translation
+    /// relative to this instead of jumping to the touch point.
+    @State private var gestureBasePos: CGPoint? = nil
     /// Launch straight into the camera on first appear (post-run prompt flow) —
     /// the user already tapped "Take a photo" once to get here.
     let autoOpenCamera: Bool
@@ -478,10 +492,19 @@ struct PostComposerView: View {
                 SimultaneousGesture(
                     DragGesture()
                         .onChanged { value in
-                            let x = min(max(value.location.x / canvas.width, 0.12), 0.88)
-                            let y = min(max(value.location.y / canvas.height, 0.1), 0.9)
-                            vm.stickerPos = CGPoint(x: x, y: y)
-                        },
+                            // Move RELATIVE to where the sticker started — a
+                            // location-based move teleports the sticker to
+                            // wherever the finger first lands on the canvas.
+                            let base = gestureBasePos ?? vm.stickerPos
+                            if gestureBasePos == nil { gestureBasePos = vm.stickerPos }
+                            let x = base.x + value.translation.width / canvas.width
+                            let y = base.y + value.translation.height / canvas.height
+                            vm.stickerPos = CGPoint(
+                                x: min(max(x, 0.12), 0.88),
+                                y: min(max(y, 0.1), 0.9)
+                            )
+                        }
+                        .onEnded { _ in gestureBasePos = nil },
                     MagnificationGesture()
                         .onChanged { value in
                             vm.stickerScale = min(max(gestureBaseScale * value, 0.6), 1.9)

@@ -11,23 +11,31 @@ struct PhotoLightboxView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    ZoomableScrollView {
-                        image
-                            .resizable()
-                            .scaledToFit()
+            if url == nil {
+                // AsyncImage(url: nil) never resolves — show the placeholder,
+                // not an eternal spinner.
+                Image(systemName: "photo")
+                    .font(.largeTitle)
+                    .foregroundColor(.white.opacity(0.3))
+            } else {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        ZoomableScrollView {
+                            image
+                                .resizable()
+                                .scaledToFit()
+                        }
+                    case .failure:
+                        Image(systemName: "photo")
+                            .font(.largeTitle)
+                            .foregroundColor(.white.opacity(0.3))
+                    default:
+                        ProgressView().tint(.white)
                     }
-                case .failure:
-                    Image(systemName: "photo")
-                        .font(.largeTitle)
-                        .foregroundColor(.white.opacity(0.3))
-                default:
-                    ProgressView().tint(.white)
                 }
+                .ignoresSafeArea()
             }
-            .ignoresSafeArea()
         }
         .overlay(alignment: .topTrailing) {
             Button { dismiss() } label: {

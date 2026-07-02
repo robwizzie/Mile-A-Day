@@ -22,6 +22,10 @@ struct StoryViewerView: View {
     @State private var imageReady = false
 
     @State private var showReport = false
+    /// The story the overflow options were opened FOR — captured at tap time so
+    /// the auto-advance can never re-target a destructive action mid-dialog.
+    @State private var optionsPost: PostItem?
+    @State private var showOptions = false
     /// postId → emoji the viewer sent this session (server keeps one per story).
     @State private var myReactions: [String: String] = [:]
     /// Own-story extras: seen-by counts per post + the viewers sheet.
@@ -85,7 +89,9 @@ struct StoryViewerView: View {
         // onDismiss also covers swiping the sheet away, which would otherwise
         // leave `paused` stuck true and freeze the story.
         .sheet(isPresented: $showReport, onDismiss: { paused = false }) {
-            if let post = current {
+            // Report the story the options were opened for, not whatever is
+            // current by the time the sheet lands.
+            if let post = optionsPost ?? current {
                 ReportPostSheet(postId: post.post_id) { showReport = false }
             }
         }
@@ -106,6 +112,27 @@ struct StoryViewerView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(promoteError ?? "")
+        }
+        .confirmationDialog("Story options", isPresented: $showOptions, titleVisibility: .hidden) {
+            if let post = optionsPost {
+                if post.is_self {
+                    Button("Delete story", role: .destructive) {
+                        Task { await deleteOwn(post) }
+                    }
+                } else {
+                    Button("Report") { showReport = true }
+                    Button("Block \(group.displayName)", role: .destructive) {
+                        Task { await block(post) }
+                    }
+                }
+            }
+        }
+        .onChange(of: showOptions) { _, open in
+            // Resume when the dialog closes — unless it handed off to another
+            // pausing surface (report sheet) or a destructive action is running.
+            if !open && !showReport && promoteError == nil {
+                paused = false
+            }
         }
         .statusBarHidden(true)
     }
@@ -317,21 +344,14 @@ struct StoryViewerView: View {
         .disabled(promoting)
     }
 
-    @ViewBuilder
+    /// Pauses playback and opens the options dialog for THIS story. A plain
+    /// Menu can't pause the auto-advance (no open/close signal), which let the
+    /// story change underneath an open menu and mis-target "Delete story".
     private func overflowMenu(_ post: PostItem) -> some View {
-        Menu {
-            if post.is_self {
-                Button(role: .destructive) {
-                    Task { await deleteOwn(post) }
-                } label: { Label("Delete story", systemImage: "trash") }
-            } else {
-                Button { paused = true; showReport = true } label: {
-                    Label("Report", systemImage: "flag")
-                }
-                Button(role: .destructive) {
-                    Task { await block(post) }
-                } label: { Label("Block \(group.displayName)", systemImage: "hand.raised") }
-            }
+        Button {
+            paused = true
+            optionsPost = post
+            showOptions = true
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 16, weight: .bold))
@@ -349,7 +369,8 @@ struct StoryViewerView: View {
     }
 
     private func advanceProgress() {
-        guard !isLoading, !paused, !showReport, imageReady, current != nil else { return }
+        guard !isLoading, !paused, !showReport, !showOptions, !promoting,
+              imageReady, current != nil else { return }
         progress += 0.05 / stepDuration
         if progress >= 1 { step(1) }
     }
@@ -381,7 +402,15 @@ struct StoryViewerView: View {
             await MainActor.run {
                 stories = loaded
                 isLoading = false
-                if loaded.isEmpty { close() } else { markViewed() }
+                if loaded.isEmpty {
+                    // The group's stories expired/vanished since the rail
+                    // loaded — report changed so the parent removes the dead
+                    // ring instead of re-presenting a black flash forever.
+                    changed = true
+                    close()
+                } else {
+                    markViewed()
+                }
             }
         } catch {
             await MainActor.run { isLoading = false; close() }

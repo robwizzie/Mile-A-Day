@@ -381,8 +381,12 @@ export async function getFriendsWorkoutFeed(
 		FROM workouts w
 		JOIN circle c ON c.uid = w.user_id
 		JOIN users u ON u.user_id = w.user_id
+		LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
 		WHERE w.device_end_date >= NOW() - INTERVAL '48 hours'
 		AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+		-- Respect the owner's share_workouts_to_feed opt-out on this legacy
+		-- feed too, not just the unified feed (the viewer still sees their own).
+		AND (COALESCE(ns.share_workouts_to_feed, true) = true OR w.user_id = $1)
 		ORDER BY w.device_end_date DESC
 		LIMIT 100
 		`,

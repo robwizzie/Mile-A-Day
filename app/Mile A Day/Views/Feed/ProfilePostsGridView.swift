@@ -170,7 +170,16 @@ struct ProfilePostsFeedSheet: View {
                         .padding(MADTheme.Spacing.md)
                         .padding(.bottom, MADTheme.Spacing.xl)
                     }
-                    .onAppear { proxy.scrollTo(initialPostId, anchor: .top) }
+                    .onAppear {
+                        // LazyVStack hasn't laid out far-down cards yet when
+                        // onAppear fires, so a single scrollTo can land short
+                        // for deep taps — jump, then correct once layout has
+                        // caught up.
+                        proxy.scrollTo(initialPostId, anchor: .top)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            proxy.scrollTo(initialPostId, anchor: .top)
+                        }
+                    }
                 }
             }
             .navigationTitle(title)

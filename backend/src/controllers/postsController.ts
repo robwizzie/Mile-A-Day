@@ -1,4 +1,5 @@
 import { Response } from "express";
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import sharp from "sharp";
@@ -20,6 +21,7 @@ import {
   getStoryViewers,
   reactToStory,
   getOwnPostMemories,
+  userOwnsWorkout,
   ALLOWED_STORY_REACTIONS,
   PostStatsSnapshot,
 } from "../services/postService.js";
@@ -44,6 +46,15 @@ const MAX_CAPTION = 280;
 const DEFAULT_FEED_LIMIT = 20;
 const MAX_FEED_LIMIT = 50;
 
+// posts.post_id is a uuid — validate route params before they hit a ::uuid
+// cast, so garbage ids 404 instead of bubbling a cast error into a 500.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string | undefined): value is string {
+  return typeof value === "string" && UUID_RE.test(value);
+}
+
 /**
  * Upload a post photo. The image arrives already flattened (run-stats overlay
  * baked in by the client). Mirrors uploadProfileImage: Multer memory buffer →
@@ -59,7 +70,10 @@ export async function uploadPostMedia(
     return res.status(400).json({ error: "No image file provided" });
   }
   try {
-    const filename = `${userId}-${Date.now()}.jpg`;
+    // Random suffix: two uploads in the same millisecond (double-tap retry)
+    // must not overwrite each other. The `<userId>-` prefix doubles as the
+    // ownership check when the media_url is referenced in POST /posts.
+    const filename = `${userId}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.jpg`;
     const outputPath = path.join(process.cwd(), "uploads", "posts", filename);
     await sharp(req.file.buffer)
       .rotate() // honor EXIF orientation before resizing (portrait photos)
@@ -109,6 +123,14 @@ export async function createPostController(
         .status(400)
         .json({ error: "media_url does not reference an uploaded file" });
     }
+    // Ownership: upload filenames are `<userId>-<ts>-<rand>.jpg`, and media
+    // urls are visible to the whole circle — without this check anyone could
+    // republish a friend's photo (including story-only photos) as their own.
+    if (!path.basename(media_url).startsWith(`${userId}-`)) {
+      return res
+        .status(403)
+        .json({ error: "media_url must reference your own upload" });
+    }
 
     const shareToFeed = share_to_feed !== false; // default true
     const shareToStory = share_to_story === true; // default false
@@ -142,11 +164,24 @@ export async function createPostController(
       });
     }
 
+    // Only link the post to a workout the caller actually owns. Workout ids are
+    // visible to the whole circle in feed payloads, so an unchecked id would let
+    // a user occupy a friend's one-post-per-workout slot (blocking their posts
+    // and hiding their workout card). Unknown/foreign ids also FK-fail, so an
+    // unlinked post beats a 500 either way.
+    let workoutId = typeof workout_id === "string" ? workout_id : null;
+    if (workoutId && !(await userOwnsWorkout(userId, workoutId))) {
+      console.warn(
+        `[createPost] Ignoring workout_id not owned by poster ${userId}`,
+      );
+      workoutId = null;
+    }
+
     const post = await createPost({
       userId,
       mediaUrl: media_url,
       caption: typeof caption === "string" ? caption.trim() || null : null,
-      workoutId: typeof workout_id === "string" ? workout_id : null,
+      workoutId,
       localDate: goal.localDate,
       shareToFeed,
       shareToStory,
@@ -211,6 +246,9 @@ export async function markStoryViewedController(
   res: Response,
 ) {
   try {
+    if (!isUuid(req.params.postId)) {
+      return res.status(404).json({ error: "story_not_found" });
+    }
     await markStoryViewed(req.userId!, req.params.postId);
     res.json({ ok: true });
   } catch (error: any) {
@@ -225,6 +263,9 @@ export async function getStoryViewersController(
   res: Response,
 ) {
   try {
+    if (!isUuid(req.params.postId)) {
+      return res.status(404).json({ error: "story_not_found" });
+    }
     const viewers = await getStoryViewers(req.userId!, req.params.postId);
     if (viewers === null) {
       return res.status(404).json({ error: "story_not_found" });
@@ -242,6 +283,9 @@ export async function reactToStoryController(
   res: Response,
 ) {
   try {
+    if (!isUuid(req.params.postId)) {
+      return res.status(404).json({ error: "story_not_found" });
+    }
     const emoji = typeof req.body?.emoji === "string" ? req.body.emoji : "";
     if (!ALLOWED_STORY_REACTIONS.has(emoji)) {
       return res.status(400).json({ error: "invalid_reaction" });
@@ -291,8 +335,11 @@ export async function getFeedController(
     const before =
       typeof req.query.before === "string" ? req.query.before : null;
     const items = await getFeed(req.userId!, limit, before);
+    // `cursor` is the microsecond-precise Postgres text timestamp; created_at
+    // (a ms-truncated JS Date) would skip same-millisecond rows at boundaries.
+    const last = items[items.length - 1];
     const nextBefore =
-      items.length === limit ? items[items.length - 1].created_at : null;
+      items.length === limit ? (last.cursor ?? last.created_at) : null;
     res.status(200).json({ items, next_before: nextBefore });
   } catch (error: any) {
     console.error("Error fetching feed:", error.message);
@@ -313,8 +360,9 @@ export async function getUnifiedFeedController(
     const before =
       typeof req.query.before === "string" ? req.query.before : null;
     const items = await getUnifiedFeed(req.userId!, limit, before);
+    const last = items[items.length - 1];
     const nextBefore =
-      items.length === limit ? items[items.length - 1].sort_ts : null;
+      items.length === limit ? (last.cursor ?? last.sort_ts) : null;
     res.status(200).json({ items, next_before: nextBefore });
   } catch (error: any) {
     console.error("Error fetching unified feed:", error.message);
@@ -340,8 +388,9 @@ export async function getUserPostsController(
       limit,
       before,
     );
+    const last = items[items.length - 1];
     const nextBefore =
-      items.length === limit ? items[items.length - 1].created_at : null;
+      items.length === limit ? (last.cursor ?? last.created_at) : null;
     res.status(200).json({ items, next_before: nextBefore });
   } catch (error: any) {
     console.error("Error fetching user posts:", error.message);
@@ -356,6 +405,9 @@ export async function deletePostController(
   const userId = req.userId!;
   const postId = req.params.postId;
   try {
+    if (!isUuid(postId)) {
+      return res.status(404).json({ error: "Post not found" });
+    }
     const deleted = await softDeletePost(userId, postId);
     if (deleted) return res.json({ ok: true });
 
@@ -381,6 +433,9 @@ export async function reportPostController(
   const postId = req.params.postId;
   const { reason, details } = req.body ?? {};
   try {
+    if (!isUuid(postId)) {
+      return res.status(404).json({ error: "Post not found" });
+    }
     if (!REPORT_REASONS.includes(reason)) {
       return res
         .status(400)

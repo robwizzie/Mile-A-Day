@@ -45,6 +45,11 @@ struct PostCardView: View {
         .fullScreenCover(isPresented: $showLightbox) {
             PhotoLightboxView(url: heroURL)
         }
+        // If the story photo disappears (author deleted it) while the card was
+        // flipped to it, flip back — otherwise heroURL is nil forever.
+        .onChange(of: storyPhotoURL) { _, newValue in
+            if newValue == nil { showAltPhoto = false }
+        }
     }
 
     private var header: some View {
@@ -180,18 +185,28 @@ struct PostCardView: View {
             }
     }
 
+    @ViewBuilder
     private func cardImage(_ url: URL?) -> some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case .success(let image):
-                image.resizable().scaledToFill()
-            case .failure:
-                ZStack {
-                    Color.white.opacity(0.05)
-                    Image(systemName: "photo").foregroundColor(.white.opacity(0.3))
+        if url == nil {
+            // AsyncImage(url: nil) never leaves .empty — show the broken-photo
+            // placeholder instead of an eternal spinner.
+            ZStack {
+                Color.white.opacity(0.05)
+                Image(systemName: "photo").foregroundColor(.white.opacity(0.3))
+            }
+        } else {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .failure:
+                    ZStack {
+                        Color.white.opacity(0.05)
+                        Image(systemName: "photo").foregroundColor(.white.opacity(0.3))
+                    }
+                default:
+                    ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
                 }
-            default:
-                ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
             }
         }
     }

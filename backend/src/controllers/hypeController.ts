@@ -5,6 +5,7 @@ import { getFriendship } from "../services/friendshipService.js";
 import { getUser } from "../services/userService.js";
 import { sendPush } from "../services/pushNotificationService.js";
 import { shouldSendNotification } from "../services/notificationSettingsService.js";
+import { getPostAuthor } from "../services/postService.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import {
   logHypeIfUnderLimit,
@@ -154,10 +155,30 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
     // Abuse is bounded by the friend/co-participant gate, per-context dedupe,
     // and the daily hype limit below.
 
+    // Post hypes must reference a real post authored by the target — without
+    // this, mismatched (target, post) pairs bypass dedupe and pollute counts.
+    // (Non-uuid ids short-circuit before they'd blow up the ::uuid cast.)
+    if (context?.contextType === "post") {
+      const isUuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          context.contextId,
+        );
+      const author = isUuid ? await getPostAuthor(context.contextId) : null;
+      if (author !== targetUserId) {
+        return res
+          .status(400)
+          .json({ error: "context_id does not reference the target's post" });
+      }
+    }
+
     // Canonicalize mile hypes so the feed (workout_id-keyed) and the
     // notifications inbox (user:date-keyed) write and dedupe the same context.
     if (context?.contextType === "mile") {
-      context = await canonicalizeMileContext(targetUserId, context);
+      try {
+        context = await canonicalizeMileContext(targetUserId, context);
+      } catch {
+        return res.status(400).json({ error: "Invalid mile context" });
+      }
     }
 
     // Context-aware dedupe pre-check (legacy no-context hypes skip this).
@@ -177,7 +198,17 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
     }
 
     // Atomic: insert iff still under the limit. Closes the concurrent-sender race.
-    const inserted = await logHypeIfUnderLimit(senderId, targetUserId, context);
+    let inserted;
+    try {
+      inserted = await logHypeIfUnderLimit(senderId, targetUserId, context);
+    } catch (err: any) {
+      // Two identical requests can both pass the dedupe pre-check; the loser
+      // hits the partial unique index — that's an "already hyped", not a 500.
+      if (err?.code === "23505") {
+        return res.status(409).json({ error: "already_hyped" });
+      }
+      throw err;
+    }
     if (!inserted) {
       const resetsAt = await getHypeResetsAt(senderId);
       const resetIn = formatTimeUntil(resetsAt);

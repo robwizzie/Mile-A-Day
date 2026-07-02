@@ -51,6 +51,10 @@ export interface PostRow {
   is_hyped: boolean;
   hype_count: number;
   is_viewed?: boolean;
+  // Microsecond-precise created_at (Postgres text form) for keyset pagination.
+  // node-pg parses timestamptz to a ms-truncated JS Date, and a truncated
+  // `before` cursor silently skips same-millisecond rows at page boundaries.
+  cursor?: string;
 }
 
 export interface StoryGroup {
@@ -100,8 +104,10 @@ const POST_SELECT = `${POST_COLUMNS},
 			AND h.context_id = p.post_id::text
 	) AS is_hyped,
 	(
-		SELECT COUNT(*)::int FROM hype_log hc
-		WHERE hc.context_type = 'post' AND hc.context_id = p.post_id::text
+		SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
+		WHERE hc.context_type = 'post'
+			AND hc.target_id = p.user_id
+			AND hc.context_id = p.post_id::text
 	) AS hype_count`;
 
 export interface CreatePostInput {
@@ -330,16 +336,51 @@ export async function getUserActiveStories(
   return rows;
 }
 
-/** Record that the viewer saw a story. Idempotent. */
+/**
+ * Record that the viewer saw a story. Idempotent, and guarded: only records a
+ * view for an ACTIVE story the viewer is actually allowed to see (author, or
+ * an accepted friend of the author with no block either way) — otherwise a
+ * relayed post id could inject a stranger into the author's "Seen by" list.
+ */
 export async function markStoryViewed(
   viewerId: string,
   postId: string,
 ): Promise<void> {
   await db.query(
-    `INSERT INTO story_views (post_id, viewer_id) VALUES ($1, $2)
+    `INSERT INTO story_views (post_id, viewer_id)
+		 SELECT p.post_id, $2
+		 FROM posts p
+		 WHERE p.post_id = $1
+			 AND p.share_to_story
+			 AND p.deleted_at IS NULL
+			 AND p.story_expires_at > NOW()
+			 AND (
+				 p.user_id = $2
+				 OR EXISTS (
+					 SELECT 1 FROM friendships f
+					 WHERE f.user_id = p.user_id AND f.friend_id = $2 AND f.status = 'accepted'
+				 )
+			 )
+			 AND NOT EXISTS (
+				 SELECT 1 FROM user_blocks b
+				 WHERE (b.blocker_id = p.user_id AND b.blocked_id = $2)
+						OR (b.blocker_id = $2 AND b.blocked_id = p.user_id)
+			 )
 		 ON CONFLICT (post_id, viewer_id) DO NOTHING`,
     [postId, viewerId],
   );
+}
+
+/** Whether the workout exists and belongs to the user (post-link guard). */
+export async function userOwnsWorkout(
+  userId: string,
+  workoutId: string,
+): Promise<boolean> {
+  const rows = await db.query(
+    `SELECT 1 FROM workouts WHERE workout_id = $1 AND user_id = $2`,
+    [workoutId, userId],
+  );
+  return rows.length > 0;
 }
 
 /** One row in a story's "seen by" list, with any emoji reaction. */
@@ -510,7 +551,8 @@ export async function getFeed(
   const rows = await db.query<PostRow>(
     `
 		${CIRCLE_CTE}
-		SELECT ${POST_SELECT}
+		SELECT ${POST_SELECT},
+			p.created_at::text AS cursor
 		FROM posts p
 		JOIN circle c ON c.uid = p.user_id
 		JOIN users u ON u.user_id = p.user_id
@@ -559,6 +601,8 @@ export interface FeedEntryRow {
   is_self: boolean;
   is_hyped: boolean;
   hype_count: number;
+  // Microsecond-precise sort_ts (Postgres text form) for keyset pagination.
+  cursor?: string;
 }
 
 /**
@@ -576,13 +620,15 @@ export async function getUnifiedFeed(
   const rows = await db.query<FeedEntryRow>(
     `
 		${CIRCLE_CTE}
-		SELECT * FROM (
+		SELECT feed.*, feed.sort_ts::text AS cursor FROM (
 			SELECT
 				'post' AS kind,
 				p.post_id::text AS id,
 				p.created_at AS sort_ts,
 				p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
 				p.media_url, p.caption, p.stats_snapshot,
+				-- Story photos are a 24h moment: once expired they must stop
+				-- riding along on the permanent feed card.
 				(
 					SELECT p3.media_url FROM posts p3
 					WHERE p.workout_id IS NOT NULL
@@ -591,6 +637,7 @@ export async function getUnifiedFeed(
 						AND p3.post_id <> p.post_id
 						AND p3.deleted_at IS NULL
 						AND p3.share_to_story AND NOT p3.share_to_feed
+						AND p3.story_expires_at > NOW()
 					ORDER BY p3.created_at DESC
 					LIMIT 1
 				) AS story_photo_url,
@@ -614,8 +661,10 @@ export async function getUnifiedFeed(
 					WHERE h.sender_id = $1 AND h.target_id = p.user_id
 						AND h.context_type = 'post' AND h.context_id = p.post_id::text
 				) AS is_hyped,
-				(SELECT COUNT(*)::int FROM hype_log hc
-					WHERE hc.context_type = 'post' AND hc.context_id = p.post_id::text) AS hype_count
+				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
+					WHERE hc.context_type = 'post'
+						AND hc.target_id = p.user_id
+						AND hc.context_id = p.post_id::text) AS hype_count
 			FROM posts p
 			JOIN circle c ON c.uid = p.user_id
 			JOIN users u ON u.user_id = p.user_id
@@ -693,7 +742,8 @@ export async function getUserPosts(
   const rows = await db.query<PostRow>(
     `
 		${CIRCLE_CTE}
-		SELECT ${POST_SELECT}
+		SELECT ${POST_SELECT},
+			p.created_at::text AS cursor
 		FROM posts p
 		JOIN users u ON u.user_id = p.user_id
 		WHERE p.user_id = $2
