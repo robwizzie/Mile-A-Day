@@ -57,6 +57,13 @@
       "when": 1782945046004,
       "tag": "0007_tearful_deathbird",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1782952394676,
+      "tag": "0008_lethal_gambit",
+      "breakpoints": true
     }
   ]
 }
