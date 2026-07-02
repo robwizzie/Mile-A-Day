@@ -88,6 +88,8 @@ export async function createPostController(
     share_to_feed,
     share_to_story,
     stats_snapshot,
+    is_auto,
+    include_route,
   } = req.body ?? {};
 
   try {
@@ -149,6 +151,9 @@ export async function createPostController(
       shareToFeed,
       shareToStory,
       statsSnapshot: (stats_snapshot ?? null) as PostStatsSnapshot | null,
+      // Absent on legacy clients — createPost keeps the old upsert behavior then.
+      isAuto: typeof is_auto === "boolean" ? is_auto : undefined,
+      includeRoute: include_route !== false, // default true
     });
 
     // Fire-and-forget: tell friends about a new feed post (respects their
@@ -163,6 +168,11 @@ export async function createPostController(
 
     res.status(201).json(post);
   } catch (error: any) {
+    // One deliberate post per workout — the slot is taken until that post is
+    // deleted. Surface as a conflict the client can message, not a 500.
+    if (error?.message === "workout_already_posted") {
+      return res.status(409).json({ error: "workout_already_posted" });
+    }
     console.error("Error creating post:", error.message);
     res.status(500).json({ error: "Error creating post" });
   }

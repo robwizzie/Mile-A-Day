@@ -2,7 +2,8 @@ import SwiftUI
 
 /// A raw walk/run in the unified feed (no photo) — the auto activity card.
 /// Shares the visual language of PostCardView: author header, the run line,
-/// a compact stat strip, and a hype affordance.
+/// the GPS route map when the workout has one, a compact stat strip, and a
+/// hype affordance.
 struct ActivityCardView: View {
     let entry: FeedEntry
     var isHyping: Bool = false
@@ -17,6 +18,15 @@ struct ActivityCardView: View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             header
             runLine
+            if let coords = entry.routeCoordinates {
+                WorkoutRouteMapView(
+                    coordinates: coords,
+                    routeColor: Self.color(entry.workout_type)
+                )
+                .frame(maxWidth: .infinity)
+                .frame(height: 160)
+                .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+            }
             statStrip
             footer
         }

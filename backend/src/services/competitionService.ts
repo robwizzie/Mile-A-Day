@@ -9,6 +9,7 @@ import {
 import { PostgresService } from "./DbService.js";
 import {
   getQuantityDateRangeBatch,
+  getActivityBreakdownBatch,
   getUsersWithManualWorkouts,
 } from "./workoutService.js";
 import { getStepsDateRangeBatch } from "./dailyStepsService.js";
@@ -247,10 +248,41 @@ export async function getCompetition(
 
   // Calculate scores for started competitions (start_date on or before today in ET)
   if (competition.start_date && competition.start_date <= getTodayET()) {
-    const userScores = await getUserScores(competition);
+    const acceptedIds = competition.users
+      .filter((u: CompetitionUser) => u.invite_status === "accepted")
+      .map((u: CompetitionUser) => u.user_id);
+    // Per-day walk/run breakdown (distance + workout counts) for the detail
+    // view's stats panel and calendar. Steps comps don't read workouts.
+    const isStepUnit = competition.options?.unit === "steps";
+    const [userScores, breakdownRows] = await Promise.all([
+      getUserScores(competition),
+      isStepUnit
+        ? Promise.resolve([])
+        : getActivityBreakdownBatch(
+            acceptedIds,
+            competition.start_date,
+            competition.end_date ?? undefined,
+            competition.workouts,
+          ),
+    ]);
+    const activityByUser: Record<
+      string,
+      NonNullable<CompetitionUser["daily_activity"]>
+    > = {};
+    for (const row of breakdownRows) {
+      const byDate = (activityByUser[row.user_id] ??= {});
+      const byType = (byDate[row.local_date] ??= {});
+      byType[row.workout_type] = {
+        distance: Number(row.total_distance),
+        count: Number(row.workout_count),
+      };
+    }
     competition.users = competition.users.map((user: CompetitionUser) => ({
       ...user,
       ...userScores[user.user_id],
+      ...(isStepUnit
+        ? {}
+        : { daily_activity: activityByUser[user.user_id] ?? {} }),
     }));
   }
 

@@ -30,6 +30,7 @@ struct StoryViewerView: View {
     /// Stories promoted to the feed this session ("Add to feed").
     @State private var promotedIds: Set<String> = []
     @State private var promoting = false
+    @State private var promoteError: String?
 
     /// The emoji palette — must match the backend's ALLOWED_STORY_REACTIONS.
     private let reactionEmojis = ["❤️", "🔥", "👏", "💪", "😮"]
@@ -98,6 +99,14 @@ struct StoryViewerView: View {
                 viewerCounts[post.post_id] = resp.count
             }
         }
+        .alert("Couldn't add to feed", isPresented: Binding(
+            get: { promoteError != nil },
+            set: { if !$0 { promoteError = nil; paused = false } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(promoteError ?? "")
+        }
         .statusBarHidden(true)
     }
 
@@ -107,8 +116,20 @@ struct StoryViewerView: View {
         AsyncImage(url: post.mediaURL) { phase in
             switch phase {
             case .success(let image):
-                image.resizable().scaledToFill()
-                    .onAppear { imageReady = true }
+                // The media is composed at 4:5 with the stats sticker baked in,
+                // so it must be shown WHOLE. Fit it (never fill-crop — that cut
+                // off the sticker/edges on tall screens) over a blurred,
+                // edge-to-edge copy that fills the letterbox space.
+                ZStack {
+                    image.resizable()
+                        .scaledToFill()
+                        .blur(radius: 40, opaque: true)
+                        .opacity(0.6)
+                    image.resizable()
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
+                .onAppear { imageReady = true }
             case .failure:
                 Image(systemName: "photo").font(.largeTitle).foregroundColor(.white.opacity(0.3))
                     .onAppear { imageReady = true }
@@ -154,9 +175,16 @@ struct StoryViewerView: View {
                 Text(group.displayName)
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
-                Text(post.relativeTime)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
+                HStack(spacing: 4) {
+                    Text(post.relativeTime)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.7))
+                    if let type = post.workout_type {
+                        Image(systemName: ActivityCardView.icon(type))
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(ActivityCardView.color(type))
+                    }
+                }
             }
             Spacer()
             overflowMenu(post)
@@ -373,20 +401,27 @@ struct StoryViewerView: View {
         promoting = true
         defer { promoting = false }
         do {
-            // Carries the workout id, so this upserts the photo into the run's
-            // existing feed post (replacing the auto route/stats card in place).
+            // Carries the workout id, so this replaces the run's auto
+            // route/stats card in place. If the run already has a deliberate
+            // feed post, the server rejects it (one post per workout).
             _ = try await PostService.createPost(
                 mediaUrl: post.media_url,
                 caption: post.caption,
                 workoutId: post.workout_id,
                 shareToFeed: true,
                 shareToStory: false,
-                stats: post.stats_snapshot
+                stats: post.stats_snapshot,
+                isAuto: false
             )
             await MainActor.run {
                 promotedIds.insert(post.post_id)
                 changed = true
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+        } catch APIError.conflict {
+            await MainActor.run {
+                paused = true
+                promoteError = "This workout already has a feed post. Delete it first to share this photo instead."
             }
         } catch {
             print("[StoryViewer] ❌ Add to feed failed: \(error)")

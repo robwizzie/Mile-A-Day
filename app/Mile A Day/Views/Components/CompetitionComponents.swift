@@ -1002,6 +1002,28 @@ struct CompetitionLeaderboardRow: View {
         }
     }
 
+    /// Whether to surface the player's summed interval distance as a secondary
+    /// line. Apex and race scores already ARE distance, so it would duplicate
+    /// the score there; steps comps track steps, not miles. Hidden pre-start
+    /// (no `intervals` yet) so the row degrades to its old look.
+    private var showsTotalDistance: Bool {
+        guard unit != .steps, user.intervals != nil else { return false }
+        switch competitionType {
+        case .streaks, .targets, .clash: return true
+        case .apex, .race: return false
+        }
+    }
+
+    /// "128 mi" / "42.7 mi" — matches the activity calendar's formatting
+    /// (no decimals once totals reach triple digits).
+    private var totalDistanceText: String {
+        let total = user.totalIntervalDistance
+        let formatted = total >= 100
+            ? String(format: "%.0f", total)
+            : String(format: "%.1f", total)
+        return "\(formatted) \(unit.shortDisplayName)"
+    }
+
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
             // Rank badge
@@ -1095,6 +1117,21 @@ struct CompetitionLeaderboardRow: View {
                                 .font(.system(size: 8, weight: .medium))
                                 .foregroundColor(.white.opacity(0.3))
                         }
+                    }
+                }
+
+                // Secondary total-distance line — the streak/points score alone
+                // hides how far a player has actually gone in the comp.
+                if showsTotalDistance {
+                    HStack(spacing: 3) {
+                        Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(.white.opacity(isEliminated ? 0.2 : 0.35))
+                        Text(totalDistanceText)
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(isEliminated ? 0.3 : 0.5))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                 }
             }

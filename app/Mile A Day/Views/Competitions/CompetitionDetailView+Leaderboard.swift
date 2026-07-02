@@ -976,10 +976,66 @@ struct DailyActivityCalendar: View {
     /// Total summed distance — focused user's only when focused, otherwise comp-wide.
     private var aggregateTotalDistance: Double {
         if let user = focusedUser {
-            return user.intervals?.values.reduce(0, +) ?? 0
+            return user.totalIntervalDistance
         }
         return allUsers.reduce(0) { sum, u in
-            sum + (u.intervals?.values.reduce(0, +) ?? 0)
+            sum + u.totalIntervalDistance
+        }
+    }
+
+    // MARK: - Daily activity (run/walk) helpers
+    // The backend's `daily_activity` field (per-day, per-type distance + count)
+    // only exists on newer responses — every consumer below must render nothing
+    // when it's absent so older payloads fall back to the pre-split UI.
+
+    /// True when at least one relevant competitor carries the per-activity
+    /// breakdown. Scoped to the focused user when focused.
+    private var hasDailyActivityData: Bool {
+        if let user = focusedUser { return user.hasDailyActivity }
+        return allUsers.contains { $0.hasDailyActivity }
+    }
+
+    /// Plain per-day key ("YYYY-MM-DD") matching `daily_activity`'s keys.
+    /// Unlike `key(for:)` this never widens to week/month buckets — the
+    /// activity split is always daily regardless of the comp's interval.
+    private func dayKey(for date: Date) -> String {
+        isoDateFormatter.string(from: Calendar.current.startOfDay(for: date))
+    }
+
+    /// Total workout count for one activity type — focused user's when
+    /// focused, comp-wide otherwise.
+    private func activityCount(for activity: CompetitionActivity) -> Int {
+        if let user = focusedUser {
+            return user.totalActivityCount(for: activity)
+        }
+        return allUsers.reduce(0) { $0 + $1.totalActivityCount(for: activity) }
+    }
+
+    /// Activity types with any logged workout on this day — any player's in
+    /// aggregate mode, the focused player's when focused. Drives the tiny
+    /// calendar-cell dots, so it's limited to comps that allow BOTH types
+    /// (a single-type comp's dot carries no extra information, just clutter).
+    private func activityTypes(on date: Date) -> [CompetitionActivity] {
+        guard competition.workouts.count > 1, isInRange(date) else { return [] }
+        let k = dayKey(for: date)
+        let users = focusedUser.map { [$0] } ?? allUsers
+        return competition.workouts.filter { activity in
+            users.contains { u in
+                guard let entry = u.dailyActivityEntry(for: activity, onDay: k) else { return false }
+                return (entry.count ?? 0) > 0 || (entry.distance ?? 0) > 0
+            }
+        }
+    }
+
+    /// One user's per-type split for one day, ordered by the comp's allowed
+    /// activities. Empty when the backend didn't send `daily_activity` or the
+    /// user logged nothing that day.
+    private func activitySplits(for user: CompetitionUser, on date: Date) -> [(activity: CompetitionActivity, entry: DailyActivityEntry)] {
+        let k = dayKey(for: date)
+        return competition.workouts.compactMap { (activity: CompetitionActivity) -> (activity: CompetitionActivity, entry: DailyActivityEntry)? in
+            guard let entry = user.dailyActivityEntry(for: activity, onDay: k),
+                  (entry.count ?? 0) > 0 || (entry.distance ?? 0) > 0 else { return nil }
+            return (activity, entry)
         }
     }
 
@@ -1190,6 +1246,10 @@ struct DailyActivityCalendar: View {
             focusBar
             summaryHeader
 
+            if hasDailyActivityData {
+                activityCountsRow
+            }
+
             if months.count > 1 {
                 monthNavigator
             } else {
@@ -1383,13 +1443,42 @@ struct DailyActivityCalendar: View {
 
             Spacer()
 
-            HStack(spacing: 4) {
+            // Display-only allowed-activity icons. Hidden once real run/walk
+            // counts exist — `activityCountsRow` supersedes them with the same
+            // icons plus counts, and doubling up just eats header width.
+            if !hasDailyActivityData {
+                HStack(spacing: 4) {
+                    ForEach(competition.workouts, id: \.self) { activity in
+                        Image(systemName: activity.icon)
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(activity.color)
+                            .frame(width: 22, height: 22)
+                            .background(Circle().fill(activity.backgroundColor))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Run/walk workout-count chips under the stats columns — comp-wide by
+    /// default, the focused player's when focused. Wrapped in a horizontal
+    /// ScrollView so big counts can't overflow narrow (SE-width) screens.
+    private var activityCountsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
                 ForEach(competition.workouts, id: \.self) { activity in
-                    Image(systemName: activity.icon)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(activity.color)
-                        .frame(width: 22, height: 22)
-                        .background(Circle().fill(activity.backgroundColor))
+                    let count = activityCount(for: activity)
+                    HStack(spacing: 4) {
+                        Image(systemName: activity.icon)
+                            .font(.system(size: 10, weight: .bold))
+                        Text("\(count) \(activity.displayName.lowercased())\(count == 1 ? "" : "s")")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .lineLimit(1)
+                    }
+                    .foregroundColor(activity.color)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Capsule().fill(activity.backgroundColor))
                 }
             }
         }
@@ -1481,7 +1570,8 @@ struct DailyActivityCalendar: View {
                             isInRange: isInRange(date),
                             isSelected: selectedDay.map { Calendar.current.isDate($0, inSameDayAs: date) } ?? false,
                             accent: effectiveAccent,
-                            streakStatus: streakStatus(for: date)
+                            streakStatus: streakStatus(for: date),
+                            activityDots: activityTypes(on: date)
                         )
                     }
                     .buttonStyle(.plain)
@@ -1543,7 +1633,8 @@ struct DailyActivityCalendar: View {
                         goal: goal,
                         unit: competition.options.unit,
                         accent: effectiveAccent,
-                        isCurrentUser: entry.user.user_id == currentUserId
+                        isCurrentUser: entry.user.user_id == currentUserId,
+                        activitySplits: activitySplits(for: entry.user, on: date)
                     )
                 }
             }
@@ -1633,6 +1724,10 @@ private struct DailyCalendarCell: View {
     /// When set (streaks comp + focused user), trumps the aggregate hit-ratio
     /// rendering and shows life-loss / elimination state instead.
     var streakStatus: DailyActivityCalendar.FocusedDayStatus? = nil
+    /// Activity types (run/walk) with a logged workout this day — rendered as
+    /// tiny color-coded dots under the day number. Empty = no dots (no
+    /// `daily_activity` data, single-type comp, or an off day).
+    var activityDots: [CompetitionActivity] = []
 
     private var hasAnyHits: Bool { hitRatio > 0 }
     private var isAllHit: Bool { hitRatio >= 0.999 }
@@ -1696,9 +1791,31 @@ private struct DailyCalendarCell: View {
                     hasAnyHits ? .white.opacity(0.9) :
                     .white.opacity(0.55)
                 )
+
+            if isInRange {
+                activityDotsRow
+            }
         }
         .frame(height: 36)
         .aspectRatio(1, contentMode: .fit)
+    }
+
+    /// Tiny run/walk type dots pinned under the day number. A hairline white
+    /// ring keeps them legible on top of solid accent/green fills. Renders
+    /// nothing when `activityDots` is empty.
+    @ViewBuilder
+    private var activityDotsRow: some View {
+        if !activityDots.isEmpty {
+            HStack(spacing: 2) {
+                ForEach(activityDots, id: \.self) { activity in
+                    Circle()
+                        .fill(activity.color)
+                        .frame(width: 3.5, height: 3.5)
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.5), lineWidth: 0.5))
+                }
+            }
+            .offset(y: 11)
+        }
     }
 
     // MARK: - Streak rendering
@@ -1770,6 +1887,15 @@ private struct DailyCalendarCell: View {
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(0.28))
             }
+
+            // Run/walk type dots only make sense on days with activity —
+            // miss/elimination cells keep their uncluttered warning look.
+            switch status {
+            case .completed, .today:
+                activityDotsRow
+            default:
+                EmptyView()
+            }
         }
         .frame(height: 36)
         .aspectRatio(1, contentMode: .fit)
@@ -1785,6 +1911,10 @@ private struct DayDetailRow: View {
     let unit: CompetitionUnit
     let accent: Color
     let isCurrentUser: Bool
+    /// This user's run/walk split for the tapped day. Empty when the backend
+    /// didn't send `daily_activity` (older responses) or there's no data —
+    /// the row then renders exactly as before.
+    var activitySplits: [(activity: CompetitionActivity, entry: DailyActivityEntry)] = []
 
     private var hitGoal: Bool { goal > 0 && distance >= goal }
     private var hasActivity: Bool { distance > 0 }
@@ -1794,6 +1924,16 @@ private struct DayDetailRow: View {
             ? String(format: "%.1f", distance)
             : String(format: "%.2f", distance)
         return "\(formatted) \(unit.shortDisplayName)"
+    }
+
+    /// Chip label for one activity's slice of the day — distance when we have
+    /// it ("1.2 mi"), workout count otherwise ("×2").
+    private func splitText(for entry: DailyActivityEntry) -> String {
+        let d = entry.distance ?? 0
+        if d > 0 {
+            return "\(String(format: "%.1f", d)) \(unit.shortDisplayName)"
+        }
+        return "×\(entry.count ?? 0)"
     }
 
     var body: some View {
@@ -1818,6 +1958,26 @@ private struct DayDetailRow: View {
                 Text(hasActivity ? distanceText : "Off day")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundColor(hasActivity ? accent : .white.opacity(0.35))
+
+                // Per-type run/walk split chips for this day (new backends only).
+                if !activitySplits.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(activitySplits, id: \.activity) { split in
+                            HStack(spacing: 3) {
+                                Image(systemName: split.activity.icon)
+                                    .font(.system(size: 8, weight: .bold))
+                                Text(splitText(for: split.entry))
+                                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                                    .lineLimit(1)
+                            }
+                            .foregroundColor(split.activity.color)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(split.activity.backgroundColor))
+                        }
+                    }
+                    .padding(.top, 1)
+                }
             }
 
             Spacer()
