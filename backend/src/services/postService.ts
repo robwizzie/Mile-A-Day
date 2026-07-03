@@ -630,8 +630,9 @@ export async function getUnifiedFeed(
 				p.created_at AS sort_ts,
 				p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
 				p.media_url, p.caption, p.stats_snapshot,
-				-- Story photos are a 24h moment: once expired they must stop
-				-- riding along on the permanent feed card.
+				-- Owner's decision: the 24h expiry only ends the STORY (rail/viewer).
+				-- A photo riding on the run's feed card stays permanently — only
+				-- deleting the story removes it.
 				(
 					SELECT p3.media_url FROM posts p3
 					WHERE p.workout_id IS NOT NULL
@@ -640,7 +641,6 @@ export async function getUnifiedFeed(
 						AND p3.post_id <> p.post_id
 						AND p3.deleted_at IS NULL
 						AND p3.share_to_story AND NOT p3.share_to_feed
-						AND p3.story_expires_at > NOW()
 					ORDER BY p3.created_at DESC
 					LIMIT 1
 				) AS story_photo_url,
@@ -747,9 +747,10 @@ export async function getUserPosts(
 		${CIRCLE_CTE}
 		SELECT ${POST_SELECT},
 			p.created_at::text AS cursor,
-			-- The run's ACTIVE story photo, so the profile grid + detail cards
-			-- can lead with the real picture (workout card second), matching
-			-- the feed. Expired stories drop off here just like on feed cards.
+			-- The run's story photo, so the profile grid + detail cards lead
+			-- with the real picture (workout card second), matching the feed.
+			-- Owner's decision: story expiry does NOT remove the photo from
+			-- feed/profile surfaces — only deleting the story does.
 			(
 				SELECT p3.media_url FROM posts p3
 				WHERE p.workout_id IS NOT NULL
@@ -758,7 +759,6 @@ export async function getUserPosts(
 					AND p3.post_id <> p.post_id
 					AND p3.deleted_at IS NULL
 					AND p3.share_to_story AND NOT p3.share_to_feed
-					AND p3.story_expires_at > NOW()
 				ORDER BY p3.created_at DESC
 				LIMIT 1
 			) AS story_photo_url
