@@ -1181,3 +1181,32 @@ export const userBlocks = pgTable(
     }),
   ],
 );
+
+// Operational error log for the admin dashboard. Written fire-and-forget by
+// logError() at failure sites (push/APNs sends, auth, cron). No FK on user_id:
+// a logging insert must never fail because a referenced row is gone.
+export const errorLog = pgTable(
+  "error_log",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    category: text().notNull(),
+    userId: text("user_id"),
+    message: text().notNull(),
+    context: jsonb(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "string",
+    }).defaultNow(),
+  },
+  (table) => [
+    index("idx_error_log_created_at").using(
+      "btree",
+      table.createdAt.desc().nullsFirst(),
+    ),
+    index("idx_error_log_category").using(
+      "btree",
+      table.category.asc().nullsLast(),
+      table.createdAt.desc().nullsFirst(),
+    ),
+  ],
+);
