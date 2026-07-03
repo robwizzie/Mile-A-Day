@@ -144,20 +144,14 @@ struct ProfilePostsGridView: View {
 /// A user's posts as a scrollable, read-only feed — opened from the profile
 /// grid at the tapped post, so browsing someone's history feels like reading a
 /// feed instead of opening photos one at a time. Shares the grid's post array
-/// (and its pagination) via a binding, and taps open the pinch-zoom lightbox.
+/// (and its pagination) via a binding; photos pinch-zoom in place like the
+/// main feed.
 struct ProfilePostsFeedSheet: View {
     let title: String
     @Binding var posts: [PostItem]
     let initialPostId: String
     let onNeedMore: () -> Void
     @Environment(\.dismiss) private var dismiss
-
-    /// The tapped slide's image, presented in the zoom lightbox.
-    private struct LightboxItem: Identifiable {
-        let url: URL
-        var id: String { url.absoluteString }
-    }
-    @State private var lightboxItem: LightboxItem?
 
     var body: some View {
         NavigationStack {
@@ -203,62 +197,28 @@ struct ProfilePostsFeedSheet: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
-        .fullScreenCover(item: $lightboxItem) { item in
-            PhotoLightboxView(url: item.url)
-        }
     }
 
     /// Same media treatment as the feed card: the real photo leads, the
     /// workout card is the second slide (badged "Stats"), page dots when
-    /// there's more than one.
+    /// there's more than one. Slides pinch-zoom in place (no hype here —
+    /// this surface is read-only).
     @ViewBuilder
     private func media(_ post: PostItem) -> some View {
         if let storyPhoto = post.storyPhotoURL {
             TabView {
-                photoSlide(storyPhoto)
-                photoSlide(post.mediaURL, badge: post.is_auto == true ? "Stats" : nil)
+                ZoomablePhotoSlide(url: storyPhoto)
+                ZoomablePhotoSlide(
+                    url: post.mediaURL,
+                    badge: post.is_auto == true ? ("Stats", "chart.bar.fill") : nil
+                )
             }
             .tabViewStyle(.page(indexDisplayMode: .always))
             .indexViewStyle(.page(backgroundDisplayMode: .interactive))
             .frame(maxWidth: .infinity)
             .aspectRatio(4.0 / 5.0, contentMode: .fit)
         } else {
-            photoSlide(post.mediaURL)
-        }
-    }
-
-    private func photoSlide(_ url: URL?, badge: String? = nil) -> some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case .success(let image):
-                image.resizable().scaledToFill()
-            case .failure:
-                ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) }
-            default:
-                ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .aspectRatio(4.0 / 5.0, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-        .onTapGesture {
-            if let url { lightboxItem = LightboxItem(url: url) }
-        }
-        .overlay(alignment: .topLeading) {
-            if let badge {
-                HStack(spacing: 5) {
-                    Image(systemName: "chart.bar.fill")
-                        .font(.system(size: 11, weight: .bold))
-                    Text(badge)
-                        .font(.system(size: 12, weight: .bold, design: .rounded))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(Color.black.opacity(0.55)))
-                .padding(10)
-            }
+            ZoomablePhotoSlide(url: post.mediaURL)
         }
     }
 

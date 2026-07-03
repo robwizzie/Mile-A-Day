@@ -18,6 +18,8 @@ struct SocialFeedView: View {
 
     @State private var hypingIds: Set<String> = []
     @State private var termsAccepted: Bool?
+    /// Transient "out of hypes" banner — the only hype failure worth surfacing.
+    @State private var showHypeLimitBanner = false
 
     // Presentation
     @State private var presentingComposer = false
@@ -114,6 +116,12 @@ struct SocialFeedView: View {
         .background(MADTheme.Colors.appBackgroundGradient)
         .toolbar(.hidden, for: .navigationBar)
         .overlay(alignment: .bottomTrailing) { composeButton }
+        .overlay(alignment: .top) {
+            if showHypeLimitBanner {
+                hypeLimitBanner
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
         .task { if !loadedOnce { await refresh(); await loadTermsStatus(); loadMemories() } }
         .fullScreenCover(item: $viewerGroup) { group in
             StoryViewerView(group: group, currentUserId: currentUserId) { changed in
@@ -376,9 +384,42 @@ struct SocialFeedView: View {
                 }
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
+        } catch APIError.rateLimited {
+            // Out of hypes for today — say so instead of silently doing
+            // nothing after the double-tap burst played.
+            await MainActor.run {
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    showHypeLimitBanner = true
+                }
+            }
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.25)) { showHypeLimitBanner = false }
+            }
         } catch {
-            // conflict (already hyped) / rate-limited — leave as-is.
+            // conflict (already hyped) — leave as-is.
         }
+    }
+
+    private var hypeLimitBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "hands.clap.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.orange)
+            Text("You're out of hypes for today")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .background(
+            Capsule()
+                .fill(Color(red: 0.12, green: 0.12, blue: 0.14))
+                .overlay(Capsule().strokeBorder(Color.orange.opacity(0.35), lineWidth: 1))
+                .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
+        )
+        .padding(.top, 8)
     }
 
     private func block(_ entry: FeedEntry) async {

@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// A raw walk/run in the unified feed (no photo) — the auto activity card.
-/// Shares the visual language of PostCardView: author header, the run line,
-/// the GPS route map when the workout has one, a compact stat strip, and a
-/// hype affordance.
+/// Shares the visual language of PostCardView: author header, a big
+/// distance hero line, the GPS route map when the workout has one, a stat
+/// strip, and a hype affordance. Double-tapping the map (or the hero) hypes,
+/// same as photos.
 struct ActivityCardView: View {
     let entry: FeedEntry
     var isHyping: Bool = false
@@ -11,21 +12,32 @@ struct ActivityCardView: View {
     /// Tap the author's avatar or name to open their profile.
     var onTapAuthor: (() -> Void)? = nil
 
+    @State private var hypeBurst = 0
+
     private var distance: Double { entry.distance ?? 0 }
     private var completedMile: Bool { distance >= 1.0 }
+    private var accent: Color { Self.color(entry.workout_type) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             header
-            runLine
+            heroLine
             if let coords = entry.routeCoordinates {
-                WorkoutRouteMapView(
-                    coordinates: coords,
-                    routeColor: Self.color(entry.workout_type)
-                )
-                .frame(maxWidth: .infinity)
-                .frame(height: 160)
-                .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+                WorkoutRouteMapView(coordinates: coords, routeColor: accent)
+                    .frame(maxWidth: .infinity)
+                    // Proportional, not a fixed 160pt: the map scales with the
+                    // card on every screen size instead of shrinking to a strip.
+                    .aspectRatio(16.0 / 10.0, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+                    .overlay(
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture(count: 2) { doubleTapHype() }
+                    )
             }
             statStrip
             footer
@@ -35,6 +47,18 @@ struct ActivityCardView: View {
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
                 .fill(Color.white.opacity(0.04))
         )
+        // Card-level so the burst plays for route-less cards too (double-tap
+        // on the hero line).
+        .overlay(HypeBurstView(trigger: hypeBurst))
+    }
+
+    private func doubleTapHype() {
+        guard !entry.is_self else { return }
+        hypeBurst += 1
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        if !entry.is_hyped {
+            onHype()
+        }
     }
 
     private var header: some View {
@@ -66,18 +90,31 @@ struct ActivityCardView: View {
             .disabled(onTapAuthor == nil)
             Spacer()
             Image(systemName: Self.icon(entry.workout_type))
-                .font(.system(size: 16, weight: .bold))
-                .foregroundColor(Self.color(entry.workout_type))
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(accent)
+                .frame(width: 30, height: 30)
+                .background(Circle().fill(accent.opacity(0.15)))
         }
     }
 
-    private var runLine: some View {
-        HStack(spacing: 6) {
-            Text("\(Self.verb(entry.workout_type)) \(String(format: "%.2f", distance)) mi")
-                .font(.system(size: 15, weight: .heavy, design: .rounded))
+    /// The workout headline: what they did, with the distance as the hero
+    /// number instead of a body-text line.
+    private var heroLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(Self.verb(entry.workout_type))
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.7))
+            Text(String(format: "%.2f", distance))
+                .font(.system(size: 30, weight: .black, design: .rounded))
+                .monospacedDigit()
                 .foregroundColor(.white)
+            Text("mi")
+                .font(.system(size: 16, weight: .heavy, design: .rounded))
+                .foregroundColor(.white.opacity(0.7))
         }
         .padding(.horizontal, 2)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { doubleTapHype() }
     }
 
     @ViewBuilder
@@ -89,16 +126,17 @@ struct ActivityCardView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(items, id: \.0) { item in
-                        HStack(spacing: 4) {
-                            Image(systemName: item.1).font(.system(size: 10, weight: .bold))
+                        HStack(spacing: 5) {
+                            Image(systemName: item.1)
+                                .font(.system(size: 11, weight: .bold))
                                 .foregroundColor(.orange)
                             Text(item.2)
-                                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                                .font(.system(size: 13, weight: .heavy, design: .rounded))
                                 .monospacedDigit()
-                                .foregroundColor(.white.opacity(0.85))
+                                .foregroundColor(.white.opacity(0.9))
                         }
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Capsule().fill(Color.white.opacity(0.06)))
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(Capsule().fill(Color.white.opacity(0.07)))
                     }
                 }
                 .padding(.horizontal, 2)
