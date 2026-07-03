@@ -127,16 +127,16 @@ export async function logHypeIfUnderLimit(
 const MILE_COMPOSITE_RE = /:(\d{4}-\d{2}-\d{2})$/;
 
 /**
- * SQL fragment matching a mile hype row against a workout row by EITHER key
- * form: the legacy workout_id or the canonical user:local_date composite.
- * Owns the composite encoding so read sites can't drift from the write side.
+ * SQL fragment matching a mile hype row against a workout row by the canonical
+ * user:local_date composite key. Legacy workout_id-keyed rows were collapsed
+ * onto composites by migration 0012, so this is a plain equality now. Owns the
+ * composite encoding so read sites can't drift from the write side.
  */
 export function mileHypeKeyMatchSql(
   hypeAlias: string,
   workoutAlias: string,
 ): string {
-  return `(${hypeAlias}.context_id = ${workoutAlias}.workout_id
-		OR ${hypeAlias}.context_id = (${workoutAlias}.user_id || ':' || ${workoutAlias}.local_date::text))`;
+  return `${hypeAlias}.context_id = (${workoutAlias}.user_id || ':' || ${workoutAlias}.local_date::text)`;
 }
 
 /**
@@ -181,55 +181,16 @@ export async function canonicalizeMileContext(
 }
 
 /**
- * Of the given canonical `<userId>:<localDate>` mile keys, the ones this
- * sender has already hyped under the LEGACY workout_id form — maps old
- * feed-sent hype rows onto canonical keys for batch is_hyped checks.
- */
-export async function getLegacyHypedMileKeys(
-  senderId: string,
-  compositeKeys: string[],
-): Promise<{ target_id: string; key: string }[]> {
-  if (compositeKeys.length === 0) return [];
-  return db.query<{ target_id: string; key: string }>(
-    `SELECT h.target_id, (w.user_id || ':' || w.local_date::text) AS key
-		FROM hype_log h
-		JOIN workouts w ON w.workout_id = h.context_id
-		WHERE h.sender_id = $1
-			AND h.context_type = 'mile'
-			AND (w.user_id || ':' || w.local_date::text) = ANY($2::text[])`,
-    [senderId, compositeKeys],
-  );
-}
-
-/**
- * Dedupe check for 'mile' contexts that spans BOTH key forms: the canonical
- * `<userId>:<localDate>` composite and legacy rows keyed by any of the target's
- * workout ids on that date.
+ * Dedupe check for 'mile' contexts. Since migration 0012 collapsed legacy
+ * workout_id-keyed rows onto the canonical composite, an exact-key check is
+ * sufficient — kept as its own entry point in case mile keys grow rules again.
  */
 export async function hasHypedMile(
   senderId: string,
   targetId: string,
   contextId: string,
 ): Promise<boolean> {
-  const match = MILE_COMPOSITE_RE.exec(contextId);
-  if (!match) {
-    return hasHypedContext(senderId, targetId, "mile", contextId);
-  }
-  const localDate = match[1];
-  const rows = await db.query<{ exists: boolean }>(
-    `SELECT EXISTS (
-			SELECT 1 FROM hype_log h
-			WHERE h.sender_id = $1 AND h.target_id = $2
-				AND h.context_type = 'mile'
-				AND (h.context_id = $3
-					OR h.context_id IN (
-						SELECT w.workout_id FROM workouts w
-						WHERE w.user_id = $2 AND w.local_date = $4::date
-					))
-		) AS exists`,
-    [senderId, targetId, contextId, localDate],
-  );
-  return rows[0]?.exists === true;
+  return hasHypedContext(senderId, targetId, "mile", contextId);
 }
 
 /**

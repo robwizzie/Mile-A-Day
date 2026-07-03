@@ -259,7 +259,30 @@ export const notificationSettings = pgTable("notification_settings", {
   // feed entries/posts. Explicit consent surface — when off, friends see the
   // cards without the route slide/map.
   shareRouteMaps: boolean("share_route_maps").default(true),
+  // weekly_recap_enabled: Sunday-evening "Your week" recap push + story card.
+  weeklyRecapEnabled: boolean("weekly_recap_enabled").default(true),
 });
+
+// One row per (user, week) the recap push was sent for — the cron runs hourly
+// to catch every timezone's Sunday evening, so this is what makes it fire
+// exactly once per user per week. week_start = the Monday of the recapped week.
+export const weeklyRecapLog = pgTable(
+  "weekly_recap_log",
+  {
+    userId: text("user_id").notNull(),
+    weekStart: date("week_start", { mode: "string" }).notNull(),
+    sentAt: timestamp("sent_at", {
+      withTimezone: true,
+      mode: "string",
+    }).defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.weekStart],
+      name: "weekly_recap_log_pkey",
+    }),
+  ],
+);
 
 export const competitions = pgTable(
   "competitions",

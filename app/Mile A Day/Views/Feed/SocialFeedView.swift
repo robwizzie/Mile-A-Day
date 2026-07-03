@@ -30,6 +30,7 @@ struct SocialFeedView: View {
     @State private var pendingCompose = false
     @State private var showMileHint = false
     @State private var showMemories = false
+    @State private var showWeeklyRecap = false
     @State private var profileUser: BackendUser?
 
     private var currentUserId: String? { UserDefaults.standard.string(forKey: "backendUserId") }
@@ -77,6 +78,11 @@ struct SocialFeedView: View {
 
                     if !memories.isEmpty {
                         MemoriesCardView(memories: memories) { showMemories = true }
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                    }
+
+                    if isWeeklyRecapDay {
+                        weeklyRecapTeaserCard
                             .padding(.horizontal, MADTheme.Spacing.md)
                     }
 
@@ -143,6 +149,9 @@ struct SocialFeedView: View {
         .sheet(isPresented: $showMemories) {
             MemoriesDetailView(memories: memories)
         }
+        .sheet(isPresented: $showWeeklyRecap) {
+            WeeklyRecapView()
+        }
         .sheet(item: $profileUser) { user in
             NavigationStack {
                 UserProfileDetailView(user: user, friendService: FriendService())
@@ -153,6 +162,53 @@ struct SocialFeedView: View {
         } message: {
             Text("Complete your daily mile to post and to see your friends' stories today. Keep going — you've got this! 🏃")
         }
+    }
+
+    // MARK: - Weekly Recap teaser
+
+    /// The recap teaser only surfaces at the week boundary (Sunday/Monday),
+    /// and respects the "Weekly recap" preference toggle.
+    private var isWeeklyRecapDay: Bool {
+        let weekday = Calendar.current.component(.weekday, from: Date())
+        return (weekday == 1 || weekday == 2) && NotificationPreferences.load().weeklyRecapEnabled
+    }
+
+    /// Compact "Your week in miles" card — styled like MemoriesCardView.
+    private var weeklyRecapTeaserCard: some View {
+        Button { showWeeklyRecap = true } label: {
+            HStack(spacing: MADTheme.Spacing.md) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(MADTheme.Colors.redGradient))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Weekly recap")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .tracking(1.2)
+                        .foregroundColor(.white.opacity(0.6))
+                    Text("Your week in miles is ready")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                            .strokeBorder(MADTheme.Colors.madRed.opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

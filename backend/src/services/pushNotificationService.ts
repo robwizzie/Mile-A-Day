@@ -110,7 +110,8 @@ export type NotificationType =
   | "hype_received"
   | "friend_post"
   | "story_reaction"
-  | "daily_reminder";
+  | "daily_reminder"
+  | "weekly_recap";
 
 interface PushPayload {
   title: string;

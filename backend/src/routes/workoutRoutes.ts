@@ -8,6 +8,7 @@ import {
   updateWorkout,
   recalibrateStreak,
   deleteWorkout,
+  getUserRoutesController,
 } from "../controllers/workoutController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
 
@@ -28,6 +29,13 @@ router.delete(
   "/:userId/workout/:workoutId",
   requireSelfAccess("userId"),
   deleteWorkout,
+);
+// Self-only: friends' route visibility is governed by share_route_maps on
+// feed payloads; the raw full-history dump is never exposed to others.
+router.get(
+  "/:userId/routes",
+  requireSelfAccess("userId"),
+  getUserRoutesController,
 );
 router.get("/:userId/streak", getStreak);
 router.get("/:userId/range", getWorkoutRange);

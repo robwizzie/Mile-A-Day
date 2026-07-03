@@ -34,6 +34,11 @@ import { getDailyGoalStatus } from "../services/workoutService.js";
 import { hasUnlimitedActions } from "../services/privilegedUsers.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import { logError } from "../services/errorLogService.js";
+import {
+  signMediaUrl,
+  signMediaUrlsDeep,
+  stripMediaQuery,
+} from "../services/mediaSigningService.js";
 
 // Friend "new post" push notifications stay OFF until the Feed/Stories feature
 // ships in the App Store build. The backend is already live, but the feed UI is
@@ -82,7 +87,7 @@ export async function uploadPostMedia(
       .jpeg({ quality: 82 })
       .toFile(outputPath);
 
-    res.json({ media_url: `${POSTS_MEDIA_PREFIX}${filename}` });
+    res.json({ media_url: signMediaUrl(`${POSTS_MEDIA_PREFIX}${filename}`) });
   } catch (error) {
     res.status(500).json({
       error: "Post media upload failed",
@@ -108,17 +113,21 @@ export async function createPostController(
   } = req.body ?? {};
 
   try {
+    // Clients echo the signed url from the upload/feed response (promote
+    // flow) — store the bare path, signatures are minted per-response.
+    const mediaUrl =
+      typeof media_url === "string" ? stripMediaQuery(media_url) : media_url;
     // Validate media_url points at our own posts upload dir and exists on disk.
     if (
-      typeof media_url !== "string" ||
-      !media_url.startsWith(POSTS_MEDIA_PREFIX) ||
-      media_url.includes("..")
+      typeof mediaUrl !== "string" ||
+      !mediaUrl.startsWith(POSTS_MEDIA_PREFIX) ||
+      mediaUrl.includes("..")
     ) {
       return res
         .status(400)
         .json({ error: "A valid uploaded media_url is required" });
     }
-    const onDisk = path.join(process.cwd(), media_url.replace(/^\//, ""));
+    const onDisk = path.join(process.cwd(), mediaUrl.replace(/^\//, ""));
     if (!fs.existsSync(onDisk)) {
       return res
         .status(400)
@@ -127,7 +136,7 @@ export async function createPostController(
     // Ownership: upload filenames are `<userId>-<ts>-<rand>.jpg`, and media
     // urls are visible to the whole circle — without this check anyone could
     // republish a friend's photo (including story-only photos) as their own.
-    if (!path.basename(media_url).startsWith(`${userId}-`)) {
+    if (!path.basename(mediaUrl).startsWith(`${userId}-`)) {
       return res
         .status(403)
         .json({ error: "media_url must reference your own upload" });
@@ -180,7 +189,7 @@ export async function createPostController(
 
     const post = await createPost({
       userId,
-      mediaUrl: media_url,
+      mediaUrl,
       caption: typeof caption === "string" ? caption.trim() || null : null,
       workoutId,
       localDate: goal.localDate,
@@ -204,7 +213,7 @@ export async function createPostController(
       evaluateSocialBadgesForUser(userId).catch(() => {});
     }
 
-    res.status(201).json(post);
+    res.status(201).json(signMediaUrlsDeep(post));
   } catch (error: any) {
     // One deliberate post per workout — the slot is taken until that post is
     // deleted. Surface as a conflict the client can message, not a 500.
@@ -221,7 +230,7 @@ export async function getStoriesRailController(
   res: Response,
 ) {
   try {
-    res.status(200).json(await getStoriesRail(req.userId!));
+    res.status(200).json(signMediaUrlsDeep(await getStoriesRail(req.userId!)));
   } catch (error: any) {
     console.error("Error fetching stories rail:", error.message);
     logError("api", `stories rail failed: ${error.message}`, {
@@ -239,7 +248,11 @@ export async function getUserStoriesController(
   try {
     res
       .status(200)
-      .json(await getUserActiveStories(req.userId!, req.params.userId));
+      .json(
+        signMediaUrlsDeep(
+          await getUserActiveStories(req.userId!, req.params.userId),
+        ),
+      );
   } catch (error: any) {
     console.error("Error fetching user stories:", error.message);
     res.status(500).json({ error: "Error fetching stories" });
@@ -321,7 +334,7 @@ export async function getPostMemoriesController(
   try {
     const goal = await getDailyGoalStatus(req.userId!);
     const items = await getOwnPostMemories(req.userId!, goal.localDate);
-    res.json({ items });
+    res.json({ items: signMediaUrlsDeep(items) });
   } catch (error: any) {
     console.error("Error getting post memories:", error.message);
     res.status(500).json({ error: "Error getting post memories" });
@@ -345,7 +358,9 @@ export async function getFeedController(
     const last = items[items.length - 1];
     const nextBefore =
       items.length === limit ? (last.cursor ?? last.created_at) : null;
-    res.status(200).json({ items, next_before: nextBefore });
+    res
+      .status(200)
+      .json({ items: signMediaUrlsDeep(items), next_before: nextBefore });
   } catch (error: any) {
     console.error("Error fetching feed:", error.message);
     res.status(500).json({ error: "Error fetching feed" });
@@ -368,7 +383,9 @@ export async function getUnifiedFeedController(
     const last = items[items.length - 1];
     const nextBefore =
       items.length === limit ? (last.cursor ?? last.sort_ts) : null;
-    res.status(200).json({ items, next_before: nextBefore });
+    res
+      .status(200)
+      .json({ items: signMediaUrlsDeep(items), next_before: nextBefore });
   } catch (error: any) {
     console.error("Error fetching unified feed:", error.message);
     // Surface in the error dashboard — the app swallows feed failures
@@ -402,7 +419,9 @@ export async function getUserPostsController(
     const last = items[items.length - 1];
     const nextBefore =
       items.length === limit ? (last.cursor ?? last.created_at) : null;
-    res.status(200).json({ items, next_before: nextBefore });
+    res
+      .status(200)
+      .json({ items: signMediaUrlsDeep(items), next_before: nextBefore });
   } catch (error: any) {
     console.error("Error fetching user posts:", error.message);
     res.status(500).json({ error: "Error fetching posts" });
