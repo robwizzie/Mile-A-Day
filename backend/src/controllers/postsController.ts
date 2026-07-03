@@ -33,6 +33,7 @@ import {
 import { getDailyGoalStatus } from "../services/workoutService.js";
 import { hasUnlimitedActions } from "../services/privilegedUsers.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
+import { logError } from "../services/errorLogService.js";
 
 // Friend "new post" push notifications stay OFF until the Feed/Stories feature
 // ships in the App Store build. The backend is already live, but the feed UI is
@@ -223,6 +224,10 @@ export async function getStoriesRailController(
     res.status(200).json(await getStoriesRail(req.userId!));
   } catch (error: any) {
     console.error("Error fetching stories rail:", error.message);
+    logError("api", `stories rail failed: ${error.message}`, {
+      userId: req.userId ?? null,
+      context: { path: "/posts/stories" },
+    });
     res.status(500).json({ error: "Error fetching stories" });
   }
 }
@@ -366,6 +371,12 @@ export async function getUnifiedFeedController(
     res.status(200).json({ items, next_before: nextBefore });
   } catch (error: any) {
     console.error("Error fetching unified feed:", error.message);
+    // Surface in the error dashboard — the app swallows feed failures
+    // silently ("No activity yet"), so this must never be invisible.
+    logError("api", `unified feed failed: ${error.message}`, {
+      userId: req.userId ?? null,
+      context: { path: "/posts/feed/unified" },
+    });
     res.status(500).json({ error: "Error fetching feed" });
   }
 }
