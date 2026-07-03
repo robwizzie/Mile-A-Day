@@ -39,6 +39,7 @@ import {
   runPendingMigrations,
   getMigrationReport,
 } from "./db/runMigrations.js";
+import { getUnifiedFeed, getStoriesRail } from "./services/postService.js";
 import { webcrypto } from "node:crypto";
 
 (globalThis as any).crypto ??= webcrypto;
@@ -99,6 +100,27 @@ app.get("/status/schema", async (req, res) => {
         `SELECT EXISTS (SELECT 1 FROM "drizzle"."__drizzle_migrations") AS ok`,
       ),
     },
+    // Execute the REAL feed queries as the most recently active user and
+    // report only row counts (or the SQL error text) — proves end-to-end
+    // whether the feed works in production without exposing any content.
+    feed_probe: await (async () => {
+      try {
+        const db = PostgresService.getInstance();
+        const rows = await db.query<{ user_id: string }>(
+          `SELECT user_id FROM workouts WHERE deleted_at IS NULL
+					ORDER BY device_end_date DESC LIMIT 1`,
+        );
+        const uid = rows[0]?.user_id;
+        if (!uid) return "no workouts in db";
+        const [feed, rail] = await Promise.all([
+          getUnifiedFeed(uid, 5, null),
+          getStoriesRail(uid),
+        ]);
+        return { unified_feed_rows: feed.length, story_groups: rail.length };
+      } catch (e: any) {
+        return `error: ${e?.message ?? e}`;
+      }
+    })(),
   });
 });
 

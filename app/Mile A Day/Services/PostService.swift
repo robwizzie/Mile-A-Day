@@ -41,6 +41,9 @@ struct PostItem: Codable, Identifiable {
     var workout_type: String?
     /// Simplified GPS trace [[lat, lng], ...] when synced + shared.
     var route: [[Double]]?
+    /// The run's ACTIVE story photo (profile posts responses) — the real
+    /// picture leads wherever it exists; the workout card is secondary.
+    var story_photo_url: String?
     let is_self: Bool
     var is_hyped: Bool
     var hype_count: Int?
@@ -58,6 +61,12 @@ struct PostItem: Codable, Identifiable {
     }
 
     var mediaURL: URL? { ProfileImageService.fullImageURL(for: media_url) }
+
+    /// The run's story photo when present and distinct from the post media.
+    var storyPhotoURL: URL? {
+        guard let story_photo_url, story_photo_url != media_url else { return nil }
+        return ProfileImageService.fullImageURL(for: story_photo_url)
+    }
 
     /// Short "2h", "5m", "now" relative time from created_at.
     var relativeTime: String { RelativeTime.short(from: created_at) }
@@ -172,7 +181,8 @@ struct FeedEntry: Codable, Identifiable {
             workout_id: nil, stats_snapshot: stats_snapshot, local_date: nil,
             share_to_feed: true, share_to_story: nil, story_expires_at: nil,
             created_at: sort_ts, is_auto: is_auto, workout_type: workout_type,
-            route: route, is_self: is_self, is_hyped: is_hyped,
+            route: route, story_photo_url: story_photo_url,
+            is_self: is_self, is_hyped: is_hyped,
             hype_count: hype_count, is_viewed: nil
         )
     }
