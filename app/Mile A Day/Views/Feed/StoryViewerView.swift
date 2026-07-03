@@ -140,34 +140,43 @@ struct StoryViewerView: View {
     // MARK: - Pieces
 
     private func storyImage(_ post: PostItem) -> some View {
-        AsyncImage(url: post.mediaURL) { phase in
-            switch phase {
-            case .success(let image):
-                // The media is composed at 4:5 with the stats sticker baked in,
-                // so it must be shown WHOLE. Fit it (never fill-crop — that cut
-                // off the sticker/edges on tall screens) over a blurred,
-                // edge-to-edge copy that fills the letterbox space.
-                ZStack {
-                    image.resizable()
-                        .scaledToFill()
-                        .blur(radius: 40, opaque: true)
-                        .opacity(0.6)
-                    image.resizable()
-                        .scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                }
-                .onAppear { imageReady = true }
-            case .failure:
-                Image(systemName: "photo").font(.largeTitle).foregroundColor(.white.opacity(0.3))
+        // The media is composed at 4:5 with the stats sticker baked in, so it
+        // must be shown WHOLE — fit within the screen (never fill-crop; that
+        // cut off the sticker/edges on tall phones) over a blurred, dimmed
+        // edge-to-edge copy that fills the letterbox space. Both layers are
+        // sized EXPLICITLY from the screen geometry so no proposal quirk can
+        // ever regress this into a crop.
+        GeometryReader { geo in
+            AsyncImage(url: post.mediaURL) { phase in
+                switch phase {
+                case .success(let image):
+                    ZStack {
+                        image.resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
+                            .blur(radius: 40, opaque: true)
+                            .opacity(0.55)
+                        image.resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .frame(width: geo.size.width, height: geo.size.height)
+                    }
                     .onAppear { imageReady = true }
-            default:
-                ProgressView().tint(.white)
+                case .failure:
+                    Image(systemName: "photo")
+                        .font(.largeTitle)
+                        .foregroundColor(.white.opacity(0.3))
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .onAppear { imageReady = true }
+                default:
+                    ProgressView().tint(.white)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                }
             }
+            // Re-identify per story so the readiness onAppear refires every step.
+            .id(post.post_id)
         }
-        // Re-identify per story so the readiness onAppear refires every step.
-        .id(post.post_id)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipped()
         .ignoresSafeArea()
     }
 
