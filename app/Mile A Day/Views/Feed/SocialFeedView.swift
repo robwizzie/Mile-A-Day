@@ -31,6 +31,7 @@ struct SocialFeedView: View {
     /// sheet-over-sheet race that can drop the composer entirely).
     @State private var pendingCompose = false
     @State private var showMileHint = false
+    @State private var showAlreadySharedHint = false
     @State private var showMemories = false
     @State private var showWeeklyRecap = false
     @State private var profileUser: BackendUser?
@@ -38,6 +39,25 @@ struct SocialFeedView: View {
     private var currentUserId: String? { UserDefaults.standard.string(forKey: "backendUserId") }
     /// Completing the daily mile unlocks posting AND viewing friends' stories.
     private var mileDone: Bool { healthManager.todaysDistance >= userManager.currentUser.goalMiles }
+
+    /// True once the user has already made a DELIBERATE share for today's mile —
+    /// a photo post on the feed or an active story of their own. One share per
+    /// walk/run is the reward, so the compose affordances hide until they delete
+    /// it (feed/story refreshes it away) or a new day's mile comes around. The
+    /// auto route/stats card doesn't count — a photo can still replace it.
+    private var alreadySharedWorkout: Bool {
+        guard let uid = currentUserId else { return false }
+        let hasStoryToday = stories.contains { $0.user_id == uid && Self.isToday($0.latest_at) }
+        let hasFeedPostToday = feed.contains {
+            $0.is_self && $0.isPost && $0.is_auto != true && Self.isToday($0.sort_ts)
+        }
+        return hasStoryToday || hasFeedPostToday
+    }
+
+    private static func isToday(_ iso: String) -> Bool {
+        guard let d = RelativeTime.date(from: iso) else { return false }
+        return Calendar.current.isDateInToday(d)
+    }
 
     private var statsInput: RunStatsInput {
         let user = userManager.currentUser
@@ -72,6 +92,7 @@ struct SocialFeedView: View {
                         myName: userManager.currentUser.username ?? userManager.currentUser.name,
                         myImageURL: userManager.currentUser.profileImageUrl,
                         canPost: mileDone,
+                        hasSharedWorkout: alreadySharedWorkout,
                         canViewStories: mileDone,
                         onTapAdd: handleCompose,
                         onTapGroup: { viewerGroup = $0 },
@@ -170,6 +191,11 @@ struct SocialFeedView: View {
         } message: {
             Text("Complete your daily mile to post and to see your friends' stories today. Keep going — you've got this! 🏃")
         }
+        .alert("You've already shared this one", isPresented: $showAlreadySharedHint) {
+            Button("Got it", role: .cancel) {}
+        } message: {
+            Text("One post per walk or run — that's the reward. Delete your current post or story if you'd rather share a different shot.")
+        }
     }
 
     // MARK: - Weekly Recap teaser
@@ -257,19 +283,25 @@ struct SocialFeedView: View {
         }
     }
 
+    /// The compose FAB. Hidden entirely once the mile is done AND already
+    /// shared — one post per walk/run, so there's nothing to add. Still shows
+    /// the lock state before the mile is finished.
+    @ViewBuilder
     private var composeButton: some View {
-        Button(action: handleCompose) {
-            Image(systemName: mileDone ? "plus" : "lock.fill")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(.white)
-                .frame(width: 56, height: 56)
-                .background(
-                    Circle().fill(mileDone ? AnyShapeStyle(MADTheme.Colors.redGradient) : AnyShapeStyle(Color.gray.opacity(0.6)))
-                )
-                .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+        if !(mileDone && alreadySharedWorkout) {
+            Button(action: handleCompose) {
+                Image(systemName: mileDone ? "plus" : "lock.fill")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 56, height: 56)
+                    .background(
+                        Circle().fill(mileDone ? AnyShapeStyle(MADTheme.Colors.redGradient) : AnyShapeStyle(Color.gray.opacity(0.6)))
+                    )
+                    .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+            }
+            .padding(.trailing, MADTheme.Spacing.lg)
+            .padding(.bottom, MADTheme.Spacing.lg)
         }
-        .padding(.trailing, MADTheme.Spacing.lg)
-        .padding(.bottom, MADTheme.Spacing.lg)
     }
 
     private var emptyState: some View {
@@ -293,6 +325,9 @@ struct SocialFeedView: View {
 
     private func handleCompose() {
         guard mileDone else { showMileHint = true; return }
+        // Reachable from the rail's own-story cell even after the FAB hides —
+        // enforce one-share-per-workout at the entry point too.
+        guard !alreadySharedWorkout else { showAlreadySharedHint = true; return }
         if termsAccepted == true {
             presentingComposer = true
         } else {

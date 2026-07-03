@@ -58,6 +58,10 @@ export interface PostRow {
   // The run's active story photo (getUserPosts only) — lets profile surfaces
   // lead with the real picture like the feed does.
   story_photo_url?: string | null;
+  // getUserActiveStories only: does this story's workout ALREADY have a live
+  // feed post? Drives hiding the story viewer's "Add to feed" button so it
+  // isn't offered (then 409'd) when the run is already on the feed.
+  workout_on_feed?: boolean;
 }
 
 export interface StoryGroup {
@@ -323,7 +327,14 @@ export async function getUserActiveStories(
 		SELECT ${POST_SELECT},
 			EXISTS (
 				SELECT 1 FROM story_views sv WHERE sv.post_id = p.post_id AND sv.viewer_id = $1
-			) AS is_viewed
+			) AS is_viewed,
+			EXISTS (
+				SELECT 1 FROM posts pf
+				WHERE pf.workout_id = p.workout_id
+					AND pf.workout_id IS NOT NULL
+					AND pf.deleted_at IS NULL
+					AND pf.share_to_feed
+			) AS workout_on_feed
 		FROM posts p
 		JOIN circle c ON c.uid = p.user_id
 		JOIN users u ON u.user_id = p.user_id

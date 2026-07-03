@@ -112,6 +112,20 @@ struct PostCardView: View {
         return [post.mediaURL]
     }
 
+    /// Whether to append a branded workout-stats card as the run's second
+    /// slide. Only when there's no route map to show instead, the media isn't
+    /// already a stats card (auto post), and we actually have stats — so every
+    /// photo post reads "photo → the run", not a lone photo.
+    private var workoutCardStats: PostStats? {
+        guard post.is_auto != true,
+              routeSlideCoordinates == nil,
+              storyPhotoURL == nil,
+              let stats = post.stats_snapshot,
+              (stats.distance ?? 0) > 0
+        else { return nil }
+        return stats
+    }
+
     /// Double-tap on any media slide: clap burst + hype (friends' posts only,
     /// once — a re-double-tap replays the burst without double-counting).
     private func doubleTapHype() {
@@ -130,8 +144,9 @@ struct PostCardView: View {
     private var media: some View {
         let slides = photoURLs
         let coords = routeSlideCoordinates
+        let cardStats = workoutCardStats
         Group {
-            if slides.count > 1 || coords != nil {
+            if slides.count > 1 || coords != nil || cardStats != nil {
                 TabView {
                     ForEach(Array(slides.enumerated()), id: \.offset) { index, url in
                         // When the story photo leads, badge the trailing auto
@@ -144,6 +159,8 @@ struct PostCardView: View {
                     }
                     if let coords {
                         routeSlide(coords)
+                    } else if let cardStats {
+                        workoutCardSlide(cardStats)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .always))
@@ -159,6 +176,16 @@ struct PostCardView: View {
             }
         }
         .overlay(HypeBurstView(trigger: hypeBurst))
+    }
+
+    /// The run itself as a branded stats card — the second slide when a photo
+    /// post has no GPS route to show. Double-tap hypes, matching the photo.
+    private func workoutCardSlide(_ stats: PostStats) -> some View {
+        FeedWorkoutCard(stats: stats, workoutType: post.workout_type)
+            .frame(maxWidth: .infinity)
+            .aspectRatio(4.0 / 5.0, contentMode: .fit)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { if !post.is_self { doubleTapHype() } }
     }
 
     private func routeSlide(_ coords: [CLLocationCoordinate2D]) -> some View {

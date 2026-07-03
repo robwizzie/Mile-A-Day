@@ -48,6 +48,9 @@ struct PostItem: Codable, Identifiable {
     var is_hyped: Bool
     var hype_count: Int?
     var is_viewed: Bool?
+    /// Story rows only: does this run already have a live feed post? Hides the
+    /// story viewer's "Add to feed" when the workout is already on the feed.
+    var workout_on_feed: Bool?
 
     var id: String { post_id }
 
@@ -183,7 +186,7 @@ struct FeedEntry: Codable, Identifiable {
             created_at: sort_ts, is_auto: is_auto, workout_type: workout_type,
             route: route, story_photo_url: story_photo_url,
             is_self: is_self, is_hyped: is_hyped,
-            hype_count: hype_count, is_viewed: nil
+            hype_count: hype_count, is_viewed: nil, workout_on_feed: nil
         )
     }
 }

@@ -325,9 +325,14 @@ struct StoryViewerView: View {
     }
 
     /// A story photo can be promoted into the permanent feed — it replaces the
-    /// run's auto route/stats card in place (upsert by workout).
+    /// run's auto route/stats card in place (upsert by workout). Hidden when the
+    /// story is itself on the feed OR its workout already has a separate feed
+    /// post (server-computed `workout_on_feed`) — otherwise "Add to feed" would
+    /// be offered only to 409 on tap.
     private func canPromote(_ post: PostItem) -> Bool {
-        post.share_to_feed != true && !promotedIds.contains(post.post_id)
+        post.share_to_feed != true
+            && post.workout_on_feed != true
+            && !promotedIds.contains(post.post_id)
     }
 
     private func addToFeedPill(_ post: PostItem) -> some View {

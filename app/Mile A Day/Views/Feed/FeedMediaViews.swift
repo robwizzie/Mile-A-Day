@@ -239,6 +239,137 @@ private struct ZoomGestureHost: UIViewRepresentable {
     }
 }
 
+// MARK: - Workout card slide
+
+/// The run/walk as a branded 4:5 card, rendered live from a post's stats —
+/// the "workout" second slide of a photo post when the run has no GPS route to
+/// show instead. Same visual language as the baked RunStatsCardView, but
+/// responsive so it fills the feed slide on any screen size.
+struct FeedWorkoutCard: View {
+    let stats: PostStats
+    let workoutType: String?
+
+    private var accent: Color { ActivityCardView.color(workoutType) }
+    private var icon: String { ActivityCardView.icon(workoutType) }
+    private var verb: String { ActivityCardView.verb(workoutType) }
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.09, green: 0.09, blue: 0.12), .black],
+                startPoint: .top, endPoint: .bottom
+            )
+            RadialGradient(colors: [accent.opacity(0.4), .clear],
+                           center: .init(x: 0.5, y: 0.32), startRadius: 8, endRadius: 220)
+
+            VStack(spacing: 0) {
+                HStack {
+                    HStack(spacing: 5) {
+                        Image(systemName: icon).font(.system(size: 12, weight: .bold))
+                        Text(verb.uppercased())
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .tracking(1.4)
+                    }
+                    .foregroundColor(accent)
+                    .padding(.horizontal, 11).padding(.vertical, 6)
+                    .background(Capsule().fill(accent.opacity(0.15)))
+                    Spacer()
+                    if let date = stats.date, !date.isEmpty {
+                        Text(date)
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.55))
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                Text(String(format: "%.2f", stats.distance ?? 0))
+                    .font(.system(size: 76, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+                    .shadow(color: .black.opacity(0.4), radius: 6, y: 3)
+                Text("MILES")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .tracking(7)
+                    .foregroundColor(.white.opacity(0.6))
+
+                Spacer(minLength: 8)
+
+                let tiles = statTiles
+                if !tiles.isEmpty {
+                    VStack(spacing: 8) {
+                        ForEach(Array(stride(from: 0, to: tiles.count, by: 2)), id: \.self) { row in
+                            HStack(spacing: 8) {
+                                tileView(tiles[row])
+                                if row + 1 < tiles.count { tileView(tiles[row + 1]) }
+                            }
+                        }
+                    }
+                }
+
+                HStack(spacing: 5) {
+                    Image(systemName: "figure.run.circle.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(accent)
+                    Text("Mile A Day")
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white.opacity(0.85))
+                }
+                .padding(.top, 14)
+            }
+            .padding(18)
+        }
+        .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+    }
+
+    private struct Tile { let icon: String; let label: String; let value: String; var tint: Color = .white }
+
+    private var statTiles: [Tile] {
+        var out: [Tile] = []
+        if let p = stats.pace, p > 0 {
+            out.append(Tile(icon: "speedometer", label: "PACE", value: "\(RunStatsStickerView.paceText(p)) /mi"))
+        }
+        if let d = stats.duration, d > 0 {
+            out.append(Tile(icon: "clock.fill", label: "TIME", value: RunStatsStickerView.durationText(d)))
+        }
+        if let c = stats.calories, c > 0 {
+            out.append(Tile(icon: "bolt.fill", label: "CALORIES", value: "\(Int(c.rounded()))"))
+        } else if let s = stats.steps, s > 0 {
+            out.append(Tile(icon: "shoeprints.fill", label: "STEPS", value: s.formatted(.number.grouping(.automatic))))
+        }
+        if let s = stats.streak, s > 0 {
+            out.append(Tile(icon: "flame.fill", label: "STREAK", value: "\(s) days", tint: .orange))
+        }
+        return out
+    }
+
+    private func tileView(_ tile: Tile) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: tile.icon)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(tile.tint == .white ? accent : tile.tint)
+                Text(tile.label)
+                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .tracking(1)
+                    .foregroundColor(.white.opacity(0.5))
+            }
+            Text(tile.value)
+                .font(.system(size: 18, weight: .black, design: .rounded))
+                .monospacedDigit()
+                .foregroundColor(tile.tint)
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.white.opacity(0.07)))
+    }
+}
+
 // MARK: - Double-tap hype burst
 
 /// Instagram's big-heart moment, in Mile A Day's language: a huge clap bursts
