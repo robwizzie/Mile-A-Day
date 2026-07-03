@@ -35,6 +35,7 @@ import { startPendingSendCron } from "./cron/pendingSendCron.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
 import { PostgresService } from "./services/DbService.js";
+import { runPendingMigrations } from "./db/runMigrations.js";
 import { webcrypto } from "node:crypto";
 
 (globalThis as any).crypto ??= webcrypto;
@@ -149,8 +150,31 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
 });
 
 const server = http.createServer(app);
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on port ${PORT}`);
+// Apply any pending schema migrations BEFORE accepting traffic. Deploys are
+// git-driven with no shell access to run `npm run db:migrate` by hand, so the
+// server owns its own migrations. Failure is logged (and error-monitored),
+// not fatal — endpoints that don't touch new columns keep serving.
+runPendingMigrations()
+  .then((ok) => {
+    if (!ok) {
+      logError(
+        "api",
+        "Startup migrations failed — schema may be behind the code",
+        {
+          userId: null,
+          context: { source: "runPendingMigrations" },
+        },
+      );
+    }
+  })
+  .finally(() => {
+    server.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on port ${PORT}`);
+      startCrons();
+    });
+  });
+
+function startCrons() {
   startCompetitionCron();
   startNotificationCron();
   startSilentSyncCron();
@@ -160,4 +184,4 @@ server.listen(PORT, "0.0.0.0", () => {
   seedExtraBadges();
   // Idempotently ensure the v2 daily challenges (5K/10K/social) exist.
   seedExtraChallenges();
-});
+}
