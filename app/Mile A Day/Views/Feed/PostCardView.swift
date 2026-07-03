@@ -1,12 +1,12 @@
 import SwiftUI
 import CoreLocation
 
-/// A single post in the social feed: author header, photo (overlay already
-/// baked in), caption, hype + social-proof tally, and a report/block/delete menu.
-/// When the run also has a story photo, a corner thumbnail flips the card
-/// between the route/stats image and the photo. When the run has GPS route
-/// data, the photo becomes a swipeable photo → route-map carousel, and tapping
-/// the photo opens a pinch-to-zoom lightbox.
+/// A single post in the social feed: author header, media, caption, hype +
+/// social-proof tally, and a report/block/delete menu. The media is a single
+/// photo, or a swipeable full-size carousel when the run has more to show —
+/// always the real PHOTO first, then the route/stats card, then the route map
+/// (each slide full 4:5, with page dots). Tapping a photo slide opens the
+/// pinch-to-zoom lightbox.
 struct PostCardView: View {
     let post: PostItem
     /// The run's story-only photo, when different from the post media.
@@ -19,8 +19,12 @@ struct PostCardView: View {
     /// Tap the author's avatar or name to open their profile.
     var onTapAuthor: (() -> Void)? = nil
 
-    @State private var showAltPhoto = false
-    @State private var showLightbox = false
+    /// The tapped slide's image, presented in the zoom lightbox.
+    private struct LightboxItem: Identifiable {
+        let url: URL
+        var id: String { url.absoluteString }
+    }
+    @State private var lightboxItem: LightboxItem?
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
@@ -42,13 +46,8 @@ struct PostCardView: View {
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
                 .fill(Color.white.opacity(0.04))
         )
-        .fullScreenCover(isPresented: $showLightbox) {
-            PhotoLightboxView(url: heroURL)
-        }
-        // If the story photo disappears (author deleted it) while the card was
-        // flipped to it, flip back — otherwise heroURL is nil forever.
-        .onChange(of: storyPhotoURL) { _, newValue in
-            if newValue == nil { showAltPhoto = false }
+        .fullScreenCover(item: $lightboxItem) { item in
+            PhotoLightboxView(url: item.url)
         }
     }
 
@@ -99,13 +98,6 @@ struct PostCardView: View {
         }
     }
 
-    private var heroURL: URL? {
-        showAltPhoto ? storyPhotoURL : post.mediaURL
-    }
-    private var thumbURL: URL? {
-        showAltPhoto ? post.mediaURL : storyPhotoURL
-    }
-
     /// Route slide coordinates — hidden for auto posts, whose media already IS
     /// the rendered route/stats card (a second identical slide would be noise).
     private var routeSlideCoordinates: [CLLocationCoordinate2D]? {
@@ -113,20 +105,39 @@ struct PostCardView: View {
         return post.routeCoordinates
     }
 
-    /// Photo, or a photo → route-map carousel when the run has a GPS path.
+    /// Image slides, real moment first: when the run has a story photo it
+    /// leads, and the post media (photo or route/stats card) becomes the
+    /// second slide — never a cramped corner thumbnail.
+    private var photoURLs: [URL?] {
+        if let storyPhotoURL {
+            return [storyPhotoURL, post.mediaURL]
+        }
+        return [post.mediaURL]
+    }
+
+    /// A single photo, or a full-size swipeable carousel:
+    /// photo → route/stats card → route map.
     @ViewBuilder
     private var media: some View {
-        if let coords = routeSlideCoordinates {
+        let slides = photoURLs
+        let coords = routeSlideCoordinates
+        if slides.count > 1 || coords != nil {
             TabView {
-                photo
-                routeSlide(coords)
+                ForEach(Array(slides.enumerated()), id: \.offset) { index, url in
+                    // When the story photo leads, badge the trailing auto
+                    // route/stats card so the swipe reads as "photo → stats".
+                    photoSlide(url, badge: index > 0 && post.is_auto == true ? "Stats" : nil)
+                }
+                if let coords {
+                    routeSlide(coords)
+                }
             }
             .tabViewStyle(.page(indexDisplayMode: .always))
             .indexViewStyle(.page(backgroundDisplayMode: .interactive))
             .frame(maxWidth: .infinity)
             .aspectRatio(4.0 / 5.0, contentMode: .fit)
         } else {
-            photo
+            photoSlide(post.mediaURL)
         }
     }
 
@@ -139,50 +150,38 @@ struct PostCardView: View {
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
         .overlay(alignment: .topLeading) {
-            HStack(spacing: 5) {
-                Image(systemName: "map.fill")
-                    .font(.system(size: 11, weight: .bold))
-                Text("Route")
-                    .font(.system(size: 12, weight: .bold, design: .rounded))
-            }
-            .foregroundColor(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(Color.black.opacity(0.55)))
-            .padding(10)
+            slideBadge("Route", icon: "map.fill")
         }
     }
 
-    private var photo: some View {
-        cardImage(heroURL)
+    private func photoSlide(_ url: URL?, badge: String? = nil) -> some View {
+        cardImage(url)
             .frame(maxWidth: .infinity)
             .aspectRatio(4.0 / 5.0, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-            .onTapGesture { showLightbox = true }
-            .overlay(alignment: .bottomTrailing) {
-                // Corner thumbnail flips between the route/stats card and the
-                // run's story photo (BeReal-style).
-                if storyPhotoURL != nil {
-                    Button {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                            showAltPhoto.toggle()
-                        }
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    } label: {
-                        cardImage(thumbURL)
-                            .frame(width: 64, height: 80)
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(Color.white.opacity(0.9), lineWidth: 1.5)
-                            )
-                            .shadow(color: .black.opacity(0.5), radius: 6, y: 3)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(10)
+            .onTapGesture {
+                if let url { lightboxItem = LightboxItem(url: url) }
+            }
+            .overlay(alignment: .topLeading) {
+                if let badge {
+                    slideBadge(badge, icon: "chart.bar.fill")
                 }
             }
+    }
+
+    private func slideBadge(_ text: String, icon: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .bold))
+            Text(text)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(Color.black.opacity(0.55)))
+        .padding(10)
     }
 
     @ViewBuilder
