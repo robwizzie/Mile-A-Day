@@ -57,6 +57,13 @@ struct WorkoutTrackingView: View {
     @State private var workoutSession: HKWorkoutSession?
     @State private var workoutBuilder: HKWorkoutBuilder?
     @State private var workoutActivity: Activity<WorkoutActivityAttributes>?
+    // Mid-run photo capture: snap now, decide at the end of the run whether
+    // it becomes the post. Shots are stashed in MidRunPhotoStash and offered
+    // by the post-run photo prompt.
+    @State private var showMidRunCamera = false
+    @State private var midRunImage: UIImage?
+    @State private var midRunSnapCount = 0
+    @State private var showSnapSavedToast = false
 
     // Workout distance only (starts at 0)
     private var currentDistance: Double {
@@ -249,6 +256,14 @@ struct WorkoutTrackingView: View {
                         .padding(.vertical, 12)
                     }
                     Spacer()
+                    // Mid-run snap: see something worth keeping, capture it in
+                    // one tap, keep moving — the end-of-run prompt asks whether
+                    // it becomes the post. Pinned in the top bar so it never
+                    // crowds the metrics or the Stop button.
+                    if CameraPicker.isAvailable && !isStopping {
+                        midRunCameraButton
+                            .padding(.trailing, 20)
+                    }
                 }
                 .padding(.top, 16)
 
@@ -291,6 +306,81 @@ struct WorkoutTrackingView: View {
         .opacity(showCompletion || showPreviousProgress ? 0 : 1)
         .overlay(previousProgressOverlay)
         .overlay(goalCompletionOverlay)
+        .overlay(alignment: .top) { snapSavedToast }
+    }
+
+    // MARK: - Mid-Run Photo Capture
+
+    private var midRunCameraButton: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showMidRunCamera = true
+        } label: {
+            Image(systemName: "camera.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 44, height: 44)
+                .background(
+                    Circle()
+                        .fill(Color.white.opacity(0.18))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
+                )
+                .overlay(alignment: .topTrailing) {
+                    if midRunSnapCount > 0 {
+                        Text("\(midRunSnapCount)")
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundColor(.white)
+                            .frame(width: 18, height: 18)
+                            .background(Circle().fill(Color.orange))
+                            .offset(x: 4, y: -4)
+                    }
+                }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .fullScreenCover(isPresented: $showMidRunCamera) {
+            CameraPicker(image: $midRunImage)
+                .ignoresSafeArea()
+        }
+        .onChange(of: midRunImage) { _, newImage in
+            guard let image = newImage else { return }
+            midRunImage = nil
+            guard MidRunPhotoStash.add(image) else { return }
+            midRunSnapCount = MidRunPhotoStash.count
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                showSnapSavedToast = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                withAnimation(.easeOut(duration: 0.25)) { showSnapSavedToast = false }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var snapSavedToast: some View {
+        if showSnapSavedToast {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.green)
+                Text(midRunSnapCount >= MidRunPhotoStash.maxPhotos
+                     ? "Saved — that's the max, oldest gets replaced"
+                     : "Saved for your post")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.75))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+            )
+            .padding(.top, 72)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .allowsHitTesting(false)
+        }
     }
 
     /// Vertical spacing between the metric blocks, tightened on shorter screens.
@@ -647,6 +737,10 @@ struct WorkoutTrackingView: View {
             showCountdown = false
             isTracking = true
 
+            // Restore the snap-count badge — mid-run photos survive an app
+            // relaunch alongside the workout itself.
+            midRunSnapCount = MidRunPhotoStash.count
+
             // Resume tracking with the saved distance as the starting point.
             // For pedometer: new pedometer readings will ADD to saved.currentDistance.
             // For GPS: new GPS deltas will add to saved.currentDistance.
@@ -731,6 +825,12 @@ struct WorkoutTrackingView: View {
         }
 
         workoutStartDate = Date()
+
+        // Fresh session: drop any mid-run snaps left over from a previous
+        // workout (crash, force-quit) so an old photo can't hijack this run's
+        // post-run prompt.
+        MidRunPhotoStash.clear()
+        midRunSnapCount = 0
 
         // Immediately persist initial workout state
         let initialState = InProgressWorkoutState(

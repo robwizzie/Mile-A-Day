@@ -5,6 +5,10 @@ import SwiftUI
 /// a photo publishes it with the photo; skipping publishes the route map (or a
 /// stats card) via `RunPostService`. Friends get one merged notification ~10 min
 /// later (handled server-side), so there's a window to add a photo.
+///
+/// If the user snapped photos MID-run (camera button on the tracking screen),
+/// those lead here: pick one, take a fresh shot instead, or skip. The stash is
+/// cleared once this prompt resolves, whichever path is taken.
 struct PostRunPhotoPromptView: View {
     let workoutId: String
     let workoutType: String
@@ -13,6 +17,10 @@ struct PostRunPhotoPromptView: View {
     @State private var showComposer = false
     @State private var appeared = false
     @State private var didAct = false
+    /// Photos captured during the run via the tracking screen's camera button.
+    @State private var midRunSnaps: [UIImage] = []
+    /// The mid-run snap chosen for the composer; nil = fresh camera capture.
+    @State private var selectedSnap: UIImage?
 
     private var isWalk: Bool { workoutType == "walking" }
     private var accent: Color { isWalk ? .blue : MADTheme.Colors.madRed }
@@ -26,23 +34,18 @@ struct PostRunPhotoPromptView: View {
             VStack(spacing: MADTheme.Spacing.lg) {
                 Spacer()
 
-                ZStack {
-                    Circle().fill(accent.opacity(0.18)).frame(width: 150, height: 150)
-                    Circle().strokeBorder(accent.opacity(0.4), lineWidth: 1).frame(width: 150, height: 150)
-                    Image(systemName: "camera.fill")
-                        .font(.system(size: 54, weight: .semibold))
-                        .foregroundStyle(LinearGradient(colors: [.white, accent],
-                                                        startPoint: .top, endPoint: .bottom))
-                        .shadow(color: accent.opacity(0.5), radius: 16)
+                if midRunSnaps.isEmpty {
+                    cameraHero
+                } else {
+                    midRunSnapStrip
                 }
-                .scaleEffect(appeared ? 1 : 0.6)
-                .opacity(appeared ? 1 : 0)
 
                 VStack(spacing: 8) {
-                    Text(isWalk ? "Capture your walk" : "Capture your run")
+                    Text(headline)
                         .font(.system(size: 26, weight: .black, design: .rounded))
                         .foregroundColor(.white)
-                    Text("Snap a photo for your story — it disappears in 24 hours. Your run's route and stats post to the feed either way.")
+                        .multilineTextAlignment(.center)
+                    Text(subheadline)
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.6))
                         .multilineTextAlignment(.center)
@@ -53,10 +56,13 @@ struct PostRunPhotoPromptView: View {
                 Spacer()
 
                 VStack(spacing: MADTheme.Spacing.sm) {
-                    Button { showComposer = true } label: {
+                    Button {
+                        selectedSnap = nil
+                        showComposer = true
+                    } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "camera.fill")
-                            Text("Take a photo")
+                            Text(midRunSnaps.isEmpty ? "Take a photo" : "Take a new photo")
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -73,26 +79,129 @@ struct PostRunPhotoPromptView: View {
                 .padding(.bottom, MADTheme.Spacing.xl)
             }
         }
-        .onAppear { withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { appeared = true } }
+        .onAppear {
+            midRunSnaps = MidRunPhotoStash.loadAll()
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { appeared = true }
+        }
         .fullScreenCover(isPresented: $showComposer) {
             PostComposerView(
                 stats: RunPostService.todayStats(workoutId: workoutId),
                 destination: .story,
-                autoOpenCamera: true
+                // A chosen mid-run snap goes straight onto the canvas; only a
+                // fresh capture launches the camera.
+                autoOpenCamera: selectedSnap == nil,
+                initialImage: selectedSnap
             ) { outcome in
                 showComposer = false
-                didAct = true
-                // The feed always gets the run's route/stats card UNLESS the
-                // photo itself was sent to the feed (then it IS the feed item).
                 switch outcome {
+                case .cancelled where !midRunSnaps.isEmpty:
+                    // Backed out with snaps still to consider — return to this
+                    // prompt so they can pick a different one or Skip. Nothing
+                    // is finalized yet.
+                    selectedSnap = nil
+                    return
                 case .published(let toFeed, _) where toFeed:
-                    break
-                default:
+                    // The photo went to the feed, so it IS the feed item.
+                    didAct = true
+                case .published, .cancelled:
+                    // Photo to a story only, or cancelled with no snaps to
+                    // reconsider — the feed still gets the run's route/stats card.
+                    didAct = true
                     Task { await RunPostService.autoPostMile(workoutId: workoutId, workoutType: workoutType) }
                 }
                 finish()
             }
         }
+    }
+
+    private var headline: String {
+        if midRunSnaps.isEmpty {
+            return isWalk ? "Capture your walk" : "Capture your run"
+        }
+        return "Use a photo from your \(isWalk ? "walk" : "run")?"
+    }
+
+    private var subheadline: String {
+        if midRunSnaps.isEmpty {
+            return "Snap a photo for your story — it disappears in 24 hours. Your run's route and stats post to the feed either way."
+        }
+        let count = midRunSnaps.count
+        return count == 1
+            ? "You snapped a photo out there — tap it to share it, or take a fresh one."
+            : "You snapped \(count) photos out there — tap your favorite to share it, or take a fresh one."
+    }
+
+    // MARK: - Hero (no mid-run snaps)
+
+    private var cameraHero: some View {
+        ZStack {
+            Circle().fill(accent.opacity(0.18)).frame(width: 150, height: 150)
+            Circle().strokeBorder(accent.opacity(0.4), lineWidth: 1).frame(width: 150, height: 150)
+            Image(systemName: "camera.fill")
+                .font(.system(size: 54, weight: .semibold))
+                .foregroundStyle(LinearGradient(colors: [.white, accent],
+                                                startPoint: .top, endPoint: .bottom))
+                .shadow(color: accent.opacity(0.5), radius: 16)
+        }
+        .scaleEffect(appeared ? 1 : 0.6)
+        .opacity(appeared ? 1 : 0)
+    }
+
+    // MARK: - Mid-run snaps
+
+    /// The run's snaps as big tappable cards. One or two fit centered on any
+    /// screen; three-plus scroll horizontally so five never overflow.
+    @ViewBuilder
+    private var midRunSnapStrip: some View {
+        if midRunSnaps.count <= 2 {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(Array(midRunSnaps.enumerated()), id: \.offset) { index, snap in
+                    snapCard(index: index, snap: snap)
+                }
+            }
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    ForEach(Array(midRunSnaps.enumerated()), id: \.offset) { index, snap in
+                        snapCard(index: index, snap: snap)
+                    }
+                }
+                .padding(.horizontal, MADTheme.Spacing.lg)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+    }
+
+    private func snapCard(index: Int, snap: UIImage) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            selectedSnap = snap
+            showComposer = true
+        } label: {
+            Image(uiImage: snap)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 132, height: 165) // 4:5, like the post
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
+                )
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundStyle(.white, accent)
+                        .padding(8)
+                }
+                .shadow(color: .black.opacity(0.4), radius: 10, y: 5)
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(appeared ? 1 : 0.8)
+        .opacity(appeared ? 1 : 0)
+        .animation(
+            .spring(response: 0.5, dampingFraction: 0.7).delay(Double(index) * 0.06),
+            value: appeared
+        )
     }
 
     private func skip() {
@@ -103,6 +212,9 @@ struct PostRunPhotoPromptView: View {
     }
 
     private func finish() {
+        // The run's snaps are one-shot offers: whatever wasn't chosen is gone
+        // once the prompt resolves (posted, skipped, or composer dismissed).
+        MidRunPhotoStash.clear()
         manager.dismissCurrentCelebration()
     }
 }

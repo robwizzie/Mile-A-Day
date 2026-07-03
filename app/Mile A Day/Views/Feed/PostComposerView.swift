@@ -123,7 +123,7 @@ final class PostComposerViewModel: ObservableObject {
     /// Captured on-screen canvas size (points), reused to render the composite.
     var canvasSize: CGSize = .zero
 
-    init(stats: RunStatsInput, destination: PostDestination) {
+    init(stats: RunStatsInput, destination: PostDestination, initialImage: UIImage? = nil) {
         self.stats = stats
         self.destination = destination
         var cfg = StickerConfig.load()
@@ -133,6 +133,9 @@ final class PostComposerViewModel: ObservableObject {
         cfg.enabled = cfg.enabled.filter { available.contains($0) }
         if cfg.enabled.isEmpty { cfg.enabled = Array(available.prefix(1)) }
         self.config = cfg
+        // Seed a pre-chosen photo (mid-run snap) AFTER all stored properties
+        // are initialized — the @Published setter touches self.
+        self.pickedImage = initialImage
     }
 
     var canPublish: Bool {
@@ -273,9 +276,11 @@ struct PostComposerView: View {
         stats: RunStatsInput,
         destination: PostDestination = .feed,
         autoOpenCamera: Bool = false,
+        initialImage: UIImage? = nil,
         onFinished: @escaping (PostComposeOutcome) -> Void
     ) {
-        _vm = StateObject(wrappedValue: PostComposerViewModel(stats: stats, destination: destination))
+        _vm = StateObject(wrappedValue: PostComposerViewModel(
+            stats: stats, destination: destination, initialImage: initialImage))
         self.autoOpenCamera = autoOpenCamera
         self.onFinished = onFinished
     }
