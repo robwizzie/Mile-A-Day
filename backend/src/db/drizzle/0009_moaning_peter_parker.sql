@@ -1,0 +1,1 @@
+ALTER TABLE "notification_settings" ADD COLUMN "share_route_maps" boolean DEFAULT true;

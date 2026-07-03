@@ -1,5 +1,6 @@
 import { Friendship, User } from "../types/user.js";
 import { PostgresService } from "./DbService.js";
+import { mileHypeKeyMatchSql } from "./hypeService.js";
 
 const db = PostgresService.getInstance();
 
@@ -361,23 +362,31 @@ export async function getFriendsWorkoutFeed(
 			w.calories::float AS calories,
 			w.steps,
 			(w.user_id = $1) AS is_self,
+			-- Mile hypes are keyed by workout_id (feed) or user:local_date
+			-- (notifications) — match both so the surfaces stay in sync, and
+			-- count DISTINCT senders so dual-keyed legacy pairs count once.
 			EXISTS (
 				SELECT 1 FROM hype_log h
 				WHERE h.sender_id = $1
 					AND h.target_id = w.user_id
 					AND h.context_type = 'mile'
-					AND h.context_id = w.workout_id
+					AND ${mileHypeKeyMatchSql("h", "w")}
 			) AS is_hyped,
 			(
-				SELECT COUNT(*)::int FROM hype_log hc
+				SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
 				WHERE hc.context_type = 'mile'
-					AND hc.context_id = w.workout_id
+					AND hc.target_id = w.user_id
+					AND ${mileHypeKeyMatchSql("hc", "w")}
 			) AS hype_count
 		FROM workouts w
 		JOIN circle c ON c.uid = w.user_id
 		JOIN users u ON u.user_id = w.user_id
+		LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
 		WHERE w.device_end_date >= NOW() - INTERVAL '48 hours'
 		AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+		-- Respect the owner's share_workouts_to_feed opt-out on this legacy
+		-- feed too, not just the unified feed (the viewer still sees their own).
+		AND (COALESCE(ns.share_workouts_to_feed, true) = true OR w.user_id = $1)
 		ORDER BY w.device_end_date DESC
 		LIMIT 100
 		`,

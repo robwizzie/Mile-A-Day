@@ -114,6 +114,10 @@ final class PostComposerViewModel: ObservableObject {
     @Published var config: StickerConfig
     @Published var isPublishing = false
     @Published var errorMessage: String?
+    /// Whether the linked workout has a GPS route to offer alongside the photo.
+    @Published var hasRoute = false
+    /// User choice: show the route map with this post (carousel slide 2).
+    @Published var includeRoute = true
 
     let stats: RunStatsInput
     /// Captured on-screen canvas size (points), reused to render the composite.
@@ -133,6 +137,20 @@ final class PostComposerViewModel: ObservableObject {
 
     var canPublish: Bool {
         pickedImage != nil && !isPublishing
+    }
+
+    /// Check whether the linked workout has GPS route data, enabling the
+    /// "Include route map" toggle. No route (indoor/manual) → toggle hidden.
+    /// Cheap existence probe — never enumerates the route's locations.
+    func checkRouteAvailability() async {
+        // Master "Share route maps" setting off → never offer the per-post
+        // toggle (the server wouldn't ship the route to friends anyway).
+        guard NotificationPreferences.load().shareRouteMaps else { return }
+        guard !hasRoute, let workoutId = stats.workoutId else { return }
+        let workout = HealthKitManager.shared.todaysWorkouts
+            .first { $0.uuid.uuidString == workoutId }
+        guard let workout else { return }
+        hasRoute = await HealthKitManager.shared.hasRouteData(for: workout)
     }
 
     /// Render the on-screen canvas (photo + sticker) to a flat JPEG-ready image
@@ -173,15 +191,32 @@ final class PostComposerViewModel: ObservableObject {
                 workoutId: stats.workoutId,
                 shareToFeed: destination.toFeed,
                 shareToStory: destination.toStory,
-                stats: stats.snapshot
+                stats: stats.snapshot,
+                isAuto: false,
+                includeRoute: includeRoute
             )
-            if stickerEnabled { config.save() } // remember the user's overlay style
+            if stickerEnabled {
+                // Remember the user's overlay style — but merge back any stats
+                // that were remembered and merely had no data TODAY (init
+                // filters those out of the session config); otherwise one
+                // treadmill day permanently erases a saved choice like pace.
+                var toSave = config
+                let available = Set(stats.availableStats())
+                let rememberedUnavailable = StickerConfig.load().enabled
+                    .filter { !available.contains($0) }
+                toSave.enabled = config.enabled + rememberedUnavailable
+                toSave.save()
+            }
             return true
         } catch let APIError.apiError(message) where message == "mile_not_completed" {
             errorMessage = "Finish today's mile before you post."
             return false
         } catch let APIError.apiError(message) where message == "terms_not_accepted" {
             errorMessage = "Please accept the community terms to post."
+            return false
+        } catch APIError.conflict {
+            // One deliberate post per workout — a reward, not a redo.
+            errorMessage = "You've already shared a post for this workout. Delete it first if you want to post a new one."
             return false
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? "Couldn't share your post. Try again."
@@ -225,6 +260,9 @@ struct PostComposerView: View {
     @StateObject private var vm: PostComposerViewModel
     @State private var showCamera = false
     @State private var gestureBaseScale: CGFloat = 1.0
+    /// Sticker position at drag start (normalized) — drags apply translation
+    /// relative to this instead of jumping to the touch point.
+    @State private var gestureBasePos: CGPoint? = nil
     /// Launch straight into the camera on first appear (post-run prompt flow) —
     /// the user already tapped "Take a photo" once to get here.
     let autoOpenCamera: Bool
@@ -251,6 +289,7 @@ struct PostComposerView: View {
                         canvasSection
                         if vm.pickedImage != nil {
                             overlayEditor
+                            if vm.hasRoute { routeToggle }
                             captionField
                             destinationToggles
                         }
@@ -304,7 +343,37 @@ struct PostComposerView: View {
                     showCamera = true
                 }
             }
+            .task { await vm.checkRouteAvailability() }
+            // Re-probe once a photo lands — todaysWorkouts may not have been
+            // loaded yet when the composer first appeared.
+            .onChange(of: vm.pickedImage) { _, newImage in
+                guard newImage != nil else { return }
+                Task { await vm.checkRouteAvailability() }
+            }
         }
+    }
+
+    /// Offer to ride the run's GPS route along with the photo (shown as a
+    /// second, swipeable slide on the feed card). Only offered when the linked
+    /// workout actually has route data.
+    private var routeToggle: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: $vm.includeRoute.animation(.easeInOut)) {
+                Label("Include route map", systemImage: "map.fill")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+            }
+            .tint(MADTheme.Colors.madRed)
+            Text("Friends can swipe to see your mile's path next to the photo.")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(MADTheme.Spacing.md)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .fill(Color.white.opacity(0.04))
+        )
     }
 
     // MARK: - Canvas
@@ -423,10 +492,19 @@ struct PostComposerView: View {
                 SimultaneousGesture(
                     DragGesture()
                         .onChanged { value in
-                            let x = min(max(value.location.x / canvas.width, 0.12), 0.88)
-                            let y = min(max(value.location.y / canvas.height, 0.1), 0.9)
-                            vm.stickerPos = CGPoint(x: x, y: y)
-                        },
+                            // Move RELATIVE to where the sticker started — a
+                            // location-based move teleports the sticker to
+                            // wherever the finger first lands on the canvas.
+                            let base = gestureBasePos ?? vm.stickerPos
+                            if gestureBasePos == nil { gestureBasePos = vm.stickerPos }
+                            let x = base.x + value.translation.width / canvas.width
+                            let y = base.y + value.translation.height / canvas.height
+                            vm.stickerPos = CGPoint(
+                                x: min(max(x, 0.12), 0.88),
+                                y: min(max(y, 0.1), 0.9)
+                            )
+                        }
+                        .onEnded { _ in gestureBasePos = nil },
                     MagnificationGesture()
                         .onChanged { value in
                             vm.stickerScale = min(max(gestureBaseScale * value, 0.6), 1.9)

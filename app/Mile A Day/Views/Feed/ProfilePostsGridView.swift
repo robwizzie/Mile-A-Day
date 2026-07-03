@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// Instagram-style 3-column grid of a user's permanent posts, used on both the
-/// owner's profile and a friend's profile. Tapping a thumbnail opens a detail
-/// sheet. Paginates as the user scrolls.
+/// owner's profile and a friend's profile. Tapping a thumbnail opens the
+/// person's posts as a scrollable feed (starting at the tapped post) so you can
+/// keep swiping through their history. Paginates as the user scrolls.
 struct ProfilePostsGridView: View {
     let userId: String
     var isSelf: Bool = false
@@ -14,7 +15,7 @@ struct ProfilePostsGridView: View {
     @State private var loaded = false
     @State private var selectedPost: PostItem?
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 3), count: 3)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 3)
 
     var body: some View {
         Group {
@@ -25,7 +26,7 @@ struct ProfilePostsGridView: View {
             } else if posts.isEmpty {
                 emptyState
             } else {
-                LazyVGrid(columns: columns, spacing: 3) {
+                LazyVGrid(columns: columns, spacing: 4) {
                     ForEach(posts) { post in
                         Button { selectedPost = post } label: { thumbnail(post) }
                             .buttonStyle(.plain)
@@ -40,7 +41,14 @@ struct ProfilePostsGridView: View {
             }
         }
         .task { if !loaded { await load() } }
-        .sheet(item: $selectedPost) { post in PostDetailSheet(post: post) }
+        .sheet(item: $selectedPost) { post in
+            ProfilePostsFeedSheet(
+                title: isSelf ? "Your Posts" : "Posts",
+                posts: $posts,
+                initialPostId: post.post_id,
+                onNeedMore: { Task { await loadMore() } }
+            )
+        }
     }
 
     private func thumbnail(_ post: PostItem) -> some View {
@@ -57,7 +65,11 @@ struct ProfilePostsGridView: View {
                     }
                 }
             )
-            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
+            )
             .overlay(alignment: .topTrailing) {
                 if post.stats_snapshot?.streak != nil {
                     Image(systemName: "flame.fill")
@@ -65,6 +77,16 @@ struct ProfilePostsGridView: View {
                         .foregroundColor(.orange)
                         .padding(4)
                         .background(Circle().fill(.black.opacity(0.4)))
+                        .padding(4)
+                }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if let type = post.workout_type {
+                    Image(systemName: ActivityCardView.icon(type))
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(ActivityCardView.color(type))
+                        .padding(4)
+                        .background(Circle().fill(.black.opacity(0.45)))
                         .padding(4)
                 }
             }
@@ -117,60 +139,121 @@ struct ProfilePostsGridView: View {
     }
 }
 
-/// Read-only detail for a single post opened from the grid: the photo, caption,
-/// and a stat strip. (Hype/moderation live on the main feed.)
-struct PostDetailSheet: View {
-    let post: PostItem
+/// A user's posts as a scrollable, read-only feed — opened from the profile
+/// grid at the tapped post, so browsing someone's history feels like reading a
+/// feed instead of opening photos one at a time. Shares the grid's post array
+/// (and its pagination) via a binding, and taps open the pinch-zoom lightbox.
+struct ProfilePostsFeedSheet: View {
+    let title: String
+    @Binding var posts: [PostItem]
+    let initialPostId: String
+    let onNeedMore: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var lightboxPost: PostItem?
 
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.black.ignoresSafeArea()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                        HStack(spacing: 10) {
-                            AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(post.displayName)
-                                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                                    .foregroundColor(.white)
-                                Text(post.relativeTime)
-                                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                                    .foregroundColor(.white.opacity(0.5))
-                            }
-                            Spacer()
-                        }
+                MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
 
-                        AsyncImage(url: post.mediaURL) { phase in
-                            switch phase {
-                            case .success(let image): image.resizable().scaledToFit()
-                            default: ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
-                                    .aspectRatio(4.0 / 5.0, contentMode: .fit)
+                ScrollViewReader { proxy in
+                    ScrollView(showsIndicators: false) {
+                        LazyVStack(spacing: MADTheme.Spacing.md) {
+                            ForEach(posts) { post in
+                                card(post)
+                                    .id(post.post_id)
+                                    .onAppear {
+                                        if post.id == posts.last?.id { onNeedMore() }
+                                    }
                             }
                         }
-                        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-
-                        if let stats = post.stats_snapshot {
-                            PostStatStrip(stats: stats)
-                        }
-                        if let caption = post.caption, !caption.isEmpty {
-                            Text(caption)
-                                .font(.system(size: 14, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.9))
+                        .padding(MADTheme.Spacing.md)
+                        .padding(.bottom, MADTheme.Spacing.xl)
+                    }
+                    .onAppear {
+                        // LazyVStack hasn't laid out far-down cards yet when
+                        // onAppear fires, so a single scrollTo can land short
+                        // for deep taps — jump, then correct once layout has
+                        // caught up.
+                        proxy.scrollTo(initialPostId, anchor: .top)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            proxy.scrollTo(initialPostId, anchor: .top)
                         }
                     }
-                    .padding(MADTheme.Spacing.md)
                 }
             }
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }.foregroundColor(.white)
+                    Button("Done") { dismiss() }
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
                 }
             }
             .toolbarBackground(.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
         }
+        .fullScreenCover(item: $lightboxPost) { post in
+            PhotoLightboxView(url: ProfileImageService.fullImageURL(for: post.media_url))
+        }
+    }
+
+    private func card(_ post: PostItem) -> some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            HStack(spacing: 10) {
+                AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(post.displayName)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    Text(post.relativeTime)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                Spacer()
+                if let type = post.workout_type {
+                    Image(systemName: ActivityCardView.icon(type))
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(ActivityCardView.color(type))
+                }
+            }
+
+            AsyncImage(url: post.mediaURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable().scaledToFill()
+                case .failure:
+                    ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) }
+                default:
+                    ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .aspectRatio(4.0 / 5.0, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+            .onTapGesture { lightboxPost = post }
+
+            if let stats = post.stats_snapshot {
+                PostStatStrip(stats: stats).padding(.horizontal, 2)
+            }
+            if let caption = post.caption, !caption.isEmpty {
+                Text(caption)
+                    .font(.system(size: 14, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.9))
+                    .padding(.horizontal, 2)
+            }
+            if let count = post.hype_count, count > 0 {
+                HypeTally(count: count).padding(.horizontal, 2)
+            }
+        }
+        .padding(MADTheme.Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
     }
 }

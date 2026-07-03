@@ -8,6 +8,7 @@
 
 import Foundation
 import HealthKit
+import CoreLocation
 
 // MARK: - Sync Progress Models
 
@@ -477,9 +478,14 @@ class WorkoutSyncService: ObservableObject {
     private func uploadBatchWithRetry(_ workouts: [HKWorkout], fullSync: Bool = false) async throws {
         var lastError: Error?
 
+        // Build the payload ONCE — it's deterministic, and the transform now
+        // reads GPS routes from HealthKit, which must not be re-enumerated on
+        // every network retry.
+        let workoutData = try await transformWorkoutsForBackend(workouts, includeRoutes: !fullSync)
+
         for attempt in 1...maxRetries {
             do {
-                try await uploadBatch(workouts, fullSync: fullSync)
+                try await uploadBatch(workoutData, count: workouts.count, fullSync: fullSync)
                 return  // Success!
             } catch {
                 lastError = error
@@ -499,16 +505,13 @@ class WorkoutSyncService: ObservableObject {
         }
     }
 
-    /// Upload a single batch to the backend.
+    /// Upload one pre-transformed batch to the backend.
     /// When `fullSync` is true the request carries ?fullSync=true so the backend
     /// suppresses friend-facing notifications for this historical backfill.
-    private func uploadBatch(_ workouts: [HKWorkout], fullSync: Bool = false) async throws {
+    private func uploadBatch(_ workoutData: [[String: Any]], count: Int, fullSync: Bool = false) async throws {
         guard let userId = currentUserId else {
             throw SyncError.notAuthenticated
         }
-
-        // Transform workouts to backend format
-        let workoutData = try await transformWorkoutsForBackend(workouts)
 
         // Make API request using fancyFetch
         let endpoint = fullSync ? "/workouts/\(userId)/upload?fullSync=true" : "/workouts/\(userId)/upload"
@@ -537,7 +540,7 @@ class WorkoutSyncService: ObservableObject {
                 body: requestBody,
                 responseType: UploadResponse.self
             )
-            print("[WorkoutSyncService] ✅ Uploaded batch of \(workouts.count) workouts")
+            print("[WorkoutSyncService] ✅ Uploaded batch of \(count) workouts")
 
             let badgeCount = response.newlyEarnedBadges?.count ?? 0
             let completionCount = response.newChallengeCompletions?.count ?? 0
@@ -582,11 +585,43 @@ class WorkoutSyncService: ObservableObject {
         }
     }
 
+    /// Cap uploaded routes to a drawing-friendly polyline; the backend stores
+    /// them verbatim (with its own backstop) and feeds them back to feed cards.
+    private static let maxRoutePoints = 150
+    /// Don't fetch routes for oversized batches — that's a backfill, not a
+    /// fresh run, and per-workout route queries would drag the whole upload.
+    private static let maxRouteFetchBatch = 25
+
+    /// The workout's GPS trace as [[lat, lng], ...], downsampled to
+    /// `maxRoutePoints` and rounded to ~1m precision. Nil when the workout has
+    /// no route (indoor/manual).
+    private func simplifiedRoute(for workout: HKWorkout) async -> [[Double]]? {
+        let locations = await HealthKitManager.shared.fetchAllRouteLocations(for: workout)
+        guard locations.count >= 2 else { return nil }
+
+        let sampled: [CLLocation]
+        if locations.count > Self.maxRoutePoints {
+            let stride = Double(locations.count - 1) / Double(Self.maxRoutePoints - 1)
+            sampled = (0..<Self.maxRoutePoints).map { locations[Int((Double($0) * stride).rounded())] }
+        } else {
+            sampled = locations
+        }
+        return sampled.map { location in
+            [
+                (location.coordinate.latitude * 100_000).rounded() / 100_000,
+                (location.coordinate.longitude * 100_000).rounded() / 100_000,
+            ]
+        }
+    }
+
     /// Transform HKWorkout objects to backend format
-    private func transformWorkoutsForBackend(_ workouts: [HKWorkout]) async throws -> [[String:
-        Any]]
+    private func transformWorkoutsForBackend(
+        _ workouts: [HKWorkout],
+        includeRoutes: Bool = false
+    ) async throws -> [[String: Any]]
     {
         var workoutData: [[String: Any]] = []
+        let fetchRoutes = includeRoutes && workouts.count <= Self.maxRouteFetchBatch
 
         for workout in workouts {
             // Get split data for this workout
@@ -616,7 +651,7 @@ class WorkoutSyncService: ObservableObject {
             let calories = await activeEnergyKilocalories(for: workout)
             let distance = workout.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
 
-            let workoutDict: [String: Any] = [
+            var workoutDict: [String: Any] = [
                 "workoutId": workout.uuid.uuidString,
                 "distance": distance,
                 "localDate": localDate,
@@ -629,6 +664,12 @@ class WorkoutSyncService: ObservableObject {
                 "splits": splitsData,
                 "source": "healthkit",
             ]
+
+            // Attach the simplified GPS path when the workout has one, so the
+            // backend can store it and feed cards can draw the mile's route.
+            if fetchRoutes, let route = await simplifiedRoute(for: workout) {
+                workoutDict["route"] = route
+            }
 
             workoutData.append(workoutDict)
         }

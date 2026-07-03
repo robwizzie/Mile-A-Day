@@ -1,359 +1,483 @@
-import { AuthenticatedRequest } from '../middleware/auth.js';
-import { Response } from 'express';
-import hasRequiredKeys from '../utils/hasRequiredKeys.js';
-import { BadRequestError } from '../errors/Errors.js';
+import { AuthenticatedRequest } from "../middleware/auth.js";
+import { Response } from "express";
+import hasRequiredKeys from "../utils/hasRequiredKeys.js";
+import { BadRequestError } from "../errors/Errors.js";
 import {
-	createCompetition,
-	getCompetition,
-	getCompetitions,
-	sendCompetitionInvite,
-	updateCompetitionInvite,
-	updateCompetition,
-	deleteCompetition,
-	removeUserFromCompetition,
-	getTodayET,
-	autoStartIfAllAccepted
-} from '../services/competitionService.js';
-import { getUser } from '../services/userService.js';
-import { CompetitionUser } from '../types/competitions.js';
-import { sendPush, sendOrQueueCompetitionNotification } from '../services/pushNotificationService.js';
+  createCompetition,
+  getCompetition,
+  getCompetitions,
+  sendCompetitionInvite,
+  updateCompetitionInvite,
+  updateCompetition,
+  deleteCompetition,
+  removeUserFromCompetition,
+  getTodayET,
+  autoStartIfAllAccepted,
+} from "../services/competitionService.js";
+import { getUser } from "../services/userService.js";
+import { CompetitionUser } from "../types/competitions.js";
+import {
+  sendPush,
+  sendOrQueueCompetitionNotification,
+} from "../services/pushNotificationService.js";
 
 export async function createComp(req: AuthenticatedRequest, res: Response) {
-	if (!hasRequiredKeys(['competition_name', 'type'], req, res)) return;
+  if (!hasRequiredKeys(["competition_name", "type"], req, res)) return;
 
-	const { competition_name, start_date, end_date, workouts, type, options } = req.body;
+  const { competition_name, start_date, end_date, workouts, type, options } =
+    req.body;
 
-	try {
-		const competitionId = await createCompetition({
-			competition_name,
-			start_date,
-			end_date,
-			workouts,
-			type,
-			options,
-			owner: req.userId!
-		});
+  try {
+    const competitionId = await createCompetition({
+      competition_name,
+      start_date,
+      end_date,
+      workouts,
+      type,
+      options,
+      owner: req.userId!,
+    });
 
-		res.status(200).json({ competition_id: competitionId });
-	} catch (error: any) {
-		if (error instanceof BadRequestError) {
-			return res.status(400).json({ error: error.message });
-		}
+    res.status(200).json({ competition_id: competitionId });
+  } catch (error: any) {
+    if (error instanceof BadRequestError) {
+      return res.status(400).json({ error: error.message });
+    }
 
-		console.error('Error creating competition:', error.message);
-		res.status(500).json({ error: 'Error creating competition: ' + error.message });
-	}
+    console.error("Error creating competition:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error creating competition: " + error.message });
+  }
 }
 
 export async function startComp(req: AuthenticatedRequest, res: Response) {
-	if (!hasRequiredKeys(['competitionId'], req, res)) return;
+  if (!hasRequiredKeys(["competitionId"], req, res)) return;
 
-	const competitionId = req.params.competitionId;
+  const competitionId = req.params.competitionId;
 
-	try {
-		const competition = await getCompetition(competitionId);
+  try {
+    const competition = await getCompetition(competitionId);
 
-		if (!competition) {
-			return res.status(404).json({ error: `No competition found with id: ${competitionId}` });
-		}
+    if (!competition) {
+      return res
+        .status(404)
+        .json({ error: `No competition found with id: ${competitionId}` });
+    }
 
-		// Only owner can start
-		if (competition.owner !== req.userId!) {
-			return res.status(403).json({ error: 'Only the competition owner can start it' });
-		}
+    // Only owner can start
+    if (competition.owner !== req.userId!) {
+      return res
+        .status(403)
+        .json({ error: "Only the competition owner can start it" });
+    }
 
-		// Must not be already started
-		if (competition.start_date && competition.start_date <= getTodayET()) {
-			return res.status(400).json({ error: 'Competition has already started' });
-		}
+    // Must not be already started
+    if (competition.start_date && competition.start_date <= getTodayET()) {
+      return res.status(400).json({ error: "Competition has already started" });
+    }
 
-		// Need at least 2 accepted participants
-		const acceptedCount = competition.users.filter((u: CompetitionUser) => u.invite_status === 'accepted').length;
+    // Need at least 2 accepted participants
+    const acceptedCount = competition.users.filter(
+      (u: CompetitionUser) => u.invite_status === "accepted",
+    ).length;
 
-		if (acceptedCount < 2) {
-			return res.status(400).json({
-				error: `Need at least 2 accepted participants to start. Currently have ${acceptedCount}.`
-			});
-		}
+    if (acceptedCount < 2) {
+      return res.status(400).json({
+        error: `Need at least 2 accepted participants to start. Currently have ${acceptedCount}.`,
+      });
+    }
 
-		// Start at midnight ET tomorrow so the first official day is a full day for everyone
-		const todayET = getTodayET(); // 'YYYY-MM-DD' in ET
-		const [y, m, d] = todayET.split('-').map(Number);
-		const tomorrowUTC = new Date(Date.UTC(y, m - 1, d + 1));
-		const startDate = tomorrowUTC.toISOString().split('T')[0];
+    // Start at midnight ET tomorrow so the first official day is a full day for everyone
+    const todayET = getTodayET(); // 'YYYY-MM-DD' in ET
+    const [y, m, d] = todayET.split("-").map(Number);
+    const tomorrowUTC = new Date(Date.UTC(y, m - 1, d + 1));
+    const startDate = tomorrowUTC.toISOString().split("T")[0];
 
-		let endDate: string | undefined;
-		if (competition.options.duration_hours) {
-			const end = new Date(tomorrowUTC.getTime() + competition.options.duration_hours * 60 * 60 * 1000);
-			endDate = end.toISOString().split('T')[0];
-		}
+    let endDate: string | undefined;
+    if (competition.options.duration_hours) {
+      const end = new Date(
+        tomorrowUTC.getTime() +
+          competition.options.duration_hours * 60 * 60 * 1000,
+      );
+      endDate = end.toISOString().split("T")[0];
+    }
 
-		const updatedCompetition = await updateCompetition({
-			competitionId,
-			start_date: startDate,
-			...(endDate ? { end_date: endDate } : {})
-		});
+    const updatedCompetition = await updateCompetition({
+      competitionId,
+      start_date: startDate,
+      ...(endDate ? { end_date: endDate } : {}),
+    });
 
-		// Notify all accepted participants (except the owner who started it)
-		const participants = competition.users.filter(
-			(u: CompetitionUser) => u.invite_status === 'accepted' && u.user_id !== req.userId!
-		);
-		for (const participant of participants) {
-			sendOrQueueCompetitionNotification(
-				participant.user_id,
-				'competition_started',
-				competitionId,
-				competition.competition_name
-			).catch(err => console.error('[Push] Error sending competition start notification:', err.message));
-		}
+    // Notify all accepted participants (except the owner who started it)
+    const participants = competition.users.filter(
+      (u: CompetitionUser) =>
+        u.invite_status === "accepted" && u.user_id !== req.userId!,
+    );
+    for (const participant of participants) {
+      sendOrQueueCompetitionNotification(
+        participant.user_id,
+        "competition_started",
+        competitionId,
+        competition.competition_name,
+      ).catch((err) =>
+        console.error(
+          "[Push] Error sending competition start notification:",
+          err.message,
+        ),
+      );
+    }
 
-		res.status(200).json({ competition: updatedCompetition });
-	} catch (error: any) {
-		console.error('Error starting competition:', error.message);
-		res.status(500).json({ error: 'Error starting competition: ' + error.message });
-	}
+    res.status(200).json({ competition: updatedCompetition });
+  } catch (error: any) {
+    console.error("Error starting competition:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error starting competition: " + error.message });
+  }
 }
 
 export async function deleteComp(req: AuthenticatedRequest, res: Response) {
-	if (!hasRequiredKeys(['competitionId'], req, res)) return;
+  if (!hasRequiredKeys(["competitionId"], req, res)) return;
 
-	try {
-		await deleteCompetition(req.params.competitionId, req.userId!);
-		res.status(200).json({ message: 'Competition deleted successfully' });
-	} catch (error: any) {
-		if (error instanceof BadRequestError) {
-			return res.status(400).json({ error: error.message });
-		}
-		console.error('Error deleting competition:', error.message);
-		res.status(500).json({ error: 'Error deleting competition: ' + error.message });
-	}
+  try {
+    await deleteCompetition(req.params.competitionId, req.userId!);
+    res.status(200).json({ message: "Competition deleted successfully" });
+  } catch (error: any) {
+    if (error instanceof BadRequestError) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error("Error deleting competition:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error deleting competition: " + error.message });
+  }
 }
 
 export async function getComp(req: AuthenticatedRequest, res: Response) {
-	if (!hasRequiredKeys(['competitionId'], req, res)) return;
+  if (!hasRequiredKeys(["competitionId"], req, res)) return;
 
-	try {
-		const competition = await getCompetition(req.params.competitionId);
+  try {
+    // The detail view is the only consumer of the per-day walk/run breakdown.
+    const competition = await getCompetition(req.params.competitionId, {
+      includeActivityBreakdown: true,
+    });
 
-		if (!competition) {
-			return res.status(404).json({ error: `No competition found with id: ${req.params.competitionId}` });
-		}
+    if (!competition) {
+      return res
+        .status(404)
+        .json({
+          error: `No competition found with id: ${req.params.competitionId}`,
+        });
+    }
 
-		return res.status(200).json({ competition });
-	} catch (error: any) {
-		console.error('Error getting competition:', error.message);
-		res.status(500).json({ error: 'Error getting competition: ' + error.message });
-	}
+    return res.status(200).json({ competition });
+  } catch (error: any) {
+    console.error("Error getting competition:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error getting competition: " + error.message });
+  }
 }
 
 export async function getAllComps(req: AuthenticatedRequest, res: Response) {
-	const page = req.query.page as string;
-	const status = req.query.status as string;
-	const pageSize = req.query.pageSize as string;
+  const page = req.query.page as string;
+  const status = req.query.status as string;
+  const pageSize = req.query.pageSize as string;
 
-	try {
-		const competitions = await getCompetitions(req.userId!, {
-			page: page ? parseInt(page) : 1,
-			pageSize: pageSize ? parseInt(pageSize) : 25,
-			status: status || 'active'
-		});
+  try {
+    const competitions = await getCompetitions(req.userId!, {
+      page: page ? parseInt(page) : 1,
+      pageSize: pageSize ? parseInt(pageSize) : 25,
+      status: status || "active",
+    });
 
-		res.status(200).json({ competitions });
-	} catch (error: any) {
-		console.error('Error getting comps:', error.message);
-		res.status(500).json({ error: 'Error getting comps: ' + error.message });
-	}
+    res.status(200).json({ competitions });
+  } catch (error: any) {
+    console.error("Error getting comps:", error.message);
+    res.status(500).json({ error: "Error getting comps: " + error.message });
+  }
 }
 
-export async function inviteUsersToComp(req: AuthenticatedRequest, res: Response) {
-	if (!hasRequiredKeys(['competitionId', 'inviteUser'], req, res)) return;
+export async function inviteUsersToComp(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!hasRequiredKeys(["competitionId", "inviteUser"], req, res)) return;
 
-	const competitionId = req.params.competitionId;
-	const inviteUserId = req.body.inviteUser;
+  const competitionId = req.params.competitionId;
+  const inviteUserId = req.body.inviteUser;
 
-	try {
-		const invitee = await getUser({ userId: inviteUserId });
+  try {
+    const invitee = await getUser({ userId: inviteUserId });
 
-		if (!invitee) {
-			return res.status(404).json({ error: `No user found with id: ${inviteUserId}` });
-		}
+    if (!invitee) {
+      return res
+        .status(404)
+        .json({ error: `No user found with id: ${inviteUserId}` });
+    }
 
-		const competition = await getCompetition(competitionId);
+    const competition = await getCompetition(competitionId);
 
-		if (!competition) {
-			return res.status(404).json({ error: `No competition found with id: ${req.params.competitionId}` });
-		}
+    if (!competition) {
+      return res
+        .status(404)
+        .json({
+          error: `No competition found with id: ${req.params.competitionId}`,
+        });
+    }
 
-		if (competition.users.find(u => u.user_id === inviteUserId && u.invite_status === 'accepted')) {
-			return res.status(400).json({ error: `User ${inviteUserId} is already in this competition` });
-		}
+    if (
+      competition.users.find(
+        (u) => u.user_id === inviteUserId && u.invite_status === "accepted",
+      )
+    ) {
+      return res
+        .status(400)
+        .json({ error: `User ${inviteUserId} is already in this competition` });
+    }
 
-		if (!competition.users.find(u => u.user_id === req.userId! && u.invite_status === 'accepted')) {
-			return res.status(401).json({ error: 'User does not have access to this competition' });
-		}
+    if (
+      !competition.users.find(
+        (u) => u.user_id === req.userId! && u.invite_status === "accepted",
+      )
+    ) {
+      return res
+        .status(401)
+        .json({ error: "User does not have access to this competition" });
+    }
 
-		await sendCompetitionInvite(competitionId, inviteUserId);
+    await sendCompetitionInvite(competitionId, inviteUserId);
 
-		// Notify the invited user
-		const inviter = await getUser({ userId: req.userId! });
-		const inviterName = inviter?.username || 'Someone';
-		sendPush(inviteUserId, {
-			title: 'Competition invite',
-			body: `${inviterName} invited you to ${competition.competition_name}`,
-			type: 'competition_invite',
-			data: { competition_id: competitionId }
-		}).catch(err => console.error('[Push] Error sending competition invite notification:', err.message));
+    // Notify the invited user
+    const inviter = await getUser({ userId: req.userId! });
+    const inviterName = inviter?.username || "Someone";
+    sendPush(inviteUserId, {
+      title: "Competition invite",
+      body: `${inviterName} invited you to ${competition.competition_name}`,
+      type: "competition_invite",
+      data: { competition_id: competitionId },
+    }).catch((err) =>
+      console.error(
+        "[Push] Error sending competition invite notification:",
+        err.message,
+      ),
+    );
 
-		res.status(200).json({ message: `Successfully invited user ${inviteUserId} to competition ${competitionId}` });
-	} catch (error: any) {
-		console.error('Error inviting user:', error.message);
-		res.status(500).json({ error: 'Error inviting user: ' + error.message });
-	}
+    res
+      .status(200)
+      .json({
+        message: `Successfully invited user ${inviteUserId} to competition ${competitionId}`,
+      });
+  } catch (error: any) {
+    console.error("Error inviting user:", error.message);
+    res.status(500).json({ error: "Error inviting user: " + error.message });
+  }
 }
 
-export async function removeUserFromComp(req: AuthenticatedRequest, res: Response) {
-	if (!hasRequiredKeys(['competitionId', 'userId'], req, res)) return;
+export async function removeUserFromComp(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!hasRequiredKeys(["competitionId", "userId"], req, res)) return;
 
-	const competitionId = req.params.competitionId;
-	const targetUserId = req.params.userId;
+  const competitionId = req.params.competitionId;
+  const targetUserId = req.params.userId;
 
-	try {
-		const competition = await getCompetition(competitionId);
+  try {
+    const competition = await getCompetition(competitionId);
 
-		if (!competition) {
-			return res.status(404).json({ error: `No competition found with id: ${competitionId}` });
-		}
+    if (!competition) {
+      return res
+        .status(404)
+        .json({ error: `No competition found with id: ${competitionId}` });
+    }
 
-		// Only the owner can remove users
-		if (competition.owner !== req.userId!) {
-			return res.status(403).json({ error: 'Only the competition owner can remove users' });
-		}
+    // Only the owner can remove users
+    if (competition.owner !== req.userId!) {
+      return res
+        .status(403)
+        .json({ error: "Only the competition owner can remove users" });
+    }
 
-		// Can't remove yourself (owner)
-		if (targetUserId === req.userId!) {
-			return res.status(400).json({ error: 'Cannot remove yourself from the competition' });
-		}
+    // Can't remove yourself (owner)
+    if (targetUserId === req.userId!) {
+      return res
+        .status(400)
+        .json({ error: "Cannot remove yourself from the competition" });
+    }
 
-		// Can only remove from lobby (not started yet)
-		if (competition.start_date && competition.start_date <= getTodayET()) {
-			return res.status(400).json({ error: 'Cannot remove users from a competition that has already started' });
-		}
+    // Can only remove from lobby (not started yet)
+    if (competition.start_date && competition.start_date <= getTodayET()) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "Cannot remove users from a competition that has already started",
+        });
+    }
 
-		// Check user is actually in the competition
-		if (!competition.users.find(u => u.user_id === targetUserId)) {
-			return res.status(400).json({ error: 'User is not in this competition' });
-		}
+    // Check user is actually in the competition
+    if (!competition.users.find((u) => u.user_id === targetUserId)) {
+      return res.status(400).json({ error: "User is not in this competition" });
+    }
 
-		await removeUserFromCompetition(competitionId, targetUserId);
+    await removeUserFromCompetition(competitionId, targetUserId);
 
-		res.status(200).json({ message: `Successfully removed user ${targetUserId} from competition ${competitionId}` });
-	} catch (error: any) {
-		console.error('Error removing user from competition:', error.message);
-		res.status(500).json({ error: 'Error removing user: ' + error.message });
-	}
+    res
+      .status(200)
+      .json({
+        message: `Successfully removed user ${targetUserId} from competition ${competitionId}`,
+      });
+  } catch (error: any) {
+    console.error("Error removing user from competition:", error.message);
+    res.status(500).json({ error: "Error removing user: " + error.message });
+  }
 }
 
 export async function getCompInvites(req: AuthenticatedRequest, res: Response) {
-	try {
-		const competitions = await getCompetitions(req.userId!, {
-			page: parseInt(req.query.page as string) || 1,
-			status: 'on_your_mark',
-			pageSize: 25
-		});
-		res.status(200).json({ competitionInvites: competitions });
-	} catch (error: any) {
-		console.error('Error getting competition invites:', error.message);
-		res.status(500).json({ error: 'Error getting competition invites: ' + error.message });
-	}
+  try {
+    const competitions = await getCompetitions(req.userId!, {
+      page: parseInt(req.query.page as string) || 1,
+      status: "on_your_mark",
+      pageSize: 25,
+    });
+    res.status(200).json({ competitionInvites: competitions });
+  } catch (error: any) {
+    console.error("Error getting competition invites:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error getting competition invites: " + error.message });
+  }
 }
 
 export async function updateComp(req: AuthenticatedRequest, res: Response) {
-	if (!hasRequiredKeys(['competitionId'], req, res)) return;
+  if (!hasRequiredKeys(["competitionId"], req, res)) return;
 
-	const { competition_name, start_date, end_date, workouts, type, options } = req.body;
-	const competitionId = req.params.competitionId;
+  const { competition_name, start_date, end_date, workouts, type, options } =
+    req.body;
+  const competitionId = req.params.competitionId;
 
-	try {
-		const existingCompetition = await getCompetition(competitionId);
+  try {
+    const existingCompetition = await getCompetition(competitionId);
 
-		if (!existingCompetition) {
-			return res.status(404).json({ error: `No competition found with id: ${competitionId}` });
-		}
+    if (!existingCompetition) {
+      return res
+        .status(404)
+        .json({ error: `No competition found with id: ${competitionId}` });
+    }
 
-		if (existingCompetition.owner !== req.userId!) {
-			return res.status(403).json({ error: 'Only the competition owner can update it' });
-		}
+    if (existingCompetition.owner !== req.userId!) {
+      return res
+        .status(403)
+        .json({ error: "Only the competition owner can update it" });
+    }
 
-		if (existingCompetition.start_date && new Date(existingCompetition.start_date) <= new Date()) {
-			return res.status(400).json({ error: 'Cannot update a competition that has already started' });
-		}
+    if (
+      existingCompetition.start_date &&
+      new Date(existingCompetition.start_date) <= new Date()
+    ) {
+      return res
+        .status(400)
+        .json({
+          error: "Cannot update a competition that has already started",
+        });
+    }
 
-		const updatedCompetition = await updateCompetition({
-			competitionId,
-			competition_name,
-			start_date,
-			end_date,
-			workouts,
-			type,
-			options
-		});
+    const updatedCompetition = await updateCompetition({
+      competitionId,
+      competition_name,
+      start_date,
+      end_date,
+      workouts,
+      type,
+      options,
+    });
 
-		res.status(200).json({ competition: updatedCompetition });
-	} catch (error: any) {
-		if (error instanceof BadRequestError) {
-			return res.status(400).json({ error: error.message });
-		}
+    res.status(200).json({ competition: updatedCompetition });
+  } catch (error: any) {
+    if (error instanceof BadRequestError) {
+      return res.status(400).json({ error: error.message });
+    }
 
-		console.error('Error updating competition:', error.message);
-		res.status(500).json({ error: 'Error updating competition: ' + error.message });
-	}
+    console.error("Error updating competition:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error updating competition: " + error.message });
+  }
 }
 
-export function getCompInviteHandler(status: 'accepted' | 'declined') {
-	return async function acceptCompInvite(req: AuthenticatedRequest, res: Response) {
-		if (!hasRequiredKeys(['competitionId'], req, res)) return;
+export function getCompInviteHandler(status: "accepted" | "declined") {
+  return async function acceptCompInvite(
+    req: AuthenticatedRequest,
+    res: Response,
+  ) {
+    if (!hasRequiredKeys(["competitionId"], req, res)) return;
 
-		try {
-			const competitionId = req.params.competitionId;
+    try {
+      const competitionId = req.params.competitionId;
 
-			const competition = await getCompetition(competitionId);
+      const competition = await getCompetition(competitionId);
 
-			if (!competition) {
-				return res.status(404).json({ error: `No competition found with id ${competitionId}` });
-			}
+      if (!competition) {
+        return res
+          .status(404)
+          .json({ error: `No competition found with id ${competitionId}` });
+      }
 
-			if (!competition.users.find(u => u.user_id === req.userId! && u.invite_status === 'pending')) {
-				return res
-					.status(400)
-					.json({ error: `User ${req.userId!} does not have a pending invite to competition ${competitionId}` });
-			}
+      if (
+        !competition.users.find(
+          (u) => u.user_id === req.userId! && u.invite_status === "pending",
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            error: `User ${req.userId!} does not have a pending invite to competition ${competitionId}`,
+          });
+      }
 
-			const updatedUserInfo = await updateCompetitionInvite(competitionId, req.userId!, status);
+      const updatedUserInfo = await updateCompetitionInvite(
+        competitionId,
+        req.userId!,
+        status,
+      );
 
-			competition.users = competition.users.map(u => (u.user_id === req.userId! ? { ...u, ...updatedUserInfo } : u));
+      competition.users = competition.users.map((u) =>
+        u.user_id === req.userId! ? { ...u, ...updatedUserInfo } : u,
+      );
 
-			// Notify the competition owner when someone accepts
-			if (status === 'accepted') {
-				const accepter = await getUser({ userId: req.userId! });
-				const accepterName = accepter?.username || 'Someone';
-				sendPush(competition.owner, {
-					title: 'Invite accepted',
-					body: `${accepterName} joined ${competition.competition_name}`,
-					type: 'competition_accepted',
-					data: { competition_id: competitionId }
-				}).catch(err => console.error('[Push] Error sending competition accepted notification:', err.message));
+      // Notify the competition owner when someone accepts
+      if (status === "accepted") {
+        const accepter = await getUser({ userId: req.userId! });
+        const accepterName = accepter?.username || "Someone";
+        sendPush(competition.owner, {
+          title: "Invite accepted",
+          body: `${accepterName} joined ${competition.competition_name}`,
+          type: "competition_accepted",
+          data: { competition_id: competitionId },
+        }).catch((err) =>
+          console.error(
+            "[Push] Error sending competition accepted notification:",
+            err.message,
+          ),
+        );
 
-				// Auto-start once everyone invited has accepted (starts at midnight
-				// ET, same as the manual Start button)
-				if (await autoStartIfAllAccepted(competitionId)) {
-					return res.status(200).json({ competition: await getCompetition(competitionId) });
-				}
-			}
+        // Auto-start once everyone invited has accepted (starts at midnight
+        // ET, same as the manual Start button)
+        if (await autoStartIfAllAccepted(competitionId)) {
+          return res
+            .status(200)
+            .json({ competition: await getCompetition(competitionId) });
+        }
+      }
 
-			res.status(200).json({ competition });
-		} catch (error: any) {
-			console.error('Error handling invite:', error.message);
-			res.status(500).json({ error: 'Error handling invite: ' + error.message });
-		}
-	};
+      res.status(200).json({ competition });
+    } catch (error: any) {
+      console.error("Error handling invite:", error.message);
+      res
+        .status(500)
+        .json({ error: "Error handling invite: " + error.message });
+    }
+  };
 }

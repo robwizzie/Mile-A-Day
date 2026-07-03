@@ -500,6 +500,14 @@ enum CompetitionActivity: String, Codable, CaseIterable {
         }
     }
 
+    /// Key the backend uses for this type inside `daily_activity` payloads.
+    var dailyActivityKey: String {
+        switch self {
+        case .run: return "running"
+        case .walk: return "walking"
+        }
+    }
+
     var color: Color {
         switch self {
         case .run: return MADTheme.Colors.madRed
@@ -628,6 +636,14 @@ enum CompetitionInterval: String, Codable, CaseIterable {
     }
 }
 
+/// One activity type's slice of a user's day — distance + workout count for
+/// "running" or "walking" on a single local date. Both fields optional so
+/// partial backend payloads decode safely.
+struct DailyActivityEntry: Codable, Equatable {
+    let distance: Double?
+    let count: Int?
+}
+
 /// Competition user with enriched data from backend
 struct CompetitionUser: Codable, Identifiable {
     let competition_id: String
@@ -639,6 +655,11 @@ struct CompetitionUser: Codable, Identifiable {
     let intervals: [String: Double]?
     let remaining_lives: Int?
     let has_manual_workouts: Bool?
+    /// Per-day activity-type breakdown, keyed by "YYYY-MM-DD" local date then
+    /// by activity type ("running"/"walking"). Already filtered server-side to
+    /// the comp's allowed types. Nil on older backends / pre-start / steps
+    /// comps — everything reading it must degrade gracefully.
+    let daily_activity: [String: [String: DailyActivityEntry]]?
 
     var id: String { "\(competition_id)-\(user_id)" }
 
@@ -653,7 +674,29 @@ struct CompetitionUser: Codable, Identifiable {
         return "Unknown"
     }
 
-    init(competition_id: String, user_id: String, invite_status: InviteStatus, username: String?, profile_image_url: String? = nil, score: Double?, intervals: [String: Double]?, remaining_lives: Int? = nil, has_manual_workouts: Bool? = nil) {
+    /// Summed distance across all intervals — the player's total for the comp.
+    var totalIntervalDistance: Double {
+        intervals?.values.reduce(0, +) ?? 0
+    }
+
+    /// True when the backend sent the per-activity daily breakdown.
+    var hasDailyActivity: Bool {
+        !(daily_activity?.isEmpty ?? true)
+    }
+
+    /// This user's distance/count split for one activity type on one
+    /// "YYYY-MM-DD" local day. Nil when the day or type has no data.
+    func dailyActivityEntry(for activity: CompetitionActivity, onDay dayKey: String) -> DailyActivityEntry? {
+        daily_activity?[dayKey]?[activity.dailyActivityKey]
+    }
+
+    /// Total workout count for one activity type across the whole competition.
+    func totalActivityCount(for activity: CompetitionActivity) -> Int {
+        guard let daily = daily_activity else { return 0 }
+        return daily.values.reduce(0) { $0 + ($1[activity.dailyActivityKey]?.count ?? 0) }
+    }
+
+    init(competition_id: String, user_id: String, invite_status: InviteStatus, username: String?, profile_image_url: String? = nil, score: Double?, intervals: [String: Double]?, remaining_lives: Int? = nil, has_manual_workouts: Bool? = nil, daily_activity: [String: [String: DailyActivityEntry]]? = nil) {
         self.competition_id = competition_id
         self.user_id = user_id
         self.invite_status = invite_status
@@ -663,6 +706,7 @@ struct CompetitionUser: Codable, Identifiable {
         self.intervals = intervals
         self.remaining_lives = remaining_lives
         self.has_manual_workouts = has_manual_workouts
+        self.daily_activity = daily_activity
     }
 
     init(from decoder: Decoder) throws {
@@ -676,6 +720,7 @@ struct CompetitionUser: Codable, Identifiable {
         intervals = try container.decodeIfPresent([String: Double].self, forKey: .intervals)
         remaining_lives = try container.decodeIfPresent(Int.self, forKey: .remaining_lives)
         has_manual_workouts = try container.decodeIfPresent(Bool.self, forKey: .has_manual_workouts)
+        daily_activity = try container.decodeIfPresent([String: [String: DailyActivityEntry]].self, forKey: .daily_activity)
     }
 }
 

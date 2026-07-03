@@ -146,6 +146,9 @@ struct NotificationSettingsView: View {
                         settingsToggle("Share my walks & runs to the feed", isOn: $prefs.shareWorkoutsToFeed,
                             description: "Friends see your activity in the unified feed")
                         settingsDivider
+                        settingsToggle("Share route maps", isOn: $prefs.shareRouteMaps,
+                            description: "Show the GPS path of your walks and runs on your feed cards — turn off to keep your routes to yourself")
+                        settingsDivider
                         settingsToggle("Photo prompt after a run", isOn: $autoShareRunsToFeed,
                             description: "Snap a story photo of your mile — the route map posts to the feed either way")
                         settingsDivider
@@ -427,6 +430,7 @@ struct NotificationSettingsView: View {
                     "timezone_offset_minutes": TimeZone.current.secondsFromGMT() / 60,
                     "share_workouts_to_feed": prefs.shareWorkoutsToFeed,
                     "friend_posts_enabled": prefs.friendPostsEnabled,
+                    "share_route_maps": prefs.shareRouteMaps,
                 ]
                 _ = try await friendService.updateNotificationSettings(backendSettings)
             } catch {

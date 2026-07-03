@@ -22,6 +22,10 @@ struct StoryViewerView: View {
     @State private var imageReady = false
 
     @State private var showReport = false
+    /// The story the overflow options were opened FOR — captured at tap time so
+    /// the auto-advance can never re-target a destructive action mid-dialog.
+    @State private var optionsPost: PostItem?
+    @State private var showOptions = false
     /// postId → emoji the viewer sent this session (server keeps one per story).
     @State private var myReactions: [String: String] = [:]
     /// Own-story extras: seen-by counts per post + the viewers sheet.
@@ -30,6 +34,7 @@ struct StoryViewerView: View {
     /// Stories promoted to the feed this session ("Add to feed").
     @State private var promotedIds: Set<String> = []
     @State private var promoting = false
+    @State private var promoteError: String?
 
     /// The emoji palette — must match the backend's ALLOWED_STORY_REACTIONS.
     private let reactionEmojis = ["❤️", "🔥", "👏", "💪", "😮"]
@@ -84,7 +89,9 @@ struct StoryViewerView: View {
         // onDismiss also covers swiping the sheet away, which would otherwise
         // leave `paused` stuck true and freeze the story.
         .sheet(isPresented: $showReport, onDismiss: { paused = false }) {
-            if let post = current {
+            // Report the story the options were opened for, not whatever is
+            // current by the time the sheet lands.
+            if let post = optionsPost ?? current {
                 ReportPostSheet(postId: post.post_id) { showReport = false }
             }
         }
@@ -98,28 +105,78 @@ struct StoryViewerView: View {
                 viewerCounts[post.post_id] = resp.count
             }
         }
+        .alert("Couldn't add to feed", isPresented: Binding(
+            get: { promoteError != nil },
+            set: { if !$0 { promoteError = nil; paused = false } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(promoteError ?? "")
+        }
+        .confirmationDialog("Story options", isPresented: $showOptions, titleVisibility: .hidden) {
+            if let post = optionsPost {
+                if post.is_self {
+                    Button("Delete story", role: .destructive) {
+                        Task { await deleteOwn(post) }
+                    }
+                } else {
+                    Button("Report") { showReport = true }
+                    Button("Block \(group.displayName)", role: .destructive) {
+                        Task { await block(post) }
+                    }
+                }
+            }
+        }
+        .onChange(of: showOptions) { _, open in
+            // Resume when the dialog closes — unless it handed off to another
+            // pausing surface (report sheet) or a destructive action is running.
+            if !open && !showReport && promoteError == nil {
+                paused = false
+            }
+        }
         .statusBarHidden(true)
     }
 
     // MARK: - Pieces
 
     private func storyImage(_ post: PostItem) -> some View {
-        AsyncImage(url: post.mediaURL) { phase in
-            switch phase {
-            case .success(let image):
-                image.resizable().scaledToFill()
+        // The media is composed at 4:5 with the stats sticker baked in, so it
+        // must be shown WHOLE — fit within the screen (never fill-crop; that
+        // cut off the sticker/edges on tall phones) over a blurred, dimmed
+        // edge-to-edge copy that fills the letterbox space. Both layers are
+        // sized EXPLICITLY from the screen geometry so no proposal quirk can
+        // ever regress this into a crop.
+        GeometryReader { geo in
+            AsyncImage(url: post.mediaURL) { phase in
+                switch phase {
+                case .success(let image):
+                    ZStack {
+                        image.resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
+                            .blur(radius: 40, opaque: true)
+                            .opacity(0.55)
+                        image.resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .frame(width: geo.size.width, height: geo.size.height)
+                    }
                     .onAppear { imageReady = true }
-            case .failure:
-                Image(systemName: "photo").font(.largeTitle).foregroundColor(.white.opacity(0.3))
-                    .onAppear { imageReady = true }
-            default:
-                ProgressView().tint(.white)
+                case .failure:
+                    Image(systemName: "photo")
+                        .font(.largeTitle)
+                        .foregroundColor(.white.opacity(0.3))
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .onAppear { imageReady = true }
+                default:
+                    ProgressView().tint(.white)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                }
             }
+            // Re-identify per story so the readiness onAppear refires every step.
+            .id(post.post_id)
         }
-        // Re-identify per story so the readiness onAppear refires every step.
-        .id(post.post_id)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipped()
         .ignoresSafeArea()
     }
 
@@ -154,9 +211,16 @@ struct StoryViewerView: View {
                 Text(group.displayName)
                     .font(.system(size: 14, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
-                Text(post.relativeTime)
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.7))
+                HStack(spacing: 4) {
+                    Text(post.relativeTime)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.7))
+                    if let type = post.workout_type {
+                        Image(systemName: ActivityCardView.icon(type))
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(ActivityCardView.color(type))
+                    }
+                }
             }
             Spacer()
             overflowMenu(post)
@@ -289,21 +353,14 @@ struct StoryViewerView: View {
         .disabled(promoting)
     }
 
-    @ViewBuilder
+    /// Pauses playback and opens the options dialog for THIS story. A plain
+    /// Menu can't pause the auto-advance (no open/close signal), which let the
+    /// story change underneath an open menu and mis-target "Delete story".
     private func overflowMenu(_ post: PostItem) -> some View {
-        Menu {
-            if post.is_self {
-                Button(role: .destructive) {
-                    Task { await deleteOwn(post) }
-                } label: { Label("Delete story", systemImage: "trash") }
-            } else {
-                Button { paused = true; showReport = true } label: {
-                    Label("Report", systemImage: "flag")
-                }
-                Button(role: .destructive) {
-                    Task { await block(post) }
-                } label: { Label("Block \(group.displayName)", systemImage: "hand.raised") }
-            }
+        Button {
+            paused = true
+            optionsPost = post
+            showOptions = true
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 16, weight: .bold))
@@ -321,7 +378,8 @@ struct StoryViewerView: View {
     }
 
     private func advanceProgress() {
-        guard !isLoading, !paused, !showReport, imageReady, current != nil else { return }
+        guard !isLoading, !paused, !showReport, !showOptions, !promoting,
+              imageReady, current != nil else { return }
         progress += 0.05 / stepDuration
         if progress >= 1 { step(1) }
     }
@@ -353,7 +411,15 @@ struct StoryViewerView: View {
             await MainActor.run {
                 stories = loaded
                 isLoading = false
-                if loaded.isEmpty { close() } else { markViewed() }
+                if loaded.isEmpty {
+                    // The group's stories expired/vanished since the rail
+                    // loaded — report changed so the parent removes the dead
+                    // ring instead of re-presenting a black flash forever.
+                    changed = true
+                    close()
+                } else {
+                    markViewed()
+                }
             }
         } catch {
             await MainActor.run { isLoading = false; close() }
@@ -373,20 +439,27 @@ struct StoryViewerView: View {
         promoting = true
         defer { promoting = false }
         do {
-            // Carries the workout id, so this upserts the photo into the run's
-            // existing feed post (replacing the auto route/stats card in place).
+            // Carries the workout id, so this replaces the run's auto
+            // route/stats card in place. If the run already has a deliberate
+            // feed post, the server rejects it (one post per workout).
             _ = try await PostService.createPost(
                 mediaUrl: post.media_url,
                 caption: post.caption,
                 workoutId: post.workout_id,
                 shareToFeed: true,
                 shareToStory: false,
-                stats: post.stats_snapshot
+                stats: post.stats_snapshot,
+                isAuto: false
             )
             await MainActor.run {
                 promotedIds.insert(post.post_id)
                 changed = true
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+        } catch APIError.conflict {
+            await MainActor.run {
+                paused = true
+                promoteError = "This workout already has a feed post. Delete it first to share this photo instead."
             }
         } catch {
             print("[StoryViewer] ❌ Add to feed failed: \(error)")

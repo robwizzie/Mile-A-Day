@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import CoreLocation
 
 // MARK: - Models
 
@@ -34,12 +35,21 @@ struct PostItem: Codable, Identifiable {
     let share_to_story: Bool?
     let story_expires_at: String?
     let created_at: String
+    /// System-generated route/stats card (vs a deliberate user post).
+    var is_auto: Bool?
+    /// The linked workout's type ("running"/"walking") for the type icon.
+    var workout_type: String?
+    /// Simplified GPS trace [[lat, lng], ...] when synced + shared.
+    var route: [[Double]]?
     let is_self: Bool
     var is_hyped: Bool
     var hype_count: Int?
     var is_viewed: Bool?
 
     var id: String { post_id }
+
+    /// Decoded route polyline (nil when absent or degenerate).
+    var routeCoordinates: [CLLocationCoordinate2D]? { decodeRouteCoordinates(route) }
 
     var displayName: String {
         if let username, !username.isEmpty { return username }
@@ -51,6 +61,18 @@ struct PostItem: Codable, Identifiable {
 
     /// Short "2h", "5m", "now" relative time from created_at.
     var relativeTime: String { RelativeTime.short(from: created_at) }
+}
+
+/// Decode a backend `[[lat, lng], ...]` trace into map coordinates. Nil when
+/// absent or degenerate (fewer than 2 valid points) — the single definition of
+/// "drawable route" shared by post and feed-entry models.
+func decodeRouteCoordinates(_ route: [[Double]]?) -> [CLLocationCoordinate2D]? {
+    guard let route, route.count >= 2 else { return nil }
+    let coords = route.compactMap { pair -> CLLocationCoordinate2D? in
+        guard pair.count >= 2 else { return nil }
+        return CLLocationCoordinate2D(latitude: pair[0], longitude: pair[1])
+    }
+    return coords.count >= 2 ? coords : nil
 }
 
 /// One author's worth of active stories in the rail (lazy-loaded on tap).
@@ -97,12 +119,16 @@ struct FeedEntry: Codable, Identifiable {
     /// The run's story-only photo, when one exists — powers the photo/route
     /// flip on the feed card without duplicating the run in the feed.
     let story_photo_url: String?
-    // workout-only
+    /// post-only: system-generated route/stats card (vs a deliberate post).
+    let is_auto: Bool?
+    // workout columns (workout_type is also set for posts via their run)
     let workout_type: String?
     let distance: Double?
     let total_duration: Double?
     let calories: Double?
     let steps: Int?
+    /// Simplified GPS trace [[lat, lng], ...] for the entry's workout.
+    let route: [[Double]]?
     // shared
     let is_self: Bool
     var is_hyped: Bool
@@ -112,13 +138,16 @@ struct FeedEntry: Codable, Identifiable {
         case kind
         case entryId = "id"
         case sort_ts, user_id, username, first_name, last_name, profile_image_url
-        case media_url, caption, stats_snapshot, story_photo_url
-        case workout_type, distance, total_duration, calories, steps
+        case media_url, caption, stats_snapshot, story_photo_url, is_auto
+        case workout_type, distance, total_duration, calories, steps, route
         case is_self, is_hyped, hype_count
     }
 
     var id: String { "\(kind)-\(entryId)" }
     var isPost: Bool { kind == "post" }
+
+    /// Decoded route polyline (nil when absent or degenerate).
+    var routeCoordinates: [CLLocationCoordinate2D]? { decodeRouteCoordinates(route) }
 
     var storyPhotoURL: URL? {
         guard let story_photo_url, story_photo_url != media_url else { return nil }
@@ -142,7 +171,8 @@ struct FeedEntry: Codable, Identifiable {
             profile_image_url: profile_image_url, media_url: media, caption: caption,
             workout_id: nil, stats_snapshot: stats_snapshot, local_date: nil,
             share_to_feed: true, share_to_story: nil, story_expires_at: nil,
-            created_at: sort_ts, is_self: is_self, is_hyped: is_hyped,
+            created_at: sort_ts, is_auto: is_auto, workout_type: workout_type,
+            route: route, is_self: is_self, is_hyped: is_hyped,
             hype_count: hype_count, is_viewed: nil
         )
     }
@@ -248,14 +278,19 @@ enum PostService {
     }
 
     /// Create a post from an already-uploaded media_url. Throws APIError.apiError
-    /// with code "mile_not_completed" / "terms_not_accepted" when gated.
+    /// with code "mile_not_completed" / "terms_not_accepted" when gated, and
+    /// APIError.conflict ("workout_already_posted") when the workout already has
+    /// a live user post for that destination (one deliberate post per workout —
+    /// delete the old one to post again).
     static func createPost(
         mediaUrl: String,
         caption: String?,
         workoutId: String?,
         shareToFeed: Bool,
         shareToStory: Bool,
-        stats: PostStats?
+        stats: PostStats?,
+        isAuto: Bool = false,
+        includeRoute: Bool = true
     ) async throws -> PostItem {
         struct Body: Encodable {
             let media_url: String
@@ -264,6 +299,8 @@ enum PostService {
             let share_to_feed: Bool
             let share_to_story: Bool
             let stats_snapshot: PostStats?
+            let is_auto: Bool
+            let include_route: Bool
         }
         let bodyData = try JSONEncoder().encode(
             Body(
@@ -272,7 +309,9 @@ enum PostService {
                 workout_id: workoutId,
                 share_to_feed: shareToFeed,
                 share_to_story: shareToStory,
-                stats_snapshot: stats
+                stats_snapshot: stats,
+                is_auto: isAuto,
+                include_route: includeRoute
             )
         )
         return try await APIClient.fancyFetch(

@@ -196,6 +196,28 @@ export const workouts = pgTable(
   ],
 );
 
+// Simplified GPS trace for a workout, synced from HealthKit when available
+// (outdoor walks/runs). One row per workout; re-syncs replace the trace in
+// place. Points are client-downsampled ([[lat, lng], ...], ~5 decimal places).
+export const workoutRoutes = pgTable(
+  "workout_routes",
+  {
+    workoutId: varchar("workout_id", { length: 255 }).primaryKey().notNull(),
+    route: jsonb().notNull(),
+    pointCount: integer("point_count").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.workoutId],
+      foreignColumns: [workouts.workoutId],
+      name: "workout_routes_workout_id_fkey",
+    }).onDelete("cascade"),
+  ],
+);
+
 export const notificationSettings = pgTable("notification_settings", {
   userId: text("user_id").primaryKey().notNull(),
   nudgesEnabled: boolean("nudges_enabled").default(true),
@@ -233,6 +255,10 @@ export const notificationSettings = pgTable("notification_settings", {
   // notify me when a friend shares a new photo post.
   shareWorkoutsToFeed: boolean("share_workouts_to_feed").default(true),
   friendPostsEnabled: boolean("friend_posts_enabled").default(true),
+  // share_route_maps: expose my GPS route maps (workout_routes traces) on my
+  // feed entries/posts. Explicit consent surface — when off, friends see the
+  // cards without the route slide/map.
+  shareRouteMaps: boolean("share_route_maps").default(true),
 });
 
 export const competitions = pgTable(
@@ -968,6 +994,13 @@ export const posts = pgTable(
       .defaultNow()
       .notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "string" }),
+    // Auto-generated post (the route/stats card published when the user skips
+    // the photo prompt) vs a deliberate user post. An auto post may be replaced
+    // in place by a user post; a live user post blocks re-posting for the same
+    // workout until it's deleted (one deliberate post per workout).
+    isAuto: boolean("is_auto").default(false).notNull(),
+    // Whether the post surfaces the workout's route map alongside the photo.
+    includeRoute: boolean("include_route").default(true).notNull(),
   },
   (table) => [
     index("idx_posts_user_created").using(

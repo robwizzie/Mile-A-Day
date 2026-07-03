@@ -24,6 +24,10 @@ struct SocialFeedView: View {
     @State private var viewerGroup: StoryGroup?
     @State private var reportingPost: PostItem?
     @State private var showTermsGate = false
+    /// Compose was requested but blocked on the terms gate — open the composer
+    /// AFTER the gate sheet dismisses (presenting both at once is a SwiftUI
+    /// sheet-over-sheet race that can drop the composer entirely).
+    @State private var pendingCompose = false
     @State private var showMileHint = false
     @State private var showMemories = false
     @State private var profileUser: BackendUser?
@@ -108,7 +112,13 @@ struct SocialFeedView: View {
         .fullScreenCover(item: $viewerGroup) { group in
             StoryViewerView(group: group, currentUserId: currentUserId) { changed in
                 viewerGroup = nil
-                if changed { Task { await refresh() } }
+                if changed {
+                    Task { await refresh() }
+                } else {
+                    // Even a plain watch-through changes rail state (viewed
+                    // rings) — refresh just the rail so rings gray out.
+                    Task { await refreshRail() }
+                }
             }
         }
         .sheet(isPresented: $presentingComposer) {
@@ -119,10 +129,15 @@ struct SocialFeedView: View {
         .sheet(item: $reportingPost) { post in
             ReportPostSheet(postId: post.post_id) { reportingPost = nil }
         }
-        .sheet(isPresented: $showTermsGate) {
+        .sheet(isPresented: $showTermsGate, onDismiss: {
+            // Present the composer only after the gate sheet is fully gone.
+            if pendingCompose && termsAccepted == true {
+                presentingComposer = true
+            }
+            pendingCompose = false
+        }) {
             PostTermsGateView {
                 termsAccepted = true
-                presentingComposer = true
             }
         }
         .sheet(isPresented: $showMemories) {
@@ -217,6 +232,7 @@ struct SocialFeedView: View {
         if termsAccepted == true {
             presentingComposer = true
         } else {
+            pendingCompose = true
             showTermsGate = true
         }
     }
@@ -257,6 +273,14 @@ struct SocialFeedView: View {
         }
     }
 
+    /// Reload just the stories rail (viewed rings, expired groups) without the
+    /// heavier full feed refresh.
+    private func refreshRail() async {
+        if let groups = try? await PostService.fetchStoriesRail() {
+            await MainActor.run { stories = groups }
+        }
+    }
+
     private func loadMore() async {
         guard let before = nextBefore, !isLoadingMore else { return }
         await MainActor.run { isLoadingMore = true }
@@ -287,7 +311,13 @@ struct SocialFeedView: View {
                 context: HypeContext(contextType: ctxType, contextId: entry.entryId, contextLabel: label)
             )
             await MainActor.run {
-                updateEntry(entry.id) { $0.is_hyped = true; $0.hype_count = ($0.hype_count ?? 0) + 1 }
+                updateEntry(entry.id) { e in
+                    // A refresh may have landed mid-request and already carry
+                    // this hype — don't count it twice.
+                    guard !e.is_hyped else { return }
+                    e.is_hyped = true
+                    e.hype_count = (e.hype_count ?? 0) + 1
+                }
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
         } catch {

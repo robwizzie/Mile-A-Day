@@ -70,9 +70,12 @@ enum MemoriesService {
             let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: today).day ?? 0
             guard days > 0 else { continue }
 
+            // Bucket by RANGE, not exact day counts — the server computes "a
+            // week/month ago" against its own date, and timezone or midnight
+            // drift makes the client's day math land on 6/8 or 29/31.
             let ago: String? = {
-                if days == 7 { return "1 week ago" }
-                if days < 360 { return "1 month ago" }
+                if (5...9).contains(days) { return "1 week ago" }
+                if (25...45).contains(days) { return "1 month ago" }
                 return nil // exact-year memories use the standard label
             }()
             let years = cal.dateComponents([.year], from: date, to: today).year ?? 0

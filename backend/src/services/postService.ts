@@ -1,6 +1,7 @@
 import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { shouldSendNotification } from "./notificationSettingsService.js";
+import { mileHypeKeyMatchSql } from "./hypeService.js";
 
 const db = PostgresService.getInstance();
 
@@ -43,10 +44,17 @@ export interface PostRow {
   share_to_story: boolean;
   story_expires_at: string | null;
   created_at: string;
+  is_auto: boolean;
+  include_route: boolean;
+  workout_type: string | null;
   is_self: boolean;
   is_hyped: boolean;
   hype_count: number;
   is_viewed?: boolean;
+  // Microsecond-precise created_at (Postgres text form) for keyset pagination.
+  // node-pg parses timestamptz to a ms-truncated JS Date, and a truncated
+  // `before` cursor silently skips same-millisecond rows at page boundaries.
+  cursor?: string;
 }
 
 export interface StoryGroup {
@@ -60,9 +68,11 @@ export interface StoryGroup {
   latest_at: string;
 }
 
-// SELECT list shared by feed + story-detail reads so both shapes match PostRow.
-// `$1` must be the viewer id (drives is_self / is_hyped).
-const POST_SELECT = `
+// Base post columns shared by every post-shaped read (viewer-independent).
+// Routes are deliberately NOT here — only the unified feed ships them (the
+// story viewer / memories / profile grid never render a route map, and the
+// jsonb payload is not free).
+const POST_COLUMNS = `
 	p.post_id,
 	p.user_id,
 	u.username,
@@ -78,6 +88,13 @@ const POST_SELECT = `
 	p.share_to_story,
 	p.story_expires_at,
 	p.created_at,
+	p.is_auto,
+	p.include_route,
+	(SELECT w.workout_type FROM workouts w WHERE w.workout_id = p.workout_id) AS workout_type`;
+
+// SELECT list shared by feed + story-detail reads so both shapes match PostRow.
+// `$1` must be the viewer id (drives is_self / is_hyped).
+const POST_SELECT = `${POST_COLUMNS},
 	(p.user_id = $1) AS is_self,
 	EXISTS (
 		SELECT 1 FROM hype_log h
@@ -87,8 +104,10 @@ const POST_SELECT = `
 			AND h.context_id = p.post_id::text
 	) AS is_hyped,
 	(
-		SELECT COUNT(*)::int FROM hype_log hc
-		WHERE hc.context_type = 'post' AND hc.context_id = p.post_id::text
+		SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
+		WHERE hc.context_type = 'post'
+			AND hc.target_id = p.user_id
+			AND hc.context_id = p.post_id::text
 	) AS hype_count`;
 
 export interface CreatePostInput {
@@ -100,11 +119,30 @@ export interface CreatePostInput {
   shareToFeed: boolean;
   shareToStory: boolean;
   statsSnapshot?: PostStatsSnapshot | null;
+  // Tri-state: true = system auto post (route/stats card), false = deliberate
+  // user post, undefined = legacy client that didn't send the flag (keeps the
+  // original always-upsert behavior so shipped app versions don't break).
+  isAuto?: boolean;
+  includeRoute?: boolean;
 }
+
+// Shape the freshly inserted/updated row like a PostRow (is_self=true).
+const CREATED_POST_SELECT = `
+	SELECT ${POST_COLUMNS},
+		true AS is_self, false AS is_hyped, 0 AS hype_count`;
 
 /**
  * Insert a post and return it shaped as a PostRow (is_self=true, no hypes yet).
  * story_expires_at is set to now()+24h only when the post is shared to a story.
+ *
+ * One-post-per-workout rules (per destination — feed and story-only are
+ * separate slots, enforced by partial unique indexes):
+ * - Legacy clients (isAuto undefined) keep the original upsert-in-place.
+ * - An AUTO post fills an empty slot or replaces an existing auto post; it
+ *   never clobbers a deliberate user post (returns the existing post instead).
+ * - A USER post fills an empty slot or replaces the auto post; if a live user
+ *   post already exists for the workout it throws "workout_already_posted" —
+ *   deleting the old post frees the slot again.
  */
 export async function createPost(input: CreatePostInput): Promise<PostRow> {
   // A workout can have ONE live feed post and ONE live story-only photo
@@ -113,16 +151,45 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
   const conflictTarget = input.shareToFeed
     ? `(workout_id) WHERE (deleted_at IS NULL AND workout_id IS NOT NULL AND share_to_feed)`
     : `(workout_id) WHERE (deleted_at IS NULL AND workout_id IS NOT NULL AND share_to_story AND NOT share_to_feed)`;
+  // Legacy clients (still in the wild) don't send is_auto, but their auto
+  // route/stats cards must stay replaceable by an updated device's photo post.
+  // Classify legacy inserts with the same signature the 0008 backfill used:
+  // a caption-less, feed-only post with a stats snapshot is the auto card.
+  // A misfire only makes a caption-less legacy photo replaceable — which is
+  // exactly the pre-flag behavior those clients already have.
+  const legacyLooksAuto =
+    input.caption == null &&
+    input.statsSnapshot != null &&
+    input.shareToFeed &&
+    !input.shareToStory;
+  const isAutoValue =
+    input.isAuto === undefined ? legacyLooksAuto : input.isAuto === true;
+  // Legacy requests may overwrite anything the caller owns; flagged requests
+  // may only overwrite the slot's AUTO post.
+  const updateGuard =
+    input.isAuto === undefined
+      ? `WHERE posts.user_id = $1`
+      : `WHERE posts.user_id = $1 AND posts.is_auto`;
+  // Legacy clients never sent the flags, so their upserts must not clobber a
+  // stored is_auto/include_route (e.g. resetting a route opt-out to true).
+  const flagUpdates =
+    input.isAuto === undefined
+      ? ""
+      : `,
+					is_auto = EXCLUDED.is_auto,
+					include_route = EXCLUDED.include_route`;
   const rows = await db.query<PostRow>(
     `
 		WITH inserted AS (
 			INSERT INTO posts (
 				user_id, media_url, caption, workout_id, stats_snapshot,
-				local_date, share_to_feed, share_to_story, story_expires_at
+				local_date, share_to_feed, share_to_story, story_expires_at,
+				is_auto, include_route
 			)
 			VALUES (
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
-				CASE WHEN $8 THEN NOW() + INTERVAL '24 hours' ELSE NULL END
+				CASE WHEN $8 THEN NOW() + INTERVAL '24 hours' ELSE NULL END,
+				$9, $10
 			)
 				ON CONFLICT ${conflictTarget}
 				DO UPDATE SET
@@ -131,15 +198,11 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 					stats_snapshot = COALESCE(EXCLUDED.stats_snapshot, posts.stats_snapshot),
 					share_to_feed = EXCLUDED.share_to_feed,
 					share_to_story = EXCLUDED.share_to_story,
-					story_expires_at = CASE WHEN EXCLUDED.share_to_story THEN NOW() + INTERVAL '24 hours' ELSE NULL END
-				WHERE posts.user_id = $1
+					story_expires_at = CASE WHEN EXCLUDED.share_to_story THEN NOW() + INTERVAL '24 hours' ELSE NULL END${flagUpdates}
+				${updateGuard}
 			RETURNING *
 		)
-		SELECT
-			p.post_id, p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
-			p.media_url, p.caption, p.workout_id, p.stats_snapshot, p.local_date::text AS local_date,
-			p.share_to_feed, p.share_to_story, p.story_expires_at, p.created_at,
-			true AS is_self, false AS is_hyped, 0 AS hype_count
+		${CREATED_POST_SELECT}
 		FROM inserted p
 		JOIN users u ON u.user_id = p.user_id
 		`,
@@ -152,14 +215,30 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       input.localDate,
       input.shareToFeed,
       input.shareToStory,
+      isAutoValue,
+      input.includeRoute !== false,
     ],
   );
-  // Zero rows = the workout_id conflicted with a post the caller doesn't own
-  // (the ownership guard on DO UPDATE skipped it) — reject rather than 500.
-  if (!rows[0]) {
-    throw new Error("workout_already_posted");
+  if (rows[0]) return rows[0];
+
+  // Zero rows — the slot is taken and the update guard skipped it. An auto
+  // post quietly yields to the caller's existing user post; anything else
+  // (another user's post, or a second deliberate post) is rejected.
+  if (input.isAuto === true && input.workoutId) {
+    const existing = await db.query<PostRow>(
+      `
+			${CREATED_POST_SELECT}
+			FROM posts p
+			JOIN users u ON u.user_id = p.user_id
+			WHERE p.workout_id = $2 AND p.user_id = $1 AND p.deleted_at IS NULL
+				AND ${input.shareToFeed ? "p.share_to_feed" : "(p.share_to_story AND NOT p.share_to_feed)"}
+			LIMIT 1
+			`,
+      [input.userId, input.workoutId],
+    );
+    if (existing[0]) return existing[0];
   }
-  return rows[0];
+  throw new Error("workout_already_posted");
 }
 
 /**
@@ -257,16 +336,51 @@ export async function getUserActiveStories(
   return rows;
 }
 
-/** Record that the viewer saw a story. Idempotent. */
+/**
+ * Record that the viewer saw a story. Idempotent, and guarded: only records a
+ * view for an ACTIVE story the viewer is actually allowed to see (author, or
+ * an accepted friend of the author with no block either way) — otherwise a
+ * relayed post id could inject a stranger into the author's "Seen by" list.
+ */
 export async function markStoryViewed(
   viewerId: string,
   postId: string,
 ): Promise<void> {
   await db.query(
-    `INSERT INTO story_views (post_id, viewer_id) VALUES ($1, $2)
+    `INSERT INTO story_views (post_id, viewer_id)
+		 SELECT p.post_id, $2
+		 FROM posts p
+		 WHERE p.post_id = $1
+			 AND p.share_to_story
+			 AND p.deleted_at IS NULL
+			 AND p.story_expires_at > NOW()
+			 AND (
+				 p.user_id = $2
+				 OR EXISTS (
+					 SELECT 1 FROM friendships f
+					 WHERE f.user_id = p.user_id AND f.friend_id = $2 AND f.status = 'accepted'
+				 )
+			 )
+			 AND NOT EXISTS (
+				 SELECT 1 FROM user_blocks b
+				 WHERE (b.blocker_id = p.user_id AND b.blocked_id = $2)
+						OR (b.blocker_id = $2 AND b.blocked_id = p.user_id)
+			 )
 		 ON CONFLICT (post_id, viewer_id) DO NOTHING`,
     [postId, viewerId],
   );
+}
+
+/** Whether the workout exists and belongs to the user (post-link guard). */
+export async function userOwnsWorkout(
+  userId: string,
+  workoutId: string,
+): Promise<boolean> {
+  const rows = await db.query(
+    `SELECT 1 FROM workouts WHERE workout_id = $1 AND user_id = $2`,
+    [workoutId, userId],
+  );
+  return rows.length > 0;
 }
 
 /** One row in a story's "seen by" list, with any emoji reaction. */
@@ -367,7 +481,11 @@ export async function reactToStory(
   // Notify only on the FIRST reaction to this story (emoji swaps stay quiet).
   if (inserted[0]?.inserted) {
     try {
-      const shouldSend = await shouldSendNotification(authorId, senderId, "hype");
+      const shouldSend = await shouldSendNotification(
+        authorId,
+        senderId,
+        "hype",
+      );
       if (shouldSend) {
         const sender = await db.query<{ username: string | null }>(
           `SELECT username FROM users WHERE user_id = $1`,
@@ -433,7 +551,8 @@ export async function getFeed(
   const rows = await db.query<PostRow>(
     `
 		${CIRCLE_CTE}
-		SELECT ${POST_SELECT}
+		SELECT ${POST_SELECT},
+			p.created_at::text AS cursor
 		FROM posts p
 		JOIN circle c ON c.uid = p.user_id
 		JOIN users u ON u.user_id = p.user_id
@@ -467,16 +586,23 @@ export interface FeedEntryRow {
   // The run's story-only photo (if one exists) so the feed card can offer a
   // photo/route flip without duplicating the run in the feed.
   story_photo_url: string | null;
-  // workout-only
+  // post-only: system-generated route/stats card vs deliberate user post.
+  is_auto: boolean | null;
+  // workout columns (also populated for posts via their linked workout)
   workout_type: string | null;
   distance: number | null;
   total_duration: number | null;
   calories: number | null;
   steps: number | null;
+  // Simplified GPS trace for the entry's workout, when synced (and, for
+  // posts, when the author chose to include it).
+  route: [number, number][] | null;
   // shared
   is_self: boolean;
   is_hyped: boolean;
   hype_count: number;
+  // Microsecond-precise sort_ts (Postgres text form) for keyset pagination.
+  cursor?: string;
 }
 
 /**
@@ -494,13 +620,15 @@ export async function getUnifiedFeed(
   const rows = await db.query<FeedEntryRow>(
     `
 		${CIRCLE_CTE}
-		SELECT * FROM (
+		SELECT feed.*, feed.sort_ts::text AS cursor FROM (
 			SELECT
 				'post' AS kind,
 				p.post_id::text AS id,
 				p.created_at AS sort_ts,
 				p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
 				p.media_url, p.caption, p.stats_snapshot,
+				-- Story photos are a 24h moment: once expired they must stop
+				-- riding along on the permanent feed card.
 				(
 					SELECT p3.media_url FROM posts p3
 					WHERE p.workout_id IS NOT NULL
@@ -509,25 +637,38 @@ export async function getUnifiedFeed(
 						AND p3.post_id <> p.post_id
 						AND p3.deleted_at IS NULL
 						AND p3.share_to_story AND NOT p3.share_to_feed
+						AND p3.story_expires_at > NOW()
 					ORDER BY p3.created_at DESC
 					LIMIT 1
 				) AS story_photo_url,
-				NULL::varchar AS workout_type,
+				p.is_auto,
+				(SELECT w2.workout_type FROM workouts w2 WHERE w2.workout_id = p.workout_id) AS workout_type,
 				NULL::double precision AS distance,
 				NULL::double precision AS total_duration,
 				NULL::double precision AS calories,
 				NULL::integer AS steps,
+				-- Auto posts' media already IS the rendered route card, so shipping
+				-- the polyline too would only duplicate pixels and bloat the page.
+				-- Gated on the author's global "Share route maps" consent setting
+				-- on top of the per-post include_route choice.
+				(SELECT wr.route FROM workout_routes wr
+					WHERE p.include_route AND NOT p.is_auto
+						AND (COALESCE(nsp.share_route_maps, true) OR p.user_id = $1)
+						AND wr.workout_id = p.workout_id) AS route,
 				(p.user_id = $1) AS is_self,
 				EXISTS (
 					SELECT 1 FROM hype_log h
 					WHERE h.sender_id = $1 AND h.target_id = p.user_id
 						AND h.context_type = 'post' AND h.context_id = p.post_id::text
 				) AS is_hyped,
-				(SELECT COUNT(*)::int FROM hype_log hc
-					WHERE hc.context_type = 'post' AND hc.context_id = p.post_id::text) AS hype_count
+				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
+					WHERE hc.context_type = 'post'
+						AND hc.target_id = p.user_id
+						AND hc.context_id = p.post_id::text) AS hype_count
 			FROM posts p
 			JOIN circle c ON c.uid = p.user_id
 			JOIN users u ON u.user_id = p.user_id
+			LEFT JOIN notification_settings nsp ON nsp.user_id = p.user_id
 			WHERE p.share_to_feed AND p.deleted_at IS NULL
 				AND p.user_id NOT IN (SELECT uid FROM blocked)
 
@@ -540,19 +681,32 @@ export async function getUnifiedFeed(
 				w.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
 				NULL::text AS media_url, NULL::text AS caption, NULL::jsonb AS stats_snapshot,
 				NULL::text AS story_photo_url,
+				NULL::boolean AS is_auto,
 				w.workout_type,
 				w.distance::double precision,
 				w.total_duration::double precision,
 				w.calories::double precision,
 				w.steps,
+				-- Raw workout routes respect the owner's "Share route maps" setting
+				-- (the owner always sees their own).
+				(SELECT wr.route FROM workout_routes wr
+					WHERE (COALESCE(ns.share_route_maps, true) OR w.user_id = $1)
+						AND wr.workout_id = w.workout_id) AS route,
 				(w.user_id = $1) AS is_self,
+				-- Mile hypes are keyed two ways historically: by workout_id (feed)
+				-- and by user:local_date (notifications). Match both so a hype from
+				-- either surface shows up here; DISTINCT sender so a pre-migration
+				-- pair of dual-keyed rows from one person counts once.
 				EXISTS (
 					SELECT 1 FROM hype_log h
 					WHERE h.sender_id = $1 AND h.target_id = w.user_id
-						AND h.context_type = 'mile' AND h.context_id = w.workout_id
+						AND h.context_type = 'mile'
+						AND ${mileHypeKeyMatchSql("h", "w")}
 				) AS is_hyped,
-				(SELECT COUNT(*)::int FROM hype_log hc
-					WHERE hc.context_type = 'mile' AND hc.context_id = w.workout_id) AS hype_count
+				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
+					WHERE hc.context_type = 'mile'
+						AND hc.target_id = w.user_id
+						AND ${mileHypeKeyMatchSql("hc", "w")}) AS hype_count
 			FROM workouts w
 			JOIN circle c ON c.uid = w.user_id
 			JOIN users u ON u.user_id = w.user_id
@@ -588,7 +742,8 @@ export async function getUserPosts(
   const rows = await db.query<PostRow>(
     `
 		${CIRCLE_CTE}
-		SELECT ${POST_SELECT}
+		SELECT ${POST_SELECT},
+			p.created_at::text AS cursor
 		FROM posts p
 		JOIN users u ON u.user_id = p.user_id
 		WHERE p.user_id = $2

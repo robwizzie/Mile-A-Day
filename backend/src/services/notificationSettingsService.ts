@@ -21,6 +21,7 @@ export interface NotificationPreferences {
   timezone_offset_minutes: number | null; // user's current UTC offset in minutes
   share_workouts_to_feed: boolean; // include my raw walks/runs in friends' feed
   friend_posts_enabled: boolean; // notify me when a friend shares a new post
+  share_route_maps: boolean; // show my GPS route maps on my feed entries/posts
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferences = {
@@ -40,6 +41,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   timezone_offset_minutes: null,
   share_workouts_to_feed: true,
   friend_posts_enabled: true,
+  share_route_maps: true,
 };
 
 export async function getNotificationPreferences(
@@ -70,6 +72,7 @@ export async function getNotificationPreferences(
     timezone_offset_minutes: row.timezone_offset_minutes ?? null,
     share_workouts_to_feed: row.share_workouts_to_feed ?? true,
     friend_posts_enabled: row.friend_posts_enabled ?? true,
+    share_route_maps: row.share_route_maps ?? true,
   };
 }
 
@@ -112,6 +115,7 @@ export async function updateNotificationPreferences(
     { key: "timezone_offset_minutes", value: prefs.timezone_offset_minutes },
     { key: "share_workouts_to_feed", value: prefs.share_workouts_to_feed },
     { key: "friend_posts_enabled", value: prefs.friend_posts_enabled },
+    { key: "share_route_maps", value: prefs.share_route_maps },
   ];
 
   for (const field of fields) {

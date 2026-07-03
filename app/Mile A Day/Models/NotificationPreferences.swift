@@ -37,6 +37,15 @@ struct NotificationPreferences: Codable {
     var shareWorkoutsToFeed: Bool = true
     /// Notify me when a friend shares a new photo post.
     var friendPostsEnabled: Bool = true
+    /// Show my GPS route maps on my feed entries and posts. Off = friends see
+    /// the cards without the route slide/map (I still see my own).
+    /// Optional backing field so prefs saved by older app versions (no key)
+    /// still decode instead of silently resetting everything to defaults.
+    private var shareRouteMapsRaw: Bool?
+    var shareRouteMaps: Bool {
+        get { shareRouteMapsRaw ?? true }
+        set { shareRouteMapsRaw = newValue }
+    }
 
     // Do Not Disturb schedule
     var dndEnabled: Bool = false

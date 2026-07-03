@@ -43,7 +43,9 @@ const app = express();
 const PORT = parseInt(process.env.PORT ?? "3000");
 
 app.use(compression());
-app.use(express.json());
+// 2mb (default is 100kb): a workout-sync batch can now carry GPS route traces
+// (~3-4KB per workout x 25-workout batches) and must never 413 mid-sync.
+app.use(express.json({ limit: "2mb" }));
 
 // Ensure uploads directories exist
 const uploadsDir = path.join(process.cwd(), "uploads", "profile-images");

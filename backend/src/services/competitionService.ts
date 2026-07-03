@@ -9,6 +9,7 @@ import {
 import { PostgresService } from "./DbService.js";
 import {
   getQuantityDateRangeBatch,
+  getActivityBreakdownBatch,
   getUsersWithManualWorkouts,
 } from "./workoutService.js";
 import { getStepsDateRangeBatch } from "./dailyStepsService.js";
@@ -226,6 +227,9 @@ const USERS_AGG_SQL = `
 
 export async function getCompetition(
   competitionId: string,
+  {
+    includeActivityBreakdown = false,
+  }: { includeActivityBreakdown?: boolean } = {},
 ): Promise<Competition> {
   const competition = (
     await db.query(
@@ -247,10 +251,44 @@ export async function getCompetition(
 
   // Calculate scores for started competitions (start_date on or before today in ET)
   if (competition.start_date && competition.start_date <= getTodayET()) {
-    const userScores = await getUserScores(competition);
+    // Per-day walk/run breakdown (distance + workout counts) for the detail
+    // view's stats panel and calendar — opt-in because getCompetition is also
+    // on hot paths (nudges, flexes, cron resolution) that never read it.
+    // Steps comps don't read workouts, so they never get one.
+    const withBreakdown =
+      includeActivityBreakdown && competition.options?.unit !== "steps";
+    const acceptedIds = competition.users
+      .filter((u: CompetitionUser) => u.invite_status === "accepted")
+      .map((u: CompetitionUser) => u.user_id);
+    const [userScores, breakdownRows] = await Promise.all([
+      getUserScores(competition),
+      withBreakdown
+        ? getActivityBreakdownBatch(
+            acceptedIds,
+            competition.start_date,
+            competition.end_date ?? undefined,
+            competition.workouts,
+          )
+        : Promise.resolve([]),
+    ]);
+    const activityByUser: Record<
+      string,
+      NonNullable<CompetitionUser["daily_activity"]>
+    > = {};
+    for (const row of breakdownRows) {
+      const byDate = (activityByUser[row.user_id] ??= {});
+      const byType = (byDate[row.local_date] ??= {});
+      byType[row.workout_type] = {
+        distance: Number(row.total_distance),
+        count: Number(row.workout_count),
+      };
+    }
     competition.users = competition.users.map((user: CompetitionUser) => ({
       ...user,
       ...userScores[user.user_id],
+      ...(withBreakdown
+        ? { daily_activity: activityByUser[user.user_id] ?? {} }
+        : {}),
     }));
   }
 
