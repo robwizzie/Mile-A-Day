@@ -18,8 +18,8 @@ Gamified fitness app: run a mile every day, build streaks, compete with friends.
 
 ### Website (`cd website`)
 - Dev: `npm run dev`
-- Build: `npm run build`
-- Lint: `npm run lint`
+- Build: `npm run build` (also type-checks — this is the pre-merge gate)
+- The `lint` script is broken: eslint is not a dependency and there is no config. Don't run it; don't add it to CI.
 
 ### iOS (`app/`)
 - Build via Xcode only. Do not attempt `xcodebuild` from CLI.
@@ -57,7 +57,7 @@ This app ships through Apple's App Store. Every change — UI, backend, copy, as
 ## Code Style
 
 - No linter/formatter configured for backend. Follow existing patterns.
-- Website has ESLint (`pnpm lint`).
+- Website has NO working ESLint (the `lint` script references an uninstalled eslint). `next build` is the check.
 - iOS: follow existing SwiftUI patterns, no SwiftLint.
 
 ## Claude Skills & Agents

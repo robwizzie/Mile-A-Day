@@ -78,5 +78,7 @@ jobs:
           cache: npm
           cache-dependency-path: website/package-lock.json
       - run: npm ci
-      - run: npm run lint
+      # No lint step: the repo has no eslint dependency/config — the `lint`
+      # script assumed a global install. `next build` type-checks, which is
+      # the gate that matters here.
       - run: npm run build
