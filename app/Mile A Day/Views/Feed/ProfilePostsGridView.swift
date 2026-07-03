@@ -55,7 +55,9 @@ struct ProfilePostsGridView: View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay(
-                AsyncImage(url: post.mediaURL) { phase in
+                // The real picture leads when the run has one; the workout
+                // card is only the face of the post when no photo exists.
+                AsyncImage(url: post.storyPhotoURL ?? post.mediaURL) { phase in
                     switch phase {
                     case .success(let image): image.resizable().scaledToFill()
                     case .failure:
@@ -149,7 +151,13 @@ struct ProfilePostsFeedSheet: View {
     let initialPostId: String
     let onNeedMore: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var lightboxPost: PostItem?
+
+    /// The tapped slide's image, presented in the zoom lightbox.
+    private struct LightboxItem: Identifiable {
+        let url: URL
+        var id: String { url.absoluteString }
+    }
+    @State private var lightboxItem: LightboxItem?
 
     var body: some View {
         NavigationStack {
@@ -195,8 +203,62 @@ struct ProfilePostsFeedSheet: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
-        .fullScreenCover(item: $lightboxPost) { post in
-            PhotoLightboxView(url: ProfileImageService.fullImageURL(for: post.media_url))
+        .fullScreenCover(item: $lightboxItem) { item in
+            PhotoLightboxView(url: item.url)
+        }
+    }
+
+    /// Same media treatment as the feed card: the real photo leads, the
+    /// workout card is the second slide (badged "Stats"), page dots when
+    /// there's more than one.
+    @ViewBuilder
+    private func media(_ post: PostItem) -> some View {
+        if let storyPhoto = post.storyPhotoURL {
+            TabView {
+                photoSlide(storyPhoto)
+                photoSlide(post.mediaURL, badge: post.is_auto == true ? "Stats" : nil)
+            }
+            .tabViewStyle(.page(indexDisplayMode: .always))
+            .indexViewStyle(.page(backgroundDisplayMode: .interactive))
+            .frame(maxWidth: .infinity)
+            .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        } else {
+            photoSlide(post.mediaURL)
+        }
+    }
+
+    private func photoSlide(_ url: URL?, badge: String? = nil) -> some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                image.resizable().scaledToFill()
+            case .failure:
+                ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) }
+            default:
+                ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+        .onTapGesture {
+            if let url { lightboxItem = LightboxItem(url: url) }
+        }
+        .overlay(alignment: .topLeading) {
+            if let badge {
+                HStack(spacing: 5) {
+                    Image(systemName: "chart.bar.fill")
+                        .font(.system(size: 11, weight: .bold))
+                    Text(badge)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.black.opacity(0.55)))
+                .padding(10)
+            }
         }
     }
 
@@ -221,21 +283,7 @@ struct ProfilePostsFeedSheet: View {
                 }
             }
 
-            AsyncImage(url: post.mediaURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                case .failure:
-                    ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) }
-                default:
-                    ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .aspectRatio(4.0 / 5.0, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-            .onTapGesture { lightboxPost = post }
+            media(post)
 
             if let stats = post.stats_snapshot {
                 PostStatStrip(stats: stats).padding(.horizontal, 2)

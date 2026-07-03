@@ -55,6 +55,9 @@ export interface PostRow {
   // node-pg parses timestamptz to a ms-truncated JS Date, and a truncated
   // `before` cursor silently skips same-millisecond rows at page boundaries.
   cursor?: string;
+  // The run's active story photo (getUserPosts only) — lets profile surfaces
+  // lead with the real picture like the feed does.
+  story_photo_url?: string | null;
 }
 
 export interface StoryGroup {
@@ -743,7 +746,22 @@ export async function getUserPosts(
     `
 		${CIRCLE_CTE}
 		SELECT ${POST_SELECT},
-			p.created_at::text AS cursor
+			p.created_at::text AS cursor,
+			-- The run's ACTIVE story photo, so the profile grid + detail cards
+			-- can lead with the real picture (workout card second), matching
+			-- the feed. Expired stories drop off here just like on feed cards.
+			(
+				SELECT p3.media_url FROM posts p3
+				WHERE p.workout_id IS NOT NULL
+					AND p3.workout_id = p.workout_id
+					AND p3.user_id = p.user_id
+					AND p3.post_id <> p.post_id
+					AND p3.deleted_at IS NULL
+					AND p3.share_to_story AND NOT p3.share_to_feed
+					AND p3.story_expires_at > NOW()
+				ORDER BY p3.created_at DESC
+				LIMIT 1
+			) AS story_photo_url
 		FROM posts p
 		JOIN users u ON u.user_id = p.user_id
 		WHERE p.user_id = $2
