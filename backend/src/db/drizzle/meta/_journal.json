@@ -61,8 +61,22 @@
     {
       "idx": 8,
       "version": "7",
-      "when": 1782952394676,
-      "tag": "0008_lethal_gambit",
+      "when": 1782959504600,
+      "tag": "0008_heavy_nightmare",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783005444459,
+      "tag": "0009_moaning_peter_parker",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783048091864,
+      "tag": "0010_common_nitro",
       "breakpoints": true
     }
   ]
