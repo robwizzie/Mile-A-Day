@@ -35,7 +35,10 @@ import { startPendingSendCron } from "./cron/pendingSendCron.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
 import { PostgresService } from "./services/DbService.js";
-import { runPendingMigrations } from "./db/runMigrations.js";
+import {
+  runPendingMigrations,
+  getMigrationReport,
+} from "./db/runMigrations.js";
 import { webcrypto } from "node:crypto";
 
 (globalThis as any).crypto ??= webcrypto;
@@ -57,6 +60,46 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 app.get("/status", (req, res) => {
   res.send("healthy");
+});
+
+// Public schema diagnostics: the startup-migration boot report plus live
+// probes for the marker objects recent code depends on. Contains only schema
+// booleans, migration tags, and counts — no user data. Exists because prod
+// has no shell/log access; this is how schema state gets diagnosed.
+app.get("/status/schema", async (req, res) => {
+  const probe = async (sql: string): Promise<boolean | string> => {
+    try {
+      const db = PostgresService.getInstance();
+      const rows = await db.query<{ ok: boolean }>(sql);
+      return rows[0]?.ok === true;
+    } catch (e: any) {
+      return `error: ${e?.message ?? e}`;
+    }
+  };
+  res.json({
+    migration_report: getMigrationReport(),
+    probes: {
+      posts_is_auto: await probe(
+        `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+					WHERE table_name = 'posts' AND column_name = 'is_auto') AS ok`,
+      ),
+      workout_routes_table: await probe(
+        `SELECT EXISTS (SELECT 1 FROM information_schema.tables
+					WHERE table_name = 'workout_routes') AS ok`,
+      ),
+      share_route_maps: await probe(
+        `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+					WHERE table_name = 'notification_settings' AND column_name = 'share_route_maps') AS ok`,
+      ),
+      error_log_table: await probe(
+        `SELECT EXISTS (SELECT 1 FROM information_schema.tables
+					WHERE table_name = 'error_log') AS ok`,
+      ),
+      journal_rows: await probe(
+        `SELECT EXISTS (SELECT 1 FROM "drizzle"."__drizzle_migrations") AS ok`,
+      ),
+    },
+  });
 });
 
 app.get("/test-signin.html", (req, res) => {
