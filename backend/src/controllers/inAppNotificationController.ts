@@ -1,6 +1,5 @@
 import { Request, Response } from "express";
 import { PostgresService } from "../services/DbService.js";
-import { getLegacyHypedMileKeys } from "../services/hypeService.js";
 
 const db = PostgresService.getInstance();
 
@@ -138,12 +137,8 @@ export async function getInAppNotifications(req: Request, res: Response) {
     const targetIds = ctxKeys.map((k) => k.targetId);
     const types = ctxKeys.map((k) => k.type);
     const ids = ctxKeys.map((k) => k.id);
-    // Mile hypes sent from the feed were historically keyed by workout_id
-    // rather than the canonical user:local_date composite -- map those legacy
-    // rows onto the derived composite keys so they read as hyped here too.
-    const mileKeys = ctxKeys.filter((k) => k.type === "mile").map((k) => k.id);
 
-    const [hyped, legacyMile, unreadCount] = await Promise.all([
+    const [hyped, unreadCount] = await Promise.all([
       ctxKeys.length > 0
         ? db.query<{
             target_id: string;
@@ -159,7 +154,6 @@ export async function getInAppNotifications(req: Request, res: Response) {
             [userId, targetIds, types, ids],
           )
         : Promise.resolve([]),
-      getLegacyHypedMileKeys(userId, mileKeys),
       db.query(
         `SELECT COUNT(*) as count FROM in_app_notifications
 			WHERE user_id = $1 AND is_read = FALSE`,
@@ -170,9 +164,6 @@ export async function getInAppNotifications(req: Request, res: Response) {
     const hypedSet = new Set<string>();
     for (const h of hyped) {
       hypedSet.add(`${h.target_id}|${h.context_type}|${h.context_id}`);
-    }
-    for (const h of legacyMile) {
-      hypedSet.add(`${h.target_id}|mile|${h.key}`);
     }
 
     const notifications = derived.map(({ row, hype }) => {

@@ -19,6 +19,7 @@ struct ProfileView: View {
     @State private var recalibrateResultMessage: String?
     @State private var showingShareProfile = false
     @State private var showingSettings = false
+    @State private var showingRouteHeatmap = false
 
     // Friends count shown in the header (Instagram-style), tappable through to
     // the friends list. Owns one FriendService for the count + the list link.
@@ -140,6 +141,9 @@ struct ProfileView: View {
         }
         .sheet(isPresented: $showingManagePins) {
             ManagePinnedBadgesSheet(userManager: userManager)
+        }
+        .sheet(isPresented: $showingRouteHeatmap) {
+            RouteHeatmapView()
         }
         .task {
             await loadOwnFriendCount()
@@ -325,7 +329,44 @@ struct ProfileView: View {
     private var ownStatsTabContent: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
             performanceSection
+            routeHeatmapCard
         }
+    }
+
+    /// Entry point into the full-screen personal route heatmap.
+    private var routeHeatmapCard: some View {
+        Button {
+            showingRouteHeatmap = true
+        } label: {
+            HStack(spacing: MADTheme.Spacing.md) {
+                ZStack {
+                    Circle()
+                        .fill(MADTheme.Colors.madRed.opacity(0.15))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "map.fill")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(MADTheme.Colors.madRed)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Route Heatmap")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.primary)
+                    Text("Every walk and run, painted on one map")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
+        }
+        .buttonStyle(ScaleButtonStyle())
     }
 
     /// Instagram-style grid of the user's own posts.

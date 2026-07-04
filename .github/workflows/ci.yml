@@ -1,0 +1,84 @@
+# Merge safety net. There is no other automated gate: main auto-deploys to the
+# live API via Coolify, so this is what stands between a merge and production.
+#
+# backend job = the exact failure ladder of the v1.2 feed outage:
+#   1. tsc build
+#   2. drizzle-kit check (journal/snapshot consistency — catches the silent
+#      migration-journal corruption a branch merge can cause)
+#   3. the REAL migrator (dist/db/migrateCli.js) against a throwaway Postgres,
+#      run twice: fresh apply, then again to prove idempotence (prod re-runs
+#      it on every container boot)
+#   4. seeded feed/story/hype/signing smoke test against the migrated schema
+#
+# iOS is NOT built here — Xcode Cloud owns that (see docs/XCODE_CLOUD_SETUP.md).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (build + migrations + smoke)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mad_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/mad_ci
+      APP_JWT_SECRET: ci-only-jwt-secret
+      MEDIA_SIGNING_SECRET: ci-only-media-secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Build (tsc)
+        run: npm run build
+      - name: Drizzle journal/snapshot check
+        run: npx drizzle-kit check
+      - name: Enable pg_trgm (migration 0000 uses gin_trgm_ops)
+        run: PGPASSWORD=postgres psql -h localhost -U postgres -d mad_ci -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+      - name: Apply migrations to fresh database
+        run: node dist/db/migrateCli.js
+      - name: Re-run migrator (must be idempotent — prod runs it every boot)
+        run: node dist/db/migrateCli.js
+      - name: Seeded feed/story/hype/signing smoke test
+        run: node scripts/ci-smoke.mjs
+
+  website:
+    name: Website (lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      # No lint step: the repo has no eslint dependency/config — the `lint`
+      # script assumed a global install. `next build` type-checks, which is
+      # the gate that matters here.
+      - run: npm run build

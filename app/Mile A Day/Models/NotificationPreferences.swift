@@ -47,6 +47,15 @@ struct NotificationPreferences: Codable {
         set { shareRouteMapsRaw = newValue }
     }
 
+    /// Surface the shareable "Your Week" recap (feed teaser card on
+    /// Sunday/Monday). Same optional-backing pattern as shareRouteMaps so
+    /// prefs saved by older app versions (no key) still decode.
+    private var weeklyRecapEnabledRaw: Bool?
+    var weeklyRecapEnabled: Bool {
+        get { weeklyRecapEnabledRaw ?? true }
+        set { weeklyRecapEnabledRaw = newValue }
+    }
+
     // Do Not Disturb schedule
     var dndEnabled: Bool = false
     var dndStartHour: Int = 22  // 10 PM

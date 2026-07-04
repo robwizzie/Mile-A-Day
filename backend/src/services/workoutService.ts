@@ -384,6 +384,30 @@ export async function getRecentWorkouts(
 }
 
 /**
+ * Every stored GPS route for a user's live workouts, newest first — powers the
+ * personal route heatmap (all paths overlaid on one map). Self-access only:
+ * route sharing settings gate what FRIENDS see, but your own history is
+ * always yours. Capped because routes are ~300 points each; 1000 routes
+ * (~3 years of daily runs) is already several MB of JSON.
+ */
+export async function getUserRoutes(userId: string, limit: number = 1000) {
+  return await db.query<{
+    workout_id: string;
+    local_date: string;
+    workout_type: string;
+    route: unknown;
+  }>(
+    `SELECT w.workout_id, w.local_date, w.workout_type, wr.route
+		 FROM workout_routes wr
+		 JOIN workouts w ON w.workout_id = wr.workout_id
+		 WHERE w.user_id = $1 AND w.deleted_at IS NULL
+		 ORDER BY w.device_end_date DESC
+		 LIMIT $2`,
+    [userId, limit],
+  );
+}
+
+/**
  * Today's date ('YYYY-MM-DD') in the user's local timezone, derived from their
  * most recent workout's timezone_offset (matches workouts.local_date format).
  * Falls back to the server's UTC date if the user has no workouts.

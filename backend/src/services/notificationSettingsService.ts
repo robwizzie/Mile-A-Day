@@ -22,6 +22,7 @@ export interface NotificationPreferences {
   share_workouts_to_feed: boolean; // include my raw walks/runs in friends' feed
   friend_posts_enabled: boolean; // notify me when a friend shares a new post
   share_route_maps: boolean; // show my GPS route maps on my feed entries/posts
+  weekly_recap_enabled: boolean; // Sunday-evening weekly recap push + story card
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferences = {
@@ -42,6 +43,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   share_workouts_to_feed: true,
   friend_posts_enabled: true,
   share_route_maps: true,
+  weekly_recap_enabled: true,
 };
 
 export async function getNotificationPreferences(
@@ -73,6 +75,7 @@ export async function getNotificationPreferences(
     share_workouts_to_feed: row.share_workouts_to_feed ?? true,
     friend_posts_enabled: row.friend_posts_enabled ?? true,
     share_route_maps: row.share_route_maps ?? true,
+    weekly_recap_enabled: row.weekly_recap_enabled ?? true,
   };
 }
 
@@ -116,6 +119,7 @@ export async function updateNotificationPreferences(
     { key: "share_workouts_to_feed", value: prefs.share_workouts_to_feed },
     { key: "friend_posts_enabled", value: prefs.friend_posts_enabled },
     { key: "share_route_maps", value: prefs.share_route_maps },
+    { key: "weekly_recap_enabled", value: prefs.weekly_recap_enabled },
   ];
 
   for (const field of fields) {

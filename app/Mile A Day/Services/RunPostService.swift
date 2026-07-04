@@ -61,9 +61,13 @@ enum RunPostService {
             let coords = await HealthKitManager.shared.fetchAllRouteLocations(for: workout)
                 .map { $0.coordinate }
             if coords.count >= 2 {
-                let color: UIColor = workoutType == "walking"
-                    ? .systemBlue : UIColor(MADTheme.Colors.madRed)
-                image = await renderRouteImage(coordinates: coords, color: color)
+                // Same accent the feed uses for this workout type — the baked
+                // card and the live cards must speak one color language.
+                let color = UIColor(ActivityCardView.color(workoutType))
+                image = await renderRouteImage(
+                    coordinates: coords, color: color,
+                    stats: stats, workoutType: workoutType
+                )
             }
         }
         if image == nil {
@@ -93,18 +97,39 @@ enum RunPostService {
 
     @MainActor
     static func renderStatsCard(stats: RunStatsInput, workoutType: String) -> UIImage? {
+        // The card lays itself out at design size (360×450) — scale up to the
+        // 1080×1350 upload size. Rendering AT 1080 with scale 1 is the classic
+        // bug: point sizes become raw pixels and the whole card reads tiny.
         let card = RunStatsCardView(stats: stats, workoutType: workoutType)
-            .frame(width: 1080, height: 1350)
         let renderer = ImageRenderer(content: card)
-        renderer.scale = 1
+        renderer.scale = 1080 / RunStatsCardView.designSize.width
         renderer.isOpaque = true
         return renderer.uiImage
     }
 
-    /// Snapshot a map covering the route and draw the traced polyline + start/end
-    /// pins. Uses `MKMapSnapshotter` (not `ImageRenderer`) because live map tiles
-    /// don't render through SwiftUI's renderer.
-    static func renderRouteImage(coordinates: [CLLocationCoordinate2D], color: UIColor) async -> UIImage? {
+    /// The stats/brand overlay for route images, rendered transparent at the
+    /// same design-space scale so its type sizes match the stats card's.
+    @MainActor
+    private static func renderRouteOverlay(stats: RunStatsInput, workoutType: String) -> UIImage? {
+        let overlay = RouteStatsOverlayView(stats: stats, workoutType: workoutType)
+        let renderer = ImageRenderer(content: overlay)
+        renderer.scale = 1080 / RunStatsCardView.designSize.width
+        renderer.isOpaque = false
+        return renderer.uiImage
+    }
+
+    /// Snapshot a map covering the route, draw the traced polyline + start/end
+    /// pins, then composite the stats/brand overlay so the post carries its
+    /// numbers instead of being a bare map. Uses `MKMapSnapshotter` (not
+    /// `ImageRenderer`) because live map tiles don't render through SwiftUI's
+    /// renderer.
+    @MainActor
+    static func renderRouteImage(
+        coordinates: [CLLocationCoordinate2D],
+        color: UIColor,
+        stats: RunStatsInput,
+        workoutType: String
+    ) async -> UIImage? {
         guard coordinates.count >= 2 else { return nil }
 
         var minLat = coordinates[0].latitude, maxLat = coordinates[0].latitude
@@ -132,6 +157,8 @@ enum RunPostService {
         }
         guard let snapshot else { return nil }
 
+        let overlay = renderRouteOverlay(stats: stats, workoutType: workoutType)
+
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         let renderer = UIGraphicsImageRenderer(size: options.size, format: format)
@@ -139,9 +166,10 @@ enum RunPostService {
             snapshot.image.draw(at: .zero)
             let cg = ctx.cgContext
 
-            // Bottom scrim for legibility if we ever overlay text.
+            // Line + pin sizes are in the 1080px space — thick enough to stay
+            // visible when the image displays at ~a third of that width.
             cg.setStrokeColor(color.cgColor)
-            cg.setLineWidth(10)
+            cg.setLineWidth(16)
             cg.setLineJoin(.round)
             cg.setLineCap(.round)
             var first = true
@@ -153,14 +181,17 @@ enum RunPostService {
 
             drawDot(cg, at: snapshot.point(for: coordinates.first!), color: .systemGreen)
             drawDot(cg, at: snapshot.point(for: coordinates.last!), color: color)
+
+            // Stats band + activity/date chips over the map.
+            overlay?.draw(in: CGRect(origin: .zero, size: options.size))
         }
     }
 
     private static func drawDot(_ cg: CGContext, at pt: CGPoint, color: UIColor) {
-        let outer: CGFloat = 15
+        let outer: CGFloat = 21
         cg.setFillColor(UIColor.white.cgColor)
         cg.fillEllipse(in: CGRect(x: pt.x - outer, y: pt.y - outer, width: outer * 2, height: outer * 2))
-        let inner: CGFloat = 9
+        let inner: CGFloat = 13
         cg.setFillColor(color.cgColor)
         cg.fillEllipse(in: CGRect(x: pt.x - inner, y: pt.y - inner, width: inner * 2, height: inner * 2))
     }

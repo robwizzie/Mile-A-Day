@@ -9,6 +9,9 @@ struct StoriesRailView: View {
     let myName: String
     let myImageURL: String?
     let canPost: Bool
+    /// The viewer has already shared this workout — the "+" add badge hides
+    /// (one post per walk/run); the ring still opens their own story.
+    var hasSharedWorkout: Bool = false
     /// Friends' stories stay locked until the viewer finishes their mile.
     var canViewStories: Bool = true
     let onTapAdd: () -> Void
@@ -63,11 +66,16 @@ struct StoriesRailView: View {
                     ring(unviewed: myGroup?.has_unviewed ?? false, dashed: myGroup == nil) {
                         AvatarView(name: myName, imageURL: myImageURL, size: 64)
                     }
-                    Image(systemName: canPost ? "plus.circle.fill" : "lock.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.white, canPost ? MADTheme.Colors.madRed : Color.gray)
-                        .background(Circle().fill(.black))
-                        .offset(x: 2, y: 2)
+                    // No add/lock badge once they've shared this workout — the
+                    // ring still opens their own story, there's just nothing new
+                    // to post. Lock shows only before the mile is done.
+                    if !hasSharedWorkout {
+                        Image(systemName: canPost ? "plus.circle.fill" : "lock.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.white, canPost ? MADTheme.Colors.madRed : Color.gray)
+                            .background(Circle().fill(.black))
+                            .offset(x: 2, y: 2)
+                    }
                 }
                 Text("Your story")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))

@@ -14,6 +14,7 @@ import {
   updateWorkout as updateWorkoutDb,
   computePersonalRecords,
   getUserLocalToday,
+  getUserRoutes,
 } from "../services/workoutService.js";
 import { checkRaceCompletions } from "../services/competitionService.js";
 import { softDeleteWorkout } from "../services/workoutDeletionService.js";
@@ -366,6 +367,19 @@ export async function getRecentWorkouts(req: Request, res: Response) {
     res
       .status(500)
       .json({ error: "Error getting recent workouts: " + error.message });
+  }
+}
+
+/** GET /workouts/:userId/routes — all stored GPS routes for the heatmap. */
+export async function getUserRoutesController(req: Request, res: Response) {
+  if (!hasRequiredKeys(["userId"], req, res)) return;
+
+  try {
+    const results = await getUserRoutes(req.params.userId);
+    return res.status(200).json(results);
+  } catch (error: any) {
+    console.error("Error getting user routes:", error.message);
+    res.status(500).json({ error: "Error getting user routes" });
   }
 }
 

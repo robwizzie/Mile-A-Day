@@ -18,6 +18,8 @@ struct SocialFeedView: View {
 
     @State private var hypingIds: Set<String> = []
     @State private var termsAccepted: Bool?
+    /// Transient "out of hypes" banner — the only hype failure worth surfacing.
+    @State private var showHypeLimitBanner = false
 
     // Presentation
     @State private var presentingComposer = false
@@ -29,12 +31,33 @@ struct SocialFeedView: View {
     /// sheet-over-sheet race that can drop the composer entirely).
     @State private var pendingCompose = false
     @State private var showMileHint = false
+    @State private var showAlreadySharedHint = false
     @State private var showMemories = false
+    @State private var showWeeklyRecap = false
     @State private var profileUser: BackendUser?
 
     private var currentUserId: String? { UserDefaults.standard.string(forKey: "backendUserId") }
     /// Completing the daily mile unlocks posting AND viewing friends' stories.
     private var mileDone: Bool { healthManager.todaysDistance >= userManager.currentUser.goalMiles }
+
+    /// True once the user has already made a DELIBERATE share for today's mile —
+    /// a photo post on the feed or an active story of their own. One share per
+    /// walk/run is the reward, so the compose affordances hide until they delete
+    /// it (feed/story refreshes it away) or a new day's mile comes around. The
+    /// auto route/stats card doesn't count — a photo can still replace it.
+    private var alreadySharedWorkout: Bool {
+        guard let uid = currentUserId else { return false }
+        let hasStoryToday = stories.contains { $0.user_id == uid && Self.isToday($0.latest_at) }
+        let hasFeedPostToday = feed.contains {
+            $0.is_self && $0.isPost && $0.is_auto != true && Self.isToday($0.sort_ts)
+        }
+        return hasStoryToday || hasFeedPostToday
+    }
+
+    private static func isToday(_ iso: String) -> Bool {
+        guard let d = RelativeTime.date(from: iso) else { return false }
+        return Calendar.current.isDateInToday(d)
+    }
 
     private var statsInput: RunStatsInput {
         let user = userManager.currentUser
@@ -69,6 +92,7 @@ struct SocialFeedView: View {
                         myName: userManager.currentUser.username ?? userManager.currentUser.name,
                         myImageURL: userManager.currentUser.profileImageUrl,
                         canPost: mileDone,
+                        hasSharedWorkout: alreadySharedWorkout,
                         canViewStories: mileDone,
                         onTapAdd: handleCompose,
                         onTapGroup: { viewerGroup = $0 },
@@ -77,6 +101,11 @@ struct SocialFeedView: View {
 
                     if !memories.isEmpty {
                         MemoriesCardView(memories: memories) { showMemories = true }
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                    }
+
+                    if isWeeklyRecapDay {
+                        weeklyRecapTeaserCard
                             .padding(.horizontal, MADTheme.Spacing.md)
                     }
 
@@ -108,6 +137,12 @@ struct SocialFeedView: View {
         .background(MADTheme.Colors.appBackgroundGradient)
         .toolbar(.hidden, for: .navigationBar)
         .overlay(alignment: .bottomTrailing) { composeButton }
+        .overlay(alignment: .top) {
+            if showHypeLimitBanner {
+                hypeLimitBanner
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
         .task { if !loadedOnce { await refresh(); await loadTermsStatus(); loadMemories() } }
         .fullScreenCover(item: $viewerGroup) { group in
             StoryViewerView(group: group, currentUserId: currentUserId) { changed in
@@ -143,6 +178,9 @@ struct SocialFeedView: View {
         .sheet(isPresented: $showMemories) {
             MemoriesDetailView(memories: memories)
         }
+        .sheet(isPresented: $showWeeklyRecap) {
+            WeeklyRecapView()
+        }
         .sheet(item: $profileUser) { user in
             NavigationStack {
                 UserProfileDetailView(user: user, friendService: FriendService())
@@ -153,6 +191,58 @@ struct SocialFeedView: View {
         } message: {
             Text("Complete your daily mile to post and to see your friends' stories today. Keep going — you've got this! 🏃")
         }
+        .alert("You've already shared this one", isPresented: $showAlreadySharedHint) {
+            Button("Got it", role: .cancel) {}
+        } message: {
+            Text("One post per walk or run — that's the reward. Delete your current post or story if you'd rather share a different shot.")
+        }
+    }
+
+    // MARK: - Weekly Recap teaser
+
+    /// The recap teaser only surfaces at the week boundary (Sunday/Monday),
+    /// and respects the "Weekly recap" preference toggle.
+    private var isWeeklyRecapDay: Bool {
+        let weekday = Calendar.current.component(.weekday, from: Date())
+        return (weekday == 1 || weekday == 2) && NotificationPreferences.load().weeklyRecapEnabled
+    }
+
+    /// Compact "Your week in miles" card — styled like MemoriesCardView.
+    private var weeklyRecapTeaserCard: some View {
+        Button { showWeeklyRecap = true } label: {
+            HStack(spacing: MADTheme.Spacing.md) {
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(MADTheme.Colors.redGradient))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Weekly recap")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .tracking(1.2)
+                        .foregroundColor(.white.opacity(0.6))
+                    Text("Your week in miles is ready")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                            .strokeBorder(MADTheme.Colors.madRed.opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -193,19 +283,25 @@ struct SocialFeedView: View {
         }
     }
 
+    /// The compose FAB. Hidden entirely once the mile is done AND already
+    /// shared — one post per walk/run, so there's nothing to add. Still shows
+    /// the lock state before the mile is finished.
+    @ViewBuilder
     private var composeButton: some View {
-        Button(action: handleCompose) {
-            Image(systemName: mileDone ? "plus" : "lock.fill")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(.white)
-                .frame(width: 56, height: 56)
-                .background(
-                    Circle().fill(mileDone ? AnyShapeStyle(MADTheme.Colors.redGradient) : AnyShapeStyle(Color.gray.opacity(0.6)))
-                )
-                .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+        if !(mileDone && alreadySharedWorkout) {
+            Button(action: handleCompose) {
+                Image(systemName: mileDone ? "plus" : "lock.fill")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 56, height: 56)
+                    .background(
+                        Circle().fill(mileDone ? AnyShapeStyle(MADTheme.Colors.redGradient) : AnyShapeStyle(Color.gray.opacity(0.6)))
+                    )
+                    .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+            }
+            .padding(.trailing, MADTheme.Spacing.lg)
+            .padding(.bottom, MADTheme.Spacing.lg)
         }
-        .padding(.trailing, MADTheme.Spacing.lg)
-        .padding(.bottom, MADTheme.Spacing.lg)
     }
 
     private var emptyState: some View {
@@ -229,6 +325,9 @@ struct SocialFeedView: View {
 
     private func handleCompose() {
         guard mileDone else { showMileHint = true; return }
+        // Reachable from the rail's own-story cell even after the FAB hides —
+        // enforce one-share-per-workout at the entry point too.
+        guard !alreadySharedWorkout else { showAlreadySharedHint = true; return }
         if termsAccepted == true {
             presentingComposer = true
         } else {
@@ -320,9 +419,42 @@ struct SocialFeedView: View {
                 }
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
+        } catch APIError.rateLimited {
+            // Out of hypes for today — say so instead of silently doing
+            // nothing after the double-tap burst played.
+            await MainActor.run {
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                    showHypeLimitBanner = true
+                }
+            }
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.25)) { showHypeLimitBanner = false }
+            }
         } catch {
-            // conflict (already hyped) / rate-limited — leave as-is.
+            // conflict (already hyped) — leave as-is.
         }
+    }
+
+    private var hypeLimitBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "hands.clap.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.orange)
+            Text("You're out of hypes for today")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .background(
+            Capsule()
+                .fill(Color(red: 0.12, green: 0.12, blue: 0.14))
+                .overlay(Capsule().strokeBorder(Color.orange.opacity(0.35), lineWidth: 1))
+                .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
+        )
+        .padding(.top, 8)
     }
 
     private func block(_ entry: FeedEntry) async {

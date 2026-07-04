@@ -32,6 +32,7 @@ import { startNotificationCron } from "./cron/notificationCron.js";
 import { startSilentSyncCron } from "./cron/silentSyncCron.js";
 import { startStoriesCron } from "./cron/storiesCron.js";
 import { startPendingSendCron } from "./cron/pendingSendCron.js";
+import { startWeeklyRecapCron } from "./cron/weeklyRecapCron.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
 import { PostgresService } from "./services/DbService.js";
@@ -40,6 +41,7 @@ import {
   getMigrationReport,
 } from "./db/runMigrations.js";
 import { getUnifiedFeed, getStoriesRail } from "./services/postService.js";
+import { verifyPostsMediaAccess } from "./services/mediaSigningService.js";
 import { webcrypto } from "node:crypto";
 
 (globalThis as any).crypto ??= webcrypto;
@@ -57,6 +59,10 @@ const uploadsDir = path.join(process.cwd(), "uploads", "profile-images");
 fs.mkdirSync(uploadsDir, { recursive: true });
 fs.mkdirSync(path.join(process.cwd(), "uploads", "posts"), { recursive: true });
 
+// Post photos require a signed url (issued on every post/feed response);
+// profile images below stay public. Mounted BEFORE the general static
+// handler so unsigned /uploads/posts requests never reach the files.
+app.use("/uploads/posts", verifyPostsMediaAccess);
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 app.get("/status", (req, res) => {
@@ -245,6 +251,7 @@ function startCrons() {
   startSilentSyncCron();
   startStoriesCron();
   startPendingSendCron();
+  startWeeklyRecapCron();
   // Idempotently ensure the v2 social/app-function badges exist in the catalog.
   seedExtraBadges();
   // Idempotently ensure the v2 daily challenges (5K/10K/social) exist.

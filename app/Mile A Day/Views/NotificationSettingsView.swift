@@ -154,6 +154,9 @@ struct NotificationSettingsView: View {
                         settingsDivider
                         settingsToggle("New posts from friends", isOn: $prefs.friendPostsEnabled,
                             description: "Get notified when a friend shares a photo")
+                        settingsDivider
+                        settingsToggle("Weekly recap", isOn: $prefs.weeklyRecapEnabled,
+                            description: "A Sunday summary of your week's miles, ready to share")
                     }
 
                     // Competition Notifications — collapsed behind a master
@@ -431,6 +434,7 @@ struct NotificationSettingsView: View {
                     "share_workouts_to_feed": prefs.shareWorkoutsToFeed,
                     "friend_posts_enabled": prefs.friendPostsEnabled,
                     "share_route_maps": prefs.shareRouteMaps,
+                    "weekly_recap_enabled": prefs.weeklyRecapEnabled,
                 ]
                 _ = try await friendService.updateNotificationSettings(backendSettings)
             } catch {
