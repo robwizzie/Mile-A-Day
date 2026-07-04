@@ -134,63 +134,102 @@ export async function getInAppNotifications(req: Request, res: Response) {
         id: d.hype.hype_context_id!,
       }));
 
-    const targetIds = ctxKeys.map((k) => k.targetId);
-    const types = ctxKeys.map((k) => k.type);
-    const ids = ctxKeys.map((k) => k.id);
+    // Mile contexts use the unified RUN rule: the composite key's own 'mile'
+    // hypes PLUS 'post' hypes on posts linked to that runner+day's workouts —
+    // the same rule the feed queries use (see hypeService.runHypeMatchSql),
+    // so the inbox tally always equals the feed tally for the same run.
+    const mileKeys = ctxKeys.filter((k) => k.type === "mile");
+    const otherKeys = ctxKeys.filter((k) => k.type !== "mile");
 
-    const [hyped, counts, unreadCount] = await Promise.all([
-      ctxKeys.length > 0
-        ? db.query<{
-            target_id: string;
-            context_type: string;
-            context_id: string;
-          }>(
-            `SELECT target_id, context_type, context_id
+    const otherTargetIds = otherKeys.map((k) => k.targetId);
+    const otherTypes = otherKeys.map((k) => k.type);
+    const otherIds = otherKeys.map((k) => k.id);
+    const mileTargetIds = mileKeys.map((k) => k.targetId);
+    const mileIds = mileKeys.map((k) => k.id);
+
+    const MILE_RUN_MATCH = `
+			(h.context_type = 'mile' AND h.context_id = t.context_id)
+			OR (h.context_type = 'post' AND h.context_id IN (
+				SELECT p.post_id::text
+				FROM posts p
+				JOIN workouts w ON w.workout_id = p.workout_id
+				WHERE p.user_id = t.target_id AND p.deleted_at IS NULL
+					AND (w.user_id || ':' || w.local_date::text) = t.context_id
+			))`;
+
+    const [hypedOther, countsOther, mileStats, unreadCount] = await Promise.all(
+      [
+        otherKeys.length > 0
+          ? db.query<{
+              target_id: string;
+              context_type: string;
+              context_id: string;
+            }>(
+              `SELECT target_id, context_type, context_id
 					FROM hype_log
 					WHERE sender_id = $1
 						AND (target_id, context_type, context_id) IN (
 							SELECT * FROM UNNEST($2::text[], $3::text[], $4::text[])
 						)`,
-            [userId, targetIds, types, ids],
-          )
-        : Promise.resolve([]),
-      // Total hypes per context across ALL senders — the same DISTINCT-sender
-      // count the feed shows, keyed by the same canonical context (mile
-      // composites, post ids), so the inbox and feed tallies always agree.
-      ctxKeys.length > 0
-        ? db.query<{
-            target_id: string;
-            context_type: string;
-            context_id: string;
-            cnt: number;
-          }>(
-            `SELECT target_id, context_type, context_id,
+              [userId, otherTargetIds, otherTypes, otherIds],
+            )
+          : Promise.resolve([]),
+        otherKeys.length > 0
+          ? db.query<{
+              target_id: string;
+              context_type: string;
+              context_id: string;
+              cnt: number;
+            }>(
+              `SELECT target_id, context_type, context_id,
 						COUNT(DISTINCT sender_id)::int AS cnt
 					FROM hype_log
 					WHERE (target_id, context_type, context_id) IN (
 							SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[])
 						)
 					GROUP BY target_id, context_type, context_id`,
-            [targetIds, types, ids],
-          )
-        : Promise.resolve([]),
-      db.query(
-        `SELECT COUNT(*) as count FROM in_app_notifications
+              [otherTargetIds, otherTypes, otherIds],
+            )
+          : Promise.resolve([]),
+        mileKeys.length > 0
+          ? db.query<{
+              target_id: string;
+              context_id: string;
+              cnt: number;
+              viewer_hyped: boolean;
+            }>(
+              `SELECT t.target_id, t.context_id,
+						COUNT(DISTINCT h.sender_id)::int AS cnt,
+						BOOL_OR(h.sender_id = $3) AS viewer_hyped
+					FROM UNNEST($1::text[], $2::text[]) AS t(target_id, context_id)
+					JOIN hype_log h ON h.target_id = t.target_id AND (${MILE_RUN_MATCH})
+					GROUP BY t.target_id, t.context_id`,
+              [mileTargetIds, mileIds, userId],
+            )
+          : Promise.resolve([]),
+        db.query(
+          `SELECT COUNT(*) as count FROM in_app_notifications
 			WHERE user_id = $1 AND is_read = FALSE`,
-        [userId],
-      ),
-    ]);
+          [userId],
+        ),
+      ],
+    );
 
     const hypedSet = new Set<string>();
-    for (const h of hyped) {
+    for (const h of hypedOther) {
       hypedSet.add(`${h.target_id}|${h.context_type}|${h.context_id}`);
     }
     const countByKey = new Map<string, number>();
-    for (const c of counts) {
+    for (const c of countsOther) {
       countByKey.set(
         `${c.target_id}|${c.context_type}|${c.context_id}`,
         Number(c.cnt) || 0,
       );
+    }
+    for (const m of mileStats) {
+      const key = `${m.target_id}|mile|${m.context_id}`;
+      countByKey.set(key, Number(m.cnt) || 0);
+      if (m.viewer_hyped) hypedSet.add(key);
     }
 
     const notifications = derived.map(({ row, hype }) => {

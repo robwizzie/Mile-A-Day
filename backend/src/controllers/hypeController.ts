@@ -13,7 +13,7 @@ import {
   getDailyHypeCount,
   getHypeResetsAt,
   hasHypedContext,
-  hasHypedMile,
+  hasHypedRunContext,
   canonicalizeMileContext,
   HYPE_DAILY_LIMIT,
   HypeContext,
@@ -184,10 +184,17 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
     }
 
     // Context-aware dedupe pre-check (legacy no-context hypes skip this).
+    // Mile/post contexts dedupe across the whole RUN — hyping a mile from
+    // the inbox and then the same run's post from the feed is ONE hype.
     if (context) {
       const alreadyHyped =
-        context.contextType === "mile"
-          ? await hasHypedMile(senderId, targetUserId, context.contextId)
+        context.contextType === "mile" || context.contextType === "post"
+          ? await hasHypedRunContext(
+              senderId,
+              targetUserId,
+              context.contextType,
+              context.contextId,
+            )
           : await hasHypedContext(
               senderId,
               targetUserId,

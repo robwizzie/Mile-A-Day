@@ -81,10 +81,14 @@ export interface ContextHyper {
 }
 
 /**
- * Everyone who hyped one specific context (a post, or a user's daily mile),
- * newest first — powers the Instagram-style "who liked this" list behind the
- * hype tally. DISTINCT ON sender so pre-migration dual-keyed mile rows from
- * one person appear once, matching the feed's COUNT(DISTINCT sender_id).
+ * Everyone who hyped one specific context, newest first — powers the
+ * Instagram-style "who liked this" list behind the hype tally. DISTINCT ON
+ * sender so one person appears once, matching COUNT(DISTINCT sender_id).
+ *
+ * 'mile' and 'post' contexts use the unified RUN rule (see runHypeMatchSql):
+ * hypes on a run's mile composite AND on any live post linked to that run's
+ * workout are one pool, so this list always matches the tallies the feed,
+ * friends list, and inbox show for the same run.
  */
 export async function getContextHypers(
   targetId: string,
@@ -92,19 +96,47 @@ export async function getContextHypers(
   contextId: string,
   limit: number = 100,
 ): Promise<ContextHyper[]> {
+  let matchSql: string;
+  const params: unknown[] = [targetId, contextId, limit];
+
+  if (contextType === "mile") {
+    // $2 = user:local_date composite.
+    matchSql = `(
+			(h.context_type = 'mile' AND h.context_id = $2)
+			OR (h.context_type = 'post' AND h.context_id IN (
+				SELECT p.post_id::text
+				FROM posts p
+				JOIN workouts w ON w.workout_id = p.workout_id
+				WHERE p.user_id = $1 AND p.deleted_at IS NULL
+					AND (w.user_id || ':' || w.local_date::text) = $2
+			))
+		)`;
+  } else if (contextType === "post") {
+    // $2 = post id. Expand through the post's linked workout (when any) to
+    // the run's mile hypes and sibling posts.
+    matchSql = `EXISTS (
+			SELECT 1 FROM posts p
+			WHERE p.post_id::text = $2 AND p.user_id = $1
+				AND ${postHypeMatchSql("h", "p")}
+		)`;
+  } else {
+    matchSql = `(h.context_type = $4 AND h.context_id = $2)`;
+    params.push(contextType);
+  }
+
   const rows = await db.query<ContextHyper>(
-    `SELECT h.sender_id AS user_id, u.username, u.first_name, u.last_name,
-			u.profile_image_url, h.created_at
+    `SELECT h2.sender_id AS user_id, u.username, u.first_name, u.last_name,
+			u.profile_image_url, h2.created_at
 		FROM (
-			SELECT DISTINCT ON (sender_id) sender_id, created_at
-			FROM hype_log
-			WHERE target_id = $1 AND context_type = $2 AND context_id = $3
-			ORDER BY sender_id, created_at DESC
-		) h
-		JOIN users u ON u.user_id = h.sender_id
-		ORDER BY h.created_at DESC
-		LIMIT $4`,
-    [targetId, contextType, contextId, limit],
+			SELECT DISTINCT ON (h.sender_id) h.sender_id, h.created_at
+			FROM hype_log h
+			WHERE h.target_id = $1 AND ${matchSql}
+			ORDER BY h.sender_id, h.created_at DESC
+		) h2
+		JOIN users u ON u.user_id = h2.sender_id
+		ORDER BY h2.created_at DESC
+		LIMIT $3`,
+    params,
   );
   return rows;
 }
@@ -178,6 +210,47 @@ export function mileHypeKeyMatchSql(
 }
 
 /**
+ * SQL predicate matching a hype_log row (alias `h`) to a RUN identified by a
+ * workouts-row alias `w`: the canonical mile composite OR a 'post' hype on any
+ * live post linked to that workout. THE tally rule — one run, one number, no
+ * matter which surface the hype came from (inbox/friends list send 'mile',
+ * feed/profile cards send 'post'). Every surface that counts a run's hypes
+ * must use this or `postHypeMatchSql`, or the numbers drift apart.
+ */
+export function runHypeMatchSql(h: string, w: string): string {
+  return `(
+		(${h}.context_type = 'mile' AND ${mileHypeKeyMatchSql(h, w)})
+		OR (${h}.context_type = 'post' AND ${h}.context_id IN (
+			SELECT p_.post_id::text FROM posts p_
+			WHERE p_.workout_id = ${w}.workout_id AND p_.user_id = ${w}.user_id
+				AND p_.deleted_at IS NULL
+		))
+	)`;
+}
+
+/**
+ * The post-side counterpart of `runHypeMatchSql`: matches a hype_log row
+ * (alias `h`) to a POST row (alias `p`) — the post's own 'post' hypes, plus,
+ * when the post is linked to a workout, the run's 'mile' hypes and hypes on
+ * sibling posts of the same run. Keeps a feed post card's tally equal to the
+ * inbox / friends-list tally for the same run.
+ */
+export function postHypeMatchSql(h: string, p: string): string {
+  return `(
+		(${h}.context_type = 'post' AND ${h}.context_id = ${p}.post_id::text)
+		OR (${p}.workout_id IS NOT NULL AND ${h}.context_type = 'mile' AND ${h}.context_id = (
+			SELECT w_.user_id || ':' || w_.local_date::text FROM workouts w_
+			WHERE w_.workout_id = ${p}.workout_id
+		))
+		OR (${p}.workout_id IS NOT NULL AND ${h}.context_type = 'post' AND ${h}.context_id IN (
+			SELECT p2_.post_id::text FROM posts p2_
+			WHERE p2_.workout_id = ${p}.workout_id AND p2_.user_id = ${p}.user_id
+				AND p2_.deleted_at IS NULL
+		))
+	)`;
+}
+
+/**
  * Canonicalize a 'mile' hype context. The feed historically keys mile hypes by
  * workout_id while the notifications inbox keys them by `<userId>:<localDate>`;
  * we resolve a workout_id to the composite form so both surfaces write (and
@@ -229,6 +302,48 @@ export async function hasHypedMile(
   contextId: string,
 ): Promise<boolean> {
   return hasHypedContext(senderId, targetId, "mile", contextId);
+}
+
+/**
+ * Unified-run dedupe for 'mile' and 'post' contexts: true when the sender has
+ * hyped this RUN through EITHER context (the mile composite, or any live post
+ * linked to the run's workout). One run = one hype per sender, no matter
+ * which surface it's sent from — without this, hyping a mile from the inbox
+ * and then the same run's post from the feed double-spends the daily
+ * allowance and (pre-unification) double-counted.
+ */
+export async function hasHypedRunContext(
+  senderId: string,
+  targetId: string,
+  contextType: "mile" | "post",
+  contextId: string,
+): Promise<boolean> {
+  const matchSql =
+    contextType === "mile"
+      ? `(
+			(h.context_type = 'mile' AND h.context_id = $3)
+			OR (h.context_type = 'post' AND h.context_id IN (
+				SELECT p.post_id::text
+				FROM posts p
+				JOIN workouts w ON w.workout_id = p.workout_id
+				WHERE p.user_id = $2 AND p.deleted_at IS NULL
+					AND (w.user_id || ':' || w.local_date::text) = $3
+			))
+		)`
+      : `EXISTS (
+			SELECT 1 FROM posts p
+			WHERE p.post_id::text = $3 AND p.user_id = $2
+				AND ${postHypeMatchSql("h", "p")}
+		)`;
+
+  const rows = await db.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+			SELECT 1 FROM hype_log h
+			WHERE h.sender_id = $1 AND h.target_id = $2 AND ${matchSql}
+		) AS exists`,
+    [senderId, targetId, contextId],
+  );
+  return rows[0]?.exists === true;
 }
 
 /**

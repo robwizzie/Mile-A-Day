@@ -1,7 +1,7 @@
 import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { shouldSendNotification } from "./notificationSettingsService.js";
-import { mileHypeKeyMatchSql } from "./hypeService.js";
+import { postHypeMatchSql, runHypeMatchSql } from "./hypeService.js";
 
 const db = PostgresService.getInstance();
 
@@ -115,20 +115,21 @@ const POST_COLUMNS = `
 
 // SELECT list shared by feed + story-detail reads so both shapes match PostRow.
 // `$1` must be the viewer id (drives is_self / is_hyped).
+// Hype fields use the unified RUN rule (postHypeMatchSql): a post linked to a
+// workout also counts the run's 'mile' hypes (sent from the inbox / friends
+// list), so every surface shows the same number for the same run.
 const POST_SELECT = `${POST_COLUMNS},
 	(p.user_id = $1) AS is_self,
 	EXISTS (
 		SELECT 1 FROM hype_log h
 		WHERE h.sender_id = $1
 			AND h.target_id = p.user_id
-			AND h.context_type = 'post'
-			AND h.context_id = p.post_id::text
+			AND ${postHypeMatchSql("h", "p")}
 	) AS is_hyped,
 	(
 		SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
-		WHERE hc.context_type = 'post'
-			AND hc.target_id = p.user_id
-			AND hc.context_id = p.post_id::text
+		WHERE hc.target_id = p.user_id
+			AND ${postHypeMatchSql("hc", "p")}
 	) AS hype_count`;
 
 export interface CreatePostInput {
@@ -690,15 +691,17 @@ export async function getUnifiedFeed(
 						AND (COALESCE(nsp.share_route_maps, true) OR p.user_id = $1)
 						AND wr.workout_id = p.workout_id) AS route,
 				(p.user_id = $1) AS is_self,
+				-- Unified RUN rule: a post linked to a workout also counts the
+				-- run's 'mile' hypes (inbox / friends list) — same number on
+				-- every surface for the same run.
 				EXISTS (
 					SELECT 1 FROM hype_log h
 					WHERE h.sender_id = $1 AND h.target_id = p.user_id
-						AND h.context_type = 'post' AND h.context_id = p.post_id::text
+						AND ${postHypeMatchSql("h", "p")}
 				) AS is_hyped,
 				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
-					WHERE hc.context_type = 'post'
-						AND hc.target_id = p.user_id
-						AND hc.context_id = p.post_id::text) AS hype_count
+					WHERE hc.target_id = p.user_id
+						AND ${postHypeMatchSql("hc", "p")}) AS hype_count
 			FROM posts p
 			JOIN circle c ON c.uid = p.user_id
 			JOIN users u ON u.user_id = p.user_id
@@ -728,20 +731,17 @@ export async function getUnifiedFeed(
 					WHERE (COALESCE(ns.share_route_maps, true) OR w.user_id = $1)
 						AND wr.workout_id = w.workout_id) AS route,
 				(w.user_id = $1) AS is_self,
-				-- Mile hypes are keyed two ways historically: by workout_id (feed)
-				-- and by user:local_date (notifications). Match both so a hype from
-				-- either surface shows up here; DISTINCT sender so a pre-migration
-				-- pair of dual-keyed rows from one person counts once.
+				-- Unified RUN rule: the run's 'mile' hypes plus 'post' hypes on
+				-- any post linked to this workout (e.g. a story-only photo that
+				-- was hyped from a profile) — same number on every surface.
 				EXISTS (
 					SELECT 1 FROM hype_log h
 					WHERE h.sender_id = $1 AND h.target_id = w.user_id
-						AND h.context_type = 'mile'
-						AND ${mileHypeKeyMatchSql("h", "w")}
+						AND ${runHypeMatchSql("h", "w")}
 				) AS is_hyped,
 				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
-					WHERE hc.context_type = 'mile'
-						AND hc.target_id = w.user_id
-						AND ${mileHypeKeyMatchSql("hc", "w")}) AS hype_count
+					WHERE hc.target_id = w.user_id
+						AND ${runHypeMatchSql("hc", "w")}) AS hype_count
 			FROM workouts w
 			JOIN circle c ON c.uid = w.user_id
 			JOIN users u ON u.user_id = w.user_id
