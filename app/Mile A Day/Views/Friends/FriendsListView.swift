@@ -50,6 +50,8 @@ struct FriendsListView: View {
     @State private var isLoadingFeed = false
     @State private var hasLoadedFeed = false
     @State private var hypesRemaining: Int?
+    /// Admin/founder roles bypass the daily hype cap — pill shows ∞.
+    @State private var hypesUnlimited = false
     @State private var hypingWorkoutIds: Set<String> = []
     // Rows the user has tapped open to reveal the duration/pace/calories/steps strip.
     @State private var expandedWorkoutIds: Set<String> = []
@@ -320,7 +322,7 @@ struct FriendsListView: View {
     private var hypesRemainingChip: some View {
         HStack {
             Spacer()
-            HypePill(remaining: hypesRemaining ?? HypeService.dailyLimit)
+            HypePill(remaining: hypesRemaining ?? HypeService.dailyLimit, unlimited: hypesUnlimited)
             Spacer()
         }
         .padding(.top, 2)
@@ -403,7 +405,9 @@ struct FriendsListView: View {
                         HypeButton(
                             isHyped: item.is_hyped,
                             isBusy: hypingWorkoutIds.contains(item.workout_id),
-                            isOutOfHypes: (hypesRemaining ?? HypeService.dailyLimit) <= 0 && !item.is_hyped
+                            isOutOfHypes: !hypesUnlimited
+                                && (hypesRemaining ?? HypeService.dailyLimit) <= 0
+                                && !item.is_hyped
                         ) {
                             Task { await sendHype(for: item) }
                         }
@@ -571,6 +575,7 @@ struct FriendsListView: View {
             // New hype landed — reflect it and bump the social-proof tally.
             markHyped(item.workout_id, bumpCount: true)
             hypesRemaining = response.hypes_remaining
+            hypesUnlimited = response.unlimited ?? hypesUnlimited
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch let error as APIError {
             switch error {
@@ -607,6 +612,7 @@ struct FriendsListView: View {
         }
         if let status = try? await HypeService.status() {
             hypesRemaining = status.hypes_remaining
+            hypesUnlimited = status.unlimited ?? false
         }
         isLoadingFeed = false
         hasLoadedFeed = true
@@ -893,7 +899,8 @@ struct FriendsListView: View {
     /// green when done, accent when in-progress.
     private func friendRowCompact(friend: BackendUser, isCompleted: Bool) -> some View {
         let status = nudgeStatuses[friend.user_id]
-        let alreadyNudged = status?.already_nudged_today ?? false
+        let alreadyNudged = status?.nudgedToday ?? false
+        let canRenudge = status?.unlimitedNudges ?? false
         let todayMiles = status?.today_miles ?? 0
         let goalMiles: Double = 1.0
         let progress = min(todayMiles / goalMiles, 1.0)
@@ -920,7 +927,7 @@ struct FriendsListView: View {
             .buttonStyle(.plain)
 
             if !isCompleted {
-                nudgeButton(friend: friend, alreadyNudged: alreadyNudged)
+                nudgeButton(friend: friend, alreadyNudged: alreadyNudged, canRenudge: canRenudge)
                     .padding(.trailing, MADTheme.Spacing.md)
             }
         }
@@ -1017,9 +1024,42 @@ struct FriendsListView: View {
     }
 
     // MARK: - Nudge Button (only shown when friend hasn't completed goal)
-    private func nudgeButton(friend: BackendUser, alreadyNudged: Bool) -> some View {
+    /// `canRenudge` (unlimited-nudge roles): an already-nudged friend shows an
+    /// ENABLED "Nudge again" pill — visibly different from the fresh "Nudge",
+    /// so the sender knows one already went out today before sending another.
+    private func nudgeButton(friend: BackendUser, alreadyNudged: Bool, canRenudge: Bool = false) -> some View {
         Group {
-            if alreadyNudged {
+            if alreadyNudged && canRenudge {
+                Button {
+                    handleNudge(friend)
+                } label: {
+                    HStack(spacing: 4) {
+                        if nudgingFriendId == friend.user_id {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .tint(.orange)
+                        } else {
+                            Image(systemName: "bell.and.waves.left.and.right.fill")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text("Nudge again")
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        }
+                    }
+                    .foregroundColor(.orange.opacity(0.75))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.05))
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(Color.orange.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [3, 2.5]))
+                            )
+                    )
+                }
+                .buttonStyle(ScaleButtonStyle())
+                .disabled(nudgingFriendId != nil)
+            } else if alreadyNudged {
                 HStack(spacing: 4) {
                     Image(systemName: "bell.slash.fill")
                         .font(.system(size: 10))
@@ -1230,14 +1270,18 @@ struct FriendsListView: View {
                 await MainActor.run {
                     nudgingFriendId = nil
                     FlexNudgeTracker.markFriendNudgeSent(friendId: friend.user_id)
-                    // Optimistic update on the shared service state — preserve existing miles/completion
+                    // Optimistic update on the shared service state — preserve existing miles/completion.
+                    // Unlimited nudgers keep can_nudge so "Nudge again" stays available.
                     let existing = friendService.nudgeStatuses[friend.user_id]
+                    let unlimited = existing?.unlimitedNudges ?? false
                     friendService.nudgeStatuses[friend.user_id] = NudgeStatusResponse(
-                        can_nudge: false,
+                        can_nudge: unlimited,
                         has_completed_mile: existing?.has_completed_mile ?? false,
-                        already_nudged_today: true,
+                        already_nudged_today: !unlimited,
                         today_miles: existing?.today_miles,
-                        current_streak: existing?.current_streak
+                        current_streak: existing?.current_streak,
+                        has_nudged_today: true,
+                        unlimited_nudges: existing?.unlimited_nudges
                     )
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     showNudgeFeedback(NudgeFeedback(

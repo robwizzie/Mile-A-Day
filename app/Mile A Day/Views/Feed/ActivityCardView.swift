@@ -3,8 +3,8 @@ import SwiftUI
 /// A raw walk/run in the unified feed (no photo) — the auto activity card.
 /// Shares the visual language of PostCardView: author header, a big
 /// distance hero line, the GPS route map when the workout has one, a stat
-/// strip, and a hype affordance. Double-tapping the map (or the hero) hypes,
-/// same as photos.
+/// strip, and a hype affordance. Double-tapping anywhere on the card body
+/// hypes, same as photo posts.
 struct ActivityCardView: View {
     let entry: FeedEntry
     var isHyping: Bool = false
@@ -15,6 +15,9 @@ struct ActivityCardView: View {
     var onTapHypeCount: (() -> Void)? = nil
 
     @State private var hypeBurst = 0
+    /// Collapses duplicate reports of one physical double-tap (see
+    /// PostCardView.lastDoubleTapAt).
+    @State private var lastDoubleTapAt = Date.distantPast
 
     private var distance: Double { entry.distance ?? 0 }
     private var completedMile: Bool { distance >= ProgressCalculator.dailyGoalTolerance }
@@ -23,25 +26,29 @@ struct ActivityCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             header
-            heroLine
-            if let coords = entry.routeCoordinates {
-                WorkoutRouteMapView(coordinates: coords, routeColor: accent)
-                    .frame(maxWidth: .infinity)
-                    // Proportional, not a fixed 160pt: the map scales with the
-                    // card on every screen size instead of shrinking to a strip.
-                    .aspectRatio(16.0 / 10.0, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                    )
-                    .overlay(
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture(count: 2) { doubleTapHype() }
-                    )
+            // Instagram behavior: double-tap ANYWHERE on the card body (hero
+            // line, map, stat chips, spacing) hypes. Header/footer buttons
+            // stay out so double-tapping them can't hype by accident.
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                heroLine
+                if let coords = entry.routeCoordinates {
+                    WorkoutRouteMapView(coordinates: coords, routeColor: accent)
+                        .frame(maxWidth: .infinity)
+                        // Proportional, not a fixed 160pt: the map scales with the
+                        // card on every screen size instead of shrinking to a strip.
+                        .aspectRatio(16.0 / 10.0, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                        )
+                }
+                statStrip
             }
-            statStrip
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded { doubleTapHype() }
+            )
             footer
         }
         .padding(MADTheme.Spacing.sm)
@@ -49,13 +56,15 @@ struct ActivityCardView: View {
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
                 .fill(Color.white.opacity(0.04))
         )
-        // Card-level so the burst plays for route-less cards too (double-tap
-        // on the hero line).
+        // Card-level so the burst plays centered over the whole card.
         .overlay(HypeBurstView(trigger: hypeBurst))
     }
 
     private func doubleTapHype() {
         guard !entry.is_self else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastDoubleTapAt) > 0.35 else { return }
+        lastDoubleTapAt = now
         hypeBurst += 1
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         if !entry.is_hyped {
@@ -115,8 +124,6 @@ struct ActivityCardView: View {
                 .foregroundColor(.white.opacity(0.7))
         }
         .padding(.horizontal, 2)
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) { doubleTapHype() }
     }
 
     @ViewBuilder
@@ -150,7 +157,7 @@ struct ActivityCardView: View {
         HStack(spacing: 10) {
             if let count = entry.hype_count, count > 0 {
                 Button { onTapHypeCount?() } label: {
-                    HypeTally(count: count)
+                    HypeTally(count: count, showsLabel: true)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

@@ -714,11 +714,13 @@ export async function logNudge(
 
 // ─── Friend Nudge Rate Limiting ─────────────────────────────────────
 
-export async function canFriendNudge(
+/** Log truth: has the sender already nudged this friend today (ET day)?
+ * Independent of any rate-limit bypass — unlimited (admin) nudgers still
+ * want to SEE that they've nudged, even though they may nudge again. */
+export async function hasNudgedFriendToday(
   senderId: string,
   targetId: string,
 ): Promise<boolean> {
-  if (await hasUnlimitedActions(senderId)) return true;
   const result = await db.query(
     `SELECT id FROM friend_nudge_log
 		WHERE sender_id = $1 AND target_id = $2
@@ -726,7 +728,15 @@ export async function canFriendNudge(
 		LIMIT 1`,
     [senderId, targetId],
   );
-  return result.length === 0;
+  return result.length > 0;
+}
+
+export async function canFriendNudge(
+  senderId: string,
+  targetId: string,
+): Promise<boolean> {
+  if (await hasUnlimitedActions(senderId)) return true;
+  return !(await hasNudgedFriendToday(senderId, targetId));
 }
 
 export async function logFriendNudge(

@@ -3,11 +3,15 @@ import Foundation
 struct HypeResponse: Decodable {
     let message: String
     let hypes_remaining: Int
+    /// Admin/founder roles bypass the daily cap. Absent on older backends.
+    var unlimited: Bool?
 }
 
 struct HypeStatusResponse: Decodable {
     let hypes_remaining: Int
     let resets_at: String?
+    /// Admin/founder roles bypass the daily cap. Absent on older backends.
+    var unlimited: Bool?
 }
 
 /// Optional context describing what was hyped. When provided, the backend uses

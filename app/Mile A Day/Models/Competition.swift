@@ -835,11 +835,22 @@ struct FriendNudgeResponse: Codable {
 struct NudgeStatusResponse: Codable, Equatable {
     let can_nudge: Bool
     let has_completed_mile: Bool
+    /// Legacy: derived from can_nudge server-side, so unlimited (admin)
+    /// nudgers read false here even after nudging. Prefer `nudgedToday`.
     let already_nudged_today: Bool
     let today_miles: Double?
     /// Friend's current streak (in days). Optional for backward compatibility
     /// with pre-leaderboard backend deploys.
     let current_streak: Int?
+    /// Log truth: the sender HAS nudged this friend today — set even for
+    /// unlimited nudgers, who may still nudge again. Absent on old backends.
+    var has_nudged_today: Bool? = nil
+    /// The sender's role bypasses the once-per-friend-per-day nudge limit.
+    var unlimited_nudges: Bool? = nil
+
+    /// Display truth for "already nudged today" across backend versions.
+    var nudgedToday: Bool { has_nudged_today ?? already_nudged_today }
+    var unlimitedNudges: Bool { unlimited_nudges ?? false }
 }
 
 struct NudgeStatusBatchResponse: Codable {
@@ -891,6 +902,10 @@ struct InAppNotification: Codable, Identifiable {
     let hype_context_id: String?
     let hype_context_label: String?
     let is_hyped: Bool?
+    /// Total hypes this event has received (all senders), computed with the
+    /// SAME canonical context keys as the feed so both surfaces agree.
+    /// Absent on older backends / non-hypeable rows.
+    var hype_count: Int?
 }
 
 struct InAppNotificationResponse: Codable {

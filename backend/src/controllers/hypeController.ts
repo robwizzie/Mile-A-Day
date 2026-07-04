@@ -6,6 +6,7 @@ import { getUser } from "../services/userService.js";
 import { sendPush } from "../services/pushNotificationService.js";
 import { shouldSendNotification } from "../services/notificationSettingsService.js";
 import { getPostAuthor } from "../services/postService.js";
+import { hasUnlimitedHypes } from "../services/privilegedUsers.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import {
   logHypeIfUnderLimit,
@@ -226,7 +227,10 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
     // Re-evaluate hype badges (first hype, X hypes) in the background.
     evaluateSocialBadgesForUser(senderId).catch(() => {});
 
-    const countAfter = await getDailyHypeCount(senderId);
+    const [countAfter, unlimited] = await Promise.all([
+      getDailyHypeCount(senderId),
+      hasUnlimitedHypes(senderId),
+    ]);
 
     const shouldSend = await shouldSendNotification(
       targetUserId,
@@ -250,9 +254,16 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
       });
     }
 
+    // Unlimited (admin/founder) senders never report a depleted allowance:
+    // old builds read hypes_remaining directly for their "N left" pill and
+    // disable hyping at 0, so pin it at the cap; new builds show ∞ via the
+    // explicit flag.
     res.status(200).json({
       message: "Hype sent",
-      hypes_remaining: Math.max(0, HYPE_DAILY_LIMIT - countAfter),
+      hypes_remaining: unlimited
+        ? HYPE_DAILY_LIMIT
+        : Math.max(0, HYPE_DAILY_LIMIT - countAfter),
+      unlimited,
     });
   } catch (error: any) {
     console.error("Error sending hype:", error.message);
@@ -339,13 +350,19 @@ export async function getContextHypersController(
 export async function getHypeStatus(req: AuthenticatedRequest, res: Response) {
   const senderId = req.userId!;
   try {
-    const [count, resetsAt] = await Promise.all([
+    const [count, resetsAt, unlimited] = await Promise.all([
       getDailyHypeCount(senderId),
       getHypeResetsAt(senderId),
+      hasUnlimitedHypes(senderId),
     ]);
+    // See sendHype: unlimited senders pin hypes_remaining at the cap so old
+    // builds never render a depleted/disabled hype UI for them.
     res.status(200).json({
-      hypes_remaining: Math.max(0, HYPE_DAILY_LIMIT - count),
+      hypes_remaining: unlimited
+        ? HYPE_DAILY_LIMIT
+        : Math.max(0, HYPE_DAILY_LIMIT - count),
       resets_at: resetsAt,
+      unlimited,
     });
   } catch (error: any) {
     console.error("Error getting hype status:", error.message);

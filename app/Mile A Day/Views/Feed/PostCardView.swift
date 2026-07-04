@@ -25,20 +25,35 @@ struct PostCardView: View {
     var onTapHypeCount: (() -> Void)? = nil
 
     @State private var hypeBurst = 0
+    /// Collapses the same physical double-tap arriving from two recognizers
+    /// (the card-level SwiftUI gesture AND the zoom host's UIKit one) into a
+    /// single burst + hype.
+    @State private var lastDoubleTapAt = Date.distantPast
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             header
-            media
-            if let stats = post.stats_snapshot {
-                PostStatStrip(stats: stats).padding(.horizontal, 2)
+            // Instagram behavior: double-tap ANYWHERE on the post body —
+            // photo, route map, stats, caption, or the space between — hypes.
+            // `simultaneousGesture` so single taps (paging dots, horizontal
+            // swipes, pinch zoom) are untouched. The header and footer stay
+            // out so double-tapping a button can't hype by accident.
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                media
+                if let stats = post.stats_snapshot {
+                    PostStatStrip(stats: stats).padding(.horizontal, 2)
+                }
+                if let caption = post.caption, !caption.isEmpty {
+                    Text(caption)
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.9))
+                        .padding(.horizontal, 2)
+                }
             }
-            if let caption = post.caption, !caption.isEmpty {
-                Text(caption)
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.9))
-                    .padding(.horizontal, 2)
-            }
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                TapGesture(count: 2).onEnded { doubleTapHype() }
+            )
             footer
         }
         .padding(MADTheme.Spacing.sm)
@@ -128,10 +143,14 @@ struct PostCardView: View {
         return stats
     }
 
-    /// Double-tap on any media slide: clap burst + hype (friends' posts only,
-    /// once — a re-double-tap replays the burst without double-counting).
+    /// Double-tap anywhere on the post body: clap burst + hype (friends'
+    /// posts only, once — a re-double-tap replays the burst without
+    /// double-counting).
     private func doubleTapHype() {
         guard !post.is_self else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastDoubleTapAt) > 0.35 else { return }
+        lastDoubleTapAt = now
         hypeBurst += 1
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         if !post.is_hyped {
@@ -181,13 +200,11 @@ struct PostCardView: View {
     }
 
     /// The run itself as a branded stats card — the second slide when a photo
-    /// post has no GPS route to show. Double-tap hypes, matching the photo.
+    /// post has no GPS route to show. The card-level double-tap covers it.
     private func workoutCardSlide(_ stats: PostStats) -> some View {
         FeedWorkoutCard(stats: stats, workoutType: post.workout_type)
             .frame(maxWidth: .infinity)
             .aspectRatio(4.0 / 5.0, contentMode: .fit)
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) { if !post.is_self { doubleTapHype() } }
     }
 
     private func routeSlide(_ coords: [CLLocationCoordinate2D]) -> some View {
@@ -198,13 +215,6 @@ struct PostCardView: View {
         .frame(maxWidth: .infinity)
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-        .overlay(
-            // The map is display-only, so a clear layer can own the
-            // double-tap without stealing anything the map needs.
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) { doubleTapHype() }
-        )
         .overlay(alignment: .topLeading) {
             slideBadge("Route", icon: "map.fill")
         }
@@ -229,7 +239,7 @@ struct PostCardView: View {
         HStack(spacing: 10) {
             if let count = post.hype_count, count > 0 {
                 Button { onTapHypeCount?() } label: {
-                    HypeTally(count: count)
+                    HypeTally(count: count, showsLabel: true)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
