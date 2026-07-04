@@ -11,6 +11,7 @@ import {
   getBestMilesDay,
   getBestSplit,
   getTodayMiles,
+  DAILY_GOAL_TOLERANCE,
   updateWorkout as updateWorkoutDb,
   computePersonalRecords,
   getUserLocalToday,
@@ -109,7 +110,9 @@ export async function uploadWorkouts(req: Request, res: Response) {
     if (!isFullSync && hasRecentWorkout) {
       try {
         const todayMiles = await getTodayMiles(userId);
-        if (todayMiles >= 1.0) {
+        // Same 0.95 tolerance as streak counting — a GPS 0.98-mile day that
+        // extends the streak must also fire the mile-completed notification.
+        if (todayMiles >= DAILY_GOAL_TOLERANCE) {
           const milestoneFired = await notifyFriendsOfMileCompletion(
             userId,
           ).catch((err) => {

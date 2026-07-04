@@ -133,6 +133,9 @@ struct FeedEntry: Codable, Identifiable {
     let story_photo_url: String?
     /// post-only: system-generated route/stats card (vs a deliberate post).
     let is_auto: Bool?
+    /// The entry's workout: the linked workout for posts (nil when unlinked
+    /// or from an older backend), the workout itself for workout entries.
+    let workout_id: String?
     // workout columns (workout_type is also set for posts via their run)
     let workout_type: String?
     let distance: Double?
@@ -151,7 +154,7 @@ struct FeedEntry: Codable, Identifiable {
         case entryId = "id"
         case sort_ts, user_id, username, first_name, last_name, profile_image_url
         case media_url, caption, stats_snapshot, story_photo_url, is_auto
-        case workout_type, distance, total_duration, calories, steps, route
+        case workout_id, workout_type, distance, total_duration, calories, steps, route
         case is_self, is_hyped, hype_count
     }
 
@@ -181,7 +184,7 @@ struct FeedEntry: Codable, Identifiable {
             post_id: entryId, user_id: user_id, username: username,
             first_name: first_name, last_name: last_name,
             profile_image_url: profile_image_url, media_url: media, caption: caption,
-            workout_id: nil, stats_snapshot: stats_snapshot, local_date: nil,
+            workout_id: workout_id, stats_snapshot: stats_snapshot, local_date: nil,
             share_to_feed: true, share_to_story: nil, story_expires_at: nil,
             created_at: sort_ts, is_auto: is_auto, workout_type: workout_type,
             route: route, story_photo_url: story_photo_url,

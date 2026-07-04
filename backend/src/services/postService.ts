@@ -605,6 +605,10 @@ export interface FeedEntryRow {
   story_photo_url: string | null;
   // post-only: system-generated route/stats card vs deliberate user post.
   is_auto: boolean | null;
+  // The entry's workout: the linked workout for posts (null when unlinked),
+  // the workout itself for workout entries. Lets the client know which of
+  // today's runs already carry a deliberate post.
+  workout_id: string | null;
   // workout columns (also populated for posts via their linked workout)
   workout_type: string | null;
   distance: number | null;
@@ -659,6 +663,7 @@ export async function getUnifiedFeed(
 					LIMIT 1
 				) AS story_photo_url,
 				p.is_auto,
+				p.workout_id,
 				(SELECT w2.workout_type FROM workouts w2 WHERE w2.workout_id = p.workout_id) AS workout_type,
 				NULL::double precision AS distance,
 				NULL::double precision AS total_duration,
@@ -699,6 +704,7 @@ export async function getUnifiedFeed(
 				NULL::text AS media_url, NULL::text AS caption, NULL::jsonb AS stats_snapshot,
 				NULL::text AS story_photo_url,
 				NULL::boolean AS is_auto,
+				w.workout_id,
 				w.workout_type,
 				w.distance::double precision,
 				w.total_duration::double precision,

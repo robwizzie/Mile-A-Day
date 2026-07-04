@@ -183,7 +183,8 @@ struct MainTabView: View {
             }
         }
         .onChange(of: healthManager.todaysDistance) { _, newDistance in
-            let isCompleted = newDistance >= userManager.currentUser.goalMiles
+            let isCompleted = ProgressCalculator.isGoalCompleted(
+                current: newDistance, goal: userManager.currentUser.goalMiles)
             notificationService.updateDailyReminder(
                 isCompleted: isCompleted,
                 currentMiles: newDistance,
@@ -258,7 +259,8 @@ struct MainTabView: View {
             await notificationService.requestAuthorization()
 
             // Use smart daily reminder with completion status
-            let isCompleted = healthManager.todaysDistance >= userManager.currentUser.goalMiles
+            let isCompleted = ProgressCalculator.isGoalCompleted(
+                current: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles)
             notificationService.updateDailyReminder(
                 isCompleted: isCompleted,
                 currentMiles: healthManager.todaysDistance,

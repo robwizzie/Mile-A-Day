@@ -47,20 +47,55 @@ struct SocialFeedView: View {
 
     private var currentUserId: String? { UserDefaults.standard.string(forKey: "backendUserId") }
     /// Completing the daily mile unlocks posting AND viewing friends' stories.
-    private var mileDone: Bool { healthManager.todaysDistance >= userManager.currentUser.goalMiles }
+    private var mileDone: Bool {
+        ProgressCalculator.isGoalCompleted(
+            current: healthManager.todaysDistance,
+            goal: userManager.currentUser.goalMiles
+        )
+    }
 
-    /// True once the user has already made a DELIBERATE share for today's mile —
-    /// a photo post on the feed or an active story of their own. One share per
-    /// walk/run is the reward, so the compose affordances hide until they delete
-    /// it (feed/story refreshes it away) or a new day's mile comes around. The
-    /// auto route/stats card doesn't count — a photo can still replace it.
+    /// Workout ids of the user's own stories (fetched when the rail shows an
+    /// own-story group) — a story share counts as that workout's one share.
+    @State private var myStoryWorkoutIds: Set<String> = []
+
+    /// Workout ids of today's walks/runs that already carry the user's
+    /// DELIBERATE share — a photo post on the feed or a story. The auto
+    /// route/stats card doesn't count (a photo can still replace it).
+    private var mySharedWorkoutIds: Set<String> {
+        var ids = Set(feed.compactMap { entry -> String? in
+            guard entry.is_self, entry.isPost, entry.is_auto != true else { return nil }
+            return entry.workout_id
+        })
+        ids.formUnion(myStoryWorkoutIds)
+        return ids
+    }
+
+    /// The workout the composer should attach to: the LATEST of today's
+    /// walks/runs without a deliberate share yet. One share per walk/run is
+    /// the reward — every new workout unlocks another photo.
+    private var nextShareableWorkoutId: String? {
+        let shared = mySharedWorkoutIds
+        return healthManager.todaysWorkouts
+            .sorted { $0.startDate > $1.startDate }
+            .first { !shared.contains($0.uuid.uuidString) }?
+            .uuid.uuidString
+    }
+
+    /// True when there's nothing left to share right now: every one of today's
+    /// walks/runs already has its photo post or story. Compose affordances
+    /// hide until the user deletes a share or finishes another workout.
     private var alreadySharedWorkout: Bool {
         guard let uid = currentUserId else { return false }
-        let hasStoryToday = stories.contains { $0.user_id == uid && Self.isToday($0.latest_at) }
-        let hasFeedPostToday = feed.contains {
-            $0.is_self && $0.isPost && $0.is_auto != true && Self.isToday($0.sort_ts)
+        if healthManager.todaysWorkouts.isEmpty {
+            // Mile met via non-workout distance — no per-workout key to dedupe
+            // on, so keep the legacy one-share-per-day rule.
+            let hasStoryToday = stories.contains { $0.user_id == uid && Self.isToday($0.latest_at) }
+            let hasFeedPostToday = feed.contains {
+                $0.is_self && $0.isPost && $0.is_auto != true && Self.isToday($0.sort_ts)
+            }
+            return hasStoryToday || hasFeedPostToday
         }
-        return hasStoryToday || hasFeedPostToday
+        return nextShareableWorkoutId == nil
     }
 
     private static func isToday(_ iso: String) -> Bool {
@@ -82,9 +117,10 @@ struct SocialFeedView: View {
             streak: user.streak,
             calories: calories > 0 ? calories : nil,
             steps: steps > 0 ? steps : nil,
-            // Link to the daily-mile workout so this post upserts into the same
-            // feed item as the auto route/stats post — one post per run.
-            workoutId: mileDone ? RunPostService.dailyMileWorkoutId() : nil,
+            // Link to the newest not-yet-shared workout so this post upserts
+            // into that run's feed item — one post per run, and every new
+            // walk/run in the day unlocks another photo.
+            workoutId: mileDone ? (nextShareableWorkoutId ?? RunPostService.dailyMileWorkoutId()) : nil,
             dateText: Self.todayText()
         )
     }
@@ -225,7 +261,7 @@ struct SocialFeedView: View {
         .alert("You've already shared this one", isPresented: $showAlreadySharedHint) {
             Button("Got it", role: .cancel) {}
         } message: {
-            Text("One post per walk or run — that's the reward. Delete your current post or story if you'd rather share a different shot.")
+            Text("One post per walk or run — that's the reward. Do another walk or run to share again, or delete a post or story to swap the shot.")
         }
     }
 
@@ -401,12 +437,23 @@ struct SocialFeedView: View {
         await MainActor.run { isLoading = feed.isEmpty }
         let feedResponse = try? await PostService.fetchUnifiedFeed(before: nil)
         let storyGroups = try? await PostService.fetchStoriesRail()
+        // Own active stories carry their workout ids — needed to know which
+        // of today's workouts are already "spent" on a story share.
+        var storyWorkoutIds: Set<String> = []
+        if let uid = currentUserId,
+           storyGroups?.contains(where: { $0.user_id == uid }) == true,
+           let ownStories = try? await PostService.fetchUserStories(userId: uid) {
+            storyWorkoutIds = Set(ownStories.compactMap(\.workout_id))
+        }
         await MainActor.run {
             if let feedResponse {
                 feed = feedResponse.items
                 nextBefore = feedResponse.next_before
             }
-            if let storyGroups { stories = storyGroups }
+            if let storyGroups {
+                stories = storyGroups
+                myStoryWorkoutIds = storyWorkoutIds
+            }
             isLoading = false
             loadedOnce = true
         }

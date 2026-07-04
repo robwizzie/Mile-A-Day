@@ -926,7 +926,8 @@ struct UserProfileDetailView: View {
 
                     let goalMiles = stats.goalMiles ?? 1.0
                     let todayMiles = stats.todayMiles ?? 0.0
-                    let hasCompletedGoalToday = todayMiles >= goalMiles && goalMiles > 0
+                    let hasCompletedGoalToday = goalMiles > 0
+                        && ProgressCalculator.isGoalCompleted(current: todayMiles, goal: goalMiles)
 
                     userStats = UserStats(
                         streak: stats.streak,

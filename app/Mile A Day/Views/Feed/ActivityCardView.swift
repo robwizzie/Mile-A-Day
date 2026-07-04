@@ -17,7 +17,7 @@ struct ActivityCardView: View {
     @State private var hypeBurst = 0
 
     private var distance: Double { entry.distance ?? 0 }
-    private var completedMile: Bool { distance >= 1.0 }
+    private var completedMile: Bool { distance >= ProgressCalculator.dailyGoalTolerance }
     private var accent: Color { Self.color(entry.workout_type) }
 
     var body: some View {

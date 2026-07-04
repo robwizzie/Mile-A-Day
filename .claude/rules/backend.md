@@ -4,6 +4,8 @@ globs: backend/**
 
 # Backend Conventions
 
+- Daily-mile completion checks must use `DAILY_GOAL_TOLERANCE` (0.95) from workoutService, never a raw `>= 1.0` — streaks/challenges count 0.95 days, and today_miles is displayed 2-decimal-rounded ("1.00" can be 0.996). iOS mirror: `ProgressCalculator.dailyGoalTolerance`.
+
 ## Architecture: Routes -> Controllers -> Services
 - `routes/` - Express Router definitions. Thin: just wire HTTP verbs to controller functions + middleware.
 - `controllers/` - Request/response handling. Parse params/body, call services, format responses.

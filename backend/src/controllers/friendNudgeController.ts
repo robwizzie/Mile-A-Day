@@ -8,7 +8,10 @@ import {
   logFriendNudge,
 } from "../services/pushNotificationService.js";
 import { shouldSendNotification } from "../services/notificationSettingsService.js";
-import { getTodayMiles } from "../services/workoutService.js";
+import {
+  getTodayMiles,
+  DAILY_GOAL_TOLERANCE,
+} from "../services/workoutService.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import { PostgresService } from "../services/DbService.js";
 
@@ -59,9 +62,11 @@ export async function nudgeFriend(req: AuthenticatedRequest, res: Response) {
       return res.status(400).json({ error: "You can only nudge friends" });
     }
 
-    // Check if friend has already completed their mile today
+    // Check if friend has already completed their mile today — same 0.95
+    // tolerance as streak counting, so a day the streak credits can't be
+    // nudged as "incomplete".
     const friendTodayMiles = await getTodayMiles(friendId);
-    if (friendTodayMiles >= 1.0) {
+    if (friendTodayMiles >= DAILY_GOAL_TOLERANCE) {
       return res
         .status(400)
         .json({ error: "This friend has already completed their mile today" });
@@ -122,7 +127,7 @@ export async function checkNudgeStatus(
       fetchStreaks([friendId]),
     ]);
 
-    const hasCompletedMile = friendTodayMiles >= 1.0;
+    const hasCompletedMile = friendTodayMiles >= DAILY_GOAL_TOLERANCE;
 
     res.status(200).json({
       can_nudge: canNudge && !hasCompletedMile,
@@ -173,7 +178,7 @@ export async function checkNudgeStatusBatch(
           getTodayMiles(friendId),
         ]);
 
-        const hasCompletedMile = friendTodayMiles >= 1.0;
+        const hasCompletedMile = friendTodayMiles >= DAILY_GOAL_TOLERANCE;
         statuses[friendId] = {
           can_nudge: canNudge && !hasCompletedMile,
           has_completed_mile: hasCompletedMile,

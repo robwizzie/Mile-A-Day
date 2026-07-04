@@ -423,6 +423,17 @@ export async function getUserLocalDate(userId: string): Promise<string> {
   return rows[0].local_date;
 }
 
+/**
+ * Canonical "daily mile done" tolerance, as a fraction of the goal. Streak
+ * counting (leaderboardService), daily challenges, and the weekly recap all
+ * treat >= 0.95 mi as a completed day (GPS under-measure allowance). Every
+ * completion check against today's miles must apply this — a raw `>= 1.0`
+ * check lets a 0.98-mile day extend the streak and display as "1.00 mi ·
+ * 100%" (2-decimal rounding) while still reading "incomplete" for nudges,
+ * friend notifications, and posting.
+ */
+export const DAILY_GOAL_TOLERANCE = 0.95;
+
 export async function getTodayMiles(userId: string) {
   // Use the user's timezone offset from their most recent workout to determine
   // what "today" is in their local time (local_date is stored in user's timezone)
@@ -486,8 +497,9 @@ export async function getDailyGoalStatus(
     ),
   ]);
   const goalMiles = Number(goalRows[0]?.goal_miles ?? 1);
-  // Small epsilon so a goal stored as 1.0 isn't missed by 1.0 reading 0.9999.
-  const completed = miles + 1e-9 >= goalMiles;
+  // Same tolerance as streaks/challenges — a day the streak counts as done
+  // must also unlock posting.
+  const completed = miles + 1e-9 >= goalMiles * DAILY_GOAL_TOLERANCE;
   return { completed, miles, goalMiles, localDate };
 }
 
