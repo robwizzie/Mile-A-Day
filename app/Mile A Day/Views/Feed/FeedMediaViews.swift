@@ -320,6 +320,9 @@ struct FeedWorkoutCard: View {
                 .padding(.top, 14)
             }
             .padding(18)
+            // This card renders inside the paging carousel, whose page dots
+            // occupy the slide's bottom edge — keep the brand row above them.
+            .padding(.bottom, 16)
         }
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))

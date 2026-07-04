@@ -58,9 +58,11 @@ export interface PostRow {
   // The run's active story photo (getUserPosts only) — lets profile surfaces
   // lead with the real picture like the feed does.
   story_photo_url?: string | null;
-  // getUserActiveStories only: does this story's workout ALREADY have a live
-  // feed post? Drives hiding the story viewer's "Add to feed" button so it
-  // isn't offered (then 409'd) when the run is already on the feed.
+  // getUserActiveStories only: does this story's workout already have a live
+  // DELIBERATE feed post? Drives hiding the story viewer's "Add to feed"
+  // button so it isn't offered (then 409'd) when the run is already on the
+  // feed. The auto route/stats card does NOT count — promoting a story photo
+  // replaces the auto card in place, which is the button's whole point.
   workout_on_feed?: boolean;
 }
 
@@ -334,6 +336,7 @@ export async function getUserActiveStories(
 					AND pf.workout_id IS NOT NULL
 					AND pf.deleted_at IS NULL
 					AND pf.share_to_feed
+					AND NOT pf.is_auto
 			) AS workout_on_feed
 		FROM posts p
 		JOIN circle c ON c.uid = p.user_id
