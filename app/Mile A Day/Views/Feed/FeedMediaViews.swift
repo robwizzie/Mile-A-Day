@@ -135,12 +135,15 @@ private struct ZoomGestureHost: UIViewRepresentable {
         pinch.delegate = context.coordinator
         view.addGestureRecognizer(pinch)
 
-        if onDoubleTap != nil {
-            let doubleTap = UITapGestureRecognizer(
-                target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
-            doubleTap.numberOfTapsRequired = 2
-            view.addGestureRecognizer(doubleTap)
-        }
+        // Always installed — the callback is resolved at fire time via the
+        // coordinator's current `parent`. Gating installation on the closure
+        // captured at CREATION time left slides created without a handler
+        // (or recycled across identities) permanently deaf to double-taps.
+        let doubleTap = UITapGestureRecognizer(
+            target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.delegate = context.coordinator
+        view.addGestureRecognizer(doubleTap)
         return view
     }
 

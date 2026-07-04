@@ -534,8 +534,25 @@ struct SocialFeedView: View {
 
     private func hype(_ entry: FeedEntry) async {
         guard !entry.is_self, !entry.is_hyped, !hypingIds.contains(entry.id) else { return }
-        await MainActor.run { _ = hypingIds.insert(entry.id) }
+        // Optimistic, Instagram-style: the card flips to "Hyped" and the tally
+        // bumps the instant the user acts — the network round-trip happens
+        // behind it and only a rejection walks it back.
+        await MainActor.run {
+            _ = hypingIds.insert(entry.id)
+            updateEntry(entry.id) { e in
+                guard !e.is_hyped else { return }
+                e.is_hyped = true
+                e.hype_count = (e.hype_count ?? 0) + 1
+            }
+        }
         defer { Task { @MainActor in hypingIds.remove(entry.id) } }
+        let revert: @MainActor () -> Void = {
+            updateEntry(entry.id) { e in
+                guard e.is_hyped else { return }
+                e.is_hyped = false
+                e.hype_count = max(0, (e.hype_count ?? 1) - 1)
+            }
+        }
         let ctxType = entry.isPost ? "post" : "mile"
         let label = entry.isPost
             ? (entry.caption ?? entry.displayName)
@@ -546,19 +563,13 @@ struct SocialFeedView: View {
                 context: HypeContext(contextType: ctxType, contextId: entry.entryId, contextLabel: label)
             )
             await MainActor.run {
-                updateEntry(entry.id) { e in
-                    // A refresh may have landed mid-request and already carry
-                    // this hype — don't count it twice.
-                    guard !e.is_hyped else { return }
-                    e.is_hyped = true
-                    e.hype_count = (e.hype_count ?? 0) + 1
-                }
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
         } catch APIError.rateLimited {
-            // Out of hypes for today — say so instead of silently doing
-            // nothing after the double-tap burst played.
+            // Out of hypes for today — walk the optimistic state back and say
+            // so instead of silently doing nothing after the burst played.
             await MainActor.run {
+                revert()
                 UINotificationFeedbackGenerator().notificationOccurred(.warning)
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     showHypeLimitBanner = true
@@ -568,8 +579,11 @@ struct SocialFeedView: View {
             await MainActor.run {
                 withAnimation(.easeOut(duration: 0.25)) { showHypeLimitBanner = false }
             }
+        } catch APIError.conflict {
+            // Already hyped server-side — the optimistic state is the truth.
         } catch {
-            // conflict (already hyped) — leave as-is.
+            // Network/server failure — undo quietly; the user can re-tap.
+            await MainActor.run { revert() }
         }
     }
 
