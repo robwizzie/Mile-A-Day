@@ -168,7 +168,10 @@ struct HealthAccessView: View {
         let writeTypes: Set<HKSampleType> = [
             HKObjectType.workoutType(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
-            HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
+            HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
+            // Lets in-app GPS workouts save their route — the source of the
+            // feed's route maps at sync time.
+            HKSeriesType.workoutRoute()
         ]
 
         healthStore.requestAuthorization(toShare: writeTypes, read: readTypes) { success, error in

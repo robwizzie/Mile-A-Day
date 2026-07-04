@@ -916,6 +916,14 @@ struct WorkoutTrackingView: View {
         // Flush any buffered route points
         InProgressWorkoutStore.flushRoutePoints()
 
+        // Capture the GPS trace NOW — finishCleanup() clears the store, and the
+        // HealthKit route write below happens after that. Without this route,
+        // in-app workouts never got an HKWorkoutRoute, so the sync (which reads
+        // routes back from HealthKit) uploaded them route-less and the feed
+        // could never draw their maps.
+        let routeLocations = (InProgressWorkoutStore.load()?.routePoints ?? [])
+            .map { $0.toCLLocation() }
+
         // Stop timer and location tracking
         timer?.invalidate()
         timer = nil
@@ -940,16 +948,44 @@ struct WorkoutTrackingView: View {
 
         let endDate = Date()
 
-        // Async chain: add distance sample → end collection → finish workout → cleanup.
-        // Every step proceeds regardless of whether the previous step failed.
+        // Async chain: add distance sample → end collection → finish workout →
+        // attach GPS route → cleanup. Every step proceeds regardless of whether
+        // the previous step failed.
         let addCompletion: (Bool, Error?) -> Void = { _, _ in
             builder.endCollection(withEnd: endDate) { _, _ in
                 builder.finishWorkout { workout, error in
                     let saved = (workout != nil && error == nil)
-                    DispatchQueue.main.async {
-                        self.finishCleanup(workoutSaved: saved)
-                        if saved {
-                            self.healthManager.fetchAllWorkoutData()
+                    let finalize = {
+                        DispatchQueue.main.async {
+                            self.finishCleanup(workoutSaved: saved)
+                            if saved {
+                                self.healthManager.fetchAllWorkoutData()
+                            }
+                        }
+                    }
+                    // Write the tracked GPS trace as the workout's
+                    // HKWorkoutRoute BEFORE finalizing — fetchAllWorkoutData
+                    // kicks off the backend sync, which reads the route back
+                    // from HealthKit to draw feed maps. Best-effort: a failed
+                    // route write still finalizes the workout itself.
+                    guard let workout, saved, routeLocations.count >= 2 else {
+                        finalize()
+                        return
+                    }
+                    let routeBuilder = HKWorkoutRouteBuilder(
+                        healthStore: HKHealthStore(), device: .local()
+                    )
+                    routeBuilder.insertRouteData(routeLocations) { inserted, insertError in
+                        guard inserted else {
+                            print("[WorkoutTracking] ⚠️ Route insert failed: \(String(describing: insertError))")
+                            finalize()
+                            return
+                        }
+                        routeBuilder.finishRoute(with: workout, metadata: nil) { route, finishError in
+                            if route == nil {
+                                print("[WorkoutTracking] ⚠️ Route finish failed: \(String(describing: finishError))")
+                            }
+                            finalize()
                         }
                     }
                 }

@@ -628,11 +628,14 @@ class HealthKitManager: ObservableObject {
             HKSeriesType.workoutRoute()
         ]
 
-        // Define the types we want to write to HealthKit (for workout tracking)
+        // Define the types we want to write to HealthKit (for workout tracking).
+        // workoutRoute share access lets in-app GPS workouts save their route,
+        // which is what the feed's route maps are built from at sync time.
         let writeTypes: Set = [
             HKObjectType.workoutType(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
-            HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
+            HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
+            HKSeriesType.workoutRoute()
         ]
 
         healthStore.requestAuthorization(toShare: writeTypes, read: readTypes) { success, error in

@@ -274,7 +274,7 @@ final class MADBackgroundService: NSObject, ObservableObject {
         let todaysDistance = healthManager.todaysDistance
         let goalMiles = currentUser.goalMiles
 
-        let isCompleted = todaysDistance >= goalMiles
+        let isCompleted = ProgressCalculator.isGoalCompleted(current: todaysDistance, goal: goalMiles)
 
         if isCompleted {
             // Send completion notification only if conditions are met

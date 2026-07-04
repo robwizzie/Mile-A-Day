@@ -71,6 +71,44 @@ export async function getReceivedHypes(
   return rows;
 }
 
+export interface ContextHyper {
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+  created_at: string;
+}
+
+/**
+ * Everyone who hyped one specific context (a post, or a user's daily mile),
+ * newest first — powers the Instagram-style "who liked this" list behind the
+ * hype tally. DISTINCT ON sender so pre-migration dual-keyed mile rows from
+ * one person appear once, matching the feed's COUNT(DISTINCT sender_id).
+ */
+export async function getContextHypers(
+  targetId: string,
+  contextType: string,
+  contextId: string,
+  limit: number = 100,
+): Promise<ContextHyper[]> {
+  const rows = await db.query<ContextHyper>(
+    `SELECT h.sender_id AS user_id, u.username, u.first_name, u.last_name,
+			u.profile_image_url, h.created_at
+		FROM (
+			SELECT DISTINCT ON (sender_id) sender_id, created_at
+			FROM hype_log
+			WHERE target_id = $1 AND context_type = $2 AND context_id = $3
+			ORDER BY sender_id, created_at DESC
+		) h
+		JOIN users u ON u.user_id = h.sender_id
+		ORDER BY h.created_at DESC
+		LIMIT $4`,
+    [targetId, contextType, contextId, limit],
+  );
+  return rows;
+}
+
 /**
  * Atomically insert a hype_log row only if the sender is still under the
  * daily limit. Optional context describes what was hyped (mile/badge/pr) and

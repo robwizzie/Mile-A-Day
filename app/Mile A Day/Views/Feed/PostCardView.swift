@@ -21,6 +21,8 @@ struct PostCardView: View {
     let onDelete: () -> Void
     /// Tap the author's avatar or name to open their profile.
     var onTapAuthor: (() -> Void)? = nil
+    /// Tap the hype tally to see who hyped (Instagram-likes style).
+    var onTapHypeCount: (() -> Void)? = nil
 
     @State private var hypeBurst = 0
 
@@ -226,7 +228,12 @@ struct PostCardView: View {
     private var footer: some View {
         HStack(spacing: 10) {
             if let count = post.hype_count, count > 0 {
-                HypeTally(count: count)
+                Button { onTapHypeCount?() } label: {
+                    HypeTally(count: count)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(onTapHypeCount == nil)
             }
             Spacer()
             if !post.is_self {

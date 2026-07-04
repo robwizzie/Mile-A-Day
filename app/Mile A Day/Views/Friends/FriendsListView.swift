@@ -340,7 +340,7 @@ struct FriendsListView: View {
 
     private func feedRow(_ item: FeedWorkoutItem) -> some View {
         let expanded = expandedWorkoutIds.contains(item.workout_id)
-        let completedMile = item.distance >= 1.0
+        let completedMile = item.distance >= ProgressCalculator.dailyGoalTolerance
 
         return VStack(spacing: 0) {
             HStack(spacing: 12) {

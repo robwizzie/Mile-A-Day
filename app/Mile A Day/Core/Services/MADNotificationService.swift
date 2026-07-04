@@ -195,7 +195,8 @@ final class MADNotificationService: NSObject, ObservableObject {
         // 2. Previous miles was below goal (just completed)
         // 3. Haven't sent notification today already
         
-        let justCompleted = currentMiles >= goalMiles && previousMiles < goalMiles
+        let justCompleted = ProgressCalculator.isGoalCompleted(current: currentMiles, goal: goalMiles)
+            && !ProgressCalculator.isGoalCompleted(current: previousMiles, goal: goalMiles)
         let alreadySentToday = lastCompletionNotificationDate != nil && 
                              Calendar.current.isDate(lastCompletionNotificationDate!, inSameDayAs: Date())
         

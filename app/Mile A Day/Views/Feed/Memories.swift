@@ -104,49 +104,40 @@ enum MemoriesService {
 }
 
 /// Compact "On this day" card shown at the top of the feed when memories exist.
+/// Scales from one memory to many: stacked photo thumbnails when photos exist,
+/// and a summary line that says how many there are instead of a bare "+N".
 struct MemoriesCardView: View {
     let memories: [MemoryItem]
     let onTap: () -> Void
 
+    private var photoURLs: [URL] {
+        memories.compactMap(\.photoURL)
+    }
+
+    private var subtitle: String {
+        guard let top = memories.first else { return "" }
+        if memories.count == 1 {
+            return "\(top.yearsAgoText) · \(String(format: "%.2f", top.miles)) mi \(ActivityCardView.verb(top.workoutType).lowercased())"
+        }
+        return "\(memories.count) memories · \(top.yearsAgoText) and more"
+    }
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: MADTheme.Spacing.md) {
-                if let photoURL = memories.first(where: { $0.photoURL != nil })?.photoURL {
-                    AsyncImage(url: photoURL) { phase in
-                        if case .success(let image) = phase {
-                            image.resizable().scaledToFill()
-                        } else {
-                            Color.white.opacity(0.06)
-                        }
-                    }
-                    .frame(width: 44, height: 44)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                } else {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Circle().fill(MADTheme.Colors.redGradient))
-                }
+                leadingThumbnails
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("On this day")
                         .font(.system(size: 11, weight: .heavy, design: .rounded))
                         .tracking(1.2)
                         .foregroundColor(.white.opacity(0.6))
-                    if let top = memories.first {
-                        Text("\(top.yearsAgoText) · \(String(format: "%.2f", top.miles)) mi \(ActivityCardView.verb(top.workoutType).lowercased())")
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                    }
+                    Text(subtitle)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
                 }
                 Spacer()
-                if memories.count > 1 {
-                    Text("+\(memories.count - 1)")
-                        .font(.system(size: 13, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white.opacity(0.6))
-                }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(.white.opacity(0.4))
@@ -163,9 +154,48 @@ struct MemoriesCardView: View {
         }
         .buttonStyle(.plain)
     }
+
+    /// Up to three overlapping photo thumbnails, or the clock badge when the
+    /// memories have no photos.
+    @ViewBuilder
+    private var leadingThumbnails: some View {
+        let urls = Array(photoURLs.prefix(3))
+        if urls.isEmpty {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(MADTheme.Colors.redGradient))
+        } else {
+            ZStack {
+                ForEach(Array(urls.enumerated().reversed()), id: \.offset) { index, url in
+                    AsyncImage(url: url) { phase in
+                        if case .success(let image) = phase {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Color.white.opacity(0.06)
+                        }
+                    }
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(Color(red: 0.09, green: 0.07, blue: 0.08), lineWidth: 1.5)
+                    )
+                    .offset(x: CGFloat(index) * 10)
+                }
+            }
+            // Reserve the stack's real footprint so the text column doesn't
+            // overlap the offset thumbnails.
+            .frame(width: 44 + CGFloat(max(0, urls.count - 1)) * 10, height: 44, alignment: .leading)
+        }
+    }
 }
 
-/// Full list of today's memories across past years.
+/// Today's memories across past years, presented as full feed-style cards:
+/// a header ("2 years ago · June 4, 2024"), the day's photo when one exists
+/// (or a branded distance hero when not), and a stat chip strip — the same
+/// visual language as the main feed.
 struct MemoriesDetailView: View {
     let memories: [MemoryItem]
     @Environment(\.dismiss) private var dismiss
@@ -180,74 +210,179 @@ struct MemoriesDetailView: View {
         NavigationStack {
             ZStack {
                 MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
-                ScrollView {
-                    VStack(spacing: MADTheme.Spacing.md) {
-                        ForEach(memories) { memory in
-                            row(memory)
+                if memories.isEmpty {
+                    emptyState
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: MADTheme.Spacing.md) {
+                            ForEach(memories) { memory in
+                                memoryCard(memory)
+                            }
                         }
+                        .padding(MADTheme.Spacing.md)
+                        .padding(.bottom, MADTheme.Spacing.xl)
                     }
-                    .padding(MADTheme.Spacing.md)
+                    .scrollIndicators(.hidden)
                 }
             }
             .navigationTitle("On this day")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                        .foregroundColor(MADTheme.Colors.madRed)
                 }
             }
         }
     }
 
-    private func row(_ memory: MemoryItem) -> some View {
-        HStack(spacing: MADTheme.Spacing.md) {
-            if let photoURL = memory.photoURL {
-                AsyncImage(url: photoURL) { phase in
-                    if case .success(let image) = phase {
-                        image.resizable().scaledToFill()
-                    } else {
-                        ZStack {
-                            Color.white.opacity(0.06)
-                            Image(systemName: "photo").foregroundColor(.white.opacity(0.3))
-                        }
-                    }
+    private var emptyState: some View {
+        VStack(spacing: MADTheme.Spacing.sm) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 32))
+                .foregroundColor(.white.opacity(0.3))
+            Text("No memories today")
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+        }
+    }
+
+    // MARK: - Feed-style memory card
+
+    private func memoryCard(_ memory: MemoryItem) -> some View {
+        let accent = ActivityCardView.color(memory.workoutType)
+        return VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            // Header — mirrors the feed card's author row, with the memory's
+            // age standing in for the author.
+            HStack(spacing: 10) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 40, height: 40)
+                    .background(Circle().fill(MADTheme.Colors.redGradient))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(memory.yearsAgoText)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text(Self.dateFormatter.string(from: memory.date))
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
                 }
-                .frame(width: 56, height: 70)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            } else {
+                Spacer()
                 Image(systemName: ActivityCardView.icon(memory.workoutType))
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(ActivityCardView.color(memory.workoutType))
-                    .frame(width: 44, height: 44)
-                    .background(Circle().fill(Color.white.opacity(0.06)))
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(accent)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(accent.opacity(0.15)))
             }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(memory.yearsAgoText)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                Text(Self.dateFormatter.string(from: memory.date))
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.5))
+            if let photoURL = memory.photoURL {
+                photoSlide(photoURL)
+            } else if memory.miles > 0 {
+                distanceHero(memory, accent: accent)
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("\(String(format: "%.2f", memory.miles)) mi")
-                    .font(.system(size: 16, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
-                    .monospacedDigit()
-                if memory.durationSeconds > 0 {
-                    Text(RunStatsStickerView.durationText(memory.durationSeconds))
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.5))
-                        .monospacedDigit()
+
+            statStrip(memory)
+        }
+        .padding(MADTheme.Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+    }
+
+    /// The day's photo, full-width 4:5 like a feed post slide.
+    private func photoSlide(_ url: URL) -> some View {
+        AsyncImage(url: url) { phase in
+            switch phase {
+            case .success(let image):
+                image.resizable().scaledToFill()
+            case .failure:
+                ZStack {
+                    Color.white.opacity(0.05)
+                    Image(systemName: "photo").foregroundColor(.white.opacity(0.3))
+                }
+            default:
+                ZStack {
+                    Color.white.opacity(0.05)
+                    ProgressView().tint(.white)
                 }
             }
         }
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        )
+        .frame(maxWidth: .infinity)
+        .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+    }
+
+    /// Photo-less memories get a compact branded hero — the distance as the
+    /// moment, in the same gradient language as the feed's workout card.
+    private func distanceHero(_ memory: MemoryItem, accent: Color) -> some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.09, green: 0.09, blue: 0.12), .black],
+                startPoint: .top, endPoint: .bottom
+            )
+            RadialGradient(
+                colors: [accent.opacity(0.35), .clear],
+                center: .init(x: 0.5, y: 0.4), startRadius: 8, endRadius: 180
+            )
+            VStack(spacing: 2) {
+                Text(String(format: "%.2f", memory.miles))
+                    .font(.system(size: 46, weight: .black, design: .rounded))
+                    .foregroundColor(.white)
+                    .monospacedDigit()
+                    .shadow(color: .black.opacity(0.4), radius: 5, y: 2)
+                Text("MILES \(ActivityCardView.verb(memory.workoutType).uppercased())")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .tracking(4)
+                    .foregroundColor(.white.opacity(0.6))
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+    }
+
+    /// Miles / time / pace chips, same grammar as the feed's activity card.
+    @ViewBuilder
+    private func statStrip(_ memory: MemoryItem) -> some View {
+        let items = statItems(memory)
+        if !items.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(items, id: \.0) { item in
+                        HStack(spacing: 5) {
+                            Image(systemName: item.1)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.orange)
+                            Text(item.2)
+                                .font(.system(size: 13, weight: .heavy, design: .rounded))
+                                .monospacedDigit()
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(Capsule().fill(Color.white.opacity(0.07)))
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+        }
+    }
+
+    private func statItems(_ memory: MemoryItem) -> [(String, String, String)] {
+        var out: [(String, String, String)] = []
+        if memory.miles > 0 {
+            out.append(("miles", ActivityCardView.icon(memory.workoutType),
+                        String(format: "%.2f mi", memory.miles)))
+        }
+        if memory.durationSeconds > 0 {
+            out.append(("time", "clock.fill", RunStatsStickerView.durationText(memory.durationSeconds)))
+            if memory.miles > 0 {
+                out.append(("pace", "speedometer",
+                            "\(RunStatsStickerView.paceText(memory.durationSeconds / memory.miles)) /mi"))
+            }
+        }
+        return out
     }
 }

@@ -234,7 +234,14 @@ extension HKWorkout {
 /// Unified progress calculation system to ensure 1-to-1 synchronization
 /// between Apple Fitness tracking and MAD tracking
 struct ProgressCalculator {
-    
+
+    /// Canonical "daily mile done" tolerance, matching the backend
+    /// (`DAILY_GOAL_TOLERANCE` in workoutService.ts): streaks, challenges,
+    /// nudge status, and the posting gate all count >= 95% of the goal as
+    /// complete (GPS under-measure allowance). Completion checks here must
+    /// match, or the app shows "locked" states the server would allow.
+    static let dailyGoalTolerance = 0.95
+
     /// Calculates progress percentage, ensuring it never exceeds 100%
     /// - Parameters:
     ///   - current: Current distance completed
@@ -249,9 +256,9 @@ struct ProgressCalculator {
     /// - Parameters:
     ///   - current: Current distance completed
     ///   - goal: Goal distance
-    /// - Returns: True if goal is completed (current >= goal)
+    /// - Returns: True if goal is completed (within the daily-goal tolerance)
     static func isGoalCompleted(current: Double, goal: Double) -> Bool {
-        return current >= goal
+        return current + 1e-9 >= goal * dailyGoalTolerance
     }
     
     /// Calculates remaining distance to goal

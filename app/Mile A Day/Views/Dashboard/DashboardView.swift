@@ -330,6 +330,15 @@ struct DashboardView: View {
         // see yourself climb with the added miles, then the extra-mile hype.
         celebrationManager.addCelebration(.leaderboardMoveUp(stats: stats))
         celebrationManager.addCelebration(.postGoalWorkout(stats: stats))
+
+        // Every walk/run gets its own photo moment, not just the goal-crossing
+        // one — same finale as the goal path. The celebration id is keyed by
+        // workout uuid, so each new workout prompts exactly once.
+        if autoShareRunsToFeed, let uuid = healthManager.workoutIndex?.latestWorkoutUUID {
+            let hk = healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
+            let wtype = hk?.workoutActivityType == .walking ? "walking" : "running"
+            celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: uuid, workoutType: wtype))
+        }
     }
 
     // Simplified state calculation

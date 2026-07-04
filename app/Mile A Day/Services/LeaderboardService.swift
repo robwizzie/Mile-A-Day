@@ -131,17 +131,36 @@ enum LeaderboardService {
         metric: LeaderboardMetric,
         period: LeaderboardPeriod,
         limit: Int = defaultPageSize,
-        offset: Int = 0
+        offset: Int = 0,
+        attempt: Int = 0
     ) async throws -> LeaderboardPage {
         // Build the query string by hand — enum raw values + ints, so no
         // URL-encoding required. Avoids URLComponents quirks with path-only URLs.
         let endpoint = "/leaderboard?metric=\(metric.rawValue)&period=\(period.rawValue)&limit=\(limit)&offset=\(offset)"
 
-        return try await APIClient.fancyFetch(
-            endpoint: endpoint,
-            method: .GET,
-            body: nil,
-            responseType: LeaderboardPage.self
-        )
+        do {
+            return try await APIClient.fancyFetch(
+                endpoint: endpoint,
+                method: .GET,
+                body: nil,
+                responseType: LeaderboardPage.self
+            )
+        } catch {
+            // Transient network failures (timeout, flaky cellular) get two
+            // quiet retries with backoff before the error state surfaces —
+            // same policy as RemoteChallengeService. Real API/decode errors
+            // throw immediately.
+            let isTransient: Bool = {
+                if error is URLError { return true }
+                if case APIError.networkError = error { return true }
+                return false
+            }()
+            guard isTransient, attempt < 2, !Task.isCancelled else { throw error }
+            try await Task.sleep(nanoseconds: UInt64(attempt + 1) * 1_500_000_000)
+            return try await fetch(
+                metric: metric, period: period,
+                limit: limit, offset: offset, attempt: attempt + 1
+            )
+        }
     }
 }
