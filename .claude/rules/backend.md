@@ -28,6 +28,8 @@ globs: backend/**
 - Existing prod schema was baselined via `scripts/drizzle-baseline.mjs` (records `0000` as applied without running it). Run it ONCE per environment before the first `db:migrate`.
 - `drizzle-kit pull` has introspection bugs to fix by hand after every pull: (1) some SQL-expression/empty-string defaults emit broken TS → fix with `.default(sql\`...\`)` / `.default('')`; (2) composite-index per-column opclasses get misaligned (text col tagged `timestamptz_ops` etc.) → these are all DEFAULT opclasses, so strip every `.op(...)` EXCEPT non-defaults like `gin_trgm_ops`; (3) `relations.ts` imports `./schema` without `.js` → add it. After fixing, regenerate the baseline (empty `meta/_journal.json` + `db:generate`) and confirm it says "No schema changes".
 
+- Never emit raw `timestamptz::text` in URL query params (pagination cursors): its `+00` offset decodes as a SPACE in Express's query parser and the `::timestamptz` cast 500s. Emit cursors via `URL_SAFE_CURSOR` (ISO `…Z`, postService.ts); iOS must percent-encode query values with a set that excludes `+` (`PostService.queryValueAllowed`).
+
 ## Auth Pattern
 - Public routes (`/auth/*`, `/dev/*`, `/status`) are mounted BEFORE `authenticateToken` middleware in server.ts.
 - Protected routes are mounted AFTER. `req.userId` is set by auth middleware (see `AuthenticatedRequest` type).

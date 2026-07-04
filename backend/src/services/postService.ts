@@ -77,6 +77,18 @@ export interface StoryGroup {
   latest_at: string;
 }
 
+/**
+ * Keyset-pagination cursor as URL-safe ISO-8601 UTC with microseconds
+ * ("2026-07-04T12:34:56.123456Z"). The raw `::text` of a timestamptz renders
+ * as "2026-07-04 12:34:56.123456+00" — and a literal '+' in a query string is
+ * decoded as a SPACE by Express's query parser, which made the returned
+ * cursor fail its `::timestamptz` cast on the next page ("the feed stops
+ * loading"). Microsecond precision is kept so same-millisecond rows at page
+ * boundaries are neither skipped nor repeated.
+ */
+const URL_SAFE_CURSOR = (col: string) =>
+  `to_char((${col}) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US') || 'Z'`;
+
 // Base post columns shared by every post-shaped read (viewer-independent).
 // Routes are deliberately NOT here — only the unified feed ships them (the
 // story viewer / memories / profile grid never render a route map, and the
@@ -569,7 +581,7 @@ export async function getFeed(
     `
 		${CIRCLE_CTE}
 		SELECT ${POST_SELECT},
-			p.created_at::text AS cursor
+			${URL_SAFE_CURSOR("p.created_at")} AS cursor
 		FROM posts p
 		JOIN circle c ON c.uid = p.user_id
 		JOIN users u ON u.user_id = p.user_id
@@ -641,7 +653,7 @@ export async function getUnifiedFeed(
   const rows = await db.query<FeedEntryRow>(
     `
 		${CIRCLE_CTE}
-		SELECT feed.*, feed.sort_ts::text AS cursor FROM (
+		SELECT feed.*, ${URL_SAFE_CURSOR("feed.sort_ts")} AS cursor FROM (
 			SELECT
 				'post' AS kind,
 				p.post_id::text AS id,
@@ -766,7 +778,7 @@ export async function getUserPosts(
     `
 		${CIRCLE_CTE}
 		SELECT ${POST_SELECT},
-			p.created_at::text AS cursor,
+			${URL_SAFE_CURSOR("p.created_at")} AS cursor,
 			-- The run's story photo, so the profile grid + detail cards lead
 			-- with the real picture (workout card second), matching the feed.
 			-- Owner's decision: story expiry does NOT remove the photo from

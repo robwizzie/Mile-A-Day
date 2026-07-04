@@ -341,6 +341,22 @@ export async function getPostMemoriesController(
   }
 }
 
+/**
+ * Repair a keyset cursor whose timezone '+' was decoded as a space. Shipped
+ * clients percent-encode cursors with a set that leaves '+' literal, and
+ * Express's query parser turns a literal '+' into ' ' — so the old
+ * "2026-07-04 12:34:56.123456+00" cursor arrived as "…123456 00" and its
+ * `::timestamptz` cast threw, silently killing pagination after page one.
+ * New cursors are emitted URL-safe (ISO-8601 "…Z"), but cursors already in
+ * the field (and older app builds) still need this rewrite. A valid cursor
+ * never legitimately ends in <space><offset-digits>, so the rewrite is safe.
+ */
+function repairBeforeCursor(req: AuthenticatedRequest): string | null {
+  const raw = typeof req.query.before === "string" ? req.query.before : null;
+  if (!raw) return null;
+  return raw.replace(/ (\d{2}(:?\d{2})?)$/, "+$1");
+}
+
 export async function getFeedController(
   req: AuthenticatedRequest,
   res: Response,
@@ -350,10 +366,9 @@ export async function getFeedController(
     const limit = Number.isFinite(rawLimit)
       ? Math.min(Math.max(rawLimit, 1), MAX_FEED_LIMIT)
       : DEFAULT_FEED_LIMIT;
-    const before =
-      typeof req.query.before === "string" ? req.query.before : null;
+    const before = repairBeforeCursor(req);
     const items = await getFeed(req.userId!, limit, before);
-    // `cursor` is the microsecond-precise Postgres text timestamp; created_at
+    // `cursor` is the microsecond-precise URL-safe timestamp; created_at
     // (a ms-truncated JS Date) would skip same-millisecond rows at boundaries.
     const last = items[items.length - 1];
     const nextBefore =
@@ -377,8 +392,7 @@ export async function getUnifiedFeedController(
     const limit = Number.isFinite(rawLimit)
       ? Math.min(Math.max(rawLimit, 1), MAX_FEED_LIMIT)
       : DEFAULT_FEED_LIMIT;
-    const before =
-      typeof req.query.before === "string" ? req.query.before : null;
+    const before = repairBeforeCursor(req);
     const items = await getUnifiedFeed(req.userId!, limit, before);
     const last = items[items.length - 1];
     const nextBefore =
@@ -408,8 +422,7 @@ export async function getUserPostsController(
     const limit = Number.isFinite(rawLimit)
       ? Math.min(Math.max(rawLimit, 1), MAX_FEED_LIMIT)
       : DEFAULT_FEED_LIMIT;
-    const before =
-      typeof req.query.before === "string" ? req.query.before : null;
+    const before = repairBeforeCursor(req);
     const items = await getUserPosts(
       req.userId!,
       req.params.userId,

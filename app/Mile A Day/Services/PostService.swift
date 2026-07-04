@@ -257,6 +257,26 @@ enum PostError: LocalizedError {
 /// APIClient.fancyFetch (auto token refresh); the photo upload hand-rolls
 /// multipart like ProfileImageService.
 enum PostService {
+    /// Percent-encoding for query-string VALUES (pagination cursors).
+    /// `.urlQueryAllowed` leaves '+' literal, and the backend's query parser
+    /// decodes a literal '+' as a SPACE — which corrupted the old
+    /// "…12:34:56.123456+00" timestamp cursors and silently froze feed
+    /// pagination after the first page. Encoding the reserved characters
+    /// guarantees the cursor arrives byte-identical.
+    private static let queryValueAllowed: CharacterSet = {
+        var set = CharacterSet.urlQueryAllowed
+        set.remove(charactersIn: "+&=?")
+        return set
+    }()
+
+    /// A `before=` query suffix for the given cursor, safely encoded.
+    fileprivate static func beforeSuffix(_ before: String?) -> String {
+        guard let before,
+              let encoded = before.addingPercentEncoding(withAllowedCharacters: queryValueAllowed)
+        else { return "" }
+        return "&before=\(encoded)"
+    }
+
     /// Upload a flattened post photo (overlay already composited). Returns the
     /// server `media_url` to reference when creating the post.
     static func uploadMedia(_ image: UIImage) async throws -> String {
@@ -386,28 +406,19 @@ enum PostService {
 
     /// One page of the feed. Pass the previous page's `next_before` to paginate.
     static func fetchFeed(before: String? = nil) async throws -> FeedResponse {
-        var endpoint = "/posts/feed?limit=20"
-        if let before, let encoded = before.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            endpoint += "&before=\(encoded)"
-        }
+        let endpoint = "/posts/feed?limit=20" + beforeSuffix(before)
         return try await APIClient.fancyFetch(endpoint: endpoint, responseType: FeedResponse.self)
     }
 
     /// The unified feed: photo posts + workout activity interleaved, paginated.
     static func fetchUnifiedFeed(before: String? = nil) async throws -> UnifiedFeedResponse {
-        var endpoint = "/posts/feed/unified?limit=20"
-        if let before, let encoded = before.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            endpoint += "&before=\(encoded)"
-        }
+        let endpoint = "/posts/feed/unified?limit=20" + beforeSuffix(before)
         return try await APIClient.fancyFetch(endpoint: endpoint, responseType: UnifiedFeedResponse.self)
     }
 
     /// A user's permanent posts for the Instagram-style profile grid.
     static func fetchUserPosts(userId: String, before: String? = nil) async throws -> FeedResponse {
-        var endpoint = "/posts/user/\(userId)?limit=24"
-        if let before, let encoded = before.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            endpoint += "&before=\(encoded)"
-        }
+        let endpoint = "/posts/user/\(userId)?limit=24" + beforeSuffix(before)
         return try await APIClient.fancyFetch(endpoint: endpoint, responseType: FeedResponse.self)
     }
 

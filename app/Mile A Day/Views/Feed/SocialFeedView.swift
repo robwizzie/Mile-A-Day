@@ -18,6 +18,9 @@ struct SocialFeedView: View {
     @State private var nextBefore: String?
     @State private var isLoading = false
     @State private var isLoadingMore = false
+    /// A load-more request failed (offline, server error). Shows a tappable
+    /// retry row — the stalled last card never re-fires onAppear on its own.
+    @State private var loadMoreFailed = false
     @State private var loadedOnce = false
 
     @State private var hypingIds: Set<String> = []
@@ -165,11 +168,20 @@ struct SocialFeedView: View {
                     } else {
                         ForEach(feed) { entry in
                             feedCard(entry)
-                                .onAppear { if entry.id == feed.last?.id { Task { await loadMore() } } }
+                                // Prefetch a few cards early (not just on the
+                                // very last row) so the next page is usually
+                                // there before the user reaches the bottom.
+                                .onAppear {
+                                    if feed.suffix(3).contains(where: { $0.id == entry.id }) {
+                                        Task { await loadMore() }
+                                    }
+                                }
                                 .padding(.horizontal, MADTheme.Spacing.md)
                         }
                         if isLoadingMore {
                             ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
+                        } else if loadMoreFailed, nextBefore != nil {
+                            loadMoreRetryRow
                         }
                     }
                 }
@@ -449,6 +461,7 @@ struct SocialFeedView: View {
             if let feedResponse {
                 feed = feedResponse.items
                 nextBefore = feedResponse.next_before
+                loadMoreFailed = false
             }
             if let storyGroups {
                 stories = storyGroups
@@ -467,18 +480,54 @@ struct SocialFeedView: View {
         }
     }
 
+    /// Instagram-style infinite scroll: pages keep coming until the server
+    /// says there's nothing older (`next_before == nil`). A page whose rows
+    /// ALL dedupe away (fresh posts shifted the keyset boundary between
+    /// requests) advances the cursor and immediately fetches again — an
+    /// unchanged last row never re-fires onAppear, so stopping there would
+    /// stall the feed with history still unloaded. A failed request surfaces
+    /// the retry row instead of dying silently.
     private func loadMore() async {
-        guard let before = nextBefore, !isLoadingMore else { return }
-        await MainActor.run { isLoadingMore = true }
-        let response = try? await PostService.fetchUnifiedFeed(before: before)
+        guard nextBefore != nil, !isLoadingMore else { return }
         await MainActor.run {
-            if let response {
-                let existing = Set(feed.map(\.id))
-                feed.append(contentsOf: response.items.filter { !existing.contains($0.id) })
-                nextBefore = response.next_before
-            }
-            isLoadingMore = false
+            isLoadingMore = true
+            loadMoreFailed = false
         }
+        while let before = nextBefore {
+            guard let response = try? await PostService.fetchUnifiedFeed(before: before) else {
+                await MainActor.run {
+                    loadMoreFailed = true
+                    isLoadingMore = false
+                }
+                return
+            }
+            let gotFresh: Bool = await MainActor.run {
+                let existing = Set(feed.map(\.id))
+                let fresh = response.items.filter { !existing.contains($0.id) }
+                feed.append(contentsOf: fresh)
+                nextBefore = response.next_before
+                return !fresh.isEmpty
+            }
+            if gotFresh || nextBefore == nil { break }
+        }
+        await MainActor.run { isLoadingMore = false }
+    }
+
+    private var loadMoreRetryRow: some View {
+        Button {
+            Task { await loadMore() }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 12, weight: .bold))
+                Text("Couldn't load more — tap to retry")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+            }
+            .foregroundColor(.white.opacity(0.7))
+            .padding(.vertical, MADTheme.Spacing.md)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Actions
