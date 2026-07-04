@@ -24,6 +24,7 @@ globs: app/**
   - `+DataFetching.swift`, `+PersonalRecords.swift`, `+StreakCalculation.swift`, `+WorkoutIndex.swift`
 - Workout sync: HealthKit -> WorkoutProcessor -> WorkoutSyncService -> Backend API
 - HealthKit queries ERROR when the device is locked (protected data). Never treat a query error as "0 miles" — only a successful empty result is a real zero. Writing 0 on error randomly reset widgets.
+- Feed route maps are read from HKWorkoutRoute at sync time. In-app tracked workouts must write their GPS trace via `HKWorkoutRouteBuilder.finishRoute` after `finishWorkout` (and `HKSeriesType.workoutRoute()` must be in the SHARE auth set) — points buffered in InProgressWorkoutStore alone never reach the backend.
 - WidgetKit renders statically: `.onAppear`-driven `@State` animations never play in widget views — render entry values directly. `WidgetDataStore` data is day-stamped; `load()` returns zeros for a stale day, and saves skip no-op writes (widget reloads are budgeted per day).
 
 ## Key Patterns

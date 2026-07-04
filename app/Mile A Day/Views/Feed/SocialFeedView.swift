@@ -7,6 +7,10 @@ import SwiftUI
 struct SocialFeedView: View {
     @StateObject private var healthManager = HealthKitManager.shared
     @StateObject private var userManager = UserManager.shared
+    /// One stable service for profiles opened from the feed. Creating a fresh
+    /// FriendService inside the sheet closure re-instantiated it on every feed
+    /// state change, wiping the loaded friends list mid-view.
+    @StateObject private var profileFriendService = FriendService()
 
     @State private var feed: [FeedEntry] = []
     @State private var stories: [StoryGroup] = []
@@ -35,6 +39,11 @@ struct SocialFeedView: View {
     @State private var showMemories = false
     @State private var showWeeklyRecap = false
     @State private var profileUser: BackendUser?
+    /// Tapped hype tally — presents the "who hyped this" sheet.
+    @State private var hypersContext: HypersListContext?
+    /// Profile tapped INSIDE the hypers sheet — presented after that sheet
+    /// fully dismisses (sheet-over-sheet races drop the second presentation).
+    @State private var pendingProfileUser: BackendUser?
 
     private var currentUserId: String? { UserDefaults.standard.string(forKey: "backendUserId") }
     /// Completing the daily mile unlocks posting AND viewing friends' stories.
@@ -183,7 +192,29 @@ struct SocialFeedView: View {
         }
         .sheet(item: $profileUser) { user in
             NavigationStack {
-                UserProfileDetailView(user: user, friendService: FriendService())
+                UserProfileDetailView(user: user, friendService: profileFriendService)
+            }
+        }
+        .sheet(item: $hypersContext, onDismiss: {
+            if let pending = pendingProfileUser {
+                pendingProfileUser = nil
+                profileUser = pending
+            }
+        }) { context in
+            HypersListSheet(context: context) { hyper in
+                guard hyper.user_id != currentUserId else { return }
+                pendingProfileUser = BackendUser(
+                    user_id: hyper.user_id,
+                    username: hyper.username,
+                    email: nil,
+                    first_name: hyper.first_name,
+                    last_name: hyper.last_name,
+                    bio: nil,
+                    profile_image_url: hyper.profile_image_url,
+                    apple_id: nil,
+                    auth_provider: nil,
+                    role: nil
+                )
             }
         }
         .alert("Finish today's mile first", isPresented: $showMileHint) {
@@ -262,6 +293,13 @@ struct SocialFeedView: View {
                 role: nil
             )
         }
+        let openHypers = {
+            hypersContext = HypersListContext(
+                contextType: entry.isPost ? "post" : "mile",
+                contextId: entry.entryId,
+                targetUserId: entry.user_id
+            )
+        }
         if entry.isPost, let post = entry.asPostItem() {
             PostCardView(
                 post: post,
@@ -271,14 +309,16 @@ struct SocialFeedView: View {
                 onReport: { reportingPost = post },
                 onBlock: { Task { await block(entry) } },
                 onDelete: { Task { await deletePost(entry) } },
-                onTapAuthor: openProfile
+                onTapAuthor: openProfile,
+                onTapHypeCount: openHypers
             )
         } else {
             ActivityCardView(
                 entry: entry,
                 isHyping: hypingIds.contains(entry.id),
                 onHype: { Task { await hype(entry) } },
-                onTapAuthor: openProfile
+                onTapAuthor: openProfile,
+                onTapHypeCount: openHypers
             )
         }
     }

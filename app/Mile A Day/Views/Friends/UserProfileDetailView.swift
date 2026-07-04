@@ -3,7 +3,13 @@ import SwiftUI
 /// Detailed view for displaying a user's profile information
 struct UserProfileDetailView: View {
     let user: BackendUser
-    let friendService: FriendService
+    // Observed, not a plain `let`: the friendship gates below (today's
+    // progress card, nudge/compete row, close-friend star) read
+    // `friendService.isFriend(...)`, and when the profile opens from a
+    // surface that passes a freshly-created service (the feed), the friends
+    // list arrives AFTER first render — without observation the view never
+    // re-evaluates and today's distance stays blank.
+    @ObservedObject var friendService: FriendService
     @ObservedObject private var userManager = UserManager.shared
     @ObservedObject private var closeFriends = CloseFriendsService.shared
     @Environment(\.dismiss) private var dismiss
@@ -138,7 +144,6 @@ struct UserProfileDetailView: View {
         }
         .onAppear {
             loadUserData()
-            refreshFriendshipStatus()
         }
         .task {
             await loadFriendTodayChallenge()
@@ -147,6 +152,12 @@ struct UserProfileDetailView: View {
             await loadBadges()
         }
         .task {
+            // Friendship data FIRST, nudge status second — loadNudgeStatus is
+            // gated on isFriend, and a service passed in fresh (e.g. from the
+            // feed) hasn't loaded its friends list yet. Running them in
+            // parallel made the gate misread friends as strangers, so today's
+            // distance never loaded.
+            await friendService.refreshAllData()
             await loadNudgeStatus()
         }
         .task {
@@ -937,12 +948,6 @@ struct UserProfileDetailView: View {
                     isLoadingStats = false
                 }
             }
-        }
-    }
-
-    private func refreshFriendshipStatus() {
-        Task {
-            await friendService.refreshAllData()
         }
     }
 

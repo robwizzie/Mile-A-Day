@@ -80,6 +80,52 @@ enum HypeService {
             responseType: [ReceivedHype].self
         )
     }
+
+    /// Everyone who hyped one specific post or daily mile, newest first — the
+    /// Instagram-style "who liked this" list behind a feed card's hype tally.
+    /// `contextId` is the post id for posts, or the workout id for miles (the
+    /// backend resolves it to the canonical composite key).
+    static func hypers(
+        contextType: String,
+        contextId: String,
+        targetUserId: String
+    ) async throws -> [Hyper] {
+        struct HypersResponse: Decodable {
+            let hypers: [Hyper]
+            let count: Int
+        }
+        var components = URLComponents()
+        components.queryItems = [
+            URLQueryItem(name: "context_type", value: contextType),
+            URLQueryItem(name: "context_id", value: contextId),
+            URLQueryItem(name: "target_user_id", value: targetUserId)
+        ]
+        let query = components.percentEncodedQuery ?? ""
+        return try await APIClient.fancyFetch(
+            endpoint: "/hype/hypers?\(query)",
+            responseType: HypersResponse.self
+        ).hypers
+    }
+}
+
+/// One person who hyped a post/mile, for the "who hyped this" list.
+struct Hyper: Decodable, Identifiable {
+    let user_id: String
+    let username: String?
+    let first_name: String?
+    let last_name: String?
+    let profile_image_url: String?
+    let created_at: String
+
+    var id: String { user_id }
+
+    var displayName: String {
+        if let username, !username.isEmpty { return username }
+        if let first_name, !first_name.isEmpty { return first_name }
+        return "Someone"
+    }
+
+    var relativeTime: String { RelativeTime.short(from: created_at) }
 }
 
 /// A hype someone sent to the current user.

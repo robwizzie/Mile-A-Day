@@ -17,6 +17,7 @@ import {
   HYPE_DAILY_LIMIT,
   HypeContext,
   getReceivedHypes,
+  getContextHypers,
 } from "../services/hypeService.js";
 
 const db = PostgresService.getInstance();
@@ -270,6 +271,68 @@ export async function getReceivedHypesController(
   } catch (error: any) {
     console.error("Error getting received hypes:", error.message);
     res.status(500).json({ error: "Error getting received hypes" });
+  }
+}
+
+/**
+ * Who hyped a specific post or daily mile — the Instagram-style "who liked
+ * this" list behind a hype tally. Query params: `context_type` ('post'|'mile'),
+ * `context_id` (post id, or the mile's workout id / user:date composite), and
+ * `target_user_id` (the content's author). Viewer must be the author, a
+ * friend, or an active-competition co-participant — the same audience that can
+ * see the tally on the feed.
+ */
+export async function getContextHypersController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  const viewerId = req.userId!;
+  const contextType = String(req.query.context_type ?? "");
+  const rawContextId = String(req.query.context_id ?? "");
+  const targetUserId = String(req.query.target_user_id ?? "");
+
+  try {
+    if (!["post", "mile"].includes(contextType)) {
+      return res
+        .status(400)
+        .json({ error: "context_type must be 'post' or 'mile'" });
+    }
+    if (!rawContextId || !targetUserId) {
+      return res
+        .status(400)
+        .json({ error: "context_id and target_user_id are required" });
+    }
+
+    if (viewerId !== targetUserId) {
+      const allowed = await isFriendOrCoParticipant(viewerId, targetUserId);
+      if (!allowed) {
+        return res
+          .status(403)
+          .json({ error: "You can only view hypes on content you can see" });
+      }
+    }
+
+    // Mile hypes are stored under the canonical `<userId>:<localDate>`
+    // composite — resolve a raw workout id to it, same as the send path.
+    let contextId = rawContextId;
+    if (contextType === "mile") {
+      try {
+        const canonical = await canonicalizeMileContext(targetUserId, {
+          contextType: "mile",
+          contextId: rawContextId,
+          contextLabel: "",
+        });
+        contextId = canonical.contextId;
+      } catch {
+        return res.status(400).json({ error: "Invalid mile context" });
+      }
+    }
+
+    const hypers = await getContextHypers(targetUserId, contextType, contextId);
+    res.status(200).json({ hypers, count: hypers.length });
+  } catch (error: any) {
+    console.error("Error getting context hypers:", error.message);
+    res.status(500).json({ error: "Error getting context hypers" });
   }
 }
 

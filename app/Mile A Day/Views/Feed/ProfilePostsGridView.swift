@@ -152,6 +152,8 @@ struct ProfilePostsFeedSheet: View {
     let initialPostId: String
     let onNeedMore: () -> Void
     @Environment(\.dismiss) private var dismiss
+    /// Tapped hype tally — presents the "who hyped this" sheet.
+    @State private var hypersContext: HypersListContext?
 
     var body: some View {
         NavigationStack {
@@ -196,6 +198,9 @@ struct ProfilePostsFeedSheet: View {
             .toolbarBackground(.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .sheet(item: $hypersContext) { context in
+                HypersListSheet(context: context)
+            }
         }
     }
 
@@ -255,7 +260,17 @@ struct ProfilePostsFeedSheet: View {
                     .padding(.horizontal, 2)
             }
             if let count = post.hype_count, count > 0 {
-                HypeTally(count: count).padding(.horizontal, 2)
+                Button {
+                    hypersContext = HypersListContext(
+                        contextType: "post",
+                        contextId: post.post_id,
+                        targetUserId: post.user_id
+                    )
+                } label: {
+                    HypeTally(count: count).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 2)
             }
         }
         .padding(MADTheme.Spacing.sm)

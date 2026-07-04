@@ -378,8 +378,19 @@ struct FeedWorkoutCard: View {
 /// Instagram's big-heart moment, in Mile A Day's language: a huge clap bursts
 /// from the center of the photo with a spring, mini claps radiate outward,
 /// then everything floats up and fades. Fire it by incrementing `trigger`.
+///
+/// Fully invisible at rest — every element's opacity is gated on `playing`,
+/// not just animation phase. (The particles used to key opacity solely off
+/// `particlesOut`, which is false at rest too, so six claps sat permanently
+/// on every card that had never been double-tapped.)
 struct HypeBurstView: View {
     let trigger: Int
+
+    /// True only while a burst is on screen. Also generation-guards the
+    /// delayed cleanup so a rapid re-double-tap isn't cut short by the
+    /// previous burst's teardown.
+    @State private var playing = false
+    @State private var generation = 0
 
     @State private var mainScale: CGFloat = 0
     @State private var mainRotation: Double = -14
@@ -398,7 +409,7 @@ struct HypeBurstView: View {
                     .foregroundColor(.orange.opacity(0.9))
                     .rotationEffect(.degrees(Double(index.isMultiple(of: 2) ? -18 : 14)))
                     .offset(particleOffset(angle: angle, distance: particlesOut ? 84 : 12))
-                    .opacity(particlesOut ? 0 : 0.9)
+                    .opacity(playing && !particlesOut ? 0.9 : 0)
                     .scaleEffect(particlesOut ? 0.6 : 1)
             }
 
@@ -415,7 +426,7 @@ struct HypeBurstView: View {
                 .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
                 .scaleEffect(mainScale)
                 .rotationEffect(.degrees(mainRotation))
-                .opacity(mainOpacity)
+                .opacity(playing ? mainOpacity : 0)
                 .offset(y: rise)
         }
         .allowsHitTesting(false)
@@ -428,13 +439,22 @@ struct HypeBurstView: View {
     }
 
     private func play() {
-        // Reset instantly (a rapid re-double-tap replays from the start).
-        mainScale = 0.2
-        mainRotation = -14
-        mainOpacity = 0
-        rise = 0
-        particlesOut = false
+        generation += 1
+        let gen = generation
 
+        // Reset instantly (a rapid re-double-tap replays from the start).
+        var reset = Transaction()
+        reset.disablesAnimations = true
+        withTransaction(reset) {
+            playing = true
+            mainScale = 0.2
+            mainRotation = -14
+            mainOpacity = 0
+            rise = 0
+            particlesOut = false
+        }
+
+        // Pop in with an Instagram-style overshoot spring…
         withAnimation(.spring(response: 0.32, dampingFraction: 0.55)) {
             mainScale = 1.12
             mainRotation = 0
@@ -443,12 +463,18 @@ struct HypeBurstView: View {
         withAnimation(.easeOut(duration: 0.7).delay(0.05)) {
             particlesOut = true
         }
+        // …hold a beat, then float up and fade out.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+            guard gen == generation else { return }
             withAnimation(.easeIn(duration: 0.35)) {
                 mainOpacity = 0
                 rise = -60
                 mainScale = 0.8
             }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.95) {
+            guard gen == generation else { return }
+            playing = false
         }
     }
 }
