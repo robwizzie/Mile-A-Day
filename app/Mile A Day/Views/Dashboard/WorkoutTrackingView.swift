@@ -345,14 +345,22 @@ struct WorkoutTrackingView: View {
         .onChange(of: midRunImage) { _, newImage in
             guard let image = newImage else { return }
             midRunImage = nil
-            guard MidRunPhotoStash.add(image) else { return }
-            midRunSnapCount = MidRunPhotoStash.count
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                showSnapSavedToast = true
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                withAnimation(.easeOut(duration: 0.25)) { showSnapSavedToast = false }
+            // Downscale + JPEG-encode off the main thread — doing it inline
+            // stutters the camera dismissal animation on big sensor images.
+            Task.detached(priority: .utility) {
+                let saved = MidRunPhotoStash.add(image)
+                let count = MidRunPhotoStash.count
+                guard saved else { return }
+                await MainActor.run {
+                    midRunSnapCount = count
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        showSnapSavedToast = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                        withAnimation(.easeOut(duration: 0.25)) { showSnapSavedToast = false }
+                    }
+                }
             }
         }
     }
