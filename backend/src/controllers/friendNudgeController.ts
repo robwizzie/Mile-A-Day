@@ -5,8 +5,10 @@ import { getFriendship } from "../services/friendshipService.js";
 import {
   sendPush,
   canFriendNudge,
+  hasNudgedFriendToday,
   logFriendNudge,
 } from "../services/pushNotificationService.js";
+import { hasUnlimitedActions } from "../services/privilegedUsers.js";
 import { shouldSendNotification } from "../services/notificationSettingsService.js";
 import {
   getTodayMiles,
@@ -121,18 +123,27 @@ export async function checkNudgeStatus(
   const senderId = req.userId!;
 
   try {
-    const [canNudge, friendTodayMiles, streaks] = await Promise.all([
-      canFriendNudge(senderId, friendId),
-      getTodayMiles(friendId),
-      fetchStreaks([friendId]),
-    ]);
+    const [nudgedToday, unlimited, friendTodayMiles, streaks] =
+      await Promise.all([
+        hasNudgedFriendToday(senderId, friendId),
+        hasUnlimitedActions(senderId),
+        getTodayMiles(friendId),
+        fetchStreaks([friendId]),
+      ]);
+    const canNudge = unlimited || !nudgedToday;
 
     const hasCompletedMile = friendTodayMiles >= DAILY_GOAL_TOLERANCE;
 
     res.status(200).json({
       can_nudge: canNudge && !hasCompletedMile,
       has_completed_mile: hasCompletedMile,
+      // Legacy field: derived from can_nudge, so unlimited nudgers read
+      // false here and old builds keep their re-nudge ability.
       already_nudged_today: !canNudge,
+      // Log truth + role, so new builds can show "already nudged, nudge
+      // again?" for unlimited senders.
+      has_nudged_today: nudgedToday,
+      unlimited_nudges: unlimited,
       today_miles: Math.round(friendTodayMiles * 100) / 100,
       current_streak: streaks[friendId] ?? 0,
     });
@@ -163,26 +174,36 @@ export async function checkNudgeStatusBatch(
         can_nudge: boolean;
         has_completed_mile: boolean;
         already_nudged_today: boolean;
+        has_nudged_today: boolean;
+        unlimited_nudges: boolean;
         today_miles: number;
         current_streak: number;
       }
     > = {};
 
-    // One DB roundtrip for all streaks rather than N per-friend queries.
-    const streaks = await fetchStreaks(friendIds);
+    // One DB roundtrip for all streaks rather than N per-friend queries;
+    // the role bypass is per-sender, so look it up once.
+    const [streaks, unlimited] = await Promise.all([
+      fetchStreaks(friendIds),
+      hasUnlimitedActions(senderId),
+    ]);
 
     await Promise.all(
       friendIds.map(async (friendId: string) => {
-        const [canNudge, friendTodayMiles] = await Promise.all([
-          canFriendNudge(senderId, friendId),
+        const [nudgedToday, friendTodayMiles] = await Promise.all([
+          hasNudgedFriendToday(senderId, friendId),
           getTodayMiles(friendId),
         ]);
+        const canNudge = unlimited || !nudgedToday;
 
         const hasCompletedMile = friendTodayMiles >= DAILY_GOAL_TOLERANCE;
         statuses[friendId] = {
           can_nudge: canNudge && !hasCompletedMile,
           has_completed_mile: hasCompletedMile,
+          // Legacy: derived, so unlimited nudgers keep re-nudge on old builds.
           already_nudged_today: !canNudge,
+          has_nudged_today: nudgedToday,
+          unlimited_nudges: unlimited,
           today_miles: Math.round(friendTodayMiles * 100) / 100,
           current_streak: streaks[friendId] ?? 0,
         };

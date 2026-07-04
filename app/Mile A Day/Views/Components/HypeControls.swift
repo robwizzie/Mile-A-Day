@@ -73,19 +73,31 @@ struct HypeButton: View {
 // MARK: - Hype Tally
 
 /// Social-proof badge: how many hypes a single workout/event has received.
-/// Reads "👏 N". Hidden by callers when the count is zero.
+/// Compact form reads "👏 N" (tight rows); labeled form reads "👏 3 hypes"
+/// — the Instagram-likes-style line used on feed cards, where it's also the
+/// tap target for "who hyped this".
 struct HypeTally: View {
     let count: Int
+    /// Render the spelled-out "N hypes" form (feed cards).
+    var showsLabel: Bool = false
 
     var body: some View {
-        HStack(spacing: 3) {
+        HStack(spacing: showsLabel ? 5 : 3) {
             Image(systemName: "hands.clap.fill")
-                .font(.system(size: 10, weight: .bold))
-            Text("\(count)")
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
-                .monospacedDigit()
+                .font(.system(size: showsLabel ? 12 : 10, weight: .bold))
+                .foregroundColor(.orange)
+            if showsLabel {
+                Text("\(count) hype\(count == 1 ? "" : "s")")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.white.opacity(0.9))
+            } else {
+                Text("\(count)")
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.orange)
+            }
         }
-        .foregroundColor(.orange)
     }
 }
 
@@ -93,15 +105,19 @@ struct HypeTally: View {
 
 /// Shows how many hypes the user has left today. `compact` ("N left") fits the
 /// navigation toolbar; the default descriptive form suits inline placement.
-/// Dims to grey once the daily allowance is spent.
+/// Dims to grey once the daily allowance is spent. Unlimited (admin/founder)
+/// users get an "∞" pill that never depletes.
 struct HypePill: View {
     let remaining: Int
     var compact: Bool = false
+    /// The user's role bypasses the daily hype cap.
+    var unlimited: Bool = false
 
-    private var depleted: Bool { remaining <= 0 }
+    private var depleted: Bool { !unlimited && remaining <= 0 }
     private var tint: Color { depleted ? .white.opacity(0.55) : .orange }
 
     private var label: String {
+        if unlimited { return compact ? "∞" : "Unlimited hypes" }
         if compact { return "\(remaining) left" }
         return "\(remaining) hype\(remaining == 1 ? "" : "s") left today"
     }

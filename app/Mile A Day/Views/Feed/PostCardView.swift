@@ -239,7 +239,7 @@ struct PostCardView: View {
         HStack(spacing: 10) {
             if let count = post.hype_count, count > 0 {
                 Button { onTapHypeCount?() } label: {
-                    HypeTally(count: count)
+                    HypeTally(count: count, showsLabel: true)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

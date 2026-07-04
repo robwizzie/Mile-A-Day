@@ -13,6 +13,8 @@ struct NotificationInboxView: View {
     @State private var hypedRowIds: Set<String> = []
     @State private var hypeToast: String?
     @State private var hypesRemaining: Int?
+    /// Admin/founder roles bypass the daily hype cap — pill shows ∞.
+    @State private var hypesUnlimited = false
 
     /// Active category filter. `all` shows everything; the others narrow
     /// the feed to a related cluster of notification types so users can
@@ -85,12 +87,12 @@ struct NotificationInboxView: View {
                 // stops the orange pill from rendering inside a second system pill.
                 if #available(iOS 26.0, *) {
                     ToolbarItem(placement: .navigationBarLeading) {
-                        HypePill(remaining: remaining, compact: true)
+                        HypePill(remaining: remaining, compact: true, unlimited: hypesUnlimited)
                     }
                     .sharedBackgroundVisibility(.hidden)
                 } else {
                     ToolbarItem(placement: .navigationBarLeading) {
-                        HypePill(remaining: remaining, compact: true)
+                        HypePill(remaining: remaining, compact: true, unlimited: hypesUnlimited)
                     }
                 }
             }
@@ -473,6 +475,15 @@ struct NotificationInboxView: View {
         notification.is_hyped == true || hypedRowIds.contains(notification.id)
     }
 
+    /// The event's total hype count for display: the server figure (computed
+    /// with the same canonical context keys as the feed) plus one while the
+    /// viewer's own optimistic hype is in flight but not yet reflected.
+    private func displayedHypeCount(_ notification: InAppNotification) -> Int {
+        let base = notification.hype_count ?? 0
+        let optimisticBump = hypedRowIds.contains(notification.id) && notification.is_hyped != true
+        return base + (optimisticBump ? 1 : 0)
+    }
+
     private func performHype(_ notification: InAppNotification) {
         guard
             let targetId = hypeTargetUserId(for: notification),
@@ -485,7 +496,10 @@ struct NotificationInboxView: View {
         Task {
             do {
                 let response = try await HypeService.sendHype(targetUserId: targetId, context: context)
-                await MainActor.run { hypesRemaining = response.hypes_remaining }
+                await MainActor.run {
+                    hypesRemaining = response.hypes_remaining
+                    hypesUnlimited = response.unlimited ?? hypesUnlimited
+                }
             } catch APIError.conflict {
                 // Already hyped server-side; stay greyed out, no toast.
             } catch APIError.rateLimited(let msg) {
@@ -518,7 +532,10 @@ struct NotificationInboxView: View {
     private func fallbackHype(_ notification: InAppNotification, targetId: String) async {
         do {
             let response = try await HypeService.sendHype(targetUserId: targetId)
-            await MainActor.run { hypesRemaining = response.hypes_remaining }
+            await MainActor.run {
+                hypesRemaining = response.hypes_remaining
+                hypesUnlimited = response.unlimited ?? hypesUnlimited
+            }
         } catch APIError.rateLimited(let msg) {
             await MainActor.run {
                 hypedRowIds.remove(notification.id)
@@ -628,8 +645,17 @@ struct NotificationInboxView: View {
 
                     if canShowHypeButton(notification) {
                         let hyped = isAlreadyHyped(notification)
-                        HypeButton(isHyped: hyped) {
-                            performHype(notification)
+                        HStack(spacing: 10) {
+                            HypeButton(isHyped: hyped) {
+                                performHype(notification)
+                            }
+                            // Same tally the feed shows for this event — the
+                            // server computes both from the same canonical
+                            // hype context, so the numbers always agree.
+                            let count = displayedHypeCount(notification)
+                            if count > 0 {
+                                HypeTally(count: count)
+                            }
                         }
                         .padding(.top, 4)
                     }
@@ -782,7 +808,10 @@ struct NotificationInboxView: View {
     private func loadHypeStatus() async {
         do {
             let status = try await HypeService.status()
-            await MainActor.run { hypesRemaining = status.hypes_remaining }
+            await MainActor.run {
+                hypesRemaining = status.hypes_remaining
+                hypesUnlimited = status.unlimited ?? false
+            }
         } catch {
             // Non-fatal — pill just stays hidden.
         }

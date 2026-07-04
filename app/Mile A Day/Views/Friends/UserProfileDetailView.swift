@@ -686,7 +686,44 @@ struct UserProfileDetailView: View {
            friendService.isFriend(user),
            let status = nudgeStatus,
            !status.has_completed_mile {
-            if status.already_nudged_today {
+            if status.nudgedToday && status.unlimitedNudges {
+                // Unlimited-nudge roles: one already went out today, but they
+                // may send another — the distinct "Nudge again" pill IS the
+                // awareness that this isn't the first.
+                Button {
+                    handleProfileNudge()
+                } label: {
+                    HStack(spacing: 5) {
+                        if isNudging {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .tint(.orange)
+                        } else {
+                            Image(systemName: "bell.and.waves.left.and.right.fill")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Nudge again")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .lineLimit(1)
+                        }
+                    }
+                    .foregroundColor(.orange.opacity(0.75))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.05))
+                            .overlay(
+                                Capsule().strokeBorder(
+                                    Color.orange.opacity(0.35),
+                                    style: StrokeStyle(lineWidth: 1, dash: [3, 2.5])
+                                )
+                            )
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(isNudging)
+            } else if status.nudgedToday {
                 HStack(spacing: 5) {
                     Image(systemName: "bell.slash.fill")
                         .font(.system(size: 11, weight: .bold))
@@ -749,12 +786,16 @@ struct UserProfileDetailView: View {
                     isNudging = false
                     FlexNudgeTracker.markFriendNudgeSent(friendId: user.user_id)
                     // Preserve existing miles/completion in the optimistic update.
+                    // Unlimited nudgers keep "Nudge again" available.
+                    let unlimited = nudgeStatus?.unlimitedNudges ?? false
                     nudgeStatus = NudgeStatusResponse(
-                        can_nudge: false,
+                        can_nudge: unlimited,
                         has_completed_mile: nudgeStatus?.has_completed_mile ?? false,
-                        already_nudged_today: true,
+                        already_nudged_today: !unlimited,
                         today_miles: nudgeStatus?.today_miles,
-                        current_streak: nudgeStatus?.current_streak
+                        current_streak: nudgeStatus?.current_streak,
+                        has_nudged_today: true,
+                        unlimited_nudges: nudgeStatus?.unlimited_nudges
                     )
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     showProfileNudgeFeedback(NudgeFeedback(

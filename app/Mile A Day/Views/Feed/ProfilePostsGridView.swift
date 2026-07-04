@@ -267,7 +267,7 @@ struct ProfilePostsFeedSheet: View {
                         targetUserId: post.user_id
                     )
                 } label: {
-                    HypeTally(count: count).contentShape(Rectangle())
+                    HypeTally(count: count, showsLabel: true).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 2)

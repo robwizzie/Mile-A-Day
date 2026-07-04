@@ -138,7 +138,7 @@ export async function getInAppNotifications(req: Request, res: Response) {
     const types = ctxKeys.map((k) => k.type);
     const ids = ctxKeys.map((k) => k.id);
 
-    const [hyped, unreadCount] = await Promise.all([
+    const [hyped, counts, unreadCount] = await Promise.all([
       ctxKeys.length > 0
         ? db.query<{
             target_id: string;
@@ -154,6 +154,26 @@ export async function getInAppNotifications(req: Request, res: Response) {
             [userId, targetIds, types, ids],
           )
         : Promise.resolve([]),
+      // Total hypes per context across ALL senders — the same DISTINCT-sender
+      // count the feed shows, keyed by the same canonical context (mile
+      // composites, post ids), so the inbox and feed tallies always agree.
+      ctxKeys.length > 0
+        ? db.query<{
+            target_id: string;
+            context_type: string;
+            context_id: string;
+            cnt: number;
+          }>(
+            `SELECT target_id, context_type, context_id,
+						COUNT(DISTINCT sender_id)::int AS cnt
+					FROM hype_log
+					WHERE (target_id, context_type, context_id) IN (
+							SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[])
+						)
+					GROUP BY target_id, context_type, context_id`,
+            [targetIds, types, ids],
+          )
+        : Promise.resolve([]),
       db.query(
         `SELECT COUNT(*) as count FROM in_app_notifications
 			WHERE user_id = $1 AND is_read = FALSE`,
@@ -164,6 +184,13 @@ export async function getInAppNotifications(req: Request, res: Response) {
     const hypedSet = new Set<string>();
     for (const h of hyped) {
       hypedSet.add(`${h.target_id}|${h.context_type}|${h.context_id}`);
+    }
+    const countByKey = new Map<string, number>();
+    for (const c of counts) {
+      countByKey.set(
+        `${c.target_id}|${c.context_type}|${c.context_id}`,
+        Number(c.cnt) || 0,
+      );
     }
 
     const notifications = derived.map(({ row, hype }) => {
@@ -187,6 +214,7 @@ export async function getInAppNotifications(req: Request, res: Response) {
         hype_context_id: hype.hype_context_id,
         hype_context_label: hype.hype_context_label,
         is_hyped: isHyped,
+        hype_count: key !== null ? (countByKey.get(key) ?? 0) : null,
       };
     });
 
