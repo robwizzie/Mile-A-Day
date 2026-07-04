@@ -27,6 +27,11 @@ struct SocialFeedView: View {
     @State private var termsAccepted: Bool?
     /// Transient "out of hypes" banner — the only hype failure worth surfacing.
     @State private var showHypeLimitBanner = false
+    /// Daily hype allowance for the header pill + card button states — the
+    /// SAME rules as the friends list and notifications tab (3/day, or ∞ for
+    /// unlimited roles).
+    @State private var hypesRemaining: Int?
+    @State private var hypesUnlimited = false
 
     // Presentation
     @State private var presentingComposer = false
@@ -128,9 +133,23 @@ struct SocialFeedView: View {
         )
     }
 
+    /// Out of hypes today (never true for unlimited roles) — dims unspent
+    /// hype buttons on cards, same as the friends list.
+    private var isOutOfHypes: Bool {
+        !hypesUnlimited && (hypesRemaining ?? HypeService.dailyLimit) <= 0
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             MADTabHeader(title: "Feed")
+                // Same allowance pill as the notifications tab — "N left",
+                // or ∞ for unlimited roles.
+                .overlay(alignment: .trailing) {
+                    if let remaining = hypesRemaining {
+                        HypePill(remaining: remaining, compact: true, unlimited: hypesUnlimited)
+                            .padding(.trailing, MADTheme.Spacing.md)
+                    }
+                }
 
             ScrollView {
                 LazyVStack(spacing: MADTheme.Spacing.md) {
@@ -189,7 +208,10 @@ struct SocialFeedView: View {
                 .padding(.bottom, MADTheme.Spacing.xxl)
             }
             .scrollIndicators(.hidden)
-            .refreshable { await refresh() }
+            .refreshable {
+                await refresh()
+                await loadHypeStatus()
+            }
         }
         .background(MADTheme.Colors.appBackgroundGradient)
         .toolbar(.hidden, for: .navigationBar)
@@ -200,7 +222,14 @@ struct SocialFeedView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .task { if !loadedOnce { await refresh(); await loadTermsStatus(); loadMemories() } }
+        .task {
+            if !loadedOnce {
+                await refresh()
+                await loadTermsStatus()
+                loadMemories()
+                await loadHypeStatus()
+            }
+        }
         .fullScreenCover(item: $viewerGroup) { group in
             StoryViewerView(group: group, currentUserId: currentUserId) { changed in
                 viewerGroup = nil
@@ -353,6 +382,7 @@ struct SocialFeedView: View {
                 post: post,
                 storyPhotoURL: entry.storyPhotoURL,
                 isHyping: hypingIds.contains(entry.id),
+                isOutOfHypes: isOutOfHypes,
                 onHype: { Task { await hype(entry) } },
                 onReport: { reportingPost = post },
                 onBlock: { Task { await block(entry) } },
@@ -364,6 +394,7 @@ struct SocialFeedView: View {
             ActivityCardView(
                 entry: entry,
                 isHyping: hypingIds.contains(entry.id),
+                isOutOfHypes: isOutOfHypes,
                 onHype: { Task { await hype(entry) } },
                 onTapAuthor: openProfile,
                 onTapHypeCount: openHypers
@@ -427,6 +458,15 @@ struct SocialFeedView: View {
     private func loadTermsStatus() async {
         if let status = try? await PostService.termsStatus() {
             await MainActor.run { termsAccepted = status.accepted }
+        }
+    }
+
+    private func loadHypeStatus() async {
+        if let status = try? await HypeService.status() {
+            await MainActor.run {
+                hypesRemaining = status.hypes_remaining
+                hypesUnlimited = status.unlimited ?? false
+            }
         }
     }
 
@@ -558,11 +598,13 @@ struct SocialFeedView: View {
             ? (entry.caption ?? entry.displayName)
             : "\(ActivityCardView.verb(entry.workout_type)) \(String(format: "%.2f", entry.distance ?? 0)) mi"
         do {
-            _ = try await HypeService.sendHype(
+            let response = try await HypeService.sendHype(
                 targetUserId: entry.user_id,
                 context: HypeContext(contextType: ctxType, contextId: entry.entryId, contextLabel: label)
             )
             await MainActor.run {
+                hypesRemaining = response.hypes_remaining
+                hypesUnlimited = response.unlimited ?? hypesUnlimited
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
             }
         } catch APIError.rateLimited {
@@ -570,6 +612,7 @@ struct SocialFeedView: View {
             // so instead of silently doing nothing after the burst played.
             await MainActor.run {
                 revert()
+                hypesRemaining = 0
                 UINotificationFeedbackGenerator().notificationOccurred(.warning)
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     showHypeLimitBanner = true

@@ -8,6 +8,9 @@ import SwiftUI
 struct ActivityCardView: View {
     let entry: FeedEntry
     var isHyping: Bool = false
+    /// Daily hype allowance spent (never true for unlimited roles) — dims the
+    /// unspent Hype button, same as the friends list.
+    var isOutOfHypes: Bool = false
     let onHype: () -> Void
     /// Tap the author's avatar or name to open their profile.
     var onTapAuthor: (() -> Void)? = nil
@@ -165,7 +168,12 @@ struct ActivityCardView: View {
             }
             Spacer()
             if !entry.is_self {
-                HypeButton(isHyped: entry.is_hyped, isBusy: isHyping, action: onHype)
+                HypeButton(
+                    isHyped: entry.is_hyped,
+                    isBusy: isHyping,
+                    isOutOfHypes: isOutOfHypes && !entry.is_hyped,
+                    action: onHype
+                )
             }
         }
         .padding(.horizontal, 2)

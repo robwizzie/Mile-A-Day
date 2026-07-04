@@ -15,6 +15,9 @@ struct PostCardView: View {
     /// The run's story-only photo, when different from the post media.
     var storyPhotoURL: URL? = nil
     var isHyping: Bool = false
+    /// Daily hype allowance spent (never true for unlimited roles) — dims the
+    /// unspent Hype button, same as the friends list.
+    var isOutOfHypes: Bool = false
     let onHype: () -> Void
     let onReport: () -> Void
     let onBlock: () -> Void
@@ -247,7 +250,12 @@ struct PostCardView: View {
             }
             Spacer()
             if !post.is_self {
-                HypeButton(isHyped: post.is_hyped, isBusy: isHyping, action: onHype)
+                HypeButton(
+                    isHyped: post.is_hyped,
+                    isBusy: isHyping,
+                    isOutOfHypes: isOutOfHypes && !post.is_hyped,
+                    action: onHype
+                )
             }
         }
         .padding(.horizontal, 2)

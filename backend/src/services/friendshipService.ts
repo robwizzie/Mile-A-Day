@@ -1,6 +1,6 @@
 import { Friendship, User } from "../types/user.js";
 import { PostgresService } from "./DbService.js";
-import { mileHypeKeyMatchSql } from "./hypeService.js";
+import { runHypeMatchSql } from "./hypeService.js";
 
 const db = PostgresService.getInstance();
 
@@ -362,21 +362,19 @@ export async function getFriendsWorkoutFeed(
 			w.calories::float AS calories,
 			w.steps,
 			(w.user_id = $1) AS is_self,
-			-- Mile hypes are keyed by workout_id (feed) or user:local_date
-			-- (notifications) — match both so the surfaces stay in sync, and
-			-- count DISTINCT senders so dual-keyed legacy pairs count once.
+			-- Unified RUN rule (runHypeMatchSql): mile hypes plus 'post' hypes
+			-- on posts linked to this workout — the same number the unified
+			-- feed and the notifications inbox show for this run.
 			EXISTS (
 				SELECT 1 FROM hype_log h
 				WHERE h.sender_id = $1
 					AND h.target_id = w.user_id
-					AND h.context_type = 'mile'
-					AND ${mileHypeKeyMatchSql("h", "w")}
+					AND ${runHypeMatchSql("h", "w")}
 			) AS is_hyped,
 			(
 				SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
-				WHERE hc.context_type = 'mile'
-					AND hc.target_id = w.user_id
-					AND ${mileHypeKeyMatchSql("hc", "w")}
+				WHERE hc.target_id = w.user_id
+					AND ${runHypeMatchSql("hc", "w")}
 			) AS hype_count
 		FROM workouts w
 		JOIN circle c ON c.uid = w.user_id
