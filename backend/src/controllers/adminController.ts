@@ -32,11 +32,11 @@ export async function verifyAppleWeb(req: Request, res: Response) {
     return res.status(400).json({ error: "id_token required" });
   }
 
-  const audience = process.env.APPLE_WEB_CLIENT_ID;
-  if (!audience) {
-    console.error("APPLE_WEB_CLIENT_ID not configured");
-    return res.status(500).json({ error: "Admin auth not configured" });
-  }
+  // Default to the registered Services ID (team NS237SS5KD) — the client id
+  // is public by design (it travels in every SIWA request), so a code default
+  // is safe and removes the host-env dependency. Env var wins when set.
+  const audience =
+    process.env.APPLE_WEB_CLIENT_ID || "org.robertwiscount.Mile-A-Day.web";
 
   try {
     const { payload } = await jwtVerify(idToken, appleJwks, {

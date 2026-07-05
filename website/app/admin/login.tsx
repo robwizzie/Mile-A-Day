@@ -3,7 +3,13 @@
 import Script from "next/script";
 import { useState } from "react";
 
-const CLIENT_ID = process.env.NEXT_PUBLIC_APPLE_WEB_CLIENT_ID;
+// The Services ID registered in the Apple Developer portal (team NS237SS5KD).
+// NOT a secret — Apple client IDs travel in every sign-in request by design,
+// so a code default is safe and spares the hosting-dashboard env-var dance.
+// An env var still wins when set (e.g. a staging Services ID).
+const CLIENT_ID =
+  process.env.NEXT_PUBLIC_APPLE_WEB_CLIENT_ID ||
+  "org.robertwiscount.Mile-A-Day.web";
 const REDIRECT_URI =
   process.env.NEXT_PUBLIC_APPLE_WEB_REDIRECT_URI ||
   "https://mileaday.run/admin";
