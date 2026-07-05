@@ -79,3 +79,104 @@ export async function getErrorSummary() {
   );
   return { total, byCategory };
 }
+
+// ─── Post forensics + restore (support tooling) ─────────────────────
+
+/**
+ * Every posts row for a user in a local-date window — INCLUDING soft-deleted
+ * rows — with the linked workout and whether each media file still exists on
+ * disk. Built for "my photo disappeared" investigations: the row shapes +
+ * deleted_at timestamps show whether a photo post was deleted, replaced by an
+ * auto card, or never existed, and file_exists says if a restore can still
+ * bring the pixels back.
+ */
+export async function getPostForensics(
+  userId: string,
+  from: string,
+  to: string,
+) {
+  const rows = await db.query<{
+    post_id: string;
+    workout_id: string | null;
+    media_url: string;
+    caption: string | null;
+    is_auto: boolean;
+    share_to_feed: boolean;
+    share_to_story: boolean;
+    local_date: string;
+    story_expires_at: string | null;
+    created_at: string;
+    deleted_at: string | null;
+    workout_type: string | null;
+    workout_distance: number | null;
+  }>(
+    `SELECT p.post_id::text AS post_id, p.workout_id, p.media_url, p.caption,
+			p.is_auto, p.share_to_feed, p.share_to_story,
+			p.local_date::text AS local_date, p.story_expires_at, p.created_at,
+			p.deleted_at,
+			w.workout_type, w.distance::float AS workout_distance
+		FROM posts p
+		LEFT JOIN workouts w ON w.workout_id = p.workout_id
+		WHERE p.user_id = $1 AND p.local_date BETWEEN $2::date AND $3::date
+		ORDER BY p.created_at`,
+    [userId, from, to],
+  );
+
+  const fs = await import("fs");
+  const path = await import("path");
+  return rows.map((r) => ({
+    ...r,
+    media_file_exists: r.media_url.startsWith("/uploads/")
+      ? fs.existsSync(path.join(process.cwd(), r.media_url.replace(/^\//, "")))
+      : null,
+  }));
+}
+
+/**
+ * Clear a soft-deleted post's deleted_at so it surfaces again. Refuses when a
+ * LIVE post now occupies the same one-per-workout slot (restoring would
+ * violate the partial unique index). Restoring the ROW only helps if the
+ * media file survived — check media_file_exists in getPostForensics first.
+ */
+export async function restoreDeletedPost(postId: string): Promise<
+  | { status: "not_found" | "already_live" }
+  | { status: "slot_taken"; by: string }
+  | { status: "restored" }
+> {
+  const rows = await db.query<{
+    post_id: string;
+    user_id: string;
+    workout_id: string | null;
+    share_to_feed: boolean;
+    share_to_story: boolean;
+    deleted_at: string | null;
+  }>(
+    `SELECT post_id::text AS post_id, user_id, workout_id,
+			share_to_feed, share_to_story, deleted_at
+		FROM posts WHERE post_id = $1::uuid`,
+    [postId],
+  );
+  const row = rows[0];
+  if (!row) return { status: "not_found" };
+  if (!row.deleted_at) return { status: "already_live" };
+
+  if (row.workout_id) {
+    const slotPredicate = row.share_to_feed
+      ? "share_to_feed"
+      : "(share_to_story AND NOT share_to_feed)";
+    const occupied = await db.query<{ post_id: string }>(
+      `SELECT post_id::text AS post_id FROM posts
+			WHERE workout_id = $1 AND user_id = $2 AND deleted_at IS NULL
+				AND ${slotPredicate}
+			LIMIT 1`,
+      [row.workout_id, row.user_id],
+    );
+    if (occupied[0]) return { status: "slot_taken", by: occupied[0].post_id };
+  }
+
+  await db.query(
+    `UPDATE posts SET deleted_at = NULL WHERE post_id = $1::uuid`,
+    [postId],
+  );
+  return { status: "restored" };
+}

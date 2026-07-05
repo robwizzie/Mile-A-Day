@@ -8,7 +8,10 @@ import {
   getMilesByDay,
   getErrors,
   getErrorSummary,
+  getPostForensics,
+  restoreDeletedPost,
 } from "../services/adminService.js";
+import { signMediaUrlsDeep } from "../services/mediaSigningService.js";
 
 const APPLE_ISS = "https://appleid.apple.com";
 const appleJwks = createRemoteJWKSet(
@@ -84,4 +87,72 @@ export async function errors(req: Request, res: Response) {
 
 export async function errorSummary(_req: Request, res: Response) {
   res.json(await getErrorSummary());
+}
+
+/**
+ * GET /admin/posts/:userId/forensics?from=YYYY-MM-DD&to=YYYY-MM-DD
+ * Every posts row (INCLUDING soft-deleted) for the user in the window, with
+ * whether each media file still exists on disk and signed URLs so the photos
+ * are viewable in a browser. Support tooling for "my photo disappeared".
+ */
+export async function postForensics(req: Request, res: Response) {
+  const userId = req.params.userId;
+  const from =
+    typeof req.query.from === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(req.query.from)
+      ? req.query.from
+      : null;
+  const to =
+    typeof req.query.to === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to)
+      ? req.query.to
+      : null;
+  if (!from || !to) {
+    return res
+      .status(400)
+      .json({ error: "from and to (YYYY-MM-DD) are required" });
+  }
+  try {
+    const rows = await getPostForensics(userId, from, to);
+    res.json({ posts: signMediaUrlsDeep(rows) });
+  } catch (error: any) {
+    console.error("Error in post forensics:", error.message);
+    res.status(500).json({ error: "Error fetching post forensics" });
+  }
+}
+
+/**
+ * POST /admin/posts/:postId/restore — clear a soft-deleted post's deleted_at.
+ * 404 unknown id, 409 already live or the slot is now occupied by a live
+ * post. Restoring only brings the photo back if the media file survived the
+ * orphan sweep (see media_file_exists in the forensics response).
+ */
+export async function restorePost(req: Request, res: Response) {
+  const postId = req.params.postId;
+  // Non-uuid ids would blow up the ::uuid cast as a 500 — 404 them instead.
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      postId,
+    )
+  ) {
+    return res.status(404).json({ error: "Post not found" });
+  }
+  try {
+    const result = await restoreDeletedPost(postId);
+    switch (result.status) {
+      case "not_found":
+        return res.status(404).json({ error: "Post not found" });
+      case "already_live":
+        return res.status(409).json({ error: "Post is not deleted" });
+      case "slot_taken":
+        return res.status(409).json({
+          error: "A live post now occupies this workout's slot",
+          occupied_by: result.by,
+        });
+      case "restored":
+        return res.json({ ok: true });
+    }
+  } catch (error: any) {
+    console.error("Error restoring post:", error.message);
+    res.status(500).json({ error: "Error restoring post" });
+  }
 }
