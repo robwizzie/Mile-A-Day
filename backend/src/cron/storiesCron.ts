@@ -15,8 +15,14 @@ const db = PostgresService.getInstance();
  */
 
 /**
- * Delete /uploads/posts files older than 24h that no live post references —
+ * Delete /uploads/posts files older than 72h that NO posts row references —
  * catches orphans from uploads that never completed a POST /posts.
+ *
+ * The reference check deliberately includes SOFT-DELETED posts: deleted_at is
+ * the undo path, and a photo is often the only copy the user has. The old
+ * live-rows-only check made every soft delete silently irreversible — delete
+ * a story (whose photo also fronts the run's feed card), and by the next
+ * 3:30 AM sweep the photo file was gone from disk forever.
  */
 async function sweepOrphanedMedia(): Promise<void> {
   const dir = path.join(process.cwd(), "uploads", "posts");
@@ -26,7 +32,7 @@ async function sweepOrphanedMedia(): Promise<void> {
   } catch {
     return; // dir not created yet
   }
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - 72 * 60 * 60 * 1000;
   let removed = 0;
   for (const file of files) {
     const full = path.join(dir, file);
@@ -39,7 +45,7 @@ async function sweepOrphanedMedia(): Promise<void> {
     if (mtimeMs > cutoff) continue;
     const mediaUrl = `/uploads/posts/${file}`;
     const referenced = await db.query<{ exists: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM posts WHERE media_url = $1 AND deleted_at IS NULL) AS exists`,
+      `SELECT EXISTS (SELECT 1 FROM posts WHERE media_url = $1) AS exists`,
       [mediaUrl],
     );
     if (referenced[0]?.exists) continue;

@@ -116,7 +116,7 @@ struct StoryViewerView: View {
         .confirmationDialog("Story options", isPresented: $showOptions, titleVisibility: .hidden) {
             if let post = optionsPost {
                 if post.is_self {
-                    Button("Delete story", role: .destructive) {
+                    Button("Delete story & photo", role: .destructive) {
                         Task { await deleteOwn(post) }
                     }
                 } else {
@@ -125,6 +125,13 @@ struct StoryViewerView: View {
                         Task { await block(post) }
                     }
                 }
+            }
+        } message: {
+            // The story's photo also fronts the run's card on the feed and
+            // profile — deleting it removes the photo EVERYWHERE, which
+            // surprised users who thought they were only ending the 24h story.
+            if optionsPost?.is_self == true {
+                Text("This also removes the photo from your run's card on the feed and your profile.")
             }
         }
         .onChange(of: showOptions) { _, open in

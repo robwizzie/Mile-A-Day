@@ -186,12 +186,13 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
     !input.shareToStory;
   const isAutoValue =
     input.isAuto === undefined ? legacyLooksAuto : input.isAuto === true;
-  // Legacy requests may overwrite anything the caller owns; flagged requests
-  // may only overwrite the slot's AUTO post.
-  const updateGuard =
-    input.isAuto === undefined
-      ? `WHERE posts.user_id = $1`
-      : `WHERE posts.user_id = $1 AND posts.is_auto`;
+  // Only the slot's AUTO post may be overwritten in place — for legacy
+  // requests too. Legacy upserts used to overwrite ANYTHING the caller owned,
+  // which let an old build's background auto-card post silently DESTROY a
+  // deliberate photo post's media (the old media_url is recorded nowhere, and
+  // the orphan sweep then removed the photo file from disk). A blocked legacy
+  // write now falls through to the yield/409 handling below instead.
+  const updateGuard = `WHERE posts.user_id = $1 AND posts.is_auto`;
   // Legacy clients never sent the flags, so their upserts must not clobber a
   // stored is_auto/include_route (e.g. resetting a route opt-out to true).
   const flagUpdates =
@@ -244,9 +245,10 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
   if (rows[0]) return rows[0];
 
   // Zero rows — the slot is taken and the update guard skipped it. An auto
-  // post quietly yields to the caller's existing user post; anything else
-  // (another user's post, or a second deliberate post) is rejected.
-  if (input.isAuto === true && input.workoutId) {
+  // post (flagged, or a legacy insert that classifies as auto) quietly yields
+  // to the caller's existing user post; anything else (another user's post,
+  // or a second deliberate post) is rejected.
+  if ((input.isAuto === true || legacyLooksAuto) && input.workoutId) {
     const existing = await db.query<PostRow>(
       `
 			${CREATED_POST_SELECT}
