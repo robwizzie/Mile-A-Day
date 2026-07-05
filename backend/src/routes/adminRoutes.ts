@@ -5,6 +5,8 @@ import {
   milesByDay,
   errors,
   errorSummary,
+  postForensics,
+  restorePost,
 } from "../controllers/adminController.js";
 
 // Public: Sign in with Apple (web) exchange -> admin access token.
@@ -18,5 +20,9 @@ adminRouter.get("/overview", overview);
 adminRouter.get("/miles-by-day", milesByDay);
 adminRouter.get("/errors", errors);
 adminRouter.get("/errors/summary", errorSummary);
+// Support tooling: post rows incl. soft-deleted + on-disk file checks, and
+// soft-delete undo — for "my photo disappeared" investigations.
+adminRouter.get("/posts/:userId/forensics", postForensics);
+adminRouter.post("/posts/:postId/restore", restorePost);
 
 export default adminRouter;

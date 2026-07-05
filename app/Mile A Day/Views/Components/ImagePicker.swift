@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import Photos
 
 struct ImagePicker: UIViewControllerRepresentable {
     @Binding var selectedImage: UIImage?
@@ -45,10 +46,35 @@ struct ImagePicker: UIViewControllerRepresentable {
     }
 }
 
+// MARK: - Camera-roll auto-save
+
+/// Saves in-app camera captures to the user's photo library (add-only
+/// access), so the app is never the only holder of a photo — posts and
+/// stories can be deleted, but the user always keeps their own copy in the
+/// camera roll. Best-effort: a denied permission or save failure never
+/// interrupts the capture flow.
+enum PhotoRollSaver {
+    static func save(_ image: UIImage) {
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else { return }
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.creationRequestForAsset(from: image)
+            } completionHandler: { _, error in
+                if let error {
+                    print("[PhotoRollSaver] Save failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Camera Capture
 
-/// Camera-only capture (no photo library). Used by the post composer so shared
-/// walks/runs are captured in the moment rather than uploaded from the roll.
+/// Camera-only capture (no photo library picking). Used by the post composer
+/// and the mid-run snap button so shared walks/runs are captured in the
+/// moment rather than uploaded from the roll. Every capture is ALSO saved to
+/// the camera roll (see PhotoRollSaver) — the user's own copy, independent of
+/// what happens to the post.
 struct CameraPicker: UIViewControllerRepresentable {
     @Binding var image: UIImage?
     @Environment(\.presentationMode) var presentationMode
@@ -85,6 +111,8 @@ struct CameraPicker: UIViewControllerRepresentable {
         ) {
             if let img = info[.originalImage] as? UIImage {
                 parent.image = img
+                // Every in-app capture also lands in the camera roll.
+                PhotoRollSaver.save(img)
             }
             parent.presentationMode.wrappedValue.dismiss()
         }
