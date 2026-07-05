@@ -8,6 +8,8 @@ import {
   getMilesByDay,
   getErrors,
   getErrorSummary,
+  getErrorsByUser,
+  getErrorTimeseries,
   getPostForensics,
   restoreDeletedPost,
 } from "../services/adminService.js";
@@ -82,11 +84,26 @@ export async function errors(req: Request, res: Response) {
     Math.max(parseInt(String(req.query.limit ?? "100"), 10) || 100, 1),
     500,
   );
-  res.json(await getErrors(category, limit));
+  const userId =
+    typeof req.query.userId === "string" && req.query.userId
+      ? req.query.userId
+      : null;
+  res.json(await getErrors(category, limit, userId));
 }
 
 export async function errorSummary(_req: Request, res: Response) {
   res.json(await getErrorSummary());
+}
+
+export async function errorsByUser(_req: Request, res: Response) {
+  res.json(await getErrorsByUser());
+}
+
+export async function errorTimeseries(req: Request, res: Response) {
+  const r = req.query.range;
+  const range = r === "24h" || r === "30d" ? r : "7d";
+  const groupBy = req.query.groupBy === "user" ? "user" : "category";
+  res.json(await getErrorTimeseries(range, groupBy));
 }
 
 /**

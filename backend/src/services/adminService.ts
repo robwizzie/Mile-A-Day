@@ -63,15 +63,79 @@ export async function getMilesByDay() {
   `);
 }
 
-/** Recent errors, newest first, optionally filtered by category. */
-export async function getErrors(category: string | null, limit: number) {
+/** Recent errors, newest first, optionally filtered by category and/or user. */
+export async function getErrors(
+  category: string | null,
+  limit: number,
+  userId: string | null = null,
+) {
   return db.query(
-    `SELECT id, category, user_id, message, context, created_at
-     FROM error_log
-     WHERE ($1::text IS NULL OR category = $1)
-     ORDER BY created_at DESC
+    `SELECT e.id, e.category, e.user_id, u.username, e.message, e.context, e.created_at
+     FROM error_log e
+     LEFT JOIN users u ON u.user_id = e.user_id
+     WHERE ($1::text IS NULL OR e.category = $1)
+       AND ($3::text IS NULL OR e.user_id = $3)
+     ORDER BY e.created_at DESC
      LIMIT $2`,
-    [category, limit],
+    [category, limit, userId],
+  );
+}
+
+/** Error counts grouped by the user the error is attached to (for push
+ *  errors that's the RECIPIENT), newest-first within, so admins can see who's
+ *  generating the noise. NULL user_id rows collapse into one "no user" bucket. */
+export async function getErrorsByUser() {
+  return db.query(`
+    SELECT e.user_id, u.username, COUNT(*)::int AS count,
+           COUNT(*) FILTER (WHERE e.created_at >= NOW() - INTERVAL '24 hours')::int AS last_24h,
+           MAX(e.created_at) AS last_at
+    FROM error_log e
+    LEFT JOIN users u ON u.user_id = e.user_id
+    GROUP BY e.user_id, u.username
+    ORDER BY count DESC
+  `);
+}
+
+/** Error counts over a range, one row per (bucket, series). `series` is the
+ *  category, or the user (username / id / "no user") when groupBy = 'user'.
+ *  24h → hourly buckets; 7d/30d → daily. Buckets are UTC-keyed strings so the
+ *  client can zero-fill against a matching `toISOString()`-derived axis.
+ *  All SQL fragments come from whitelisted branches — no user input is
+ *  interpolated, so this stays injection-safe.
+ *  ponytail: bucket keys compared in UTC via AT TIME ZONE 'UTC', so it's
+ *  independent of the DB session timezone. */
+export async function getErrorTimeseries(
+  range: "24h" | "7d" | "30d",
+  groupBy: "category" | "user",
+) {
+  const bucketExpr =
+    range === "24h"
+      ? `to_char(date_trunc('hour', e.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24')`
+      : `to_char((e.created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`;
+  const seriesExpr =
+    groupBy === "user"
+      ? `COALESCE(u.username, e.user_id, 'no user')`
+      : `e.category`;
+  const join =
+    groupBy === "user" ? "LEFT JOIN users u ON u.user_id = e.user_id" : "";
+
+  const params: unknown[] = [];
+  let where: string;
+  if (range === "24h") {
+    where = `e.created_at >= NOW() - INTERVAL '24 hours'`;
+  } else {
+    params.push(range === "7d" ? 7 : 30);
+    where = `e.created_at >= NOW() - ($1 || ' days')::interval`;
+  }
+
+  return db.query(
+    `SELECT ${bucketExpr} AS bucket, ${seriesExpr} AS series, COUNT(*)::int AS count
+     FROM error_log e
+     ${join}
+     WHERE ${where}
+     GROUP BY 1, 2
+     ORDER BY 1`,
+    params,
   );
 }
 
