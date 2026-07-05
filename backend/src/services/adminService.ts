@@ -56,10 +56,11 @@ export async function getMilesByDay() {
 /** Recent errors, newest first, optionally filtered by category. */
 export async function getErrors(category: string | null, limit: number) {
   return db.query(
-    `SELECT id, category, user_id, message, context, created_at
-     FROM error_log
-     WHERE ($1::text IS NULL OR category = $1)
-     ORDER BY created_at DESC
+    `SELECT e.id, e.category, e.user_id, u.username, e.message, e.context, e.created_at
+     FROM error_log e
+     LEFT JOIN users u ON u.user_id = e.user_id
+     WHERE ($1::text IS NULL OR e.category = $1)
+     ORDER BY e.created_at DESC
      LIMIT $2`,
     [category, limit],
   );

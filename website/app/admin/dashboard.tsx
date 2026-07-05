@@ -19,6 +19,7 @@ type ErrorRow = {
   id: string;
   category: string;
   user_id: string | null;
+  username: string | null;
   message: string;
   context: Record<string, unknown> | null;
   created_at: string;
@@ -211,6 +212,11 @@ function ErrorList() {
                     {r.category}
                   </span>
                   <span className="text-sm text-white/90">{r.message}</span>
+                  {(r.username || r.user_id) && (
+                    <span className="ml-2 text-xs text-[#ffb3c6]">
+                      @{r.username ?? r.user_id}
+                    </span>
+                  )}
                   <span className="ml-2 text-xs text-white/40">
                     {new Date(r.created_at).toLocaleString()}
                   </span>
