@@ -44,8 +44,14 @@ async function sweepOrphanedMedia(): Promise<void> {
     }
     if (mtimeMs > cutoff) continue;
     const mediaUrl = `/uploads/posts/${file}`;
+    // Compare against the stored value's PATH — rows written before the
+    // query-stripping landed (or through any future gap) may carry a
+    // ?e=&s= signature, and an exact-equality check would misread their
+    // files as orphans and delete user photos.
     const referenced = await db.query<{ exists: boolean }>(
-      `SELECT EXISTS (SELECT 1 FROM posts WHERE media_url = $1) AS exists`,
+      `SELECT EXISTS (
+				SELECT 1 FROM posts WHERE split_part(media_url, '?', 1) = $1
+			) AS exists`,
       [mediaUrl],
     );
     if (referenced[0]?.exists) continue;

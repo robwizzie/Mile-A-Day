@@ -244,6 +244,7 @@ type ForensicsPost = {
   deleted_at: string | null;
   workout_type: string | null;
   workout_distance: number | null;
+  media_file: string | null;
   media_file_exists: boolean | null;
 };
 
@@ -403,6 +404,11 @@ function PhotoForensics() {
                 {p.caption && (
                   <p className="mt-1 truncate text-xs text-white/50">
                     “{p.caption}”
+                  </p>
+                )}
+                {p.media_file && (
+                  <p className="mt-1 select-all font-mono text-[11px] text-white/35">
+                    {p.media_file}
                   </p>
                 )}
                 {p.deleted_at && (
