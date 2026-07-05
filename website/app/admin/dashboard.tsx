@@ -25,9 +25,14 @@ type ErrorRow = {
   created_at: string;
 };
 
-type ErrorSummary = {
-  total: number;
-  byCategory: { category: string; count: number; last_24h: number }[];
+type ErrorTimeseriesRow = { date: string; category: string; count: number };
+
+type UserErrorRow = {
+  user_id: string | null;
+  username: string | null;
+  count: number;
+  last_24h: number;
+  last_at: string;
 };
 
 async function getData<T>(path: string): Promise<T> {
@@ -92,6 +97,7 @@ function StatCard({
 }
 
 function MilesChart({ data }: { data: DayMiles[] }) {
+  const [hover, setHover] = useState<DayMiles | null>(null);
   if (!data.length) return null;
   const max = Math.max(...data.map((d) => d.miles), 1);
   const W = 720;
@@ -100,8 +106,14 @@ function MilesChart({ data }: { data: DayMiles[] }) {
   const barW = (W - gap * (data.length - 1)) / data.length;
   return (
     <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
-      <div className="mb-3 text-sm font-medium text-white/70">
-        Miles by day — last 30 days
+      <div className="mb-3 flex items-baseline justify-between text-sm font-medium text-white/70">
+        <span>Miles by day — last 30 days</span>
+        {hover && (
+          <span className="text-white/90">
+            {hover.date}:{" "}
+            <span className="text-[#ffb3c6]">{hover.miles.toFixed(1)} mi</span>
+          </span>
+        )}
       </div>
       <svg
         viewBox={`0 0 ${W} ${H}`}
@@ -119,7 +131,9 @@ function MilesChart({ data }: { data: DayMiles[] }) {
               width={barW}
               height={h}
               rx={2}
-              fill="#c72554"
+              fill={hover?.date === d.date ? "#ffb3c6" : "#c72554"}
+              onMouseEnter={() => setHover(d)}
+              onMouseLeave={() => setHover(null)}
             >
               <title>{`${d.date}: ${d.miles.toFixed(1)} mi`}</title>
             </rect>
@@ -135,105 +149,262 @@ function MilesChart({ data }: { data: DayMiles[] }) {
   );
 }
 
-function ErrorList() {
-  const [summary, setSummary] = useState<ErrorSummary | null>(null);
+// Stable per-category colors; "total" is white. Unknown categories cycle the
+// palette by first-seen order so the legend and lines always agree.
+const CAT_COLORS: Record<string, string> = {
+  push: "#38bdf8",
+  api: "#c72554",
+  auth: "#fbbf24",
+};
+const PALETTE = ["#a78bfa", "#34d399", "#f472b6", "#fb923c", "#60a5fa"];
+function colorFor(cat: string, i: number): string {
+  return CAT_COLORS[cat] ?? PALETTE[i % PALETTE.length];
+}
+
+/** Multi-line chart: one line per error category plus a bold white "total"
+ *  line. Hover a day to read every series' value for that day. */
+function ErrorChart({ data }: { data: ErrorTimeseriesRow[] }) {
+  const [hover, setHover] = useState<number | null>(null);
+
+  // 30-day axis ending today, zero-filled so lines stay continuous.
+  const days = Array.from({ length: 30 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (29 - i));
+    return d.toISOString().slice(0, 10);
+  });
+  const dayIndex = new Map(days.map((d, i) => [d, i]));
+
+  const cats = Array.from(new Set(data.map((r) => r.category))).sort();
+  const series = new Map<string, number[]>(
+    cats.map((c) => [c, new Array(30).fill(0)]),
+  );
+  for (const r of data) {
+    const i = dayIndex.get(r.date);
+    if (i !== undefined) series.get(r.category)![i] += r.count;
+  }
+  const total = days.map((_, i) =>
+    cats.reduce((s, c) => s + series.get(c)![i], 0),
+  );
+  const max = Math.max(...total, 1);
+
+  const W = 720;
+  const H = 200;
+  const x = (i: number) => (i / 29) * W;
+  const y = (v: number) => H - (v / max) * (H - 10);
+  const path = (vals: number[]) =>
+    vals.map((v, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(v)}`).join(" ");
+
+  const lines = [
+    ...cats.map((c, i) => ({
+      key: c,
+      color: colorFor(c, i),
+      vals: series.get(c)!,
+      width: 1.5,
+    })),
+    { key: "total", color: "#ffffff", vals: total, width: 2.5 },
+  ];
+
+  return (
+    <div className="mb-6 rounded-xl border border-white/10 bg-white/[0.03] p-5">
+      <div className="mb-3 flex items-baseline justify-between text-sm font-medium text-white/70">
+        <span>Errors by day — last 30 days</span>
+        {hover !== null && (
+          <span className="text-xs text-white/60">{days[hover]}</span>
+        )}
+      </div>
+
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="h-52 w-full overflow-visible"
+        role="img"
+        aria-label="Error counts per day by category over the last 30 days"
+        onMouseLeave={() => setHover(null)}
+      >
+        {lines.map((l) => (
+          <path
+            key={l.key}
+            d={path(l.vals)}
+            fill="none"
+            stroke={l.color}
+            strokeWidth={l.width}
+            strokeLinejoin="round"
+            opacity={l.key === "total" ? 0.9 : 0.85}
+          />
+        ))}
+        {hover !== null && (
+          <line
+            x1={x(hover)}
+            x2={x(hover)}
+            y1={0}
+            y2={H}
+            stroke="white"
+            strokeOpacity={0.2}
+          />
+        )}
+        {/* Invisible per-day hit columns drive the hover readout. */}
+        {days.map((d, i) => (
+          <rect
+            key={d}
+            x={x(i) - W / 60}
+            y={0}
+            width={W / 30}
+            height={H}
+            fill="transparent"
+            onMouseEnter={() => setHover(i)}
+          />
+        ))}
+      </svg>
+
+      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        {lines.map((l) => (
+          <span key={l.key} className="flex items-center gap-1.5 text-white/60">
+            <span
+              className="inline-block h-2 w-3 rounded-sm"
+              style={{ background: l.color }}
+            />
+            {l.key}
+            <span className="text-white/40">
+              {hover !== null
+                ? l.vals[hover]
+                : l.vals.reduce((s, v) => s + v, 0)}
+            </span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Which user each error is attached to (for push errors that's the
+ *  recipient). Click a user to load and inspect their individual errors. */
+function ErrorsByUser() {
+  const [users, setUsers] = useState<UserErrorRow[] | null>(null);
+  const [series, setSeries] = useState<ErrorTimeseriesRow[]>([]);
+  const [open, setOpen] = useState<string | null>(null);
   const [rows, setRows] = useState<ErrorRow[]>([]);
-  const [category, setCategory] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [rowsLoading, setRowsLoading] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
-      const [s, r] = await Promise.all([
-        getData<ErrorSummary>("errors/summary"),
-        getData<ErrorRow[]>(
-          `errors?limit=100${category ? `&category=${encodeURIComponent(category)}` : ""}`,
-        ),
+      const [u, s] = await Promise.all([
+        getData<UserErrorRow[]>("errors/by-user"),
+        getData<ErrorTimeseriesRow[]>("errors/timeseries"),
       ]);
-      setSummary(s);
-      setRows(r);
+      setUsers(u);
+      setSeries(s);
     } catch {
       /* unauthorized handled in getData */
-    } finally {
-      setLoading(false);
     }
-  }, [category]);
+  }, []);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  async function toggle(userId: string) {
+    if (open === userId) {
+      setOpen(null);
+      return;
+    }
+    setOpen(userId);
+    setRowsLoading(true);
+    try {
+      setRows(
+        await getData<ErrorRow[]>(
+          `errors?limit=200&userId=${encodeURIComponent(userId)}`,
+        ),
+      );
+    } catch {
+      setRows([]);
+    } finally {
+      setRowsLoading(false);
+    }
+  }
+
+  const label = (u: UserErrorRow) =>
+    u.username ? `@${u.username}` : u.user_id ? u.user_id : "(no user)";
+
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-medium text-white/70">
-          Errors {summary ? `(${summary.total})` : ""}
-        </h2>
-        <button
-          onClick={load}
-          className="rounded-md border border-white/10 px-2 py-1 text-xs text-white/60 hover:text-white"
-        >
-          Refresh
-        </button>
-      </div>
+    <>
+      {series.length > 0 && <ErrorChart data={series} />}
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <button
-          onClick={() => setCategory(null)}
-          className={`rounded-full px-3 py-1 text-xs ${category === null ? "bg-[#c72554] text-white" : "border border-white/10 text-white/60"}`}
-        >
-          all
-        </button>
-        {summary?.byCategory.map((c) => (
+      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-medium text-white/70">Errors by user</h2>
           <button
-            key={c.category}
-            onClick={() => setCategory(c.category)}
-            className={`rounded-full px-3 py-1 text-xs ${category === c.category ? "bg-[#c72554] text-white" : "border border-white/10 text-white/60"}`}
+            onClick={load}
+            className="rounded-md border border-white/10 px-2 py-1 text-xs text-white/60 hover:text-white"
           >
-            {c.category} {c.count}
-            {c.last_24h > 0 && (
-              <span className="ml-1 text-[#ffb3c6]">·{c.last_24h} today</span>
-            )}
+            Refresh
           </button>
-        ))}
-      </div>
+        </div>
 
-      {loading ? (
-        <p className="text-sm text-white/40">Loading…</p>
-      ) : rows.length === 0 ? (
-        <p className="text-sm text-white/40">No errors logged. 🎉</p>
-      ) : (
-        <ul className="divide-y divide-white/5">
-          {rows.map((r) => (
-            <li key={r.id} className="py-3">
-              <details>
-                <summary className="cursor-pointer list-none">
-                  <span className="mr-2 rounded bg-white/10 px-1.5 py-0.5 text-xs text-white/70">
-                    {r.category}
-                  </span>
-                  <span className="text-sm text-white/90">{r.message}</span>
-                  {(r.username || r.user_id) && (
-                    <span className="ml-2 text-xs text-[#ffb3c6]">
-                      @{r.username ?? r.user_id}
+        {!users ? (
+          <p className="text-sm text-white/40">Loading…</p>
+        ) : users.length === 0 ? (
+          <p className="text-sm text-white/40">No errors logged. 🎉</p>
+        ) : (
+          <ul className="divide-y divide-white/5">
+            {users.map((u) => {
+              const id = u.user_id;
+              const isOpen = open === id;
+              return (
+                <li key={id ?? "none"} className="py-2">
+                  <button
+                    onClick={() => id && toggle(id)}
+                    disabled={!id}
+                    className="flex w-full items-center justify-between text-left disabled:cursor-default"
+                  >
+                    <span className="text-sm text-white/90">{label(u)}</span>
+                    <span className="flex items-center gap-2 text-xs text-white/50">
+                      {u.last_24h > 0 && (
+                        <span className="text-[#ffb3c6]">
+                          {u.last_24h} today
+                        </span>
+                      )}
+                      <span className="rounded bg-white/10 px-1.5 py-0.5 text-white/70">
+                        {u.count}
+                      </span>
                     </span>
+                  </button>
+
+                  {isOpen && (
+                    <div className="mt-2 pl-2">
+                      {rowsLoading ? (
+                        <p className="text-xs text-white/40">Loading…</p>
+                      ) : (
+                        <ul className="divide-y divide-white/5">
+                          {rows.map((r) => (
+                            <li key={r.id} className="py-2">
+                              <details>
+                                <summary className="cursor-pointer list-none">
+                                  <span className="mr-2 rounded bg-white/10 px-1.5 py-0.5 text-xs text-white/70">
+                                    {r.category}
+                                  </span>
+                                  <span className="text-sm text-white/90">
+                                    {r.message}
+                                  </span>
+                                  <span className="ml-2 text-xs text-white/40">
+                                    {new Date(r.created_at).toLocaleString()}
+                                  </span>
+                                </summary>
+                                <pre className="mt-2 overflow-x-auto rounded bg-black/40 p-3 text-xs text-white/60">
+                                  {JSON.stringify(r.context, null, 2)}
+                                </pre>
+                              </details>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                   )}
-                  <span className="ml-2 text-xs text-white/40">
-                    {new Date(r.created_at).toLocaleString()}
-                  </span>
-                </summary>
-                <pre className="mt-2 overflow-x-auto rounded bg-black/40 p-3 text-xs text-white/60">
-                  {JSON.stringify(
-                    { user_id: r.user_id, context: r.context },
-                    null,
-                    2,
-                  )}
-                </pre>
-              </details>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -509,7 +680,7 @@ export function AdminDashboard() {
 
         <PhotoForensics />
 
-        <ErrorList />
+        <ErrorsByUser />
       </div>
     </main>
   );

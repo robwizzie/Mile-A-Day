@@ -33,8 +33,9 @@ export async function getOverview() {
            AND deleted_at IS NULL AND exclusion_reason IS NULL)::int AS active_users_7d,
       (SELECT COUNT(*) FROM hype_log)::int AS total_hypes,
       (SELECT COUNT(*) FROM hype_log WHERE created_at >= CURRENT_DATE)::int AS hypes_today,
-      (SELECT COUNT(*) FROM nudge_log)::int AS total_nudges,
-      (SELECT COUNT(*) FROM nudge_log WHERE created_at >= CURRENT_DATE)::int AS nudges_today
+      ((SELECT COUNT(*) FROM nudge_log) + (SELECT COUNT(*) FROM friend_nudge_log))::int AS total_nudges,
+      ((SELECT COUNT(*) FROM nudge_log WHERE created_at >= CURRENT_DATE)
+       + (SELECT COUNT(*) FROM friend_nudge_log WHERE created_at >= CURRENT_DATE))::int AS nudges_today
   `);
   return row;
 }
@@ -53,17 +54,49 @@ export async function getMilesByDay() {
   `);
 }
 
-/** Recent errors, newest first, optionally filtered by category. */
-export async function getErrors(category: string | null, limit: number) {
+/** Recent errors, newest first, optionally filtered by category and/or user. */
+export async function getErrors(
+  category: string | null,
+  limit: number,
+  userId: string | null = null,
+) {
   return db.query(
     `SELECT e.id, e.category, e.user_id, u.username, e.message, e.context, e.created_at
      FROM error_log e
      LEFT JOIN users u ON u.user_id = e.user_id
      WHERE ($1::text IS NULL OR e.category = $1)
+       AND ($3::text IS NULL OR e.user_id = $3)
      ORDER BY e.created_at DESC
      LIMIT $2`,
-    [category, limit],
+    [category, limit, userId],
   );
+}
+
+/** Error counts grouped by the user the error is attached to (for push
+ *  errors that's the RECIPIENT), newest-first within, so admins can see who's
+ *  generating the noise. NULL user_id rows collapse into one "no user" bucket. */
+export async function getErrorsByUser() {
+  return db.query(`
+    SELECT e.user_id, u.username, COUNT(*)::int AS count,
+           COUNT(*) FILTER (WHERE e.created_at >= NOW() - INTERVAL '24 hours')::int AS last_24h,
+           MAX(e.created_at) AS last_at
+    FROM error_log e
+    LEFT JOIN users u ON u.user_id = e.user_id
+    GROUP BY e.user_id, u.username
+    ORDER BY count DESC
+  `);
+}
+
+/** Daily error counts per category for the last 30 days, one row per
+ *  (date, category). Zero-fill happens client-side for the line chart. */
+export async function getErrorTimeseries() {
+  return db.query(`
+    SELECT created_at::date::text AS date, category, COUNT(*)::int AS count
+    FROM error_log
+    WHERE created_at >= CURRENT_DATE - INTERVAL '29 days'
+    GROUP BY 1, 2
+    ORDER BY 1
+  `);
 }
 
 /** Category counts + last-24h count, for the error-view summary/filter. */
