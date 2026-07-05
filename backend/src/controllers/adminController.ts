@@ -99,8 +99,11 @@ export async function errorsByUser(_req: Request, res: Response) {
   res.json(await getErrorsByUser());
 }
 
-export async function errorTimeseries(_req: Request, res: Response) {
-  res.json(await getErrorTimeseries());
+export async function errorTimeseries(req: Request, res: Response) {
+  const r = req.query.range;
+  const range = r === "24h" || r === "30d" ? r : "7d";
+  const groupBy = req.query.groupBy === "user" ? "user" : "category";
+  res.json(await getErrorTimeseries(range, groupBy));
 }
 
 /**

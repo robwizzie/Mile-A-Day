@@ -87,16 +87,47 @@ export async function getErrorsByUser() {
   `);
 }
 
-/** Daily error counts per category for the last 30 days, one row per
- *  (date, category). Zero-fill happens client-side for the line chart. */
-export async function getErrorTimeseries() {
-  return db.query(`
-    SELECT created_at::date::text AS date, category, COUNT(*)::int AS count
-    FROM error_log
-    WHERE created_at >= CURRENT_DATE - INTERVAL '29 days'
-    GROUP BY 1, 2
-    ORDER BY 1
-  `);
+/** Error counts over a range, one row per (bucket, series). `series` is the
+ *  category, or the user (username / id / "no user") when groupBy = 'user'.
+ *  24h → hourly buckets; 7d/30d → daily. Buckets are UTC-keyed strings so the
+ *  client can zero-fill against a matching `toISOString()`-derived axis.
+ *  All SQL fragments come from whitelisted branches — no user input is
+ *  interpolated, so this stays injection-safe.
+ *  ponytail: bucket keys compared in UTC via AT TIME ZONE 'UTC', so it's
+ *  independent of the DB session timezone. */
+export async function getErrorTimeseries(
+  range: "24h" | "7d" | "30d",
+  groupBy: "category" | "user",
+) {
+  const bucketExpr =
+    range === "24h"
+      ? `to_char(date_trunc('hour', e.created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24')`
+      : `to_char((e.created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD')`;
+  const seriesExpr =
+    groupBy === "user"
+      ? `COALESCE(u.username, e.user_id, 'no user')`
+      : `e.category`;
+  const join =
+    groupBy === "user" ? "LEFT JOIN users u ON u.user_id = e.user_id" : "";
+
+  const params: unknown[] = [];
+  let where: string;
+  if (range === "24h") {
+    where = `e.created_at >= NOW() - INTERVAL '24 hours'`;
+  } else {
+    params.push(range === "7d" ? 7 : 30);
+    where = `e.created_at >= NOW() - ($1 || ' days')::interval`;
+  }
+
+  return db.query(
+    `SELECT ${bucketExpr} AS bucket, ${seriesExpr} AS series, COUNT(*)::int AS count
+     FROM error_log e
+     ${join}
+     WHERE ${where}
+     GROUP BY 1, 2
+     ORDER BY 1`,
+    params,
+  );
 }
 
 /** Category counts + last-24h count, for the error-view summary/filter. */
