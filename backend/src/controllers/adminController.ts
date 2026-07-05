@@ -96,7 +96,12 @@ export async function errorSummary(_req: Request, res: Response) {
  * are viewable in a browser. Support tooling for "my photo disappeared".
  */
 export async function postForensics(req: Request, res: Response) {
-  const userId = req.params.userId;
+  // "me" resolves to the authenticated admin — lets the dashboard query the
+  // signed-in user without knowing their id.
+  const userId =
+    req.params.userId === "me"
+      ? ((req as any).userId as string)
+      : req.params.userId;
   const from =
     typeof req.query.from === "string" &&
     /^\d{4}-\d{2}-\d{2}$/.test(req.query.from)

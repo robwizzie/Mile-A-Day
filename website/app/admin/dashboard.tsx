@@ -41,6 +41,30 @@ async function getData<T>(path: string): Promise<T> {
   return res.json();
 }
 
+/** POST an admin action; surfaces the backend's error message on failure. */
+async function postData<T>(path: string): Promise<T> {
+  const res = await fetch(`/admin/api/data/${path}`, {
+    method: "POST",
+    cache: "no-store",
+  });
+  if (res.status === 401 || res.status === 403) {
+    await fetch("/admin/api/logout", { method: "POST" });
+    window.location.reload();
+    throw new Error("unauthorized");
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error || `Request failed: ${res.status}`);
+  return body as T;
+}
+
+/** Signed media URLs come back as backend-relative paths — absolutize them. */
+function mediaSrc(url: string): string {
+  if (url.startsWith("/")) {
+    return `${process.env.NEXT_PUBLIC_API_URL || "https://mad.mindgoblin.tech"}${url}`;
+  }
+  return url;
+}
+
 const fmt = (n: number) =>
   n >= 1000
     ? n.toLocaleString(undefined, { maximumFractionDigits: 0 })
@@ -207,6 +231,198 @@ function ErrorList() {
   );
 }
 
+type ForensicsPost = {
+  post_id: string;
+  workout_id: string | null;
+  media_url: string;
+  caption: string | null;
+  is_auto: boolean;
+  share_to_feed: boolean;
+  share_to_story: boolean;
+  local_date: string;
+  created_at: string;
+  deleted_at: string | null;
+  workout_type: string | null;
+  workout_distance: number | null;
+  media_file_exists: boolean | null;
+};
+
+function Chip({ text, tone }: { text: string; tone: "ok" | "bad" | "muted" }) {
+  const cls =
+    tone === "ok"
+      ? "bg-emerald-500/15 text-emerald-300"
+      : tone === "bad"
+        ? "bg-[#c72554]/20 text-[#ffb3c6]"
+        : "bg-white/10 text-white/60";
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${cls}`}>
+      {text}
+    </span>
+  );
+}
+
+/**
+ * "My photo disappeared" investigator: every posts row for a user (soft-
+ * deleted included) with what the media file's fate on disk is, a viewable
+ * thumbnail, and one-tap restore for deleted rows. Defaults to the signed-in
+ * admin's own posts so it works without knowing any ids — phone-friendly.
+ */
+function PhotoForensics() {
+  const today = new Date().toISOString().slice(0, 10);
+  const [userId, setUserId] = useState("me");
+  const [from, setFrom] = useState("2026-07-01");
+  const [to, setTo] = useState(today);
+  const [rows, setRows] = useState<ForensicsPost[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = await getData<{ posts: ForensicsPost[] }>(
+        `posts/${encodeURIComponent(userId.trim() || "me")}/forensics?from=${from}&to=${to}`,
+      );
+      setRows(r.posts);
+      if (r.posts.length === 0) setNote("No posts in this window.");
+    } catch (e) {
+      if ((e as Error)?.message !== "unauthorized")
+        setNote("Failed to load posts.");
+    } finally {
+      setBusy(false);
+    }
+  }, [userId, from, to]);
+
+  async function restore(id: string) {
+    setBusy(true);
+    setNote(null);
+    try {
+      await postData<{ ok: boolean }>(`posts/${id}/restore`);
+      setNote("Restored — the post is live again.");
+      await load();
+    } catch (e) {
+      if ((e as Error)?.message !== "unauthorized")
+        setNote(`Restore failed: ${(e as Error).message}`);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mb-6 rounded-xl border border-white/10 bg-white/[0.03] p-5">
+      <h2 className="mb-1 text-sm font-medium text-white/70">
+        Photo forensics
+      </h2>
+      <p className="mb-4 text-xs text-white/40">
+        Every post in the window, including deleted ones. FILE OK means the
+        image still exists on the server — restoring a deleted row brings the
+        photo back everywhere.
+      </p>
+
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <label className="text-xs text-white/50">
+          User id (or “me”)
+          <input
+            value={userId}
+            onChange={(e) => setUserId(e.target.value)}
+            className="mt-1 block w-40 rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-sm text-white"
+          />
+        </label>
+        <label className="text-xs text-white/50">
+          From
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className="mt-1 block rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-sm text-white"
+          />
+        </label>
+        <label className="text-xs text-white/50">
+          To
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className="mt-1 block rounded-md border border-white/10 bg-black/40 px-2 py-1.5 text-sm text-white"
+          />
+        </label>
+        <button
+          onClick={load}
+          disabled={busy}
+          className="rounded-lg bg-[#c72554] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {busy ? "Working…" : "Load posts"}
+        </button>
+      </div>
+
+      {note && <p className="mb-3 text-sm text-white/60">{note}</p>}
+
+      {rows && rows.length > 0 && (
+        <ul className="divide-y divide-white/5">
+          {rows.map((p) => (
+            <li key={p.post_id} className="flex gap-3 py-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={mediaSrc(p.media_url)}
+                alt=""
+                className="h-20 w-16 shrink-0 rounded-md border border-white/10 object-cover"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.opacity = "0.25";
+                }}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-sm text-white/90">{p.local_date}</span>
+                  {p.workout_type && (
+                    <span className="text-xs text-white/50">
+                      {p.workout_type}
+                      {p.workout_distance != null
+                        ? ` · ${p.workout_distance.toFixed(2)} mi`
+                        : ""}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {p.share_to_feed && <Chip text="FEED" tone="muted" />}
+                  {p.share_to_story && <Chip text="STORY" tone="muted" />}
+                  {p.is_auto && <Chip text="AUTO CARD" tone="muted" />}
+                  {p.deleted_at ? (
+                    <Chip
+                      text={`DELETED ${new Date(p.deleted_at).toLocaleString()}`}
+                      tone="bad"
+                    />
+                  ) : (
+                    <Chip text="LIVE" tone="ok" />
+                  )}
+                  {p.media_file_exists === true && (
+                    <Chip text="FILE OK" tone="ok" />
+                  )}
+                  {p.media_file_exists === false && (
+                    <Chip text="FILE GONE" tone="bad" />
+                  )}
+                </div>
+                {p.caption && (
+                  <p className="mt-1 truncate text-xs text-white/50">
+                    “{p.caption}”
+                  </p>
+                )}
+                {p.deleted_at && (
+                  <button
+                    onClick={() => restore(p.post_id)}
+                    disabled={busy}
+                    className="mt-2 rounded-md border border-emerald-400/40 px-3 py-1 text-xs font-medium text-emerald-300 disabled:opacity-50"
+                  >
+                    Restore this post
+                  </button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function AdminDashboard() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [miles, setMiles] = useState<DayMiles[]>([]);
@@ -278,6 +494,8 @@ export function AdminDashboard() {
         <div className="mb-6">
           <MilesChart data={miles} />
         </div>
+
+        <PhotoForensics />
 
         <ErrorList />
       </div>
