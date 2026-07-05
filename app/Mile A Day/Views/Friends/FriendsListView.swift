@@ -55,6 +55,10 @@ struct FriendsListView: View {
     @State private var hypingWorkoutIds: Set<String> = []
     // Rows the user has tapped open to reveal the duration/pace/calories/steps strip.
     @State private var expandedWorkoutIds: Set<String> = []
+    // Double-tap-to-hype, mirroring the feed cards: per-row clap-burst trigger
+    // plus a shared debounce so triple-taps don't fire two bursts.
+    @State private var rowHypeBursts: [String: Int] = [:]
+    @State private var lastDoubleTapAt = Date.distantPast
 
     // Shared namespace so a friend row can slide smoothly between
     // "Cheer Them On" and "Done Today" when their status flips.
@@ -430,6 +434,16 @@ struct FriendsListView: View {
                         .strokeBorder(completedMile ? Color.green.opacity(0.18) : Color.white.opacity(0.08), lineWidth: 1)
                 )
         )
+        .contentShape(Rectangle())
+        // Double-tap anywhere on the row hypes, same as double-tapping a feed
+        // card. simultaneousGesture so the avatar/expand buttons keep working.
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded { doubleTapHype(item) }
+        )
+        .overlay(
+            HypeBurstView(trigger: rowHypeBursts[item.workout_id] ?? 0)
+                .scaleEffect(0.55) // full-size burst overwhelms a compact row
+        )
     }
 
     /// Inline stats revealed when a feed row is tapped open: time, pace,
@@ -563,43 +577,63 @@ struct FriendsListView: View {
         }
     }
 
+    /// Double-tap on a row = hype, mirroring the feed cards: clap burst +
+    /// haptic play every time (celebration is free), the hype itself only
+    /// fires when the row isn't already hyped.
+    private func doubleTapHype(_ item: FeedWorkoutItem) {
+        guard !item.is_self else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastDoubleTapAt) > 0.35 else { return }
+        lastDoubleTapAt = now
+
+        rowHypeBursts[item.workout_id, default: 0] += 1
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        if !item.is_hyped {
+            Task { await sendHype(for: item) }
+        }
+    }
+
     private func sendHype(for item: FeedWorkoutItem) async {
         guard !item.is_hyped, !hypingWorkoutIds.contains(item.workout_id) else { return }
         hypingWorkoutIds.insert(item.workout_id)
         defer { hypingWorkoutIds.remove(item.workout_id) }
 
+        // Optimistic, like the feed cards: flip the row + bump the tally
+        // immediately so double-tap feels instant, reconcile on failure.
+        setHyped(item.workout_id, hyped: true, countDelta: 1)
+
         let label = "\(workoutVerb(item.workout_type)) \(String(format: "%.2f", item.distance)) mi"
         let context = HypeContext(contextType: "mile", contextId: item.workout_id, contextLabel: label)
         do {
             let response = try await HypeService.sendHype(targetUserId: item.user_id, context: context)
-            // New hype landed — reflect it and bump the social-proof tally.
-            markHyped(item.workout_id, bumpCount: true)
             hypesRemaining = response.hypes_remaining
             hypesUnlimited = response.unlimited ?? hypesUnlimited
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         } catch let error as APIError {
             switch error {
             case .conflict:
-                // Already hyped this workout server-side — reflect the hyped
-                // state but DON'T bump the count (it already includes this one).
-                markHyped(item.workout_id, bumpCount: false)
+                // Already hyped this workout server-side — keep the hyped
+                // state but undo the optimistic bump (the server's count
+                // already includes this one).
+                setHyped(item.workout_id, hyped: true, countDelta: -1)
             case .rateLimited:
+                setHyped(item.workout_id, hyped: false, countDelta: -1)
                 hypesRemaining = 0
                 UINotificationFeedbackGenerator().notificationOccurred(.warning)
             default:
+                setHyped(item.workout_id, hyped: false, countDelta: -1)
                 print("[FriendsListView] hype failed: \(error)")
             }
         } catch {
+            setHyped(item.workout_id, hyped: false, countDelta: -1)
             print("[FriendsListView] hype failed: \(error)")
         }
     }
 
-    private func markHyped(_ workoutId: String, bumpCount: Bool) {
+    private func setHyped(_ workoutId: String, hyped: Bool, countDelta: Int) {
         guard let idx = feedItems.firstIndex(where: { $0.workout_id == workoutId }) else { return }
-        feedItems[idx].is_hyped = true
-        if bumpCount {
-            feedItems[idx].hype_count = (feedItems[idx].hype_count ?? 0) + 1
-        }
+        feedItems[idx].is_hyped = hyped
+        feedItems[idx].hype_count = max((feedItems[idx].hype_count ?? 0) + countDelta, 0)
     }
 
     private func loadFeed(force: Bool = false) async {
