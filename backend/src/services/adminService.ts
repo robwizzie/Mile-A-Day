@@ -1,4 +1,5 @@
 import { PostgresService } from "./DbService.js";
+import { START_OF_TODAY_ET_SQL } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -32,9 +33,18 @@ export async function getOverview() {
          WHERE local_date >= CURRENT_DATE - INTERVAL '7 days'
            AND deleted_at IS NULL AND exclusion_reason IS NULL)::int AS active_users_7d,
       (SELECT COUNT(*) FROM hype_log)::int AS total_hypes,
-      (SELECT COUNT(*) FROM hype_log WHERE created_at >= CURRENT_DATE)::int AS hypes_today,
-      (SELECT COUNT(*) FROM nudge_log)::int AS total_nudges,
-      (SELECT COUNT(*) FROM nudge_log WHERE created_at >= CURRENT_DATE)::int AS nudges_today
+      (SELECT COUNT(*) FROM hype_log
+         WHERE created_at >= ${START_OF_TODAY_ET_SQL})::int AS hypes_today,
+      -- Nudges live in TWO tables: friend_nudge_log (the friends-list nudge —
+      -- the overwhelmingly common kind) and nudge_log (competition nudges).
+      -- Counting only nudge_log made the dashboard read 0 forever. "Today"
+      -- uses the app's midnight-ET reset, matching every other daily counter.
+      ((SELECT COUNT(*) FROM nudge_log)
+        + (SELECT COUNT(*) FROM friend_nudge_log))::int AS total_nudges,
+      ((SELECT COUNT(*) FROM nudge_log
+          WHERE created_at >= ${START_OF_TODAY_ET_SQL})
+        + (SELECT COUNT(*) FROM friend_nudge_log
+          WHERE created_at >= ${START_OF_TODAY_ET_SQL}))::int AS nudges_today
   `);
   return row;
 }
