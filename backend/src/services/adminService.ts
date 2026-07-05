@@ -124,12 +124,23 @@ export async function getPostForensics(
 
   const fs = await import("fs");
   const path = await import("path");
-  return rows.map((r) => ({
-    ...r,
-    media_file_exists: r.media_url.startsWith("/uploads/")
-      ? fs.existsSync(path.join(process.cwd(), r.media_url.replace(/^\//, "")))
-      : null,
-  }));
+  return rows.map((r) => {
+    // Stored values MAY carry a legacy ?e=&s= signature — always work on the
+    // bare path for disk checks, and expose the bare FILENAME so recovery
+    // (host snapshots, device caches) knows exactly what to look for. The
+    // filename passes through the response signer untouched (it only rewrites
+    // strings starting with /uploads/posts/).
+    const barePath = r.media_url.split("?")[0];
+    return {
+      ...r,
+      media_file: barePath.startsWith("/uploads/posts/")
+        ? barePath.slice("/uploads/posts/".length)
+        : null,
+      media_file_exists: barePath.startsWith("/uploads/")
+        ? fs.existsSync(path.join(process.cwd(), barePath.replace(/^\//, "")))
+        : null,
+    };
+  });
 }
 
 /**
@@ -138,7 +149,9 @@ export async function getPostForensics(
  * violate the partial unique index). Restoring the ROW only helps if the
  * media file survived — check media_file_exists in getPostForensics first.
  */
-export async function restoreDeletedPost(postId: string): Promise<
+export async function restoreDeletedPost(
+  postId: string,
+): Promise<
   | { status: "not_found" | "already_live" }
   | { status: "slot_taken"; by: string }
   | { status: "restored" }
