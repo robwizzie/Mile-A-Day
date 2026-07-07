@@ -44,6 +44,13 @@ enum RaceCatalog {
             ? String(format: "%d:%02d:%02d", h, m, sec)
             : String(format: "%d:%02d", m, sec)
     }
+
+    /// Average pace as "m:ss /mi" from a run's time and distance.
+    static func formatPace(seconds: Double, miles: Double) -> String {
+        guard miles > 0 else { return "—" }
+        let perMile = Int((seconds / miles).rounded())
+        return String(format: "%d:%02d /mi", perMile / 60, perMile % 60)
+    }
 }
 
 /// Read-only fetches for race PRs. All records are derived server-side from the

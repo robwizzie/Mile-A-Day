@@ -809,6 +809,7 @@ struct MADStatCard: View {
     let icon: String
     let iconColor: Color
     let backgroundColor: Color
+    var subtitle: String? = nil
 
     var body: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
@@ -834,6 +835,14 @@ struct MADStatCard: View {
                     .font(MADTheme.Typography.caption)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
+
+                if let subtitle {
+                    Text(subtitle)
+                        .font(MADTheme.Typography.caption)
+                        .foregroundColor(iconColor)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
             }
         }
         .frame(maxWidth: .infinity)

@@ -36,7 +36,10 @@ struct RacePRsSection: View {
                             value: rec.map { RaceCatalog.formatTime($0.durationSec) } ?? "—",
                             icon: "stopwatch",
                             iconColor: hasRecord ? MADTheme.Colors.madRed : .gray,
-                            backgroundColor: (hasRecord ? MADTheme.Colors.madRed : Color.gray).opacity(0.1)
+                            backgroundColor: (hasRecord ? MADTheme.Colors.madRed : Color.gray).opacity(0.1),
+                            // Empty cards reserve the pace line (blank) so every
+                            // card is the same height regardless of having a record.
+                            subtitle: rec.map { RaceCatalog.formatPace(seconds: $0.durationSec, miles: $0.distanceMiles) } ?? " "
                         )
                         .opacity(hasRecord ? 1 : 0.55)
                     }
@@ -114,6 +117,9 @@ struct RaceHistoryView: View {
             Text(RaceCatalog.formatTime(rec.durationSec))
                 .font(.system(size: 44, weight: .bold, design: .rounded))
                 .foregroundColor(.primary)
+            Text(RaceCatalog.formatPace(seconds: rec.durationSec, miles: rec.distanceMiles))
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+                .foregroundColor(MADTheme.Colors.madRed)
             Text("Personal record · \(formatDate(rec.achievedDate))")
                 .font(MADTheme.Typography.caption)
                 .foregroundColor(.secondary)
@@ -145,7 +151,7 @@ struct RaceHistoryView: View {
                             .foregroundColor(MADTheme.Colors.madRed)
                     }
                     Spacer()
-                    Text(String(format: "%.2f mi", rec.distanceMiles))
+                    Text(RaceCatalog.formatPace(seconds: rec.durationSec, miles: rec.distanceMiles))
                         .font(MADTheme.Typography.caption)
                         .foregroundColor(.secondary)
                     Text(RaceCatalog.formatTime(rec.durationSec))

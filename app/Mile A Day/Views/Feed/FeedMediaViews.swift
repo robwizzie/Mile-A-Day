@@ -438,7 +438,7 @@ struct HypeBurstView: View {
 
     private func particleOffset(angle degrees: Double, distance: CGFloat) -> CGSize {
         let radians = degrees * .pi / 180
-        return CGSize(width: cos(radians) * distance, height: sin(radians) * distance)
+        return CGSize(width: CGFloat(cos(radians)) * distance, height: CGFloat(sin(radians)) * distance)
     }
 
     private func play() {
