@@ -329,6 +329,7 @@ struct ProfileView: View {
     private var ownStatsTabContent: some View {
         VStack(spacing: MADTheme.Spacing.lg) {
             performanceSection
+            RacePRsSection(userId: userManager.currentUser.backendUserId)
             routeHeatmapCard
         }
     }

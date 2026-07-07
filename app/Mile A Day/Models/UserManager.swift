@@ -64,12 +64,14 @@ class UserManager: ObservableObject {
             guard let self else { return }
             guard let userId = self.currentUser.backendUserId else { return }
             let freshCompletions = note.userInfo?["newChallengeCompletions"] as? [[String: String]] ?? []
+            let freshRacePRs = note.userInfo?["newRaceRecords"] as? [[String: String]] ?? []
             Task {
                 await self.refreshBadgesFromServer()
                 await ChallengeService.refresh(userId: userId)
                 // After state is fresh, celebrate any challenge completed by this upload.
                 await MainActor.run {
                     self.celebrateChallengeCompletions(freshCompletions)
+                    self.celebrateRacePRs(freshRacePRs)
                 }
             }
         }
@@ -565,6 +567,26 @@ class UserManager: ObservableObject {
                 challengeStreak: streak
             )
             CelebrationManager.shared.addCelebration(.challengeCompleted(info: info))
+        }
+    }
+
+    /// Celebrate any race-distance PR (best time for 5K, 10K, half, etc.) set by
+    /// the latest upload — the "you got a new PR!" moment. Reuses the generic
+    /// milestone celebration. Silent during the initial historical sync, same as
+    /// challenges, so a first-time backfill doesn't fire a wall of celebrations.
+    func celebrateRacePRs(_ prs: [[String: String]]) {
+        guard hasCompletedInitialBadgeSync, !prs.isEmpty else { return }
+        for pr in prs {
+            guard let key = pr["distanceKey"] else { continue }
+            let name = RaceCatalog.name(for: key)
+            let timeStr = pr["durationSec"].flatMap { Double($0) }.map { RaceCatalog.formatTime($0) }
+            CelebrationManager.shared.addCelebration(
+                .milestone(
+                    title: "New \(name) PR!",
+                    description: timeStr.map { "\($0) — your fastest yet 🏃" } ?? "Your fastest yet 🏃",
+                    icon: "stopwatch.fill"
+                )
+            )
         }
     }
 

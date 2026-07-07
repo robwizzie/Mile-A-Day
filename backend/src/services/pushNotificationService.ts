@@ -961,6 +961,76 @@ export async function fanOutFriendPersonalBestPush(
   }
 }
 
+const RACE_DISPLAY_NAMES: Record<string, string> = {
+  "1mi": "1 mile",
+  "2mi": "2 mile",
+  "5k": "5K",
+  "5mi": "5 mile",
+  "10k": "10K",
+  "15k": "15K",
+  half: "half marathon",
+  marathon: "marathon",
+};
+
+function formatRaceDuration(sec: number): string {
+  const s = Math.round(sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(ss)}` : `${m}:${pad(ss)}`;
+}
+
+/**
+ * Fan out a race-distance PR (best time for 5K, 10K, half, etc.) to every
+ * accepted friend. Reuses the friend_personal_best notification category so it
+ * inherits the existing user-facing on/off toggle and audience gating — no new
+ * settings surface. pr_type is `race_<key>` so clients can distinguish it.
+ */
+export async function fanOutFriendRacePrPush(
+  senderId: string,
+  distanceKey: string,
+  durationSec: number,
+  workoutId: string,
+): Promise<void> {
+  const sender = await getSenderDisplayName(senderId);
+  const name = RACE_DISPLAY_NAMES[distanceKey] ?? distanceKey;
+  const timeStr = formatRaceDuration(durationSec);
+  const payload: PushPayload = {
+    title: `${sender} set a new ${name} PR`,
+    body: `${timeStr} — new personal record 🏃`,
+    type: "friend_personal_best",
+    data: {
+      sender_id: senderId,
+      pr_type: `race_${distanceKey}`,
+      pr_label: `${name} PR (${timeStr})`,
+      new_value: String(durationSec),
+      workout_id: workoutId,
+    },
+  };
+
+  const friendIds = await resolveFriendFanOutRecipients(
+    senderId,
+    "personal_best",
+    payload,
+    workoutId,
+  );
+  if (!friendIds || friendIds.length === 0) return;
+
+  for (const friendId of friendIds) {
+    const allowed = await shouldSendNotification(
+      friendId,
+      senderId,
+      "friend_personal_best",
+    );
+    if (!allowed) continue;
+
+    sendPush(friendId, payload).catch((err) =>
+      console.error("[Push] friend_race_pr send failed:", err.message),
+    );
+  }
+}
+
 /**
  * Fan out a daily-challenge completion to every accepted friend.
  */
