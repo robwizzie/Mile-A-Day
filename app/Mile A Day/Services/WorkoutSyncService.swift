@@ -527,10 +527,15 @@ class WorkoutSyncService: ObservableObject {
             let challengeKey: String
             let challengeTitle: String
         }
+        struct UploadedRacePR: Codable {
+            let distanceKey: String
+            let durationSec: Double
+        }
         struct UploadResponse: Codable {
             let message: String?
             let newlyEarnedBadges: [UploadedBadge]?
             let newChallengeCompletions: [UploadedChallengeCompletion]?
+            let newRaceRecords: [UploadedRacePR]?
         }
 
         do {
@@ -553,6 +558,11 @@ class WorkoutSyncService: ObservableObject {
             let completionPayload: [[String: String]] = (response.newChallengeCompletions ?? []).map {
                 ["challengeKey": $0.challengeKey, "challengeTitle": $0.challengeTitle, "localDate": $0.localDate]
             }
+            // Race PRs set by this upload (best time for 5K, 10K, etc.) so the
+            // celebration layer can tell the user they just set a new PR.
+            let racePRPayload: [[String: String]] = (response.newRaceRecords ?? []).map {
+                ["distanceKey": $0.distanceKey, "durationSec": String($0.durationSec)]
+            }
             await MainActor.run {
                 NotificationCenter.default.post(
                     name: Notification.Name("MAD_WorkoutsUploaded"),
@@ -560,7 +570,8 @@ class WorkoutSyncService: ObservableObject {
                     userInfo: [
                         "newBadgeCount": badgeCount,
                         "newChallengeCompletionCount": completionCount,
-                        "newChallengeCompletions": completionPayload
+                        "newChallengeCompletions": completionPayload,
+                        "newRaceRecords": racePRPayload
                     ]
                 )
             }

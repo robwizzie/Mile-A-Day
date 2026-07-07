@@ -14,6 +14,10 @@ import {
   DAILY_GOAL_TOLERANCE,
   updateWorkout as updateWorkoutDb,
   computePersonalRecords,
+  computeRaceRecords,
+  getRaceHistory,
+  RACE_DISTANCES,
+  type RaceDistanceKey,
   getUserLocalToday,
   getUserRoutes,
 } from "../services/workoutService.js";
@@ -32,6 +36,7 @@ import {
   fanOutFriendBadgePush,
   fanOutFriendChallengePush,
   fanOutFriendPersonalBestPush,
+  fanOutFriendRacePrPush,
 } from "../services/pushNotificationService.js";
 import { refreshCurrentStreak } from "../services/leaderboardService.js";
 
@@ -76,6 +81,14 @@ export async function uploadWorkouts(req: Request, res: Response) {
     if (!user) {
       return res.status(400).send({ error: `No user found with ID ${userId}` });
     }
+
+    // Snapshot race PRs BEFORE the upsert so a retried/idempotent re-upload
+    // doesn't re-fire a PR that was already recorded. The upsert is idempotent
+    // and the client retries, so comparing post-upsert state with the batch
+    // excluded would treat an already-persisted workout as "new" on every retry
+    // (duplicate celebration + friend push). A true pre-upsert snapshot already
+    // contains that workout, so it won't look improved. Skipped on full syncs.
+    const preRaceRecords = isFullSync ? [] : await computeRaceRecords(userId);
 
     const uploadedWorkoutIds = await uploadWorkoutsDb(userId, req.body);
 
@@ -257,10 +270,51 @@ export async function uploadWorkouts(req: Request, res: Response) {
         }
       })();
 
+    // Race-distance PR detection, computed SYNCHRONOUSLY so the improved records
+    // ride back in the response (`newRaceRecords`) for an immediate in-app "New
+    // PR!" celebration. `preRaceRecords` was snapshotted before the upsert (see
+    // above) so retries don't double-fire. The today-guard (achievedDate ===
+    // userToday) prevents a historical backfill from celebrating old runs; full
+    // syncs skip entirely. Errors here never fail the upload — PRs are a
+    // garnish, not the payload.
+    let newRaceRecords: { distanceKey: string; durationSec: number }[] = [];
+    if (!isFullSync) {
+      try {
+        const [postRace, userToday] = await Promise.all([
+          computeRaceRecords(userId),
+          getUserLocalToday(userId),
+        ]);
+        const prevByKey = new Map(
+          preRaceRecords.map((r) => [r.distanceKey, r.durationSec]),
+        );
+        for (const rec of postRace) {
+          const prev = prevByKey.get(rec.distanceKey);
+          const improved = prev === undefined || rec.durationSec < prev;
+          if (improved && rec.achievedDate === userToday) {
+            newRaceRecords.push({
+              distanceKey: rec.distanceKey,
+              durationSec: rec.durationSec,
+            });
+            fanOutFriendRacePrPush(
+              userId,
+              rec.distanceKey,
+              rec.durationSec,
+              rec.workoutId,
+            ).catch((err) =>
+              console.error("Error fanning out friend_race_pr:", err.message),
+            );
+          }
+        }
+      } catch (err: any) {
+        console.error("Error detecting race PRs:", err.message);
+      }
+    }
+
     res.status(200).json({
       message: "Successfully uploaded workouts.",
       newlyEarnedBadges: rewards.newlyEarnedBadges,
       newChallengeCompletions: rewards.newChallengeCompletions,
+      newRaceRecords,
     });
   } catch (error: any) {
     console.error("Error uploading workouts:", error.message);
@@ -287,6 +341,51 @@ export async function getStreak(req: Request, res: Response) {
   } catch (error: any) {
     console.error("Error getting streak:", error.message);
     res.status(500).json({ error: "Error getting streak: " + error.message });
+  }
+}
+
+/**
+ * Best time per race distance (1mi, 5K, 10K, half, marathon, ...), derived live
+ * from the user's workouts. Readable by any authenticated user, like /stats —
+ * friend profiles show PRs. Distances with no qualifying workout are absent.
+ */
+export async function getRaceRecords(req: Request, res: Response) {
+  if (!hasRequiredKeys(["userId"], req, res)) return;
+
+  try {
+    const records = await computeRaceRecords(req.params.userId);
+    return res.status(200).json({ records });
+  } catch (error: any) {
+    console.error("Error getting race records:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error getting race records: " + error.message });
+  }
+}
+
+/**
+ * Full progression history (every qualifying run, newest first) for one race
+ * distance. `:distance` must be a known race key.
+ */
+export async function getRaceHistoryController(req: Request, res: Response) {
+  if (!hasRequiredKeys(["userId", "distance"], req, res)) return;
+
+  const distance = req.params.distance;
+  if (!RACE_DISTANCES.some((d) => d.key === distance)) {
+    return res.status(400).json({ error: `Unknown race distance: ${distance}` });
+  }
+
+  try {
+    const history = await getRaceHistory(
+      req.params.userId,
+      distance as RaceDistanceKey,
+    );
+    return res.status(200).json({ distance, history });
+  } catch (error: any) {
+    console.error("Error getting race history:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error getting race history: " + error.message });
   }
 }
 

@@ -9,6 +9,8 @@ import {
   recalibrateStreak,
   deleteWorkout,
   getUserRoutesController,
+  getRaceRecords,
+  getRaceHistoryController,
 } from "../controllers/workoutController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
 
@@ -41,5 +43,10 @@ router.get("/:userId/streak", getStreak);
 router.get("/:userId/range", getWorkoutRange);
 router.get("/:userId/recent", getRecentWorkouts);
 router.get("/:userId/stats", getUserStats);
+// Race PRs are readable by any authenticated user (like /stats) so friend
+// profiles can display them. Specific `/race-records/:distance` first so it
+// isn't shadowed.
+router.get("/:userId/race-records/:distance", getRaceHistoryController);
+router.get("/:userId/race-records", getRaceRecords);
 
 export default router;

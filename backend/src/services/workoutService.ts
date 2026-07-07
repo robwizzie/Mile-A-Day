@@ -844,3 +844,139 @@ export async function computePersonalRecords(
     bestDayDate: bestDayRow[0]?.best_day_date ?? null,
   };
 }
+
+/**
+ * Standard race distances tracked for personal records, in miles. A workout
+ * sets the PR for the distance whose band its TOTAL distance falls in.
+ * ponytail: whole-workout match (not best-effort segments inside longer runs).
+ * The bands don't overlap, so a workout matches at most one distance. Only
+ * running/walking workouts ever reach the workouts table, so no activity-type
+ * filter is needed — the exclusion_reason/deleted_at guards (same as daily-mile
+ * counting) keep out flagged/deleted rows. Widen RACE_BAND_LO/HI if real GPS
+ * runs routinely miss their bucket.
+ */
+export const RACE_DISTANCES = [
+  { key: "1mi", miles: 1 },
+  { key: "2mi", miles: 2 },
+  { key: "5k", miles: 3.106856 },
+  { key: "5mi", miles: 5 },
+  { key: "10k", miles: 6.213712 },
+  { key: "15k", miles: 9.320568 },
+  { key: "half", miles: 13.109375 },
+  { key: "marathon", miles: 26.21875 },
+] as const;
+
+export type RaceDistanceKey = (typeof RACE_DISTANCES)[number]["key"];
+
+const RACE_BAND_LO = 0.98;
+const RACE_BAND_HI = 1.1;
+
+// SQL CASE mapping workouts.distance -> race bucket key (NULL if it fits none).
+// Built once from RACE_DISTANCES so bands stay DRY with the constant above.
+const RACE_BUCKET_CASE = `CASE ${RACE_DISTANCES.map(
+  (d) =>
+    `WHEN w.distance BETWEEN ${d.miles * RACE_BAND_LO} AND ${d.miles * RACE_BAND_HI} THEN '${d.key}'`,
+).join(" ")} END`;
+
+export interface RaceRecord {
+  distanceKey: RaceDistanceKey;
+  durationSec: number;
+  distanceMiles: number;
+  workoutId: string;
+  achievedDate: string; // YYYY-MM-DD in the user's local timezone
+}
+
+function mapRaceRow(r: {
+  bucket: RaceDistanceKey;
+  duration: string;
+  distance: string;
+  workout_id: string;
+  achieved_date: string;
+}): RaceRecord {
+  return {
+    distanceKey: r.bucket,
+    durationSec: parseFloat(r.duration),
+    distanceMiles: parseFloat(r.distance),
+    workoutId: r.workout_id,
+    achievedDate: r.achieved_date,
+  };
+}
+
+/**
+ * Fastest (MIN total_duration) qualifying workout per race distance, derived
+ * live from the workouts table — there is no stored PR table, so a user's whole
+ * history counts with zero migration/backfill. Optionally excludes a set of
+ * workout IDs to compute a "pre-upload" baseline for same-day PR detection
+ * (mirrors computePersonalRecords).
+ * ponytail: full scan of the user's run/walk workouts per call; indexed on
+ * user_id, hundreds–low-thousands of rows = ms. Add a cached table only if a
+ * profiler says this is hot.
+ */
+export async function computeRaceRecords(
+  userId: string,
+  excludeWorkoutIds: string[] = [],
+): Promise<RaceRecord[]> {
+  const exclude = excludeWorkoutIds.length > 0;
+  const excludeClause = exclude
+    ? `AND NOT (w.workout_id = ANY($2::text[]))`
+    : "";
+  const query = `
+    SELECT DISTINCT ON (bucket)
+      bucket,
+      total_duration::text AS duration,
+      distance::text AS distance,
+      workout_id,
+      to_char(local_date, 'YYYY-MM-DD') AS achieved_date
+    FROM (
+      SELECT w.workout_id, w.total_duration, w.distance, w.local_date,
+             ${RACE_BUCKET_CASE} AS bucket
+      FROM workouts w
+      WHERE w.user_id = $1
+        AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+        AND w.total_duration > 0
+        ${excludeClause}
+    ) b
+    WHERE bucket IS NOT NULL
+    ORDER BY bucket, total_duration ASC, local_date DESC`;
+  const params: any[] = exclude ? [userId, excludeWorkoutIds] : [userId];
+  const rows = await db.query<{
+    bucket: RaceDistanceKey;
+    duration: string;
+    distance: string;
+    workout_id: string;
+    achieved_date: string;
+  }>(query, params);
+  return rows.map(mapRaceRow);
+}
+
+/**
+ * Every qualifying workout for ONE race distance, newest first — the user's
+ * progression history for that distance. Same band logic as computeRaceRecords,
+ * single bucket, no aggregate.
+ */
+export async function getRaceHistory(
+  userId: string,
+  distanceKey: RaceDistanceKey,
+): Promise<RaceRecord[]> {
+  const dist = RACE_DISTANCES.find((d) => d.key === distanceKey);
+  if (!dist) return [];
+  const rows = await db.query<{
+    duration: string;
+    distance: string;
+    workout_id: string;
+    achieved_date: string;
+  }>(
+    `SELECT total_duration::text AS duration,
+            distance::text AS distance,
+            workout_id,
+            to_char(local_date, 'YYYY-MM-DD') AS achieved_date
+       FROM workouts w
+      WHERE w.user_id = $1
+        AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+        AND w.total_duration > 0
+        AND w.distance BETWEEN $2 AND $3
+      ORDER BY w.device_end_date DESC`,
+    [userId, dist.miles * RACE_BAND_LO, dist.miles * RACE_BAND_HI],
+  );
+  return rows.map((r) => mapRaceRow({ ...r, bucket: distanceKey }));
+}
