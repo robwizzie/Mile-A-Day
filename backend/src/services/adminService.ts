@@ -267,3 +267,13 @@ export async function restoreDeletedPost(
   );
   return { status: "restored" };
 }
+
+/** All users, most recently joined first. `created_at` is signup time (see
+ *  migration 0013). Small userbase — no pagination yet. */
+export async function getUsers() {
+  return db.query(`
+    SELECT user_id, username, first_name, last_name, email, created_at
+    FROM users
+    ORDER BY created_at DESC
+  `);
+}

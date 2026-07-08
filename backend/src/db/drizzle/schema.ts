@@ -117,6 +117,15 @@ export const users = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // Signup time. Backfilled for existing users from their earliest workout's
+    // upload timestamp (MIN(workouts.created_at)) — see migration 0013. New
+    // rows default to now() on insert.
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "string",
+    })
+      .defaultNow()
+      .notNull(),
   },
   (table) => [
     index("idx_users_current_streak_desc").using(

@@ -3,6 +3,7 @@ import {
   verifyAppleWeb,
   overview,
   milesByDay,
+  users,
   errors,
   errorSummary,
   errorsByUser,
@@ -20,6 +21,7 @@ adminAuthRouter.post("/apple", verifyAppleWeb);
 const adminRouter = Router();
 adminRouter.get("/overview", overview);
 adminRouter.get("/miles-by-day", milesByDay);
+adminRouter.get("/users", users);
 adminRouter.get("/errors", errors);
 adminRouter.get("/errors/summary", errorSummary);
 adminRouter.get("/errors/by-user", errorsByUser);

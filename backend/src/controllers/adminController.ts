@@ -12,6 +12,7 @@ import {
   getErrorTimeseries,
   getPostForensics,
   restoreDeletedPost,
+  getUsers,
 } from "../services/adminService.js";
 import { signMediaUrlsDeep } from "../services/mediaSigningService.js";
 
@@ -73,6 +74,10 @@ export async function overview(_req: Request, res: Response) {
 
 export async function milesByDay(_req: Request, res: Response) {
   res.json(await getMilesByDay());
+}
+
+export async function users(_req: Request, res: Response) {
+  res.json(await getUsers());
 }
 
 export async function errors(req: Request, res: Response) {

@@ -38,6 +38,15 @@ type UserErrorRow = {
   last_at: string;
 };
 
+type UserRow = {
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  created_at: string;
+};
+
 async function getData<T>(path: string): Promise<T> {
   const res = await fetch(`/admin/api/data/${path}`, { cache: "no-store" });
   if (res.status === 401 || res.status === 403) {
@@ -777,6 +786,74 @@ function PhotoForensics() {
   );
 }
 
+function UsersList() {
+  const [users, setUsers] = useState<UserRow[] | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setUsers(await getData<UserRow[]>("users"));
+    } catch {
+      /* unauthorized handled in getData */
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-medium text-white/70">
+          Users{users ? ` (${users.length})` : ""}
+        </h2>
+        <button
+          onClick={load}
+          className="rounded-md border border-white/10 px-2 py-1 text-xs text-white/60 hover:text-white"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {!users ? (
+        <p className="text-sm text-white/40">Loading…</p>
+      ) : users.length === 0 ? (
+        <p className="text-sm text-white/40">No users.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs text-white/40">
+                <th className="pb-2 pr-4 font-medium">Username</th>
+                <th className="pb-2 pr-4 font-medium">Name</th>
+                <th className="pb-2 pr-4 font-medium">Email</th>
+                <th className="pb-2 font-medium">Joined</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {users.map((u) => (
+                <tr key={u.user_id}>
+                  <td className="py-2 pr-4 text-white/90">
+                    {u.username ? `@${u.username}` : "—"}
+                  </td>
+                  <td className="py-2 pr-4 text-white/70">
+                    {[u.first_name, u.last_name].filter(Boolean).join(" ") ||
+                      "—"}
+                  </td>
+                  <td className="py-2 pr-4 text-white/70">{u.email ?? "—"}</td>
+                  <td className="py-2 whitespace-nowrap text-white/50">
+                    {new Date(u.created_at).toLocaleDateString()}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AdminDashboard() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [miles, setMiles] = useState<DayMiles[]>([]);
@@ -848,6 +925,8 @@ export function AdminDashboard() {
         <div className="mb-6">
           <MilesChart data={miles} />
         </div>
+
+        <UsersList />
 
         <PhotoForensics />
 
