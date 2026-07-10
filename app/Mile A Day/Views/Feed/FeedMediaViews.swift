@@ -313,9 +313,10 @@ struct FeedWorkoutCard: View {
                 }
 
                 HStack(spacing: 5) {
-                    Image(systemName: "figure.run.circle.fill")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(accent)
+                    Image("mad-logo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 16, height: 16)
                     Text("Mile A Day")
                         .font(.system(size: 12, weight: .heavy, design: .rounded))
                         .foregroundColor(.white.opacity(0.85))

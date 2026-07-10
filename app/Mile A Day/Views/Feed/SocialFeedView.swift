@@ -37,6 +37,10 @@ struct SocialFeedView: View {
     @State private var presentingComposer = false
     @State private var viewerGroup: StoryGroup?
     @State private var reportingPost: PostItem?
+    /// Own post being caption-edited (presents EditCaptionSheet).
+    @State private var editingPost: PostItem?
+    /// Own post pending delete confirmation.
+    @State private var deletingEntry: FeedEntry?
     @State private var showTermsGate = false
     /// Compose was requested but blocked on the terms gate — open the composer
     /// AFTER the gate sheet dismisses (presenting both at once is a SwiftUI
@@ -250,6 +254,28 @@ struct SocialFeedView: View {
         .sheet(item: $reportingPost) { post in
             ReportPostSheet(postId: post.post_id) { reportingPost = nil }
         }
+        .sheet(item: $editingPost) { post in
+            EditCaptionSheet(post: post) { newCaption in
+                if let idx = feed.firstIndex(where: { $0.isPost && $0.entryId == post.post_id }) {
+                    feed[idx].caption = newCaption
+                }
+            }
+        }
+        .alert(
+            "Delete this post?",
+            isPresented: Binding(
+                get: { deletingEntry != nil },
+                set: { if !$0 { deletingEntry = nil } }
+            ),
+            presenting: deletingEntry
+        ) { entry in
+            Button("Delete", role: .destructive) {
+                Task { await deletePost(entry) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This removes it from your feed and profile for good.")
+        }
         .sheet(isPresented: $showTermsGate, onDismiss: {
             // Present the composer only after the gate sheet is fully gone.
             if pendingCompose && termsAccepted == true {
@@ -386,7 +412,8 @@ struct SocialFeedView: View {
                 onHype: { Task { await hype(entry) } },
                 onReport: { reportingPost = post },
                 onBlock: { Task { await block(entry) } },
-                onDelete: { Task { await deletePost(entry) } },
+                onDelete: { deletingEntry = entry },
+                onEditCaption: post.is_self ? { editingPost = post } : nil,
                 onTapAuthor: openProfile,
                 onTapHypeCount: openHypers
             )

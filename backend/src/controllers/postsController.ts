@@ -16,6 +16,7 @@ import {
   getPostAuthor,
   softDeletePost,
   moderatorDeletePost,
+  updateOwnPost,
   hasAcceptedTerms,
   acceptTerms,
   getStoryViewers,
@@ -423,11 +424,16 @@ export async function getUserPostsController(
       ? Math.min(Math.max(rawLimit, 1), MAX_FEED_LIMIT)
       : DEFAULT_FEED_LIMIT;
     const before = repairBeforeCursor(req);
+    // Story-only posts are private drafts of a sort — only the author may
+    // see them, no matter what the query string claims.
+    const includeStoryOnly =
+      req.query.include_stories === "true" && req.params.userId === req.userId;
     const items = await getUserPosts(
       req.userId!,
       req.params.userId,
       limit,
       before,
+      includeStoryOnly,
     );
     const last = items[items.length - 1];
     const nextBefore =
@@ -465,6 +471,62 @@ export async function deletePostController(
   } catch (error: any) {
     console.error("Error deleting post:", error.message);
     res.status(500).json({ error: "Error deleting post" });
+  }
+}
+
+/**
+ * PATCH /posts/:postId — edit a post the caller authored.
+ * Body: { caption?: string|null, add_to_feed?: true }.
+ * add_to_feed promotes a story-only post onto the feed in place (keeping its
+ * original date/media/stats); 409 workout_already_posted when the run already
+ * has a deliberate feed post.
+ */
+export async function updatePostController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  const userId = req.userId!;
+  const postId = req.params.postId;
+  const { caption, add_to_feed } = req.body ?? {};
+  try {
+    if (!isUuid(postId)) {
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    const hasCaption = caption !== undefined;
+    if (
+      hasCaption &&
+      caption !== null &&
+      (typeof caption !== "string" || caption.length > MAX_CAPTION)
+    ) {
+      return res.status(400).json({
+        error: `caption must be a string of at most ${MAX_CAPTION} characters`,
+      });
+    }
+    const addToFeed = add_to_feed === true;
+    if (!hasCaption && !addToFeed) {
+      return res.status(400).json({ error: "Nothing to update" });
+    }
+
+    const result = await updateOwnPost(userId, postId, {
+      ...(hasCaption
+        ? {
+            caption:
+              typeof caption === "string" ? caption.trim() || null : null,
+          }
+        : {}),
+      ...(addToFeed ? { addToFeed: true } : {}),
+    });
+    if (result === "not_found") {
+      return res.status(404).json({ error: "Post not found" });
+    }
+    if (result === "feed_conflict") {
+      return res.status(409).json({ error: "workout_already_posted" });
+    }
+    res.json({ ok: true });
+  } catch (error: any) {
+    console.error("Error updating post:", error.message);
+    res.status(500).json({ error: "Error updating post" });
   }
 }
 

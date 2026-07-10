@@ -22,6 +22,8 @@ struct PostCardView: View {
     let onReport: () -> Void
     let onBlock: () -> Void
     let onDelete: () -> Void
+    /// Own posts: opens the caption editor (hidden from the menu when nil).
+    var onEditCaption: (() -> Void)? = nil
     /// Tap the author's avatar or name to open their profile.
     var onTapAuthor: (() -> Void)? = nil
     /// Tap the hype tally to see who hyped (Instagram-likes style).
@@ -96,6 +98,11 @@ struct PostCardView: View {
             }
             Menu {
                 if post.is_self {
+                    if let onEditCaption {
+                        Button(action: onEditCaption) {
+                            Label("Edit caption", systemImage: "pencil")
+                        }
+                    }
                     Button(role: .destructive, action: onDelete) {
                         Label("Delete post", systemImage: "trash")
                     }

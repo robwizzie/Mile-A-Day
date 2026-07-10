@@ -258,12 +258,15 @@ struct WorkoutRow: View {
         return formatter.string(from: workout.duration) ?? "Unknown"
     }
 
+    // Same accent per type as the feed (ActivityCardView.color) — one color
+    // language for a workout everywhere it appears.
     private var workoutColor: Color {
         switch workout.workoutActivityType {
         case .running: return MADTheme.Colors.madRed
-        case .walking: return .blue
-        case .cycling: return .green
-        default: return .purple
+        case .walking: return .orange
+        case .hiking: return .green
+        case .cycling: return .blue
+        default: return MADTheme.Colors.madRed
         }
     }
 
@@ -271,32 +274,44 @@ struct WorkoutRow: View {
         healthManager.workoutRecord(forUUID: workout.uuid.uuidString)?.source ?? .healthkit
     }
 
+    /// "18:27 /mi" when distance + duration allow it.
+    private var paceText: String? {
+        guard let distance = workout.totalDistance else { return nil }
+        let miles = distance.doubleValue(for: .mile())
+        guard miles > 0, workout.duration > 0 else { return nil }
+        return "\(RunStatsStickerView.paceText(workout.duration / miles)) /mi"
+    }
+
     var body: some View {
+        // The feed's card grammar: verb + hero distance, accent icon chip,
+        // rounded type — a workout reads the same here as on the feed.
         HStack(spacing: MADTheme.Spacing.md) {
             ZStack {
                 Circle()
                     .fill(workoutColor.opacity(0.15))
                     .frame(width: 40, height: 40)
                 Image(systemName: workoutIcon)
-                    .font(.system(size: 18, weight: .medium))
+                    .font(.system(size: 17, weight: .bold))
                     .foregroundColor(workoutColor)
             }
-            VStack(alignment: .leading, spacing: MADTheme.Spacing.xs) {
-                HStack(spacing: 6) {
-                    Text(workoutTypeString)
-                        .font(MADTheme.Typography.body)
-                        .fontWeight(.medium)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(verb)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(MADTheme.Colors.secondaryText)
+                    Text(workoutDistance)
+                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .monospacedDigit()
                         .foregroundColor(MADTheme.Colors.primaryText)
                     ManualWorkoutBadge(source: workoutSource)
                 }
-                HStack {
-                    Text(workoutDistance)
-                        .font(MADTheme.Typography.caption)
-                        .foregroundColor(MADTheme.Colors.secondaryText)
-                    Text("\u{2022}")
-                        .foregroundColor(MADTheme.Colors.secondaryText)
-                    Text(workoutDuration)
-                        .font(MADTheme.Typography.caption)
+                HStack(spacing: 5) {
+                    Image(systemName: "clock.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.orange)
+                    Text(paceText == nil ? workoutDuration : "\(workoutDuration) \u{2022} \(paceText!)")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
                         .foregroundColor(MADTheme.Colors.secondaryText)
                 }
             }
@@ -304,14 +319,24 @@ struct WorkoutRow: View {
             VStack(alignment: .trailing, spacing: 2) {
                 if showDate {
                     Text(workoutDateString)
-                        .font(MADTheme.Typography.caption)
-                        .fontWeight(.medium)
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
                         .foregroundColor(MADTheme.Colors.primaryText)
                 }
                 Text(DateFormatter.shortTime.string(from: correctedStartTime))
-                    .font(MADTheme.Typography.caption)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundColor(MADTheme.Colors.secondaryText)
             }
+        }
+    }
+
+    /// Feed-style verb ("Ran", "Walked") for the headline.
+    private var verb: String {
+        switch workout.workoutActivityType {
+        case .running: return "Ran"
+        case .walking: return "Walked"
+        case .hiking: return "Hiked"
+        case .cycling: return "Cycled"
+        default: return "Moved"
         }
     }
 

@@ -97,9 +97,10 @@ struct RunStatsCardView: View {
 
                 // Brand row — kept above the carousel's page-dot zone.
                 HStack(spacing: 6) {
-                    Image(systemName: "figure.run.circle.fill")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(accent)
+                    Image("mad-logo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 18, height: 18)
                     Text("Mile A Day")
                         .font(.system(size: 14, weight: .heavy, design: .rounded))
                         .foregroundColor(.white.opacity(0.85))
@@ -248,9 +249,10 @@ struct RouteStatsOverlayView: View {
                     }
                     Spacer()
                     HStack(spacing: 5) {
-                        Image(systemName: "figure.run.circle.fill")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(accent)
+                        Image("mad-logo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 16, height: 16)
                         Text("Mile A Day")
                             .font(.system(size: 12, weight: .heavy, design: .rounded))
                             .foregroundColor(.white.opacity(0.9))

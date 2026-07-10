@@ -33,9 +33,10 @@ struct StreakShareView: View {
         VStack(spacing: 20) {
             // App branding
             HStack {
-                Image(systemName: "figure.run")
-                    .font(.title)
-                    .foregroundColor(.orange)
+                Image("mad-logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 30, height: 30)
                 Text("Mile A Day")
                     .font(.title2)
                     .fontWeight(.bold)
@@ -132,9 +133,10 @@ struct TodayProgressShareView: View {
         VStack(spacing: 20) {
             // App branding
             HStack {
-                Image(systemName: "figure.run")
-                    .font(.title)
-                    .foregroundColor(.orange)
+                Image("mad-logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 30, height: 30)
                 Text("Mile A Day")
                     .font(.title2)
                     .fontWeight(.bold)
