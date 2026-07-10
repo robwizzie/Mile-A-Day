@@ -472,7 +472,7 @@ struct SocialFeedView: View {
 
     private func loadMemories() {
         // Local HealthKit memories show instantly; past post photos (this day
-        // in past years, a week ago, a month ago) blend in when they arrive.
+        // in past years) blend in when they arrive.
         memories = MemoriesService.onThisDay(using: healthManager)
         Task {
             if let posts = try? await PostService.fetchPostMemories(), !posts.isEmpty {

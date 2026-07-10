@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// A walk/run the user did on today's calendar day in a previous year — or a
-/// past post photo (a week / a month / years ago) resurfaced from the server.
+/// past post photo from this day in a previous year resurfaced from the server.
 struct MemoryItem: Identifiable {
     let id = UUID()
     let date: Date
@@ -12,12 +12,9 @@ struct MemoryItem: Identifiable {
     /// The story/feed photo from that day, when one exists. Expired stories
     /// live on here — the photo outlasts its 24 hours.
     var photoURL: URL? = nil
-    /// Overrides the "N years ago" label for sub-year memories ("1 week ago").
-    var agoOverride: String? = nil
 
     var yearsAgoText: String {
-        if let agoOverride { return agoOverride }
-        return yearsAgo == 1 ? "1 year ago" : "\(yearsAgo) years ago"
+        yearsAgo == 1 ? "1 year ago" : "\(yearsAgo) years ago"
     }
 }
 
@@ -51,9 +48,9 @@ enum MemoriesService {
         return out.sorted { $0.yearsAgo < $1.yearsAgo }
     }
 
-    /// Blend the server's photo memories (this day in past years, a week ago,
-    /// a month ago) into the local HealthKit ones: matching days get the photo
-    /// attached; days we have no workout record for become photo-only items.
+    /// Blend the server's photo memories (this day in past years) into the
+    /// local HealthKit ones: matching days get the photo attached; days we
+    /// have no workout record for become photo-only items.
     static func mergingPostMemories(_ posts: [PostItem], into items: [MemoryItem]) -> [MemoryItem] {
         var merged = items
         let cal = Calendar.current
@@ -67,39 +64,26 @@ enum MemoriesService {
         for post in posts {
             guard let localDate = post.local_date, let date = parser.date(from: localDate),
                   let photoURL = post.mediaURL else { continue }
-            let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: today).day ?? 0
-            guard days > 0 else { continue }
-
-            // Bucket by RANGE, not exact day counts — the server computes "a
-            // week/month ago" against its own date, and timezone or midnight
-            // drift makes the client's day math land on 6/8 or 29/31.
-            let ago: String? = {
-                if (5...9).contains(days) { return "1 week ago" }
-                if (25...45).contains(days) { return "1 month ago" }
-                return nil // exact-year memories use the standard label
-            }()
+            // Yearly memories only — a server that predates this rule also
+            // sends week/month-ago photos; anything under a year old is too
+            // recent to be a memory.
             let years = cal.dateComponents([.year], from: date, to: today).year ?? 0
+            guard years >= 1 else { continue }
 
             if let idx = merged.firstIndex(where: { cal.isDate($0.date, inSameDayAs: date) }) {
                 if merged[idx].photoURL == nil { merged[idx].photoURL = photoURL }
-                if merged[idx].agoOverride == nil, let ago { merged[idx].agoOverride = ago }
             } else {
                 merged.append(MemoryItem(
                     date: date,
-                    yearsAgo: max(years, 0),
+                    yearsAgo: years,
                     miles: post.stats_snapshot?.distance ?? 0,
                     workoutType: "running",
                     durationSeconds: post.stats_snapshot?.duration ?? 0,
-                    photoURL: photoURL,
-                    agoOverride: ago
+                    photoURL: photoURL
                 ))
             }
         }
-        // Freshest memories first: sub-year (week/month) photos, then by years.
-        return merged.sorted {
-            if ($0.agoOverride != nil) != ($1.agoOverride != nil) { return $0.agoOverride != nil }
-            return $0.yearsAgo < $1.yearsAgo
-        }
+        return merged.sorted { $0.yearsAgo < $1.yearsAgo }
     }
 }
 
