@@ -176,6 +176,7 @@ struct MainTabView: View {
                     await competitionService.refreshAllData()
                     await friendService.refreshAllData()
                     await refreshUnreadCount()
+                    await syncLeaderboardWidget()
                 }
                 // Refresh health data and re-evaluate the daily reminder
                 // so "Mile still waiting" is cancelled if the user completed their mile
@@ -270,6 +271,7 @@ struct MainTabView: View {
 
         // Sync widget data
         syncWidgetData()
+        Task { await syncLeaderboardWidget() }
     }
 
     private func handlePendingNotification() {
@@ -360,14 +362,74 @@ struct MainTabView: View {
         case .winning: urgency = "winning"
         }
 
+        // Top players (me always included) as a mini-leaderboard for the
+        // widget — same score grammar as the in-app competition rows.
+        func scoreText(_ user: CompetitionUser) -> String {
+            let score = user.score ?? 0
+            switch top.type {
+            case .streaks:
+                return "\(Int(score))d"
+            case .apex, .race:
+                return String(format: "%.1f %@", score, top.options.unit.shortDisplayName)
+            case .targets, .clash:
+                return "\(Int(score)) pt\(Int(score) == 1 ? "" : "s")"
+            }
+        }
+        var standings: [WidgetDataStore.StandingRow] = ranked.prefix(3).map { user in
+            WidgetDataStore.StandingRow(
+                name: user.displayName,
+                valueText: scoreText(user),
+                isMe: user.user_id == userId
+            )
+        }
+        if let uid = userId,
+           !standings.contains(where: { $0.isMe }),
+           let me = ranked.first(where: { $0.user_id == uid }) {
+            standings[standings.count - 1] = WidgetDataStore.StandingRow(
+                name: me.displayName, valueText: scoreText(me), isMe: true
+            )
+        }
+
         WidgetDataStore.save(
             competitionId: top.competition_id,
             competitionName: top.competition_name,
             pill: focus.pill,
             detail: focus.detail,
             rankText: rankText,
-            urgency: urgency
+            urgency: urgency,
+            standings: standings
         )
+    }
+
+    /// Mirror today's friends leaderboard into the App Group for the Daily
+    /// Leaderboard widget — the same standings the post-mile celebration
+    /// shows. Failed fetches keep the last good snapshot.
+    private func syncLeaderboardWidget() async {
+        let myId = UserDefaults.standard.string(forKey: "backendUserId")
+        guard myId != nil else { return }
+        guard let items = try? await friendService.fetchFriendsActivityToday() else { return }
+
+        var rows: [WidgetDataStore.LeaderboardRow] = items
+            .filter { $0.user_id != myId }
+            .map {
+                WidgetDataStore.LeaderboardRow(
+                    name: $0.displayName,
+                    miles: $0.today_miles,
+                    isMe: false,
+                    completed: $0.completed_today
+                )
+            }
+        let user = userManager.currentUser
+        rows.append(WidgetDataStore.LeaderboardRow(
+            name: user.username ?? user.name,
+            miles: healthManager.todaysDistance,
+            isMe: true,
+            completed: ProgressCalculator.isGoalCompleted(
+                current: healthManager.todaysDistance, goal: user.goalMiles
+            )
+        ))
+        rows.sort { $0.miles > $1.miles }
+        WidgetDataStore.save(leaderboardRows: rows)
     }
 }
 

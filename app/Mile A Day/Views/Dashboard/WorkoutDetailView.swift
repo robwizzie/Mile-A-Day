@@ -16,6 +16,12 @@ struct WorkoutDetailView: View {
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
     @State private var deleteError: String?
+    /// The user's own feed/story post linked to this workout, when one exists.
+    @State private var linkedPost: PostItem?
+    @State private var editingLinkedPost: PostItem?
+    @State private var showPostDeleteConfirm = false
+    @State private var isAddingToFeed = false
+    @State private var addToFeedError: String?
     @EnvironmentObject var healthManager: HealthKitManager
 
     private let workoutService = WorkoutService()
@@ -65,12 +71,15 @@ struct WorkoutDetailView: View {
         }
     }
 
+    // Same accent per type as the feed (ActivityCardView.color) — one color
+    // language for a workout everywhere it appears.
     private var workoutColor: Color {
         switch workout.workoutActivityType {
         case .running: return MADTheme.Colors.madRed
-        case .walking: return .blue
-        case .cycling: return .green
-        default: return .purple
+        case .walking: return .orange
+        case .hiking: return .green
+        case .cycling: return .blue
+        default: return MADTheme.Colors.madRed
         }
     }
 
@@ -94,8 +103,17 @@ struct WorkoutDetailView: View {
                         // Hero card — type, distance, date
                         heroCard
 
-                        // Route map (only shown for outdoor workouts with GPS data)
-                        routeMapSection
+                        // The run's feed/story post, rendered exactly like the
+                        // feed shows it (photo, route + stats, caption). Owner
+                        // actions — edit caption, add to feed, delete — live
+                        // in the card's menu + header pill.
+                        linkedPostSection
+
+                        // Route map (hidden when the post card above already
+                        // carries the run's visuals — no double map)
+                        if linkedPost == nil {
+                            routeMapSection
+                        }
 
                         // Key stats row
                         keyStatsRow
@@ -158,7 +176,125 @@ struct WorkoutDetailView: View {
                 await fetchCalories()
                 await fetchSplitTimes()
                 await fetchRouteData()
+                await fetchLinkedPost()
             }
+            .sheet(item: $editingLinkedPost) { post in
+                EditCaptionSheet(post: post) { newCaption in
+                    linkedPost?.caption = newCaption
+                }
+            }
+            .alert("Delete this post?", isPresented: $showPostDeleteConfirm) {
+                Button("Delete", role: .destructive) { deleteLinkedPost() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes it from your feed and profile for good. The workout itself stays.")
+            }
+            .alert("Couldn't add to feed", isPresented: Binding(
+                get: { addToFeedError != nil },
+                set: { if !$0 { addToFeedError = nil } }
+            )) {
+                Button("OK", role: .cancel) { addToFeedError = nil }
+            } message: {
+                Text(addToFeedError ?? "")
+            }
+        }
+    }
+
+    // MARK: - Linked feed post
+
+    /// The linked post with this workout's GPS trace injected, so the card
+    /// shows the same route + stats slide the feed does (the profile posts
+    /// endpoint doesn't ship routes).
+    private var displayLinkedPost: PostItem? {
+        guard var post = linkedPost else { return nil }
+        if post.route == nil, let coords = routeCoordinates, coords.count >= 2 {
+            post.route = coords.map { [$0.latitude, $0.longitude] }
+        }
+        return post
+    }
+
+    @ViewBuilder
+    private var linkedPostSection: some View {
+        if let post = displayLinkedPost {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(MADTheme.Colors.redGradient)
+                    Text(post.share_to_feed == false ? "Your Story" : "On the Feed")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    if post.share_to_feed == false {
+                        addToFeedPill
+                    }
+                }
+
+                PostCardView(
+                    post: post,
+                    storyPhotoURL: post.storyPhotoURL,
+                    onHype: {},
+                    onReport: {},
+                    onBlock: {},
+                    onDelete: { showPostDeleteConfirm = true },
+                    onEditCaption: { editingLinkedPost = post }
+                )
+            }
+        }
+    }
+
+    private var addToFeedPill: some View {
+        Button {
+            addLinkedPostToFeed()
+        } label: {
+            HStack(spacing: 4) {
+                if isAddingToFeed {
+                    ProgressView().tint(.white).scaleEffect(0.6)
+                } else {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .heavy))
+                }
+                Text("Add to feed")
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(MADTheme.Colors.redGradient))
+        }
+        .buttonStyle(.plain)
+        .disabled(isAddingToFeed)
+    }
+
+    private func fetchLinkedPost() async {
+        guard let uid = UserManager.shared.currentUser.backendUserId else { return }
+        let post = try? await PostService.fetchOwnPostForWorkout(
+            workoutId: workout.uuid.uuidString, userId: uid
+        )
+        await MainActor.run { linkedPost = post }
+    }
+
+    private func deleteLinkedPost() {
+        guard let post = linkedPost else { return }
+        Task {
+            try? await PostService.deletePost(postId: post.post_id)
+            await MainActor.run { linkedPost = nil }
+        }
+    }
+
+    private func addLinkedPostToFeed() {
+        guard let post = linkedPost, !isAddingToFeed else { return }
+        isAddingToFeed = true
+        Task {
+            do {
+                try await PostService.addPostToFeed(postId: post.post_id)
+                await fetchLinkedPost()
+            } catch {
+                await MainActor.run {
+                    addToFeedError = "This run may already have a feed post."
+                }
+            }
+            await MainActor.run { isAddingToFeed = false }
         }
     }
 

@@ -27,7 +27,7 @@ struct PostItem: Codable, Identifiable {
     let last_name: String?
     let profile_image_url: String?
     let media_url: String
-    let caption: String?
+    var caption: String?
     let workout_id: String?
     let stats_snapshot: PostStats?
     let local_date: String?
@@ -126,7 +126,7 @@ struct FeedEntry: Codable, Identifiable {
     let profile_image_url: String?
     // post-only
     let media_url: String?
-    let caption: String?
+    var caption: String?
     let stats_snapshot: PostStats?
     /// The run's story-only photo, when one exists — powers the photo/route
     /// flip on the feed card without duplicating the run in the feed.
@@ -417,9 +417,59 @@ enum PostService {
     }
 
     /// A user's permanent posts for the Instagram-style profile grid.
-    static func fetchUserPosts(userId: String, before: String? = nil) async throws -> FeedResponse {
-        let endpoint = "/posts/user/\(userId)?limit=24" + beforeSuffix(before)
+    /// `includeStories` (own profile only — the server enforces it) also
+    /// returns story-only posts whose run isn't on the feed, so the owner can
+    /// review and promote them.
+    static func fetchUserPosts(
+        userId: String,
+        before: String? = nil,
+        includeStories: Bool = false
+    ) async throws -> FeedResponse {
+        var endpoint = "/posts/user/\(userId)?limit=24" + beforeSuffix(before)
+        if includeStories { endpoint += "&include_stories=true" }
         return try await APIClient.fancyFetch(endpoint: endpoint, responseType: FeedResponse.self)
+    }
+
+    /// The caller's own post (feed or story-only) linked to a workout, if any.
+    /// Scans the first few pages of own posts — Recent Workouts surfaces
+    /// recent runs, so the match is nearly always on page one.
+    static func fetchOwnPostForWorkout(workoutId: String, userId: String) async throws -> PostItem? {
+        var before: String? = nil
+        for _ in 0..<3 {
+            let page = try await fetchUserPosts(userId: userId, before: before, includeStories: true)
+            if let match = page.items.first(where: { $0.workout_id == workoutId }) { return match }
+            guard let next = page.next_before else { return nil }
+            before = next
+        }
+        return nil
+    }
+
+    /// Edit a post's caption. Pass nil (or whitespace) to clear it.
+    static func updateCaption(postId: String, caption: String?) async throws {
+        struct Body: Encodable { let caption: String }
+        // The server trims and stores "" as NULL, so an empty string clears.
+        let bodyData = try JSONEncoder().encode(Body(caption: caption ?? ""))
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/\(postId)",
+            method: .PATCH,
+            body: bodyData,
+            responseType: OKResponse.self
+        )
+    }
+
+    /// Promote a story-only post onto the feed in place (keeps its original
+    /// date, media, and stats). Throws APIError.conflict
+    /// ("workout_already_posted") when the run already has a deliberate feed
+    /// post.
+    static func addPostToFeed(postId: String) async throws {
+        struct Body: Encodable { let add_to_feed: Bool }
+        let bodyData = try JSONEncoder().encode(Body(add_to_feed: true))
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/\(postId)",
+            method: .PATCH,
+            body: bodyData,
+            responseType: OKResponse.self
+        )
     }
 
     static func deletePost(postId: String) async throws {

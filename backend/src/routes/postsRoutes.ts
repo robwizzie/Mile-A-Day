@@ -13,6 +13,7 @@ import {
   getUnifiedFeedController,
   getUserPostsController,
   deletePostController,
+  updatePostController,
   reportPostController,
   getTermsStatusController,
   acceptTermsController,
@@ -60,6 +61,7 @@ router.get("/user/:userId", getUserPostsController);
 
 // Per-post actions.
 router.post("/:postId/report", reportPostController);
+router.patch("/:postId", updatePostController);
 router.delete("/:postId", deletePostController);
 
 export default router;

@@ -765,12 +765,19 @@ export async function getUnifiedFeed(
  * A user's permanent feed posts (newest first) for the Instagram-style profile
  * grid. Viewer must be the author or an accepted friend, and not blocked.
  * Returns [] when not allowed to view.
+ *
+ * `includeStoryOnly` (self-view only — the controller enforces it) also
+ * returns the author's story-only posts whose workout has NO live feed post,
+ * so the owner can review them and promote one onto the feed. Story photos
+ * whose run is already on the feed stay excluded — they already surface as
+ * that feed post's story_photo_url slide.
  */
 export async function getUserPosts(
   viewerId: string,
   authorId: string,
   limit: number,
   before?: string | null,
+  includeStoryOnly = false,
 ): Promise<PostRow[]> {
   const rows = await db.query<PostRow>(
     `
@@ -795,15 +802,30 @@ export async function getUserPosts(
 		FROM posts p
 		JOIN users u ON u.user_id = p.user_id
 		WHERE p.user_id = $2
-			AND p.share_to_feed
 			AND p.deleted_at IS NULL
+			AND (
+				p.share_to_feed
+				OR (
+					$5::boolean
+					AND p.user_id = $1
+					AND p.share_to_story AND NOT p.share_to_feed
+					AND NOT EXISTS (
+						SELECT 1 FROM posts pf
+						WHERE p.workout_id IS NOT NULL
+							AND pf.workout_id = p.workout_id
+							AND pf.user_id = p.user_id
+							AND pf.share_to_feed
+							AND pf.deleted_at IS NULL
+					)
+				)
+			)
 			AND EXISTS (SELECT 1 FROM circle WHERE uid = $2)
 			AND $2 NOT IN (SELECT uid FROM blocked)
 			AND ($3::timestamptz IS NULL OR p.created_at < $3::timestamptz)
 		ORDER BY p.created_at DESC
 		LIMIT $4
 		`,
-    [viewerId, authorId, before ?? null, limit],
+    [viewerId, authorId, before ?? null, limit, includeStoryOnly],
   );
   return rows;
 }
@@ -883,6 +905,88 @@ export async function softDeletePost(
     [postId, authorId],
   );
   return rows.length > 0;
+}
+
+export type UpdatePostResult = "ok" | "not_found" | "feed_conflict";
+
+/**
+ * Edit a post the caller authored: caption text, and/or promote a story-only
+ * post onto the feed (share_to_feed = true) IN PLACE — keeping its original
+ * local_date, media, and stats, unlike the story viewer's re-POST flow.
+ *
+ * Promotion honors the one-feed-post-per-workout slot the same way createPost
+ * does: an existing AUTO route/stats card for the run is soft-deleted and
+ * replaced; an existing deliberate user post returns "feed_conflict" (409).
+ */
+export async function updateOwnPost(
+  authorId: string,
+  postId: string,
+  updates: { caption?: string | null; addToFeed?: boolean },
+): Promise<UpdatePostResult> {
+  if (updates.caption !== undefined) {
+    const rows = await db.query<{ post_id: string }>(
+      `UPDATE posts SET caption = $3
+			 WHERE post_id = $1 AND user_id = $2 AND deleted_at IS NULL
+			 RETURNING post_id`,
+      [postId, authorId, updates.caption],
+    );
+    if (rows.length === 0) return "not_found";
+  }
+
+  if (updates.addToFeed === true) {
+    const target = await db.query<{
+      post_id: string;
+      share_to_feed: boolean;
+    }>(
+      `SELECT post_id, share_to_feed FROM posts
+			 WHERE post_id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+      [postId, authorId],
+    );
+    if (target.length === 0) return "not_found";
+    if (target[0].share_to_feed) return "ok"; // already on the feed
+
+    // Single statement so the auto card can't be deleted without the
+    // promotion landing (no half-applied state): `conflict` finds any live
+    // feed post on the same workout; the auto one is replaced, a deliberate
+    // user post blocks both CTE updates.
+    const promoted = await db.query<{ post_id: string }>(
+      `
+			WITH target AS (
+				SELECT post_id, workout_id FROM posts
+				WHERE post_id = $1 AND user_id = $2 AND deleted_at IS NULL
+			),
+			conflict AS (
+				SELECT p.post_id, p.is_auto
+				FROM posts p JOIN target t ON p.workout_id = t.workout_id
+				WHERE t.workout_id IS NOT NULL
+					AND p.user_id = $2
+					AND p.share_to_feed
+					AND p.deleted_at IS NULL
+					AND p.post_id <> t.post_id
+			),
+			replaced AS (
+				UPDATE posts SET deleted_at = NOW()
+				WHERE post_id IN (SELECT post_id FROM conflict WHERE is_auto)
+					AND NOT EXISTS (SELECT 1 FROM conflict WHERE is_auto IS NOT TRUE)
+				RETURNING post_id
+			)
+			UPDATE posts p SET share_to_feed = true
+			FROM target t
+			WHERE p.post_id = t.post_id
+				AND NOT EXISTS (SELECT 1 FROM conflict WHERE is_auto IS NOT TRUE)
+				-- Referencing 'replaced' forces it to run first: an unreferenced
+				-- data-modifying CTE has no ordering guarantee, and promoting
+				-- before the auto card's soft-delete lands would trip the
+				-- one-feed-post-per-workout unique index.
+				AND (SELECT COUNT(*) FROM replaced) IS NOT NULL
+			RETURNING p.post_id
+			`,
+      [postId, authorId],
+    );
+    if (promoted.length === 0) return "feed_conflict";
+  }
+
+  return "ok";
 }
 
 /** Moderator override delete (privileged users) — ignores authorship. */

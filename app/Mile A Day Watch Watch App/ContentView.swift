@@ -184,9 +184,10 @@ struct ContentView: View {
         VStack(spacing: 3) {
             // Top brand row — small wordmark + weekday/date, single line.
             HStack(spacing: 6) {
-                Image(systemName: "figure.run.circle.fill")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(WatchTheme.primaryButton)
+                Image("mad-logo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 13, height: 13)
                 Text("MILE A DAY")
                     .font(.system(size: 9, weight: .heavy, design: .rounded))
                     .foregroundColor(WatchTheme.textPrimary.opacity(0.85))
