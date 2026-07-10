@@ -542,9 +542,9 @@ export async function reactToStory(
 
 /**
  * The caller's own past post photos for the "On this day" memories surface:
- * same calendar day in previous years, plus exactly one week and one month
- * ago. Story-only photos count — expiry hides them from the rail, not from
- * the author's memories.
+ * same calendar day in previous years only — sub-year lookbacks (a week/month
+ * ago) felt too recent to be a "memory". Story-only photos count — expiry
+ * hides them from the rail, not from the author's memories.
  */
 export async function getOwnPostMemories(
   userId: string,
@@ -558,12 +558,8 @@ export async function getOwnPostMemories(
 		WHERE p.user_id = $1
 			AND p.deleted_at IS NULL
 			AND p.local_date < $2::date
-			AND (
-				(EXTRACT(MONTH FROM p.local_date) = EXTRACT(MONTH FROM $2::date)
-					AND EXTRACT(DAY FROM p.local_date) = EXTRACT(DAY FROM $2::date))
-				OR p.local_date = ($2::date - INTERVAL '1 month')::date
-				OR p.local_date = ($2::date - INTERVAL '7 days')::date
-			)
+			AND EXTRACT(MONTH FROM p.local_date) = EXTRACT(MONTH FROM $2::date)
+			AND EXTRACT(DAY FROM p.local_date) = EXTRACT(DAY FROM $2::date)
 		ORDER BY p.local_date DESC
 		LIMIT 12
 		`,

@@ -210,6 +210,24 @@ struct PostCardView: View {
             .aspectRatio(4.0 / 5.0, contentMode: .fit)
     }
 
+    /// Stats to overlay on the live route slide — same band the auto post
+    /// bakes into its image, so a route NEVER shows as a bare map when the
+    /// post carries numbers.
+    private var routeOverlayStats: RunStatsInput? {
+        guard let stats = post.stats_snapshot, let distance = stats.distance, distance > 0
+        else { return nil }
+        return RunStatsInput(
+            distance: distance,
+            paceSecondsPerMile: stats.pace,
+            durationSeconds: stats.duration,
+            streak: stats.streak,
+            calories: stats.calories,
+            steps: stats.steps,
+            workoutId: nil,
+            dateText: stats.date
+        )
+    }
+
     private func routeSlide(_ coords: [CLLocationCoordinate2D]) -> some View {
         WorkoutRouteMapView(
             coordinates: coords,
@@ -217,9 +235,26 @@ struct PostCardView: View {
         )
         .frame(maxWidth: .infinity)
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        .overlay {
+            if let stats = routeOverlayStats {
+                // The overlay lays out at the baked card's 360×450 design
+                // size; the slide is the same 4:5, so scaling by width alone
+                // reproduces the auto post's look pixel-for-pixel.
+                GeometryReader { geo in
+                    RouteStatsOverlayView(stats: stats, workoutType: post.workout_type ?? "running")
+                        .scaleEffect(geo.size.width / RunStatsCardView.designSize.width,
+                                     anchor: .topLeading)
+                }
+                .allowsHitTesting(false)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
         .overlay(alignment: .topLeading) {
-            slideBadge("Route", icon: "map.fill")
+            // The stats band carries its own activity chip up top; only badge
+            // the bare-map fallback (posts without a stats snapshot).
+            if routeOverlayStats == nil {
+                slideBadge("Route", icon: "map.fill")
+            }
         }
     }
 

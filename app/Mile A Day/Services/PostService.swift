@@ -394,8 +394,8 @@ enum PostService {
         )
     }
 
-    /// The caller's own post photos from this day in past years / a week ago /
-    /// a month ago — fuel for the "On this day" memories surface.
+    /// The caller's own post photos from this day in past years — fuel for
+    /// the "On this day" memories surface.
     static func fetchPostMemories() async throws -> [PostItem] {
         struct MemoriesResponse: Decodable { let items: [PostItem] }
         return try await APIClient.fancyFetch(
