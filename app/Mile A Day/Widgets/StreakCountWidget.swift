@@ -10,6 +10,8 @@ struct StreakCountEntry: TimelineEntry {
     let timeUntilReset: String?
     /// Sun–Sat goal-completion flags for the current week (empty when unknown).
     var weekCompletions: [Bool] = []
+    /// Total miles this week, for the medium widget's status line (0 = unknown).
+    var weekMiles: Double = 0
 }
 
 struct StreakCountProvider: TimelineProvider {
@@ -71,7 +73,8 @@ struct StreakCountProvider: TimelineProvider {
             isGoalCompleted: isGoalCompleted,
             isAtRisk: isAtRisk,
             timeUntilReset: timeUntilReset,
-            weekCompletions: WidgetDataStore.loadWeekCompletions()
+            weekCompletions: WidgetDataStore.loadWeekCompletions(),
+            weekMiles: WidgetDataStore.loadWeekMiles()
         )
 
         // Refresh more frequently if streak is at risk
@@ -152,31 +155,46 @@ struct MediumStreakView: View {
     }
 
     var body: some View {
-        HStack(spacing: 16) {
-            // Streak ring — thin stroke, compact count.
-            MADWidgetRing(
-                progress: entry.liveProgress,
-                size: 78,
-                lineWidth: 6,
-                isComplete: entry.isGoalCompleted
-            ) {
-                VStack(spacing: -1) {
-                    Image(systemName: "flame.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(MADWidgetStyle.orange)
-                    Text("\(entry.streak)")
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
+        HStack(spacing: 14) {
+            // Left zone: streak ring with the day-status chip right under it,
+            // so the whole card reads as two full columns — no dead bands.
+            VStack(spacing: 6) {
+                MADWidgetRing(
+                    progress: entry.liveProgress,
+                    size: 76,
+                    lineWidth: 6,
+                    isComplete: entry.isGoalCompleted
+                ) {
+                    VStack(spacing: -1) {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(MADWidgetStyle.orange)
+                        Text("\(entry.streak)")
+                            .font(.system(size: 29, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.5)
+                    }
                 }
+                Text("DAY STREAK")
+                    .font(.system(size: 7.5, weight: .semibold, design: .rounded))
+                    .tracking(1.0)
+                    .foregroundColor(MADWidgetStyle.secondaryText)
             }
 
-            // Right column spans the full height: section label pinned top,
-            // the week dots (the focal element) centered, and an always-present
-            // status line anchored to the bottom edge.
+            // Right column: section label, the week dots (focal element),
+            // and an always-present status line.
             VStack(alignment: .leading, spacing: 0) {
-                MADWidgetLabel(icon: "calendar", text: "THIS WEEK", color: MADWidgetStyle.red)
+                HStack {
+                    MADWidgetLabel(icon: "calendar", text: "THIS WEEK", color: MADWidgetStyle.red)
+                    Spacer(minLength: 4)
+                    if entry.weekMiles > 0 {
+                        Text(String(format: "%.1f mi", entry.weekMiles))
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundColor(.white.opacity(0.85))
+                    }
+                }
 
                 Spacer(minLength: 6)
 
@@ -188,7 +206,7 @@ struct MediumStreakView: View {
 
                         VStack(spacing: 5) {
                             Text(Self.dayLetters[index])
-                                .font(.system(size: 8.5, weight: .semibold, design: .rounded))
+                                .font(.system(size: 9, weight: .semibold, design: .rounded))
                                 .foregroundColor(isToday ? .white : MADWidgetStyle.secondaryText)
 
                             ZStack {
@@ -200,11 +218,11 @@ struct MediumStreakView: View {
                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
                                             : AnyShapeStyle(Color.white.opacity(isFuture ? 0.05 : 0.12))
                                     )
-                                    .frame(width: 21, height: 21)
+                                    .frame(width: 23, height: 23)
 
                                 if completed {
                                     Image(systemName: "checkmark")
-                                        .font(.system(size: 9, weight: .bold))
+                                        .font(.system(size: 10, weight: .bold))
                                         .foregroundColor(.white)
                                 }
 
@@ -214,7 +232,7 @@ struct MediumStreakView: View {
                                             entry.isGoalCompleted ? MADWidgetStyle.green : MADWidgetStyle.red,
                                             lineWidth: 1.5
                                         )
-                                        .frame(width: 25, height: 25)
+                                        .frame(width: 27, height: 27)
                                 }
                             }
                         }
@@ -234,7 +252,7 @@ struct MediumStreakView: View {
 
     // Always-present bottom line so the card never renders an empty band:
     // red countdown when at risk, a green confirmation once the mile is done,
-    // otherwise a quiet motivational nudge with this week's tally.
+    // otherwise this week's tally as a nudge.
     @ViewBuilder
     private var statusLine: some View {
         if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
@@ -258,7 +276,7 @@ struct MediumStreakView: View {
             }
             .foregroundColor(MADWidgetStyle.green)
         } else {
-            Text("\(completedThisWeek)/7 this week · keep it alive")
+            Text("\(completedThisWeek)/7 days · keep it alive")
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundColor(MADWidgetStyle.secondaryText)
                 .lineLimit(1)

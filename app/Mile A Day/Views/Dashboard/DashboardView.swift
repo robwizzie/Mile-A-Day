@@ -613,7 +613,7 @@ struct DashboardView: View {
         let state = currentState
         WidgetDataStore.save(todayMiles: state.distance, goal: state.goal)
         WidgetDataStore.save(streak: userManager.currentUser.streak)
-        WidgetDataStore.save(weekCompletions: currentWeekCompletions())
+        WidgetDataStore.save(weekCompletions: currentWeekCompletions(), weekMiles: currentWeekMiles())
         // No blanket reloadAllTimelines() here: the store reloads the right
         // widget kinds itself and skips no-op writes, which preserves the
         // per-day widget reload budget iOS enforces.
@@ -633,6 +633,22 @@ struct DashboardView: View {
             guard let day = calendar.date(byAdding: .day, value: offset, to: startOfWeek) else { return false }
             return healthManager.dailyMileGoals[calendar.startOfDay(for: day)] ?? false
         }
+    }
+
+    /// Total miles this week (Sun–today) from the local workout index, for
+    /// the streak widget's status line.
+    private func currentWeekMiles() -> Double {
+        guard let index = healthManager.workoutIndex else { return 0 }
+        let calendar = Calendar.current
+        let today = Date()
+        let weekday = calendar.component(.weekday, from: today)
+        guard let startOfWeek = calendar.date(
+            byAdding: .day, value: -(weekday - 1), to: calendar.startOfDay(for: today)
+        ) else { return 0 }
+        return index.workoutsByDate.values
+            .flatMap { $0 }
+            .filter { $0.localDate >= startOfWeek }
+            .reduce(0) { $0 + $1.distance }
     }
 
     private func applyHealthDataToUserManager() {
