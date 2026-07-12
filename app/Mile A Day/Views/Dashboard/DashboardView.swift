@@ -729,6 +729,7 @@ struct DashboardView: View {
                     // updateStreakFromBackend only raises the value, so it can't clobber a
                     // higher HealthKit-computed streak from a later refresh.
                     userManager.updateStreakFromBackend(stats.streak)
+                    repairWorkoutIndexIfStale(backendStreak: stats.streak)
                     if let bestSplitSeconds = stats.bestSplitTimeSeconds, bestSplitSeconds > 0 {
                         let paceMinutesPerMile = bestSplitSeconds / 60.0
                         print("[Dashboard] ✅ Updating fastest pace from backend → \(paceMinutesPerMile) min/mi")
@@ -739,6 +740,24 @@ struct DashboardView: View {
                 print("[Dashboard] ⚠️ Failed to fetch stats from backend: \(error)")
             }
         }
+    }
+
+    /// A backend streak ≥2 days ahead of the local HealthKit-derived one is the
+    /// signature of a hole in the WorkoutIndex: a workout that reached HealthKit
+    /// after the index's lastUpdated stamp was never indexed, so activeStreak()
+    /// stops at that day. Every refresh then flashes the tiny local value (via
+    /// applyHealthDataToUserManager's unconditional overwrite) before the backend
+    /// rescue lands — "1 day streak" for a second, then the real number. Rebuild
+    /// the index from full history to repair the hole; debounced to once per
+    /// calendar day, and buildWorkoutIndex() itself no-ops while a build runs.
+    private func repairWorkoutIndexIfStale(backendStreak: Int) {
+        guard backendStreak > healthManager.retroactiveStreak + 1 else { return }
+        let debounceKey = "lastStreakMismatchIndexRebuild"
+        if let last = UserDefaults.standard.object(forKey: debounceKey) as? Date,
+           Calendar.current.isDateInToday(last) { return }
+        UserDefaults.standard.set(Date(), forKey: debounceKey)
+        print("[Dashboard] 🔧 Backend streak \(backendStreak) ≫ local \(healthManager.retroactiveStreak) — rebuilding workout index to repair missed workouts")
+        Task { await healthManager.buildWorkoutIndex() }
     }
 
     /// Pull the current streak from the backend (the authoritative source the manual

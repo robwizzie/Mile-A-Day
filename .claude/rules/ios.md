@@ -28,6 +28,7 @@ globs: app/**
 - WidgetKit renders statically: `.onAppear`-driven `@State` animations never play in widget views — render entry values directly. `WidgetDataStore` data is day-stamped; `load()` returns zeros for a stale day, and saves skip no-op writes (widget reloads are budgeted per day).
 - Widget timeline policies are fallbacks (the app reloads on every data write). Never request sub-15-min refreshes: a 60s policy drained the ~40-70/day budget by morning and iOS then silently dropped ALL reloads — widgets froze on stale data while the app was correct.
 - Background HealthKit reads must gate on `hasLoadedInitialData`, not a fixed sleep — on a locked device queries error, `retroactiveStreak` reads 0, and `updateFromHealthKit` persists it unconditionally (streak 0 stuck in widgets).
+- WorkoutIndex incremental updates need the 48h lookback + record-id dedup: querying strictly from `lastUpdated` permanently drops workouts that reached HealthKit late (Watch sync), leaving a `qualifyingDays` hole — `activeStreak()` stops there and the dashboard flashes a tiny streak until the backend rescue lands. Backend-streak ≫ local triggers a debounced rebuild (`repairWorkoutIndexIfStale`).
 
 ## Key Patterns
 - Use `@Observable` (iOS 17+ Observation framework) for new view models.
