@@ -50,6 +50,7 @@ globs: backend/**
 - `express.json` limit is 2mb because workout-sync bodies carry GPS routes. Don't shrink it.
 - `posts.is_auto` is tri-state at the API (`is_auto` absent = legacy client → upsert-in-place + auto-signature heuristic). A flagged user post may only replace an auto post; second user post → 409 `workout_already_posted`.
 - `/uploads/posts` requires signed urls (`mediaSigningService`). Any endpoint RETURNING `media_url`/`story_photo_url` must wrap the payload in `signMediaUrlsDeep(...)`; any endpoint ACCEPTING a media_url must `stripMediaQuery(...)` first. The DB stores bare paths only.
+- The Feed UI isn't in the live App Store build and API calls carry no app-version signal. Server-side "user has the feed" = any `posts` row OR `terms_accepted_at IS NOT NULL` (`userHasFeedFeature` in dailyChallengeService) — gate feed-dependent features per-user with it (e.g. the `share_journey` daily challenge).
 
 ## ESM Reminder
 All imports MUST end with `.js` extension:
