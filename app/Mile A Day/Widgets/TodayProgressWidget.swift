@@ -139,8 +139,13 @@ struct TodayProgressProvider: TimelineProvider {
             streak: WidgetDataStore.loadStreak()
         )
         
-        // Refresh every minute for incomplete goals, every 15 minutes for completed goals
-        let refreshInterval: TimeInterval = data.streakCompleted ? 900 : 60 // 1min incomplete, 15min completed
+        // The timeline policy is only a FALLBACK (plus the midnight reset
+        // below) — the app force-reloads this widget on every real data write.
+        // The old 1-minute policy drained WidgetKit's daily refresh budget
+        // (~40-70 reloads) within the first hour of each day, after which iOS
+        // silently dropped ALL reloads — including the app's post-run writes —
+        // freezing the widget on stale morning zeros while the app was correct.
+        let refreshInterval: TimeInterval = data.streakCompleted ? 3600 : 1800 // 30min incomplete, 1h completed
 
         // Never sleep past midnight: WidgetDataStore.load() zeroes out data
         // from a previous day, so rebuilding right at the day boundary makes
