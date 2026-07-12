@@ -18,10 +18,18 @@ export async function getTodaysChallenge(
   localDate: string,
 ): Promise<TodaysChallengeResponse> {
   const goalMiles = await getGoalMiles(userId);
-  const challengeRow = await selectChallengeForUser(userId, localDate);
+
+  // A recorded completion pins today's challenge: selection inputs (friend
+  // count, feed-feature signals) can flip mid-day, and the challenge the user
+  // actually completed must win over a re-pick. Mirrors getTodaysCompletion.
+  const completionRow = await getCompletionRow(userId, localDate);
+  const completedRow = completionRow
+    ? await getChallengeRowByKey(completionRow.challenge_key)
+    : null;
+  const challengeRow =
+    completedRow ?? (await selectChallengeForUser(userId, localDate));
   const challenge = await renderChallenge(userId, challengeRow);
 
-  const completionRow = await getCompletionRow(userId, localDate);
   const progress = completionRow
     ? 1.0
     : await computeProgress(
@@ -768,6 +776,17 @@ const SOCIAL_CHALLENGE_KEYS = new Set([
   "wingman",
 ]);
 
+/**
+ * Challenges that require the social feed (photo posts). The feed UI is not in
+ * the live App Store build yet — and even once it ships, users lingering on
+ * older versions won't have it, and there is no app-version signal on API
+ * calls. A user provably has the feature once their client has touched a
+ * feed-only endpoint: any `posts` row (the feed build auto-posts each
+ * completed mile) or UGC-terms acceptance (only reachable from the composer).
+ * No signal → the challenge is never offered. Self-heals as users update.
+ */
+const FEED_CHALLENGE_KEYS = new Set(["share_journey"]);
+
 async function getAcceptedFriendCount(userId: string): Promise<number> {
   try {
     const rows = await db.query<{ count: string }>(
@@ -780,12 +799,31 @@ async function getAcceptedFriendCount(userId: string): Promise<number> {
   }
 }
 
+/** Whether the user's app build has the social feed (see FEED_CHALLENGE_KEYS). */
+async function userHasFeedFeature(userId: string): Promise<boolean> {
+  try {
+    // Deleted posts still count — even a deleted post proves the build posts.
+    const rows = await db.query<{ ok: boolean }>(
+      `SELECT (
+				EXISTS (SELECT 1 FROM posts WHERE user_id = $1)
+				OR EXISTS (SELECT 1 FROM users WHERE user_id = $1 AND terms_accepted_at IS NOT NULL)
+			) AS ok`,
+      [userId],
+    );
+    return rows[0]?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Per-user daily challenge selection. The base pick is deterministic by date
- * (so friends on the same day tend to share a challenge), but a social
- * challenge is skipped for users with no friends — we deterministically advance
- * to the next non-social challenge in the rotation so they always get something
- * they can actually complete.
+ * (so friends on the same day tend to share a challenge), but a challenge the
+ * user can't actually complete is skipped — we deterministically advance to
+ * the next eligible challenge in the rotation so they always get something
+ * actionable:
+ *  - social challenges are skipped for users with no accepted friends
+ *  - feed challenges are skipped for users whose app build lacks the feed
  */
 async function selectChallengeForUser(
   userId: string,
@@ -801,19 +839,28 @@ async function selectChallengeForUser(
     throw new Error("No active daily challenges configured");
 
   const baseIdx = dayOfYear(localDate) % rows.length;
-  const base = rows[baseIdx];
-  if (!SOCIAL_CHALLENGE_KEYS.has(base.challenge_key)) return base;
 
-  // Social challenge landed — keep it only if the user has friends.
-  const friendCount = await getAcceptedFriendCount(userId);
-  if (friendCount > 0) return base;
+  // Eligibility signals resolved lazily and at most once per selection —
+  // the common (non-gated) base pick costs no extra queries.
+  let friendCount: number | null = null;
+  let hasFeed: boolean | null = null;
+  const isEligible = async (row: ChallengeRow): Promise<boolean> => {
+    if (SOCIAL_CHALLENGE_KEYS.has(row.challenge_key)) {
+      friendCount ??= await getAcceptedFriendCount(userId);
+      if (friendCount === 0) return false;
+    }
+    if (FEED_CHALLENGE_KEYS.has(row.challenge_key)) {
+      hasFeed ??= await userHasFeedFeature(userId);
+      if (!hasFeed) return false;
+    }
+    return true;
+  };
 
-  // Otherwise advance deterministically to the next non-social challenge.
-  for (let i = 1; i <= rows.length; i++) {
+  for (let i = 0; i < rows.length; i++) {
     const candidate = rows[(baseIdx + i) % rows.length];
-    if (!SOCIAL_CHALLENGE_KEYS.has(candidate.challenge_key)) return candidate;
+    if (await isEligible(candidate)) return candidate;
   }
-  return base; // all social (shouldn't happen) — fall back to the base pick
+  return rows[baseIdx]; // nothing eligible (shouldn't happen) — fall back to the base pick
 }
 
 /**

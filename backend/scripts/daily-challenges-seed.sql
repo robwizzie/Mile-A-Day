@@ -28,6 +28,8 @@ INSERT INTO daily_challenges (challenge_key, title, description_template, icon, 
   ('ten_k_steps',    '10K Steps',               'Hit 10,000 steps alongside your mile',            'shoeprints.fill',     '#00C7BE', '#34C759', 'steps',    TRUE, 6),
   -- v2 additions (also auto-seeded idempotently at startup via seedExtraChallenges).
   -- `social` challenges are skipped per-user when the user has no friends.
+  -- `share_journey` is additionally skipped for users whose app build lacks the
+  -- social feed (no posts row / UGC terms) — see selectChallengeForUser.
   ('five_k_day',     '5K Day',                  'Go the distance — cover 3.1 miles (a full 5K) today', 'figure.run',              '#FF9500', '#FF3B30', 'distance', TRUE, 7),
   ('ten_k_day',      '10K Day',                 'Big effort — cover 6.2 miles (a full 10K) today',     'figure.run.circle.fill',  '#AF52DE', '#FF2D55', 'distance', TRUE, 8),
   ('two_a_day',      'Two-a-Day',               'Log two separate workouts today',                     'arrow.triangle.2.circlepath', '#5AC8FA', '#34C759', 'activity', TRUE, 9),
