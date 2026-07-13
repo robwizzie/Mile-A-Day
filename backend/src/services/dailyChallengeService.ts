@@ -15,7 +15,10 @@ import {
   FEED_CHALLENGE_KEYS,
   walkRotation,
 } from "./challengeRotation.js";
-import { getOrAssignRival } from "./h2hMatchupService.js";
+import {
+  getOrAssignRival,
+  hasH2hRivalCandidates,
+} from "./h2hMatchupService.js";
 
 const db = PostgresService.getInstance();
 
@@ -843,10 +846,18 @@ async function selectChallengeForUser(
   // the common (non-gated) base pick costs no extra queries.
   let friendCount: number | null = null;
   let hasFeed: boolean | null = null;
+  let h2hOk: boolean | null = null;
   return walkRotation(rows, localDate, async (row) => {
     if (SOCIAL_CHALLENGE_KEYS.has(row.challenge_key)) {
       friendCount ??= await getAcceptedFriendCount(userId);
       if (friendCount === 0) return false;
+    }
+    // Head-to-Head additionally needs an eligible rival: with the
+    // close-friends-only preference on, having friends isn't enough — a
+    // restricted user with no close friends rotates onto the next challenge.
+    if (row.challenge_key === "head_to_head") {
+      h2hOk ??= await hasH2hRivalCandidates(userId);
+      if (!h2hOk) return false;
     }
     if (FEED_CHALLENGE_KEYS.has(row.challenge_key)) {
       hasFeed ??= await userHasFeedFeature(userId);

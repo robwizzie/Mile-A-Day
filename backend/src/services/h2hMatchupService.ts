@@ -33,10 +33,40 @@ export interface PinnedRival {
 }
 
 /**
+ * WHERE fragment selecting user $1's eligible Head-to-Head rivals: accepted
+ * friends, narrowed to their close-friends list when the user's
+ * h2h_close_friends_only preference is on. Shared by the existence probe and
+ * the fallback pick so the two can never disagree.
+ */
+const H2H_CANDIDATE_WHERE = `
+	f.user_id = $1 AND f.status = 'accepted'
+	AND (
+		NOT COALESCE((SELECT ns.h2h_close_friends_only FROM notification_settings ns WHERE ns.user_id = $1), FALSE)
+		OR EXISTS (SELECT 1 FROM close_friends cf WHERE cf.user_id = $1 AND cf.close_friend_id = f.friend_id)
+	)`;
+
+/**
+ * TRUE when the user has at least one eligible Head-to-Head rival. Gates the
+ * challenge in the rotation walk: a user restricting to close friends who has
+ * none (left) simply rotates onto the next challenge instead of getting an
+ * unwinnable duel-less card.
+ */
+export async function hasH2hRivalCandidates(userId: string): Promise<boolean> {
+  const rows = await db.query<{ ok: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM friendships f WHERE ${H2H_CANDIDATE_WHERE}) AS ok`,
+    [userId],
+  );
+  return rows[0]?.ok === true;
+}
+
+/**
  * The user's pinned rival for the date, creating pins if this is the first
- * Head-to-Head read of the day. Returns null only for users with no accepted
- * friends. A pin whose friendship has since ended (unfriend/block deletes both
- * friendship rows) is treated as absent and deterministically re-pinned.
+ * Head-to-Head read of the day. Returns null only for users with no eligible
+ * rivals (no accepted friends, or none on their close list while restricting).
+ * A pin whose friendship has since ended (unfriend/block deletes both
+ * friendship rows) is treated as absent and deterministically re-pinned;
+ * close-list edits alone do NOT re-roll an already-pinned day — the
+ * preference shapes pin creation, starting with the next matchup.
  */
 export async function getOrAssignRival(
   userId: string,
@@ -76,7 +106,7 @@ export async function getOrAssignRival(
   // Deterministic one-sided fallback among current accepted friends, then pin
   // it so the rest of the day (and the resolver) sees the same duel.
   const friends = await db.query<{ friend_id: string }>(
-    `SELECT friend_id FROM friendships WHERE user_id = $1 AND status = 'accepted'`,
+    `SELECT f.friend_id FROM friendships f WHERE ${H2H_CANDIDATE_WHERE}`,
     [userId],
   );
   if (friends.length === 0) return null;
@@ -164,15 +194,17 @@ type PoolClient = Awaited<ReturnType<PostgresService["getClient"]>>;
  *
  * Pool = users whose rotation selection for the date is head_to_head. All pool
  * candidates have friends (social challenges are skipped otherwise), so
- * selection only varies by the feed flag — the rotation is walked once per
- * flag value instead of once per user (see selectChallengeForUser, whose
- * semantics this mirrors via the shared walkRotation).
+ * selection varies only by the feed flag and by Head-to-Head rival
+ * eligibility (the close-friends restriction) — the rotation is walked once
+ * per flag combination instead of once per user (see selectChallengeForUser,
+ * whose semantics this mirrors via the shared walkRotation).
  *
- * Matching: every undirected friendship edge inside the pool gets the
- * deterministic per-day edgeScore; ascending greedy pass pairs both-free
- * endpoints (mutual). Leftover pool users get a one-sided rival: their
- * best-scored pool neighbor (someone also dueling today) if any, else their
- * best-scored friend overall.
+ * Matching: every undirected friendship edge inside the pool — allowed by
+ * BOTH endpoints' close-friends preferences — gets the deterministic per-day
+ * edgeScore; ascending greedy pass pairs both-free endpoints (mutual).
+ * Leftover pool users get a one-sided rival: their best-scored allowed pool
+ * neighbor (someone also dueling today) if any, else their best-scored
+ * allowed friend overall.
  */
 async function computeAndInsertMatchups(
   client: PoolClient,
@@ -186,17 +218,31 @@ async function computeAndInsertMatchups(
   ).rows;
   if (challengeRows.length === 0) return;
 
-  // Everyone in the candidate set below has accepted friends, so the social
-  // gate always passes — selection varies only by the feed flag.
-  const selectsH2h = async (hasFeed: boolean): Promise<boolean> => {
-    const picked = await walkRotation(challengeRows, localDate, (row) =>
-      FEED_CHALLENGE_KEYS.has(row.challenge_key) ? hasFeed : true,
-    );
+  // Selection varies by two per-user flags: the feed signal (share_journey
+  // gate) and Head-to-Head rival eligibility (close-friends restriction —
+  // see hasH2hRivalCandidates). Everyone in the candidate set has accepted
+  // friends, so the plain social gate always passes. Walk the rotation once
+  // per flag combination instead of once per user.
+  const selectsH2h = async (
+    userHasFeed: boolean,
+    h2hOk: boolean,
+  ): Promise<boolean> => {
+    const picked = await walkRotation(challengeRows, localDate, (row) => {
+      if (row.challenge_key === "head_to_head") return h2hOk;
+      return FEED_CHALLENGE_KEYS.has(row.challenge_key) ? userHasFeed : true;
+    });
     return picked.challenge_key === "head_to_head";
   };
-  const h2hWithFeed = await selectsH2h(true);
-  const h2hWithoutFeed = await selectsH2h(false);
-  if (!h2hWithFeed && !h2hWithoutFeed) return; // nobody duels on this date
+  const h2hSelected = new Map<string, boolean>();
+  for (const feedFlag of [true, false]) {
+    for (const h2hOk of [true, false]) {
+      h2hSelected.set(
+        `${feedFlag}:${h2hOk}`,
+        await selectsH2h(feedFlag, h2hOk),
+      );
+    }
+  }
+  if (![...h2hSelected.values()].some(Boolean)) return; // nobody duels on this date
 
   // Undirected accepted-friendship edges (accepted rows exist in both
   // directions; user_id < friend_id keeps one per pair).
@@ -224,13 +270,59 @@ async function computeAndInsertMatchups(
     feedRows.map((r) => [r.user_id, r.has_feed === true]),
   );
 
-  const inPool = (uid: string): boolean =>
-    hasFeed.get(uid) ? h2hWithFeed : h2hWithoutFeed;
-  const pool = new Set(userIds.filter(inPool));
+  // Close-friends restriction, in batch — mirrors H2H_CANDIDATE_WHERE.
+  const restrictedRows = (
+    await client.query<{ user_id: string }>(
+      `SELECT user_id FROM notification_settings
+				WHERE h2h_close_friends_only = TRUE AND user_id = ANY($1::text[])`,
+      [userIds],
+    )
+  ).rows;
+  const restricted = new Set(restrictedRows.map((r) => r.user_id));
+  const closeOf = new Map<string, Set<string>>();
+  if (restricted.size > 0) {
+    const closeRows = (
+      await client.query<{ user_id: string; close_friend_id: string }>(
+        `SELECT user_id, close_friend_id FROM close_friends WHERE user_id = ANY($1::text[])`,
+        [[...restricted]],
+      )
+    ).rows;
+    for (const r of closeRows) {
+      const set = closeOf.get(r.user_id);
+      if (set) set.add(r.close_friend_id);
+      else closeOf.set(r.user_id, new Set([r.close_friend_id]));
+    }
+  }
+  /** May x duel y? Only x's own preference matters (one direction). */
+  const allows = (x: string, y: string): boolean =>
+    !restricted.has(x) || closeOf.get(x)?.has(y) === true;
+
+  // Restricted users are h2h-eligible only with >= 1 close friend among
+  // their accepted friends (edge endpoints), matching hasH2hRivalCandidates.
+  const h2hEligible = new Set<string>(
+    userIds.filter((u) => !restricted.has(u)),
+  );
+  for (const e of edges) {
+    if (allows(e.user_id, e.friend_id)) h2hEligible.add(e.user_id);
+    if (allows(e.friend_id, e.user_id)) h2hEligible.add(e.friend_id);
+  }
+
+  const pool = new Set(
+    userIds.filter((uid) =>
+      h2hSelected.get(`${hasFeed.get(uid) === true}:${h2hEligible.has(uid)}`),
+    ),
+  );
   if (pool.size === 0) return;
 
+  // Mutual pairs need BOTH directions allowed — each side must see the other.
   const scored = edges
-    .filter((e) => pool.has(e.user_id) && pool.has(e.friend_id))
+    .filter(
+      (e) =>
+        pool.has(e.user_id) &&
+        pool.has(e.friend_id) &&
+        allows(e.user_id, e.friend_id) &&
+        allows(e.friend_id, e.user_id),
+    )
     .map((e) => ({
       a: e.user_id,
       b: e.friend_id,
@@ -249,8 +341,9 @@ async function computeAndInsertMatchups(
     }
   }
 
-  // Leftovers: best pool neighbor first (they're at least dueling today),
-  // else best friend overall. One-sided, so mutual = FALSE.
+  // Leftovers: best allowed pool neighbor first (they're at least dueling
+  // today), else best allowed friend overall. One-sided, so mutual = FALSE —
+  // only the chooser's close-friends preference filters their candidates.
   const neighbors = new Map<string, string[]>();
   const addNeighbor = (from: string, to: string) => {
     const list = neighbors.get(from);
@@ -263,7 +356,7 @@ async function computeAndInsertMatchups(
   }
   for (const uid of pool) {
     if (rivalOf.has(uid)) continue;
-    const all = neighbors.get(uid) ?? [];
+    const all = (neighbors.get(uid) ?? []).filter((c) => allows(uid, c));
     const pick = (candidates: string[]): string | null => {
       let bestId: string | null = null;
       let best = Number.POSITIVE_INFINITY;
@@ -431,6 +524,7 @@ async function selectedChallengeKey(
 
   let friendCount: number | null = null;
   let hasFeed: boolean | null = null;
+  let h2hOk: boolean | null = null;
   const picked = await walkRotation(rows, localDate, async (row) => {
     if (SOCIAL_CHALLENGE_KEYS.has(row.challenge_key)) {
       if (friendCount === null) {
@@ -441,6 +535,12 @@ async function selectedChallengeKey(
         friendCount = parseInt(r[0]?.c ?? "0", 10) || 0;
       }
       if (friendCount === 0) return false;
+    }
+    // Head-to-Head additionally needs an eligible rival: with the
+    // close-friends-only preference on, having friends isn't enough.
+    if (row.challenge_key === "head_to_head") {
+      h2hOk ??= await hasH2hRivalCandidates(userId);
+      if (!h2hOk) return false;
     }
     if (FEED_CHALLENGE_KEYS.has(row.challenge_key)) {
       if (hasFeed === null) {

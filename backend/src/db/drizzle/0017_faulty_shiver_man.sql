@@ -1,0 +1,1 @@
+ALTER TABLE "notification_settings" ADD COLUMN "h2h_close_friends_only" boolean DEFAULT false NOT NULL;

@@ -258,6 +258,12 @@ export const notificationSettings = pgTable("notification_settings", {
   ),
   dailyReminderEnabled: boolean("daily_reminder_enabled").default(true),
   dailyReminderHour: integer("daily_reminder_hour").default(18),
+  // Head-to-Head rivals drawn only from the user's close-friends list.
+  // Not a notification pref, but this table is the de-facto per-user
+  // preferences row (see share_workouts_to_feed / share_route_maps).
+  h2hCloseFriendsOnly: boolean("h2h_close_friends_only")
+    .default(false)
+    .notNull(),
   timezoneOffsetMinutes: integer("timezone_offset_minutes"),
   // Social feed settings (added v2). share_workouts_to_feed: include my raw
   // walks/runs as activity cards in friends' unified feed. friend_posts_enabled:
