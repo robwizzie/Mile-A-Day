@@ -31,7 +31,7 @@ globs: backend/**
 - Never emit raw `timestamptz::text` in URL query params (pagination cursors): its `+00` offset decodes as a SPACE in Express's query parser and the `::timestamptz` cast 500s. Emit cursors via `URL_SAFE_CURSOR` (ISO `…Z`, postService.ts); iOS must percent-encode query values with a set that excludes `+` (`PostService.queryValueAllowed`).
 
 ## Auth Pattern
-- Public routes (`/auth/*`, `/dev/*`, `/status`) are mounted BEFORE `authenticateToken` middleware in server.ts.
+- Public routes (`/auth/*`, `/dev/*`, `/status`) are mounted BEFORE `authenticateToken` middleware in server.ts. `/dev/*` endpoints are fail-closed: 403 unless `NODE_ENV=development` (`npm run dev` sets it; testing them via plain `tsx watch` won't work without it).
 - Protected routes are mounted AFTER. `req.userId` is set by auth middleware (see `AuthenticatedRequest` type).
 - Use `requireSelfAccess('paramName')` middleware when a route should only allow users to access their own resources.
 

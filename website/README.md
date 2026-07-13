@@ -22,7 +22,7 @@ Mile A Day was born from a bet between two competitive friends — Rob Wiscount 
 - Apple Watch + HealthKit integration
 - 100% free
 
-[![Download on the App Store](https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg)](https://apps.apple.com/app/mile-a-day/id6744917105)
+[![Download on the App Store](https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg)](https://apps.apple.com/app/mile-a-day/id6746970905)
 
 ---
 

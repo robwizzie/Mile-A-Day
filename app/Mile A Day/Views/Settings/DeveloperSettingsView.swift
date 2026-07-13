@@ -5,6 +5,11 @@
 //  Developer tools for testing and debugging
 //  Includes cache clearing, sync reset, and testing utilities
 //
+//  DEBUG builds only: the entire file is compiled out of Release/App Store
+//  builds so no dev tooling (or its strings) ships in the production binary.
+//
+
+#if DEBUG
 
 import SwiftUI
 import HealthKit
@@ -678,3 +683,5 @@ struct DeveloperSettingsView_Previews: PreviewProvider {
         }
     }
 }
+
+#endif

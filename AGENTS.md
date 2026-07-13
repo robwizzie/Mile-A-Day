@@ -2,6 +2,16 @@
 
 Gamified fitness app: run a mile every day, build streaks, compete with friends.
 
+## PRODUCTION — App is LIVE on the App Store
+
+Real users, real data. `main` auto-deploys the backend to production via Coolify.
+- API backwards compatibility: additive changes only; never remove/rename endpoints or response fields shipped clients consume.
+- User data is sacred: no destructive SQL without explicit confirmation and a rollback plan.
+- Every change must be App Store Review Guidelines-compliant (see `.claude/rules/ios.md`).
+- When an iOS change depends on a backend change, the backend deploys first.
+
+See `CLAUDE.md` for the full, authoritative version of these rules — if this file and CLAUDE.md disagree, CLAUDE.md wins.
+
 ## Project Structure
 
 - `app/` - iOS app (Swift/SwiftUI, targets iOS + watchOS + Widgets)
@@ -18,8 +28,8 @@ Gamified fitness app: run a mile every day, build streaks, compete with friends.
 
 ### Website (`cd website`)
 - Dev: `npm run dev`
-- Build: `npm run build`
-- Lint: `npm run lint`
+- Build: `npm run build` (also type-checks — this is the pre-merge gate)
+- The `lint` script is broken: eslint is not a dependency and there is no config. Don't run it; don't add it to CI.
 
 ### iOS (`app/`)
 - Build via Xcode only. Do not attempt `xcodebuild` from CLI.
@@ -36,20 +46,20 @@ Gamified fitness app: run a mile every day, build streaks, compete with friends.
 1. **Backend is ESM** - `"type": "module"` in package.json. All local imports MUST use `.js` extension (e.g., `import foo from './foo.js'`), even though source is `.ts`.
 2. **Express 5.1** - Async errors propagate automatically. Controllers currently use explicit try/catch but it's not strictly required.
 3. **JWT uses `jose`** - Auth middleware uses `jwtVerify` from `jose`, NOT `jsonwebtoken`. The `jsonwebtoken` package is also installed but only used for token signing in some auth flows.
-4. **No migrations system** - Database schema changes are done manually against PostgreSQL. No ORM.
-5. **No CI/CD** - No automated tests or deployment pipeline. Be extra careful with changes.
+4. **Migrations via Drizzle** - Schema changes go through drizzle-kit (`backend/src/db/drizzle/`, see `.claude/rules/backend.md`). Drizzle ORM and raw SQL coexist on one pool. Existing schema is baselined; never recreate live tables.
+5. **CI is the only merge gate** - `.github/workflows/ci.yml` runs on PRs + main: backend tsc build, `drizzle-kit check`, the real migrator twice against throwaway Postgres, a feed smoke test, and the website build. Merging to `main` auto-deploys the backend via Coolify.
 6. **No shared package manager** - Backend and website both use npm. No monorepo tooling.
 7. **`.claudeignore` excludes `project.pbxproj`** - This is intentional. Never ask to read it.
 
 ## Code Style
 
 - No linter/formatter configured for backend. Follow existing patterns.
-- Website has ESLint (`pnpm lint`).
+- Website has NO working ESLint (the `lint` script references an uninstalled eslint). `next build` is the check.
 - iOS: follow existing SwiftUI patterns, no SwiftLint.
 
 ## Codex Skills & Agents
 
-This repo includes custom Codex skills and agents in `.Codex/`:
+This repo includes custom Codex skills and agents in `.claude/`:
 
 ### Skills (invoke with `/skill-name`)
 - `/new-endpoint` — Scaffold a backend endpoint (route + controller + service)
@@ -73,7 +83,7 @@ Available on top of the project skills above:
 
 - `/spec <feature>` — Spec-Driven Development entry point
 - `/ship` — final gate (Codex review + tests + UI polish + criteria check)
-- `/learn` — sweep session corrections into `.Codex/references/gotchas.md`
+- `/learn` — sweep session corrections into `.claude/references/gotchas.md`
 - `/remember "rule"` — capture a single rule mid-session
 - `/maintain` — periodic sweep (re-tune perms, regenerate INSTALLED.md, audit cost)
 - `/batch <files>` — fan-out migration orchestrator (one implementer agent per slice)
@@ -85,15 +95,15 @@ Available on top of the project skills above:
 
 ## References
 
-- **`.Codex/rules/{backend,ios,website}.md`** — area-specific conventions (existing, kept under 60 lines each)
-- **`.Codex/references/conventions.md`** — cross-cutting conventions (package manager, secrets, cross-area changes)
-- **`.Codex/references/gotchas.md`** — learned mistakes (grows via `/learn` and `/remember`)
-- **`.Codex/references/decisions.md`** — ADR-style architectural records
-- **`~/.Codex/references/{behavior,workflow-overrides,security,skill-catalog}.md`** — workflow-wide rules from cc-optimize (loaded at SessionStart and after PostCompact)
+- **`.claude/rules/{backend,ios,website}.md`** — area-specific conventions (existing, kept under 60 lines each)
+- **`.claude/references/conventions.md`** — cross-cutting conventions (package manager, secrets, cross-area changes)
+- **`.claude/references/gotchas.md`** — learned mistakes (grows via `/learn` and `/remember`)
+- **`.claude/references/decisions.md`** — ADR-style architectural records
+- **`~/.claude/references/{behavior,workflow-overrides,security,skill-catalog}.md`** — workflow-wide rules from cc-optimize (loaded at SessionStart and after PostCompact)
 
 ## Self-Maintenance
 
-These Codex files (AGENTS.md and .Codex/rules/*.md) are living documents. Update them as you work:
+These Codex files (AGENTS.md and .claude/rules/*.md) are living documents. Update them as you work:
 
 **When to add an entry:**
 - You hit a bug or build error caused by a non-obvious project quirk
@@ -106,7 +116,7 @@ These Codex files (AGENTS.md and .Codex/rules/*.md) are living documents. Update
 - Information is redundant with what you can derive from reading the code
 
 **Rules for edits:**
-- Add to the relevant rules file (.Codex/rules/backend.md, ios.md, website.md) not AGENTS.md, unless it's cross-cutting
+- Add to the relevant rules file (.claude/rules/backend.md, ios.md, website.md) not AGENTS.md, unless it's cross-cutting
 - Keep entries specific and actionable — "Use X, not Y" not "be careful with X"
 - Each file must stay under 60 lines. If a file is getting long, remove the least useful entries first
 - Never add obvious language conventions, code that speaks for itself, or vague advice

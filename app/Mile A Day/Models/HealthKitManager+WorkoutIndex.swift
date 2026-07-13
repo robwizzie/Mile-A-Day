@@ -109,6 +109,11 @@ extension HealthKitManager {
             print("  - Current streak: \(finalStreak) days")
             print("  - Most miles in one day: \(finalIndex.mostMilesInOneDay)")
 
+            // Full-history rebuild completed: from now until midnight,
+            // UserManager.vettedHealthKitStreak may accept a 2+ day streak drop
+            // as verified (unless a fresh backend value contradicts it).
+            UserDefaults.standard.set(Date(), forKey: "lastFullIndexRebuildCompletedAt")
+
             // CRITICAL: Post notification that index is ready
             NotificationCenter.default.post(name: NSNotification.Name("WorkoutIndexReady"), object: nil)
 
