@@ -4,6 +4,7 @@ import {
   ChallengeRow,
   SOCIAL_CHALLENGE_KEYS,
   FEED_CHALLENGE_KEYS,
+  ADD_FRIEND_CHALLENGE_KEY,
   walkRotation,
   edgeScore,
 } from "./challengeRotation.js";
@@ -111,13 +112,31 @@ export async function getOrAssignRival(
   );
   if (friends.length === 0) return null;
 
-  let rivalId = friends[0].friend_id;
-  let best = Number.POSITIVE_INFINITY;
-  for (const f of friends) {
-    const s = edgeScore(userId, f.friend_id, localDate);
-    if (s < best || (s === best && f.friend_id < rivalId)) {
-      best = s;
-      rivalId = f.friend_id;
+  // Prefer a recently-active rival (same 7-days-before-date signal as the
+  // matchmaker's leftover ranking), then the day's edge score.
+  const candidateIds = friends.map((f) => f.friend_id);
+  const activeRows = await db.query<{ user_id: string }>(
+    `SELECT DISTINCT user_id FROM workouts
+		WHERE user_id = ANY($1::text[])
+			AND local_date >= ($2::date - INTERVAL '7 days') AND local_date < $2::date
+			AND deleted_at IS NULL AND exclusion_reason IS NULL`,
+    [candidateIds, localDate],
+  );
+  const recentlyActive = new Set(activeRows.map((r) => r.user_id));
+
+  let rivalId = candidateIds[0];
+  let bestTier = Number.POSITIVE_INFINITY;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const c of candidateIds) {
+    const t = recentlyActive.has(c) ? 0 : 1;
+    const s = edgeScore(userId, c, localDate);
+    const better =
+      t < bestTier ||
+      (t === bestTier && (s < bestScore || (s === bestScore && c < rivalId)));
+    if (better) {
+      bestTier = t;
+      bestScore = s;
+      rivalId = c;
     }
   }
 
@@ -297,6 +316,20 @@ async function computeAndInsertMatchups(
   const allows = (x: string, y: string): boolean =>
     !restricted.has(x) || closeOf.get(x)?.has(y) === true;
 
+  // Fallback quality signal: friends who logged a workout in the 7 days
+  // BEFORE this date make livelier one-sided rivals than dormant accounts.
+  // Strictly before the date, so the ranking is stable for the whole day.
+  const activeRows = (
+    await client.query<{ user_id: string }>(
+      `SELECT DISTINCT user_id FROM workouts
+				WHERE user_id = ANY($1::text[])
+					AND local_date >= ($2::date - INTERVAL '7 days') AND local_date < $2::date
+					AND deleted_at IS NULL AND exclusion_reason IS NULL`,
+      [userIds, localDate],
+    )
+  ).rows;
+  const recentlyActive = new Set(activeRows.map((r) => r.user_id));
+
   // Restricted users are h2h-eligible only with >= 1 close friend among
   // their accepted friends (edge endpoints), matching hasH2hRivalCandidates.
   const h2hEligible = new Set<string>(
@@ -341,9 +374,10 @@ async function computeAndInsertMatchups(
     }
   }
 
-  // Leftovers: best allowed pool neighbor first (they're at least dueling
-  // today), else best allowed friend overall. One-sided, so mutual = FALSE —
-  // only the chooser's close-friends preference filters their candidates.
+  // Leftovers get a one-sided rival (mutual = FALSE); only the chooser's
+  // close-friends preference filters their candidates. Ranking: recently
+  // active beats dormant, then someone also dueling today (pool) beats
+  // someone who isn't, then the day's edge score keeps it deterministic.
   const neighbors = new Map<string, string[]>();
   const addNeighbor = (from: string, to: string) => {
     const list = neighbors.get(from);
@@ -356,20 +390,24 @@ async function computeAndInsertMatchups(
   }
   for (const uid of pool) {
     if (rivalOf.has(uid)) continue;
-    const all = (neighbors.get(uid) ?? []).filter((c) => allows(uid, c));
-    const pick = (candidates: string[]): string | null => {
-      let bestId: string | null = null;
-      let best = Number.POSITIVE_INFINITY;
-      for (const c of candidates) {
-        const s = edgeScore(uid, c, localDate);
-        if (s < best || (s === best && (bestId === null || c < bestId))) {
-          best = s;
-          bestId = c;
-        }
+    let rival: string | null = null;
+    let bestTier = Number.POSITIVE_INFINITY;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const c of neighbors.get(uid) ?? []) {
+      if (!allows(uid, c)) continue;
+      const t = (recentlyActive.has(c) ? 0 : 2) + (pool.has(c) ? 0 : 1);
+      const s = edgeScore(uid, c, localDate);
+      const better =
+        t < bestTier ||
+        (t === bestTier &&
+          (s < bestScore ||
+            (s === bestScore && (rival === null || c < rival))));
+      if (better) {
+        bestTier = t;
+        bestScore = s;
+        rival = c;
       }
-      return bestId;
-    };
-    const rival = pick(all.filter((c) => pool.has(c))) ?? pick(all);
+    }
     if (rival) rivalOf.set(uid, { rivalId: rival, mutual: false });
   }
 
@@ -525,6 +563,7 @@ async function selectedChallengeKey(
   let friendCount: number | null = null;
   let hasFeed: boolean | null = null;
   let h2hOk: boolean | null = null;
+  let friendlessOnH2hDay = false;
   const picked = await walkRotation(rows, localDate, async (row) => {
     if (SOCIAL_CHALLENGE_KEYS.has(row.challenge_key)) {
       if (friendCount === null) {
@@ -534,7 +573,13 @@ async function selectedChallengeKey(
         );
         friendCount = parseInt(r[0]?.c ?? "0", 10) || 0;
       }
-      if (friendCount === 0) return false;
+      if (friendCount === 0) {
+        // Friendless users get the add_friend substitute on h2h days —
+        // mirror selectChallengeForUser so the resolver judges the same
+        // challenge the user's card showed.
+        if (row.challenge_key === "head_to_head") friendlessOnH2hDay = true;
+        return false;
+      }
     }
     // Head-to-Head additionally needs an eligible rival: with the
     // close-friends-only preference on, having friends isn't enough.
@@ -555,6 +600,7 @@ async function selectedChallengeKey(
     }
     return true;
   });
+  if (friendlessOnH2hDay) return ADD_FRIEND_CHALLENGE_KEY;
   return picked.challenge_key;
 }
 

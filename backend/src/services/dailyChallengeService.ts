@@ -13,6 +13,7 @@ import {
   ChallengeRow,
   SOCIAL_CHALLENGE_KEYS,
   FEED_CHALLENGE_KEYS,
+  ADD_FRIEND_CHALLENGE_KEY,
   walkRotation,
 } from "./challengeRotation.js";
 import {
@@ -247,6 +248,70 @@ export async function evaluateForDay(
   };
 }
 
+/**
+ * Award "Make a Friend" the moment a friendship is ACCEPTED, for whichever
+ * side just crossed 0 → 1 accepted friends. This is the reliable award point:
+ * once the friendship exists, the rotation flips the user back onto
+ * head_to_head, so the workout-sync evaluator can never catch it after the
+ * fact. Idempotent and cheap — call it fire-and-forget from the accept path.
+ * Returns the completion (for the friend fan-out push) or null.
+ */
+export async function evaluateAddFriendCompletion(
+  userId: string,
+): Promise<NewChallengeCompletion | null> {
+  // Exactly one accepted friend = this accept took them from zero, i.e.
+  // their card today showed "Make a Friend" (users with friends were on the
+  // regular rotation and must not retro-earn this).
+  if ((await getAcceptedFriendCount(userId)) !== 1) return null;
+
+  // Local "today" preferring the app-reported offset — brand-new users have
+  // no workouts to derive a timezone from.
+  const rows = await db.query<{ local_date: string }>(
+    `SELECT ((NOW() AT TIME ZONE 'UTC') + (COALESCE(
+			(SELECT ns.timezone_offset_minutes FROM notification_settings ns WHERE ns.user_id = $1),
+			(SELECT w.timezone_offset FROM workouts w WHERE w.user_id = $1 ORDER BY w.device_end_date DESC LIMIT 1),
+			0) || ' minutes')::interval)::date::text AS local_date`,
+    [userId],
+  );
+  const localDate = rows[0]?.local_date;
+  if (!localDate) return null;
+
+  if (await getCompletionRow(userId, localDate)) return null;
+
+  // Would a friendless user's rotation walk have hit head_to_head today?
+  // (Selection can't answer this post-accept — the user has a friend now.)
+  const catalog = await db.query<ChallengeRow>(
+    `SELECT challenge_key, title, description_template, icon, gradient_start, gradient_end, type
+		FROM daily_challenges WHERE active = TRUE ORDER BY rotation_index ASC`,
+  );
+  if (catalog.length === 0) return null;
+  let hitH2h = false;
+  await walkRotation(catalog, localDate, (row) => {
+    if (row.challenge_key === "head_to_head") hitH2h = true;
+    return !SOCIAL_CHALLENGE_KEYS.has(row.challenge_key);
+  });
+  if (!hitH2h) return null;
+
+  const challenge = await getChallengeRowByKey(ADD_FRIEND_CHALLENGE_KEY);
+  if (!challenge) return null;
+
+  const inserted = await db.query<{ id: string }>(
+    `INSERT INTO user_challenge_completions (user_id, local_date, challenge_key, completing_workout_id)
+		VALUES ($1, $2, $3, NULL)
+		ON CONFLICT (user_id, local_date) DO NOTHING
+		RETURNING id`,
+    [userId, localDate, ADD_FRIEND_CHALLENGE_KEY],
+  );
+  if (inserted.length === 0) return null;
+
+  return {
+    localDate,
+    challengeKey: ADD_FRIEND_CHALLENGE_KEY,
+    challengeTitle: challenge.title,
+    completingWorkoutId: null,
+  };
+}
+
 // ─── Progress (0..1) for dashboard ring ─────────────────────────────
 
 async function computeProgress(
@@ -414,6 +479,18 @@ async function computeProgress(
       return (await hasPostToday(userId, localDate)) ? 1.0 : 0;
     case "wingman":
       return Math.min((await nudgesToday(userId, localDate)) / 1.0, 1.0);
+    case ADD_FRIEND_CHALLENGE_KEY: {
+      if ((await getAcceptedFriendCount(userId)) > 0) return 1.0;
+      // A pending request in either direction is meaningful progress.
+      const rows = await db.query<{ ok: boolean }>(
+        `SELECT EXISTS (
+					SELECT 1 FROM friendships
+					WHERE (user_id = $1 OR friend_id = $1) AND status = 'pending'
+				) AS ok`,
+        [userId],
+      );
+      return rows[0]?.ok === true ? 0.5 : 0;
+    }
     case "head_to_head": {
       const opp =
         opponent !== undefined
@@ -573,6 +650,12 @@ async function evaluatePredicate(
 
     case "wingman":
       return (await nudgesToday(userId, localDate)) >= 1;
+
+    // Note: after the friend is added, selection flips back to head_to_head,
+    // so this sync-path predicate rarely fires — the reliable award point is
+    // evaluateAddFriendCompletion at friendship-accept time.
+    case ADD_FRIEND_CHALLENGE_KEY:
+      return (await getAcceptedFriendCount(userId)) > 0;
 
     case "head_to_head": {
       // Never satisfied at workout-sync time: the duel is a whole-day mileage
@@ -847,10 +930,17 @@ async function selectChallengeForUser(
   let friendCount: number | null = null;
   let hasFeed: boolean | null = null;
   let h2hOk: boolean | null = null;
-  return walkRotation(rows, localDate, async (row) => {
+  let friendlessOnH2hDay = false;
+  const picked = await walkRotation(rows, localDate, async (row) => {
     if (SOCIAL_CHALLENGE_KEYS.has(row.challenge_key)) {
       friendCount ??= await getAcceptedFriendCount(userId);
-      if (friendCount === 0) return false;
+      if (friendCount === 0) {
+        // A FRIENDLESS user's Head-to-Head day becomes "Make a Friend" (the
+        // duel's on-ramp) instead of silently rotating past it — flag it and
+        // substitute after the walk.
+        if (row.challenge_key === "head_to_head") friendlessOnH2hDay = true;
+        return false;
+      }
     }
     // Head-to-Head additionally needs an eligible rival: with the
     // close-friends-only preference on, having friends isn't enough — a
@@ -865,6 +955,13 @@ async function selectChallengeForUser(
     }
     return true;
   });
+  if (friendlessOnH2hDay) {
+    // Seeded at startup with active = FALSE; if it's somehow missing, the
+    // walk's own pick is the safe fallback.
+    const substitute = await getChallengeRowByKey(ADD_FRIEND_CHALLENGE_KEY);
+    if (substitute) return substitute;
+  }
+  return picked;
 }
 
 async function getChallengeRowByKey(key: string): Promise<ChallengeRow | null> {
@@ -1071,6 +1168,8 @@ const EXTRA_CHALLENGES: Array<{
   gradientEnd: string;
   type: DailyChallengeType;
   rotationIndex: number;
+  /** Defaults to true; FALSE = catalog-only (never enters the rotation). */
+  active?: boolean;
 }> = [
   {
     key: "five_k_day",
@@ -1142,6 +1241,22 @@ const EXTRA_CHALLENGES: Array<{
     type: "social",
     rotationIndex: 13,
   },
+  {
+    // Head-to-Head's friendless substitute (see ADD_FRIEND_CHALLENGE_KEY).
+    // active: false keeps it OUT of the rotation — selection injects it
+    // explicitly. rotation_index 200+: reserved band for non-rotation rows
+    // (retired legacy rows live at 100+).
+    key: ADD_FRIEND_CHALLENGE_KEY,
+    title: "Make a Friend",
+    description:
+      "Add your first friend on MAD today — challenges are better together!",
+    icon: "person.badge.plus",
+    gradientStart: "#5AC8FA",
+    gradientEnd: "#5856D6",
+    type: "social",
+    rotationIndex: 200,
+    active: false,
+  },
 ];
 
 export async function seedExtraChallenges(): Promise<void> {
@@ -1160,7 +1275,7 @@ export async function seedExtraChallenges(): Promise<void> {
     const queries = EXTRA_CHALLENGES.map((c) => ({
       query: `INSERT INTO daily_challenges
 					(challenge_key, title, description_template, icon, gradient_start, gradient_end, type, active, rotation_index)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 				ON CONFLICT (challenge_key) DO NOTHING`,
       params: [
         c.key,
@@ -1170,6 +1285,7 @@ export async function seedExtraChallenges(): Promise<void> {
         c.gradientStart,
         c.gradientEnd,
         c.type,
+        c.active ?? true,
         c.rotationIndex,
       ],
     }));

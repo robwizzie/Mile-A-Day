@@ -25,6 +25,15 @@ export const SOCIAL_CHALLENGE_KEYS = new Set([
 ]);
 
 /**
+ * Substitute challenge shown to FRIENDLESS users on a day their rotation walk
+ * hits head_to_head: instead of silently rotating past the duel, the day
+ * becomes "make your first friend" — the on-ramp into everything social.
+ * Lives in the catalog with active = FALSE so it never enters the normal
+ * rotation; selection substitutes it explicitly (see selectChallengeForUser).
+ */
+export const ADD_FRIEND_CHALLENGE_KEY = "add_friend";
+
+/**
  * Challenges that require the social feed (photo posts). The feed UI is not in
  * the live App Store build yet — and even once it ships, users lingering on
  * older versions won't have it, and there is no app-version signal on API
