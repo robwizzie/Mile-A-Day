@@ -1,6 +1,6 @@
 import { Friendship, User } from "../types/user.js";
 import { PostgresService } from "./DbService.js";
-import { runHypeMatchSql } from "./hypeService.js";
+import { runHypeMatchSql, runHypedByViewerMatchSql } from "./hypeService.js";
 
 const db = PostgresService.getInstance();
 
@@ -362,14 +362,13 @@ export async function getFriendsWorkoutFeed(
 			w.calories::float AS calories,
 			w.steps,
 			(w.user_id = $1) AS is_self,
-			-- Unified RUN rule (runHypeMatchSql): mile hypes plus 'post' hypes
-			-- on posts linked to this workout — the same number the unified
-			-- feed and the notifications inbox show for this run.
+			-- Exact workout/post rule for button state: don't let a different
+			-- same-day mile hype make this workout look already hyped.
 			EXISTS (
 				SELECT 1 FROM hype_log h
 				WHERE h.sender_id = $1
 					AND h.target_id = w.user_id
-					AND ${runHypeMatchSql("h", "w")}
+					AND ${runHypedByViewerMatchSql("h", "w")}
 			) AS is_hyped,
 			(
 				SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc

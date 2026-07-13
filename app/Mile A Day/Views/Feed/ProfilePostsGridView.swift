@@ -307,6 +307,8 @@ struct ProfilePostsFeedSheet: View {
     /// Own post being caption-edited / pending delete confirmation.
     @State private var editingPost: PostItem?
     @State private var deletingPost: PostItem?
+    @State private var reportingPost: PostItem?
+    @State private var hypingIds: Set<String> = []
 
     var body: some View {
         NavigationStack {
@@ -354,6 +356,11 @@ struct ProfilePostsFeedSheet: View {
             .sheet(item: $hypersContext) { context in
                 HypersListSheet(context: context)
             }
+            .sheet(item: $reportingPost) { post in
+                ReportPostSheet(postId: post.post_id) {
+                    reportingPost = nil
+                }
+            }
             .sheet(item: $editingPost) { post in
                 EditCaptionSheet(post: post) { newCaption in
                     if let idx = posts.firstIndex(where: { $0.post_id == post.post_id }) {
@@ -384,99 +391,75 @@ struct ProfilePostsFeedSheet: View {
         }
     }
 
-    /// Same media treatment as the feed card: the real photo leads, the
-    /// workout card is the second slide (badged "Stats"), page dots when
-    /// there's more than one. Slides pinch-zoom in place (no hype here —
-    /// this surface is read-only).
-    @ViewBuilder
-    private func media(_ post: PostItem) -> some View {
-        if let storyPhoto = post.storyPhotoURL {
-            TabView {
-                ZoomablePhotoSlide(url: storyPhoto)
-                ZoomablePhotoSlide(
-                    url: post.mediaURL,
-                    badge: post.is_auto == true ? ("Stats", "chart.bar.fill") : nil
+    private func card(_ post: PostItem) -> some View {
+        PostCardView(
+            post: post,
+            storyPhotoURL: post.storyPhotoURL,
+            isHyping: hypingIds.contains(post.post_id),
+            onHype: { Task { await hype(post) } },
+            onReport: { reportingPost = post },
+            onBlock: { Task { await block(post) } },
+            onDelete: { deletingPost = post },
+            onEditCaption: post.is_self ? { editingPost = post } : nil,
+            onTapAuthor: nil,
+            onTapHypeCount: {
+                hypersContext = HypersListContext(
+                    contextType: "post",
+                    contextId: post.post_id,
+                    targetUserId: post.user_id
                 )
             }
-            .tabViewStyle(.page(indexDisplayMode: .always))
-            .indexViewStyle(.page(backgroundDisplayMode: .interactive))
-            .frame(maxWidth: .infinity)
-            .aspectRatio(4.0 / 5.0, contentMode: .fit)
-        } else {
-            ZoomablePhotoSlide(
-                url: post.mediaURL,
-                badge: post.share_to_feed == false ? ("Story", "clock.arrow.circlepath") : nil
+        )
+    }
+
+    private func hype(_ post: PostItem) async {
+        guard !post.is_self, !post.is_hyped, !hypingIds.contains(post.post_id) else { return }
+        await MainActor.run {
+            _ = hypingIds.insert(post.post_id)
+            updatePost(post.post_id) { item in
+                guard !item.is_hyped else { return }
+                item.is_hyped = true
+                item.hype_count = (item.hype_count ?? 0) + 1
+            }
+        }
+        defer { Task { @MainActor in hypingIds.remove(post.post_id) } }
+
+        let revert: @MainActor () -> Void = {
+            updatePost(post.post_id) { item in
+                guard item.is_hyped else { return }
+                item.is_hyped = false
+                item.hype_count = max(0, (item.hype_count ?? 1) - 1)
+            }
+        }
+
+        do {
+            _ = try await HypeService.sendHype(
+                targetUserId: post.user_id,
+                context: HypeContext(
+                    contextType: "post",
+                    contextId: post.post_id,
+                    contextLabel: post.caption ?? post.displayName
+                )
             )
+            await MainActor.run {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+        } catch APIError.conflict {
+            // Already hyped server-side — keep the optimistic state.
+        } catch {
+            await MainActor.run { revert() }
         }
     }
 
-    private func card(_ post: PostItem) -> some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            HStack(spacing: 10) {
-                AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(post.displayName)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                    Text(post.relativeTime)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.5))
-                }
-                Spacer()
-                if let type = post.workout_type {
-                    Image(systemName: ActivityCardView.icon(type))
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(ActivityCardView.color(type))
-                }
-                if post.is_self {
-                    Menu {
-                        Button { editingPost = post } label: {
-                            Label("Edit caption", systemImage: "pencil")
-                        }
-                        Button(role: .destructive) { deletingPost = post } label: {
-                            Label(post.share_to_feed == false ? "Delete story" : "Delete post",
-                                  systemImage: "trash")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundColor(.white.opacity(0.6))
-                            .padding(6)
-                            .contentShape(Rectangle())
-                    }
-                }
-            }
+    private func block(_ post: PostItem) async {
+        do {
+            try await BlockService.block(userId: post.user_id)
+            await MainActor.run { posts.removeAll { $0.user_id == post.user_id } }
+        } catch {}
+    }
 
-            media(post)
-
-            if let stats = post.stats_snapshot {
-                PostStatStrip(stats: stats).padding(.horizontal, 2)
-            }
-            if let caption = post.caption, !caption.isEmpty {
-                Text(caption)
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.9))
-                    .padding(.horizontal, 2)
-            }
-            if let count = post.hype_count, count > 0 {
-                Button {
-                    hypersContext = HypersListContext(
-                        contextType: "post",
-                        contextId: post.post_id,
-                        targetUserId: post.user_id
-                    )
-                } label: {
-                    HypeTally(count: count, showsLabel: true).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 2)
-            }
-        }
-        .padding(MADTheme.Spacing.sm)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        )
+    private func updatePost(_ postId: String, _ mutate: (inout PostItem) -> Void) {
+        guard let idx = posts.firstIndex(where: { $0.post_id == postId }) else { return }
+        mutate(&posts[idx])
     }
 }

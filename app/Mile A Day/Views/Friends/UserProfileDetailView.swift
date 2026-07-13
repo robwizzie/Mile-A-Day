@@ -428,7 +428,11 @@ struct UserProfileDetailView: View {
                 Last7DaysChart(workouts: friendWorkouts)
             }
             if let today = friendTodayChallenge {
-                FriendTodayChallengeRow(today: today)
+                FriendTodayChallengeRow(
+                    today: today,
+                    ownerName: user.displayName,
+                    ownerImageURL: user.profile_image_url
+                )
             }
             if !friendWorkouts.isEmpty {
                 VStack(spacing: MADTheme.Spacing.md) {
@@ -1222,6 +1226,8 @@ struct FriendWorkoutDetailSheet: View {
 /// Uses the server-side completion status from `/users/:userId/challenges/today`.
 struct FriendTodayChallengeRow: View {
     let today: RemoteChallengeService.FriendTodayDTO
+    let ownerName: String
+    let ownerImageURL: String?
 
     /// Local-catalog fallback when the server didn't enrich the row (older builds).
     private var challenge: DailyChallenge? {
@@ -1237,57 +1243,68 @@ struct FriendTodayChallengeRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: iconGradient,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 44, height: 44)
-                Image(systemName: iconName)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.white)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("TODAY'S CHALLENGE")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                    .tracking(1.0)
-                    .foregroundColor(.white.opacity(0.5))
-                Text(displayTitle ?? "Today's challenge")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            // Status pill on the right — clear "Completed" / "In progress"
-            // signal that doesn't compete with the challenge name.
-            HStack(spacing: 4) {
-                Image(systemName: today.completed ? "checkmark.circle.fill" : "hourglass")
-                    .font(.system(size: 11, weight: .bold))
-                Text(today.completed ? "Done" : "Not yet")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
-            }
-            .foregroundColor(today.completed ? .green : .white.opacity(0.55))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(
-                Capsule()
-                    .fill(today.completed ? Color.green.opacity(0.12) : Color.white.opacity(0.06))
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(
-                                today.completed ? Color.green.opacity(0.3) : Color.white.opacity(0.12),
-                                lineWidth: 1
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: iconGradient,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
                             )
-                    )
-            )
+                        )
+                        .frame(width: 44, height: 44)
+                    Image(systemName: iconName)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("TODAY'S CHALLENGE")
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .tracking(1.0)
+                        .foregroundColor(.white.opacity(0.5))
+                    Text(displayTitle ?? "Today's challenge")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                // Status pill on the right — clear "Completed" / "In progress"
+                // signal that doesn't compete with the challenge name.
+                HStack(spacing: 4) {
+                    Image(systemName: today.completed ? "checkmark.circle.fill" : "hourglass")
+                        .font(.system(size: 11, weight: .bold))
+                    Text(today.completed ? "Done" : "Not yet")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                }
+                .foregroundColor(today.completed ? .green : .white.opacity(0.55))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(today.completed ? Color.green.opacity(0.12) : Color.white.opacity(0.06))
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(
+                                    today.completed ? Color.green.opacity(0.3) : Color.white.opacity(0.12),
+                                    lineWidth: 1
+                                )
+                        )
+                )
+            }
+
+            if today.challengeKey == "head_to_head", let opponent = today.opponent {
+                FriendHeadToHeadStrip(
+                    ownerName: ownerName,
+                    ownerImageURL: ownerImageURL,
+                    opponent: opponent,
+                    accent: iconGradient.first ?? .orange
+                )
+            }
         }
         .padding(14)
         .background(
@@ -1317,6 +1334,98 @@ struct FriendTodayChallengeRow: View {
         return today.completed
             ? [.green, .green.opacity(0.8)]
             : [.white.opacity(0.2), .white.opacity(0.1)]
+    }
+}
+
+private struct FriendHeadToHeadStrip: View {
+    let ownerName: String
+    let ownerImageURL: String?
+    let opponent: RemoteChallengeService.OpponentDTO
+    let accent: Color
+
+    private var rivalName: String { opponent.username ?? "Opponent" }
+    private var tied: Bool { abs(opponent.myMiles - opponent.miles) < 0.01 }
+    private var ownerLeading: Bool { opponent.myMiles > opponent.miles && !tied }
+    private var statusColor: Color { tied ? .yellow : (ownerLeading ? .green : .orange) }
+
+    private var statusText: String {
+        if tied { return "Even at \(formatMiles(opponent.myMiles)) mi" }
+        let diff = abs(opponent.myMiles - opponent.miles)
+        if ownerLeading {
+            return "\(ownerName) leads by \(formatMiles(diff)) mi"
+        }
+        return "\(rivalName) leads by \(formatMiles(diff)) mi"
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                side(
+                    name: ownerName,
+                    image: ownerImageURL,
+                    miles: opponent.myMiles,
+                    highlight: ownerLeading,
+                    color: accent
+                )
+
+                VStack(spacing: 3) {
+                    Text("VS")
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .foregroundColor(.white.opacity(0.45))
+                    Image(systemName: tied ? "equal.circle.fill" : "arrowtriangle.up.circle.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(statusColor)
+                }
+                .frame(width: 44)
+
+                side(
+                    name: rivalName,
+                    image: opponent.profileImageUrl,
+                    miles: opponent.miles,
+                    highlight: !ownerLeading && !tied,
+                    color: .orange
+                )
+            }
+
+            Text(statusText)
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .foregroundColor(statusColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.black.opacity(0.16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(statusColor.opacity(0.28), lineWidth: 1)
+                )
+        )
+    }
+
+    private func side(name: String, image: String?, miles: Double, highlight: Bool, color: Color) -> some View {
+        HStack(spacing: 8) {
+            AvatarView(name: name, imageURL: image, size: 34)
+                .overlay(Circle().strokeBorder(highlight ? color : .clear, lineWidth: 2))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Text("\(formatMiles(miles)) mi")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .foregroundColor(highlight ? color : .white.opacity(0.72))
+                    .monospacedDigit()
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func formatMiles(_ miles: Double) -> String {
+        String(format: "%.2f", miles)
     }
 }
 

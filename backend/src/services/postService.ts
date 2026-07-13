@@ -1,7 +1,12 @@
 import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { shouldSendNotification } from "./notificationSettingsService.js";
-import { postHypeMatchSql, runHypeMatchSql } from "./hypeService.js";
+import {
+  postHypeMatchSql,
+  postHypedByViewerMatchSql,
+  runHypeMatchSql,
+  runHypedByViewerMatchSql,
+} from "./hypeService.js";
 
 const db = PostgresService.getInstance();
 
@@ -115,16 +120,15 @@ const POST_COLUMNS = `
 
 // SELECT list shared by feed + story-detail reads so both shapes match PostRow.
 // `$1` must be the viewer id (drives is_self / is_hyped).
-// Hype fields use the unified RUN rule (postHypeMatchSql): a post linked to a
-// workout also counts the run's 'mile' hypes (sent from the inbox / friends
-// list), so every surface shows the same number for the same run.
+// is_hyped is exact-card state so a different same-day mile doesn't disable
+// the button; hype_count still uses the broader run tally for social proof.
 const POST_SELECT = `${POST_COLUMNS},
 	(p.user_id = $1) AS is_self,
 	EXISTS (
 		SELECT 1 FROM hype_log h
 		WHERE h.sender_id = $1
 			AND h.target_id = p.user_id
-			AND ${postHypeMatchSql("h", "p")}
+			AND ${postHypedByViewerMatchSql("h", "p")}
 	) AS is_hyped,
 	(
 		SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
@@ -695,7 +699,7 @@ export async function getUnifiedFeed(
 				EXISTS (
 					SELECT 1 FROM hype_log h
 					WHERE h.sender_id = $1 AND h.target_id = p.user_id
-						AND ${postHypeMatchSql("h", "p")}
+						AND ${postHypedByViewerMatchSql("h", "p")}
 				) AS is_hyped,
 				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
 					WHERE hc.target_id = p.user_id
@@ -735,7 +739,7 @@ export async function getUnifiedFeed(
 				EXISTS (
 					SELECT 1 FROM hype_log h
 					WHERE h.sender_id = $1 AND h.target_id = w.user_id
-						AND ${runHypeMatchSql("h", "w")}
+						AND ${runHypedByViewerMatchSql("h", "w")}
 				) AS is_hyped,
 				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
 					WHERE hc.target_id = w.user_id

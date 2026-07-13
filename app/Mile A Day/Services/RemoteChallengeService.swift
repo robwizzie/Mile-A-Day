@@ -311,5 +311,6 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         let challengeIcon: String?
         let gradientStart: String?
         let gradientEnd: String?
+        let opponent: OpponentDTO?
     }
 }

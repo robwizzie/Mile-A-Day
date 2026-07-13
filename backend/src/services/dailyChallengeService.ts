@@ -122,6 +122,10 @@ export async function getTodaysCompletion(
   const rendered = challengeRow
     ? await renderChallenge(userId, challengeRow)
     : null;
+  const opponent =
+    challengeRow?.challenge_key === "head_to_head"
+      ? await buildOpponent(userId, localDate)
+      : null;
   return {
     userId,
     localDate,
@@ -131,6 +135,7 @@ export async function getTodaysCompletion(
     challengeIcon: rendered?.icon ?? null,
     gradientStart: rendered?.gradientStart ?? null,
     gradientEnd: rendered?.gradientEnd ?? null,
+    opponent,
   };
 }
 

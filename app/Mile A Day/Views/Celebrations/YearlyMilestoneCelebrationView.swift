@@ -728,13 +728,7 @@ struct YearlyMilestoneShareCardView: View {
 
     private var brandingFooter: some View {
         HStack(spacing: 12) {
-            Image("mad-logo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 36, height: 36)
-            Text("Mile A Day")
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundColor(.white.opacity(0.95))
+            MADLogoMark(size: 38, opacity: 1, shadow: false)
             Spacer()
             Text("mileaday.run")
                 .font(.system(size: 14, weight: .semibold, design: .rounded))

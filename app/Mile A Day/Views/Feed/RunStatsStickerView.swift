@@ -257,15 +257,7 @@ struct RunStatsStickerView: View {
     // MARK: Shared pieces
 
     private var brandLine: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "flame.fill")
-                .font(.system(size: 11, weight: .black))
-                .foregroundColor(accent)
-            Text("MILE A DAY")
-                .font(.system(size: 11, weight: .black, design: .rounded))
-                .tracking(1.5)
-                .foregroundColor(.white.opacity(0.85))
-        }
+        MADLogoMark(size: 26, opacity: 0.9, shadow: false)
     }
 
     private func heroValue(_ datum: RunStatDatum) -> some View {

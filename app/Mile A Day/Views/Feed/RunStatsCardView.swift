@@ -96,15 +96,7 @@ struct RunStatsCardView: View {
                 }
 
                 // Brand row — kept above the carousel's page-dot zone.
-                HStack(spacing: 6) {
-                    Image("mad-logo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 18, height: 18)
-                    Text("Mile A Day")
-                        .font(.system(size: 14, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white.opacity(0.85))
-                }
+                MADLogoMark(size: 34, opacity: 0.9)
                 .padding(.top, 18)
                 .padding(.bottom, 26)
             }
@@ -248,15 +240,7 @@ struct RouteStatsOverlayView: View {
                         scrimChip("clock.fill", RunStatsStickerView.durationText(d))
                     }
                     Spacer()
-                    HStack(spacing: 5) {
-                        Image("mad-logo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 16, height: 16)
-                        Text("Mile A Day")
-                            .font(.system(size: 12, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white.opacity(0.9))
-                    }
+                    MADLogoMark(size: 24, opacity: 0.9, shadow: false)
                 }
             }
             .padding(.horizontal, 18)

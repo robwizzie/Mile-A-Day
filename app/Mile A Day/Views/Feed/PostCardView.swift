@@ -104,7 +104,8 @@ struct PostCardView: View {
                         }
                     }
                     Button(role: .destructive, action: onDelete) {
-                        Label("Delete post", systemImage: "trash")
+                        Label(post.share_to_feed == false ? "Delete story" : "Delete post",
+                              systemImage: "trash")
                     }
                 } else {
                     Button(action: onReport) { Label("Report", systemImage: "flag") }

@@ -100,15 +100,27 @@ export async function getContextHypers(
   const params: unknown[] = [targetId, contextId, limit];
 
   if (contextType === "mile") {
-    // $2 = user:local_date composite.
+    // $2 = a workout id from the feed, or a legacy/user-notification
+    // user:local_date composite. Match both exact workout hypes and legacy
+    // composite hypes that belong to the same workout day.
     matchSql = `(
-			(h.context_type = 'mile' AND h.context_id = $2)
+			(h.context_type = 'mile' AND (
+				h.context_id = $2
+				OR h.context_id IN (
+					SELECT w.user_id || ':' || w.local_date::text
+					FROM workouts w
+					WHERE w.user_id = $1 AND w.workout_id::text = $2
+				)
+			))
 			OR (h.context_type = 'post' AND h.context_id IN (
 				SELECT p.post_id::text
 				FROM posts p
 				JOIN workouts w ON w.workout_id = p.workout_id
 				WHERE p.user_id = $1 AND p.deleted_at IS NULL
-					AND (w.user_id || ':' || w.local_date::text) = $2
+					AND (
+						w.workout_id::text = $2
+						OR (w.user_id || ':' || w.local_date::text) = $2
+					)
 			))
 		)`;
   } else if (contextType === "post") {
@@ -219,7 +231,23 @@ export function mileHypeKeyMatchSql(
  */
 export function runHypeMatchSql(h: string, w: string): string {
   return `(
-		(${h}.context_type = 'mile' AND ${mileHypeKeyMatchSql(h, w)})
+		(${h}.context_type = 'mile' AND (${mileHypeKeyMatchSql(h, w)} OR ${h}.context_id = ${w}.workout_id::text))
+		OR (${h}.context_type = 'post' AND ${h}.context_id IN (
+			SELECT p_.post_id::text FROM posts p_
+			WHERE p_.workout_id = ${w}.workout_id AND p_.user_id = ${w}.user_id
+				AND p_.deleted_at IS NULL
+		))
+	)`;
+}
+
+/**
+ * Viewer/button-state predicate for one concrete workout. Unlike the tally
+ * rule above, this does not let a legacy/date-keyed mile hype make a later
+ * same-day workout look already hyped in the feed.
+ */
+export function runHypedByViewerMatchSql(h: string, w: string): string {
+  return `(
+		(${h}.context_type = 'mile' AND ${h}.context_id = ${w}.workout_id::text)
 		OR (${h}.context_type = 'post' AND ${h}.context_id IN (
 			SELECT p_.post_id::text FROM posts p_
 			WHERE p_.workout_id = ${w}.workout_id AND p_.user_id = ${w}.user_id
@@ -238,9 +266,12 @@ export function runHypeMatchSql(h: string, w: string): string {
 export function postHypeMatchSql(h: string, p: string): string {
   return `(
 		(${h}.context_type = 'post' AND ${h}.context_id = ${p}.post_id::text)
-		OR (${p}.workout_id IS NOT NULL AND ${h}.context_type = 'mile' AND ${h}.context_id = (
-			SELECT w_.user_id || ':' || w_.local_date::text FROM workouts w_
-			WHERE w_.workout_id = ${p}.workout_id
+		OR (${p}.workout_id IS NOT NULL AND ${h}.context_type = 'mile' AND (
+			${h}.context_id = ${p}.workout_id::text
+			OR ${h}.context_id = (
+				SELECT w_.user_id || ':' || w_.local_date::text FROM workouts w_
+				WHERE w_.workout_id = ${p}.workout_id
+			)
 		))
 		OR (${p}.workout_id IS NOT NULL AND ${h}.context_type = 'post' AND ${h}.context_id IN (
 			SELECT p2_.post_id::text FROM posts p2_
@@ -250,13 +281,25 @@ export function postHypeMatchSql(h: string, p: string): string {
 	)`;
 }
 
+/** Exact post/workout predicate for "did I hype this card?" state. */
+export function postHypedByViewerMatchSql(h: string, p: string): string {
+  return `(
+		(${h}.context_type = 'post' AND ${h}.context_id = ${p}.post_id::text)
+		OR (${p}.workout_id IS NOT NULL AND ${h}.context_type = 'mile' AND ${h}.context_id = ${p}.workout_id::text)
+		OR (${p}.workout_id IS NOT NULL AND ${h}.context_type = 'post' AND ${h}.context_id IN (
+			SELECT p2_.post_id::text FROM posts p2_
+			WHERE p2_.workout_id = ${p}.workout_id AND p2_.user_id = ${p}.user_id
+				AND p2_.deleted_at IS NULL
+		))
+	)`;
+}
+
 /**
- * Canonicalize a 'mile' hype context. The feed historically keys mile hypes by
- * workout_id while the notifications inbox keys them by `<userId>:<localDate>`;
- * we resolve a workout_id to the composite form so both surfaces write (and
- * dedupe on) the same key. A composite id is re-prefixed with the target so a
- * client can't write a key that pollutes another user's counts. Unresolvable
- * ids pass through unchanged.
+ * Canonicalize a 'mile' hype context. The notifications inbox keys by
+ * `<userId>:<localDate>`; feed workout cards key by exact workout_id so a
+ * second same-day workout is still hypeable. A composite id is re-prefixed with
+ * the target so a client can't write a key that pollutes another user's counts.
+ * Unresolvable ids pass through unchanged for backward compatibility.
  */
 /** True when the string is a real calendar date, not just \d{4}-\d{2}-\d{2}. */
 function isRealDate(value: string): boolean {
@@ -288,14 +331,10 @@ export async function canonicalizeMileContext(
   );
   const localDate = rows[0]?.local_date;
   if (!localDate) return context;
-  return { ...context, contextId: `${targetId}:${localDate}` };
+  return context;
 }
 
-/**
- * Dedupe check for 'mile' contexts. Since migration 0012 collapsed legacy
- * workout_id-keyed rows onto the canonical composite, an exact-key check is
- * sufficient — kept as its own entry point in case mile keys grow rules again.
- */
+/** Exact-key dedupe for older callers that do not need run/post expansion. */
 export async function hasHypedMile(
   senderId: string,
   targetId: string,
@@ -318,8 +357,10 @@ export async function hasHypedRunContext(
   contextType: "mile" | "post",
   contextId: string,
 ): Promise<boolean> {
+  const isCompositeMile =
+    contextType === "mile" && MILE_COMPOSITE_RE.test(contextId);
   const matchSql =
-    contextType === "mile"
+    contextType === "mile" && isCompositeMile
       ? `(
 			(h.context_type = 'mile' AND h.context_id = $3)
 			OR (h.context_type = 'post' AND h.context_id IN (
@@ -330,10 +371,16 @@ export async function hasHypedRunContext(
 					AND (w.user_id || ':' || w.local_date::text) = $3
 			))
 		)`
-      : `EXISTS (
+      : contextType === "mile"
+        ? `EXISTS (
+			SELECT 1 FROM workouts w
+			WHERE w.workout_id::text = $3 AND w.user_id = $2
+				AND ${runHypedByViewerMatchSql("h", "w")}
+		)`
+        : `EXISTS (
 			SELECT 1 FROM posts p
 			WHERE p.post_id::text = $3 AND p.user_id = $2
-				AND ${postHypeMatchSql("h", "p")}
+				AND ${postHypedByViewerMatchSql("h", "p")}
 		)`;
 
   const rows = await db.query<{ exists: boolean }>(

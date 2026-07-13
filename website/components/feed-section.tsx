@@ -1,19 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import { useRef, useCallback, useState } from "react";
-import {
-  Camera,
-  Flame,
-  Gauge,
-  Footprints,
-  Hand,
-  Hourglass,
-  Map,
-  MoreHorizontal,
-  Plus,
-} from "lucide-react";
+import { Camera, Hand, Hourglass, Map, Plus } from "lucide-react";
 import { ProfileAvatar } from "@/components/profile-avatar";
-import { usePublicUser } from "@/lib/public-user";
 
 // App palette (MADTheme). Hype is ALWAYS represented by a clap/hand action in
 // Mile A Day — the button is solid orange, the tally icon is orange.
@@ -154,87 +144,31 @@ const MINI_CLAPS = Array.from({ length: 6 }, (_, i) => {
   };
 });
 
-/** One post, faithful to PostCardView: author header (avatar, name, relative
- * time, activity chip, ellipsis menu) → 4:5 media with page dots → stat strip
- * chips → caption → footer with the hype tally left and the solid-orange
- * clap Hype button right. No comments — hypes ARE the social currency. */
+/** One real feed-post screenshot with a double-tap hype burst layered on top. */
 function FeedPostCard() {
-  const rob = usePublicUser("rob");
-  const streak = rob?.currentStreak ?? 427;
-  const [hyped, setHyped] = useState(false);
   const [burst, setBurst] = useState(0);
 
   // Mirrors doubleTapHype(): the burst replays on every double-tap, but the
-  // hype itself only counts once.
+  // real screenshot already carries the post chrome and hype count.
   const hype = useCallback(() => {
     setBurst((b) => b + 1);
-    setHyped(true);
   }, []);
 
   return (
     <div className="rounded-2xl bg-white/[0.04] p-2.5">
-      {/* Header */}
-      <div className="flex items-center gap-2.5 px-1 pb-2 pt-0.5">
-        <ProfileAvatar username="rob" initials="RW" size={40} />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[15px] font-bold leading-tight text-white">
-            Rob
-          </div>
-          <div className="text-xs font-medium text-white/50">2h ago</div>
-        </div>
-        <div
-          className="flex h-[30px] w-[30px] items-center justify-center rounded-full"
-          style={{ background: `${MAD_RED}26` }}
-        >
-          <Footprints className="h-4 w-4" style={{ color: MAD_RED }} />
-        </div>
-        <MoreHorizontal className="h-4 w-4 text-white/60" />
-      </div>
-
-      {/* Media — 4:5 like the app, double-tap (or double-click) to hype */}
       <div
-        className="relative aspect-[4/5] cursor-pointer select-none overflow-hidden rounded-xl"
+        className="relative cursor-pointer select-none overflow-hidden rounded-xl"
         onDoubleClick={hype}
-        style={{
-          background:
-            "linear-gradient(165deg, #3a1c28 0%, #1c1016 45%, #0e1812 100%)",
-        }}
       >
-        {/* Run photo mock: visible enough to read as content on a dark page. */}
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(180deg, rgba(217,64,89,0.34) 0%, rgba(255,153,0,0.2) 38%, rgba(9,22,15,0.92) 100%)",
-          }}
+        <Image
+          src="/images/feed-example.png"
+          alt="Mile A Day feed post example"
+          width={1185}
+          height={1928}
+          priority={false}
+          className="h-auto w-full rounded-xl"
+          sizes="(min-width: 1024px) 420px, 90vw"
         />
-        <div
-          className="absolute left-[18%] top-[18%] h-20 w-20 rounded-full blur-sm"
-          style={{
-            background: `radial-gradient(circle, ${HYPE_ORANGE} 0%, rgba(255,153,0,0.42) 42%, transparent 70%)`,
-          }}
-        />
-        <div className="absolute bottom-0 left-0 right-0 h-[48%] bg-gradient-to-t from-[#07120d] via-[#102016] to-transparent" />
-        <div className="absolute bottom-0 left-1/2 h-[54%] w-[42%] -translate-x-1/2 skew-x-[-8deg] bg-black/25" />
-        <div className="absolute bottom-0 left-[48%] h-[52%] w-[2px] rotate-[8deg] bg-white/20" />
-        <div
-          className="absolute bottom-[18%] left-[18%] right-[16%] h-[36%] rounded-full border-2 border-dashed opacity-80"
-          style={{
-            borderColor: `${HYPE_ORANGE}CC`,
-            transform: "rotate(-18deg)",
-          }}
-        />
-        <div className="absolute left-4 top-4 rounded-full bg-black/30 px-2.5 py-1 text-[11px] font-extrabold text-white/90 backdrop-blur">
-          Morning mile
-        </div>
-        <div className="absolute bottom-8 right-4 rounded-xl bg-black/35 px-3 py-2 text-right backdrop-blur">
-          <div className="text-[10px] font-bold uppercase tracking-wide text-white/45">
-            Route shared
-          </div>
-          <div className="mt-0.5 text-[18px] font-black tabular-nums text-white">
-            1.24 mi
-          </div>
-        </div>
 
         {/* Clap burst — hero clap + radiating mini claps (HypeBurstView) */}
         {burst > 0 && (
@@ -264,75 +198,6 @@ function FeedPostCard() {
             ))}
           </div>
         )}
-
-        {/* Page dots — photo → stats card → route map slides */}
-        <div className="absolute bottom-2.5 left-0 right-0 flex justify-center gap-1.5">
-          <span className="h-1.5 w-1.5 rounded-full bg-white" />
-          <span className="h-1.5 w-1.5 rounded-full bg-white/40" />
-          <span className="h-1.5 w-1.5 rounded-full bg-white/40" />
-        </div>
-      </div>
-
-      {/* Stat strip — flame streak, distance, pace chips (PostStatStrip) */}
-      <div className="flex flex-wrap gap-2 px-0.5 pt-2.5">
-        <span className="flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-1">
-          <Flame className="h-3 w-3" style={{ color: HYPE_ORANGE }} />
-          <span
-            className="text-[11px] font-extrabold tabular-nums"
-            style={{ color: HYPE_ORANGE }}
-          >
-            {streak} day streak
-          </span>
-        </span>
-        <span className="flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-1 text-white/85">
-          <Footprints className="h-3 w-3" />
-          <span className="text-[11px] font-extrabold tabular-nums">
-            1.24 mi
-          </span>
-        </span>
-        <span className="flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-1 text-white/85">
-          <Gauge className="h-3 w-3" />
-          <span className="text-[11px] font-extrabold tabular-nums">
-            8:41 /mi
-          </span>
-        </span>
-      </div>
-
-      {/* Caption */}
-      <p className="px-0.5 pt-2 text-sm font-medium text-white/90">
-        Morning mile. Another one in the books.
-      </p>
-
-      {/* Footer — hype tally left, Hype button right (HypeControls) */}
-      <div className="flex items-center justify-between px-0.5 pb-1 pt-2.5">
-        <span className="flex items-center gap-1.5">
-          <Hand className="h-3.5 w-3.5" style={{ color: HYPE_ORANGE }} />
-          <span className="text-[13px] font-extrabold tabular-nums text-white/90">
-            {hyped ? 13 : 12} hypes
-          </span>
-        </span>
-        <button
-          onClick={hype}
-          aria-label="Hype this run"
-          className="flex items-center gap-1 rounded-full px-3 py-1.5 transition-all active:scale-90"
-          style={
-            hyped
-              ? {
-                  background: "rgba(255,255,255,0.06)",
-                  color: "rgba(255,255,255,0.35)",
-                }
-              : {
-                  background: HYPE_ORANGE,
-                  color: "#fff",
-                  boxShadow: `0 2px 10px ${HYPE_ORANGE}59`,
-                }
-          }
-        >
-          <Hand className="h-3.5 w-3.5" style={{ opacity: hyped ? 0.55 : 1 }} />
-          <span className="text-xs font-extrabold">
-            {hyped ? "Hyped" : "Hype"}
-          </span>
-        </button>
       </div>
     </div>
   );

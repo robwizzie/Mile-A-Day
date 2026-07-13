@@ -312,15 +312,7 @@ struct FeedWorkoutCard: View {
                     }
                 }
 
-                HStack(spacing: 5) {
-                    Image("mad-logo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 16, height: 16)
-                    Text("Mile A Day")
-                        .font(.system(size: 12, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white.opacity(0.85))
-                }
+                MADLogoMark(size: 28, opacity: 0.9)
                 .padding(.top, 14)
             }
             .padding(18)

@@ -99,24 +99,7 @@ struct MADBrandingHeader: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Actual MAD Logo from assets
-            Image("mad-logo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 32, height: 32)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("MILE A DAY")
-                    .font(.system(size: 16, weight: .semibold, design: .default))
-                    .fontWidth(.condensed)
-                    .foregroundColor(isDarkMode ? .white : .black)
-                    .tracking(1)
-
-                Text("Stay Active. Stay Motivated.")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
-            }
-
+            MADLogoMark(size: 42, opacity: 1, shadow: false)
             Spacer()
         }
     }
@@ -129,14 +112,8 @@ struct MADBrandingFooter: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image("mad-logo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 18, height: 18)
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Mile A Day")
-                    .font(.system(size: 11, weight: .semibold, design: .default))
-                    .foregroundColor(isDarkMode ? .white : .black)
+            MADLogoMark(size: 24, opacity: 1, shadow: false)
+            VStack(alignment: .leading, spacing: 1) {
                 Text("Stay Active. Stay Motivated.")
                     .font(.system(size: 10, weight: .regular, design: .default))
                     .foregroundColor(isDarkMode ? .white.opacity(0.7) : .black.opacity(0.6))
