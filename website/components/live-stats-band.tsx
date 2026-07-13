@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Route, Flame, Heart, Bell } from "lucide-react";
+import { Route, Flame, Hand, Bell } from "lucide-react";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "https://mad.mindgoblin.tech";
@@ -173,8 +173,8 @@ export function LiveStatsBand() {
             delay={2}
           />
           <StatCard
-            icon={Heart}
-            color="#D94059"
+            icon={Hand}
+            color="#FF9900"
             value={Math.round(hypes).toLocaleString()}
             label="Hypes sent"
             sublabel="double-taps of pure support"

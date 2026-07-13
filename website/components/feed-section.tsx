@@ -1,12 +1,22 @@
 "use client";
 
 import { useRef, useCallback, useState } from "react";
-import { Flame, Gauge, Footprints, Plus, MoreHorizontal } from "lucide-react";
+import {
+  Camera,
+  Flame,
+  Gauge,
+  Footprints,
+  Hand,
+  Hourglass,
+  Map,
+  MoreHorizontal,
+  Plus,
+} from "lucide-react";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { usePublicUser } from "@/lib/public-user";
 
-// App palette (MADTheme). Hype is ALWAYS the clap 👏 in Mile A Day — the
-// button is solid orange, the tally clap is orange (see HypeControls.swift).
+// App palette (MADTheme). Hype is ALWAYS represented by a clap/hand action in
+// Mile A Day — the button is solid orange, the tally icon is orange.
 const MAD_RED = "#D94059";
 const HYPE_ORANGE = "#FF9900";
 
@@ -173,10 +183,10 @@ function FeedPostCard() {
           <div className="text-xs font-medium text-white/50">2h ago</div>
         </div>
         <div
-          className="flex h-[30px] w-[30px] items-center justify-center rounded-full text-[14px]"
+          className="flex h-[30px] w-[30px] items-center justify-center rounded-full"
           style={{ background: `${MAD_RED}26` }}
         >
-          🏃
+          <Footprints className="h-4 w-4" style={{ color: MAD_RED }} />
         </div>
         <MoreHorizontal className="h-4 w-4 text-white/60" />
       </div>
@@ -190,14 +200,41 @@ function FeedPostCard() {
             "linear-gradient(165deg, #3a1c28 0%, #1c1016 45%, #0e1812 100%)",
         }}
       >
-        {/* Sunrise glow — stands in for the run photo */}
+        {/* Run photo mock: visible enough to read as content on a dark page. */}
         <div
-          className="absolute -top-6 right-8 h-32 w-32 rounded-full opacity-35 blur-2xl"
+          className="absolute inset-0"
           style={{
-            background: `linear-gradient(180deg, ${HYPE_ORANGE}, ${MAD_RED})`,
+            background:
+              "linear-gradient(180deg, rgba(217,64,89,0.34) 0%, rgba(255,153,0,0.2) 38%, rgba(9,22,15,0.92) 100%)",
           }}
         />
-        <div className="absolute bottom-0 left-0 right-0 h-1/3 bg-gradient-to-t from-black/40 to-transparent" />
+        <div
+          className="absolute left-[18%] top-[18%] h-20 w-20 rounded-full blur-sm"
+          style={{
+            background: `radial-gradient(circle, ${HYPE_ORANGE} 0%, rgba(255,153,0,0.42) 42%, transparent 70%)`,
+          }}
+        />
+        <div className="absolute bottom-0 left-0 right-0 h-[48%] bg-gradient-to-t from-[#07120d] via-[#102016] to-transparent" />
+        <div className="absolute bottom-0 left-1/2 h-[54%] w-[42%] -translate-x-1/2 skew-x-[-8deg] bg-black/25" />
+        <div className="absolute bottom-0 left-[48%] h-[52%] w-[2px] rotate-[8deg] bg-white/20" />
+        <div
+          className="absolute bottom-[18%] left-[18%] right-[16%] h-[36%] rounded-full border-2 border-dashed opacity-80"
+          style={{
+            borderColor: `${HYPE_ORANGE}CC`,
+            transform: "rotate(-18deg)",
+          }}
+        />
+        <div className="absolute left-4 top-4 rounded-full bg-black/30 px-2.5 py-1 text-[11px] font-extrabold text-white/90 backdrop-blur">
+          Morning mile
+        </div>
+        <div className="absolute bottom-8 right-4 rounded-xl bg-black/35 px-3 py-2 text-right backdrop-blur">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-white/45">
+            Route shared
+          </div>
+          <div className="mt-0.5 text-[18px] font-black tabular-nums text-white">
+            1.24 mi
+          </div>
+        </div>
 
         {/* Clap burst — hero clap + radiating mini claps (HypeBurstView) */}
         {burst > 0 && (
@@ -205,22 +242,25 @@ function FeedPostCard() {
             key={burst}
             className="pointer-events-none absolute inset-0 flex items-center justify-center"
           >
-            <span className="clap-pop absolute text-[64px] leading-none drop-shadow-[0_4px_16px_rgba(0,0,0,0.6)]">
-              👏
-            </span>
+            <Hand
+              className="clap-pop absolute h-16 w-16 drop-shadow-[0_4px_16px_rgba(0,0,0,0.6)]"
+              style={{ color: HYPE_ORANGE, fill: `${HYPE_ORANGE}22` }}
+              strokeWidth={2.4}
+            />
             {MINI_CLAPS.map((c, i) => (
-              <span
+              <Hand
                 key={i}
-                className="clap-fly absolute text-[22px] leading-none"
+                className="clap-fly absolute h-6 w-6"
                 style={
                   {
                     "--dx": `${c.dx}px`,
                     "--dy": `${c.dy}px`,
+                    color: HYPE_ORANGE,
+                    fill: `${HYPE_ORANGE}22`,
                   } as React.CSSProperties
                 }
-              >
-                👏
-              </span>
+                strokeWidth={2.3}
+              />
             ))}
           </div>
         )}
@@ -260,13 +300,13 @@ function FeedPostCard() {
 
       {/* Caption */}
       <p className="px-0.5 pt-2 text-sm font-medium text-white/90">
-        Morning mile ☀️ another one in the books.
+        Morning mile. Another one in the books.
       </p>
 
       {/* Footer — hype tally left, Hype button right (HypeControls) */}
       <div className="flex items-center justify-between px-0.5 pb-1 pt-2.5">
         <span className="flex items-center gap-1.5">
-          <span className="text-[13px] leading-none">👏</span>
+          <Hand className="h-3.5 w-3.5" style={{ color: HYPE_ORANGE }} />
           <span className="text-[13px] font-extrabold tabular-nums text-white/90">
             {hyped ? 13 : 12} hypes
           </span>
@@ -288,12 +328,7 @@ function FeedPostCard() {
                 }
           }
         >
-          <span
-            className="text-[13px] leading-none"
-            style={{ opacity: hyped ? 0.55 : 1 }}
-          >
-            👏
-          </span>
+          <Hand className="h-3.5 w-3.5" style={{ opacity: hyped ? 0.55 : 1 }} />
           <span className="text-xs font-extrabold">
             {hyped ? "Hyped" : "Hype"}
           </span>
@@ -333,50 +368,56 @@ export function FeedSection() {
             <div className="reveal reveal-delay-3 mt-8 space-y-4">
               {[
                 {
-                  emoji: "📸",
+                  icon: Camera,
                   color: MAD_RED,
                   title: "Snap it in the moment",
                   desc: "A photo prompt after every run — or grab the shot mid-mile and decide later.",
                 },
                 {
-                  emoji: "⏳",
+                  icon: Hourglass,
                   color: HYPE_ORANGE,
                   title: "Stories for the moment, feed for the record",
                   desc: "Stories vanish after 24 hours. Your feed keeps every mile you've shared.",
                 },
                 {
-                  emoji: "👏",
+                  icon: Hand,
                   color: HYPE_ORANGE,
                   title: "Double-tap to hype",
                   desc: "No likes here — hypes. A clap burst for every friend who got their mile in.",
                 },
                 {
-                  emoji: "🗺️",
+                  icon: Map,
                   color: "#33B34D",
                   title: "Your route, your call",
                   desc: "Show off the loop with a route map on your post — or keep it private with one toggle.",
                 },
-              ].map((item) => (
-                <div key={item.title} className="flex items-start gap-4">
-                  <div
-                    className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[17px]"
-                    style={{
-                      background: `${item.color}1A`,
-                      border: `1px solid ${item.color}33`,
-                    }}
-                  >
-                    {item.emoji}
-                  </div>
-                  <div>
-                    <div className="text-[15px] font-bold text-[#f5f5f5]">
-                      {item.title}
+              ].map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.title} className="flex items-start gap-4">
+                    <div
+                      className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                      style={{
+                        background: `${item.color}1A`,
+                        border: `1px solid ${item.color}33`,
+                      }}
+                    >
+                      <Icon
+                        className="h-5 w-5"
+                        style={{ color: item.color }}
+                      />
                     </div>
-                    <div className="mt-0.5 text-sm leading-relaxed text-[#a0a0a0]">
-                      {item.desc}
+                    <div>
+                      <div className="text-[15px] font-bold text-[#f5f5f5]">
+                        {item.title}
+                      </div>
+                      <div className="mt-0.5 text-sm leading-relaxed text-[#a0a0a0]">
+                        {item.desc}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -396,7 +437,7 @@ export function FeedSection() {
               </div>
             </TiltCard>
             <p className="mt-4 text-center text-xs text-white/35">
-              Go on — double-tap the photo. 👏
+              Go on — double-tap the photo.
             </p>
           </div>
         </div>
