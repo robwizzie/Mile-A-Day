@@ -266,8 +266,14 @@ final class MADNotificationService: NSObject, ObservableObject {
         }
 
         do {
-            struct RegisterRequest: Codable { let device_token: String }
-            let body = try JSONEncoder().encode(RegisterRequest(device_token: token))
+            struct RegisterRequest: Codable {
+                let device_token: String
+                let environment: String
+            }
+            let body = try JSONEncoder().encode(RegisterRequest(
+                device_token: token,
+                environment: AppEnvironment.apnsEnvironment
+            ))
             let _: [String: String] = try await APIClient.fancyFetch(
                 endpoint: "/devices/register",
                 method: .POST,

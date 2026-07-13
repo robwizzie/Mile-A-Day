@@ -52,8 +52,8 @@ globs: backend/**
 - `/uploads/posts` requires signed urls (`mediaSigningService`). Any endpoint RETURNING `media_url`/`story_photo_url` must wrap the payload in `signMediaUrlsDeep(...)`; any endpoint ACCEPTING a media_url must `stripMediaQuery(...)` first. The DB stores bare paths only.
 - The Feed UI isn't in the live App Store build and API calls carry no app-version signal. Server-side "user has the feed" = any `posts` row OR `terms_accepted_at IS NOT NULL` (`userHasFeedFeature` in dailyChallengeService) — gate feed-dependent features per-user with it (e.g. the `share_journey` daily challenge).
 
+## Push Notifications
+- `device_tokens.environment` selects the APNs host per token (`sandbox` for local DEBUG installs, `production` for App Store/TestFlight); never route pushes solely from server `APNS_PRODUCTION`.
+
 ## ESM Reminder
-All imports MUST end with `.js` extension:
-```typescript
-import { foo } from './services/fooService.js';
-```
+All imports MUST end with `.js` extension, e.g. `import { foo } from './services/fooService.js';`

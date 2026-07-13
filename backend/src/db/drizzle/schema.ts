@@ -391,6 +391,7 @@ export const deviceTokens = pgTable(
     id: uuid().defaultRandom().primaryKey().notNull(),
     userId: text("user_id").notNull(),
     deviceToken: text("device_token").notNull(),
+    environment: text().default("production").notNull(),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "string",

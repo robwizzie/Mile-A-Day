@@ -7,7 +7,7 @@ export async function registerDevice(req: AuthenticatedRequest, res: Response) {
 	if (!hasRequiredKeys(['device_token'], req, res)) return;
 
 	try {
-		await registerDeviceToken(req.userId!, req.body.device_token);
+		await registerDeviceToken(req.userId!, req.body.device_token, req.body.environment);
 		res.status(200).json({ message: 'Device registered' });
 	} catch (error: any) {
 		console.error('Error registering device:', error.message);
