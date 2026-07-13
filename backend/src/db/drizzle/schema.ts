@@ -694,6 +694,49 @@ export const userChallengeCompletions = pgTable(
   ],
 );
 
+export const h2hMatchups = pgTable(
+  "h2h_matchups",
+  {
+    localDate: date("local_date").notNull(),
+    userId: text("user_id").notNull(),
+    rivalId: text("rival_id").notNull(),
+    // TRUE only when this row is half of a reciprocal pair (both users see
+    // each other). Fallback assignments (odd-one-out, mid-day joiners) are FALSE.
+    mutual: boolean().default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    // Stamped by the end-of-day cron once the duel outcome is final.
+    // `won` is TRUE only when the user won AND the completion row was inserted.
+    resolvedAt: timestamp("resolved_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    won: boolean(),
+    // Stamped when the winner push was sent (deferred to the winner's local morning).
+    notifiedAt: timestamp("notified_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "h2h_matchups_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.rivalId],
+      foreignColumns: [users.userId],
+      name: "h2h_matchups_rival_id_fkey",
+    }).onDelete("cascade"),
+    primaryKey({
+      columns: [table.localDate, table.userId],
+      name: "h2h_matchups_pkey",
+    }),
+  ],
+);
+
 export const dailyChallenges = pgTable(
   "daily_challenges",
   {

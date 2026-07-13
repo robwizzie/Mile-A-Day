@@ -63,6 +63,8 @@ export interface ChallengeOpponent {
   profileImageUrl: string | null;
   miles: number;
   myMiles: number;
+  /** TRUE when the rival got the same matchup back (reciprocal pair). */
+  mutual: boolean;
 }
 
 export interface TodaysChallengeResponse {

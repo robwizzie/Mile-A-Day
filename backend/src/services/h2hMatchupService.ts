@@ -1,0 +1,554 @@
+import { PostgresService } from "./DbService.js";
+import { sendPush } from "./pushNotificationService.js";
+import {
+  ChallengeRow,
+  SOCIAL_CHALLENGE_KEYS,
+  FEED_CHALLENGE_KEYS,
+  walkRotation,
+  edgeScore,
+} from "./challengeRotation.js";
+
+const db = PostgresService.getInstance();
+
+/**
+ * Head-to-Head daily matchups.
+ *
+ * Rivals are PINNED in `h2h_matchups`, one row per (local_date, user): the
+ * duel a user sees in the morning is the duel that gets scored, even if their
+ * friend list changes mid-day. Pins are created by a once-per-day global
+ * matching that pairs users RECIPROCALLY wherever possible (both users get
+ * each other, `mutual = TRUE`). Reciprocity for everyone is mathematically
+ * impossible (odd counts, star-shaped friend graphs), so unpaired users fall
+ * back to a deterministic one-sided rival (`mutual = FALSE`) — same experience
+ * as the legacy behavior, never worse.
+ *
+ * The duel is scored by the end-of-day cron (see resolveDueMatchups), NOT at
+ * workout-sync time: it's a whole-day mileage total, so nobody can "win" while
+ * the other side still has hours left to run.
+ */
+
+export interface PinnedRival {
+  rivalId: string;
+  mutual: boolean;
+}
+
+/**
+ * The user's pinned rival for the date, creating pins if this is the first
+ * Head-to-Head read of the day. Returns null only for users with no accepted
+ * friends. A pin whose friendship has since ended (unfriend/block deletes both
+ * friendship rows) is treated as absent and deterministically re-pinned.
+ */
+export async function getOrAssignRival(
+  userId: string,
+  localDate: string,
+): Promise<PinnedRival | null> {
+  const readPin = async (): Promise<PinnedRival | null> => {
+    const rows = await db.query<{ rival_id: string; mutual: boolean }>(
+      `SELECT m.rival_id, m.mutual
+			FROM h2h_matchups m
+			JOIN friendships f
+				ON f.user_id = m.user_id AND f.friend_id = m.rival_id AND f.status = 'accepted'
+			WHERE m.local_date = $1 AND m.user_id = $2`,
+      [localDate, userId],
+    );
+    return rows[0]
+      ? { rivalId: rows[0].rival_id, mutual: rows[0].mutual === true }
+      : null;
+  };
+
+  let pin = await readPin();
+  if (pin) return pin;
+
+  // First Head-to-Head read of this date anywhere → compute the day's matching.
+  try {
+    await ensureMatchupsForDate(localDate);
+  } catch (e: any) {
+    console.error(
+      `[H2H] ensureMatchupsForDate(${localDate}) failed:`,
+      e?.message ?? e,
+    );
+  }
+  pin = await readPin();
+  if (pin) return pin;
+
+  // Still no usable pin: the user joined the pool after matching ran (new
+  // friendship, eligibility flip) or their pinned rival unfriended them.
+  // Deterministic one-sided fallback among current accepted friends, then pin
+  // it so the rest of the day (and the resolver) sees the same duel.
+  const friends = await db.query<{ friend_id: string }>(
+    `SELECT friend_id FROM friendships WHERE user_id = $1 AND status = 'accepted'`,
+    [userId],
+  );
+  if (friends.length === 0) return null;
+
+  let rivalId = friends[0].friend_id;
+  let best = Number.POSITIVE_INFINITY;
+  for (const f of friends) {
+    const s = edgeScore(userId, f.friend_id, localDate);
+    if (s < best || (s === best && f.friend_id < rivalId)) {
+      best = s;
+      rivalId = f.friend_id;
+    }
+  }
+
+  // Upsert replaces a dead pin (unfriended rival). Never rewrite a row the
+  // resolver already scored — by then the user's local date has moved past
+  // this date anyway, so live reads can't reach here; belt and suspenders.
+  const upserted = await db.query<{ rival_id: string; mutual: boolean }>(
+    `INSERT INTO h2h_matchups (local_date, user_id, rival_id, mutual)
+		VALUES ($1, $2, $3, FALSE)
+		ON CONFLICT (local_date, user_id) DO UPDATE
+			SET rival_id = EXCLUDED.rival_id, mutual = FALSE
+			WHERE h2h_matchups.resolved_at IS NULL
+		RETURNING rival_id, mutual`,
+    [localDate, userId, rivalId],
+  );
+  if (upserted[0]) {
+    return { rivalId: upserted[0].rival_id, mutual: false };
+  }
+  // Upsert was blocked by the resolved guard — surface whatever is stored.
+  const stored = await db.query<{ rival_id: string; mutual: boolean }>(
+    `SELECT rival_id, mutual FROM h2h_matchups WHERE local_date = $1 AND user_id = $2`,
+    [localDate, userId],
+  );
+  return stored[0]
+    ? { rivalId: stored[0].rival_id, mutual: stored[0].mutual === true }
+    : null;
+}
+
+// ─── Once-per-day global matching ───────────────────────────────────
+
+/**
+ * Compute and insert the day's matchups exactly once, serialized by an
+ * advisory lock. Concurrent first-readers block on the lock, then see the
+ * winner's rows and skip. Rows for a date existing at all means the matching
+ * already ran (individual fallback pins can only be created AFTER this).
+ */
+async function ensureMatchupsForDate(localDate: string): Promise<void> {
+  const existing = await db.query(
+    `SELECT 1 FROM h2h_matchups WHERE local_date = $1 LIMIT 1`,
+    [localDate],
+  );
+  if (existing.length > 0) return;
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+    await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [
+      `h2h_matchups:${localDate}`,
+    ]);
+    const again = await client.query(
+      `SELECT 1 FROM h2h_matchups WHERE local_date = $1 LIMIT 1`,
+      [localDate],
+    );
+    if (again.rows.length === 0) {
+      await computeAndInsertMatchups(client, localDate);
+    }
+    await client.query("COMMIT");
+  } catch (e) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      /* connection-level failure; release below */
+    }
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+type PoolClient = Awaited<ReturnType<PostgresService["getClient"]>>;
+
+/**
+ * Global greedy matching for one date.
+ *
+ * Pool = users whose rotation selection for the date is head_to_head. All pool
+ * candidates have friends (social challenges are skipped otherwise), so
+ * selection only varies by the feed flag — the rotation is walked once per
+ * flag value instead of once per user (see selectChallengeForUser, whose
+ * semantics this mirrors via the shared walkRotation).
+ *
+ * Matching: every undirected friendship edge inside the pool gets the
+ * deterministic per-day edgeScore; ascending greedy pass pairs both-free
+ * endpoints (mutual). Leftover pool users get a one-sided rival: their
+ * best-scored pool neighbor (someone also dueling today) if any, else their
+ * best-scored friend overall.
+ */
+async function computeAndInsertMatchups(
+  client: PoolClient,
+  localDate: string,
+): Promise<void> {
+  const challengeRows = (
+    await client.query<ChallengeRow>(
+      `SELECT challenge_key, title, description_template, icon, gradient_start, gradient_end, type
+			FROM daily_challenges WHERE active = TRUE ORDER BY rotation_index ASC`,
+    )
+  ).rows;
+  if (challengeRows.length === 0) return;
+
+  // Everyone in the candidate set below has accepted friends, so the social
+  // gate always passes — selection varies only by the feed flag.
+  const selectsH2h = async (hasFeed: boolean): Promise<boolean> => {
+    const picked = await walkRotation(challengeRows, localDate, (row) =>
+      FEED_CHALLENGE_KEYS.has(row.challenge_key) ? hasFeed : true,
+    );
+    return picked.challenge_key === "head_to_head";
+  };
+  const h2hWithFeed = await selectsH2h(true);
+  const h2hWithoutFeed = await selectsH2h(false);
+  if (!h2hWithFeed && !h2hWithoutFeed) return; // nobody duels on this date
+
+  // Undirected accepted-friendship edges (accepted rows exist in both
+  // directions; user_id < friend_id keeps one per pair).
+  const edges = (
+    await client.query<{ user_id: string; friend_id: string }>(
+      `SELECT user_id, friend_id FROM friendships
+			WHERE status = 'accepted' AND user_id < friend_id`,
+    )
+  ).rows;
+  if (edges.length === 0) return;
+
+  const userIds = [...new Set(edges.flatMap((e) => [e.user_id, e.friend_id]))];
+
+  // Feed flags in one batch — same signal as userHasFeedFeature.
+  const feedRows = (
+    await client.query<{ user_id: string; has_feed: boolean }>(
+      `SELECT u.user_id,
+				(EXISTS (SELECT 1 FROM posts p WHERE p.user_id = u.user_id)
+					OR u.terms_accepted_at IS NOT NULL) AS has_feed
+			FROM users u WHERE u.user_id = ANY($1::text[])`,
+      [userIds],
+    )
+  ).rows;
+  const hasFeed = new Map(
+    feedRows.map((r) => [r.user_id, r.has_feed === true]),
+  );
+
+  const inPool = (uid: string): boolean =>
+    hasFeed.get(uid) ? h2hWithFeed : h2hWithoutFeed;
+  const pool = new Set(userIds.filter(inPool));
+  if (pool.size === 0) return;
+
+  const scored = edges
+    .filter((e) => pool.has(e.user_id) && pool.has(e.friend_id))
+    .map((e) => ({
+      a: e.user_id,
+      b: e.friend_id,
+      score: edgeScore(e.user_id, e.friend_id, localDate),
+    }))
+    .sort(
+      (x, y) =>
+        x.score - y.score || x.a.localeCompare(y.a) || x.b.localeCompare(y.b),
+    );
+
+  const rivalOf = new Map<string, { rivalId: string; mutual: boolean }>();
+  for (const { a, b } of scored) {
+    if (!rivalOf.has(a) && !rivalOf.has(b)) {
+      rivalOf.set(a, { rivalId: b, mutual: true });
+      rivalOf.set(b, { rivalId: a, mutual: true });
+    }
+  }
+
+  // Leftovers: best pool neighbor first (they're at least dueling today),
+  // else best friend overall. One-sided, so mutual = FALSE.
+  const neighbors = new Map<string, string[]>();
+  const addNeighbor = (from: string, to: string) => {
+    const list = neighbors.get(from);
+    if (list) list.push(to);
+    else neighbors.set(from, [to]);
+  };
+  for (const e of edges) {
+    addNeighbor(e.user_id, e.friend_id);
+    addNeighbor(e.friend_id, e.user_id);
+  }
+  for (const uid of pool) {
+    if (rivalOf.has(uid)) continue;
+    const all = neighbors.get(uid) ?? [];
+    const pick = (candidates: string[]): string | null => {
+      let bestId: string | null = null;
+      let best = Number.POSITIVE_INFINITY;
+      for (const c of candidates) {
+        const s = edgeScore(uid, c, localDate);
+        if (s < best || (s === best && (bestId === null || c < bestId))) {
+          best = s;
+          bestId = c;
+        }
+      }
+      return bestId;
+    };
+    const rival = pick(all.filter((c) => pool.has(c))) ?? pick(all);
+    if (rival) rivalOf.set(uid, { rivalId: rival, mutual: false });
+  }
+
+  const entries = [...rivalOf.entries()];
+  const CHUNK = 2000;
+  for (let i = 0; i < entries.length; i += CHUNK) {
+    const chunk = entries.slice(i, i + CHUNK);
+    const values: string[] = [];
+    const params: any[] = [localDate];
+    for (const [uid, { rivalId, mutual }] of chunk) {
+      values.push(
+        `($1, $${params.length + 1}, $${params.length + 2}, $${params.length + 3})`,
+      );
+      params.push(uid, rivalId, mutual);
+    }
+    await client.query(
+      `INSERT INTO h2h_matchups (local_date, user_id, rival_id, mutual)
+			VALUES ${values.join(", ")}
+			ON CONFLICT (local_date, user_id) DO NOTHING`,
+      params,
+    );
+  }
+  console.log(
+    `[H2H] Matched ${entries.length} user(s) for ${localDate} (${
+      [...rivalOf.values()].filter((r) => r.mutual).length
+    } in mutual pairs).`,
+  );
+}
+
+// ─── End-of-day resolution (cron) ───────────────────────────────────
+
+/**
+ * A user's local "now" as a tz-less timestamp, preferring the app-reported
+ * notification offset and falling back to the last workout's offset (same
+ * precedence as the weekly recap cron). `col` is a code-controlled column
+ * reference, never user input.
+ */
+function localNowSql(col: string): string {
+  return `((NOW() AT TIME ZONE 'UTC') + (COALESCE(
+		(SELECT ns.timezone_offset_minutes FROM notification_settings ns WHERE ns.user_id = ${col}),
+		(SELECT w.timezone_offset FROM workouts w WHERE w.user_id = ${col} ORDER BY w.device_end_date DESC LIMIT 1),
+		0) || ' minutes')::interval)`;
+}
+
+/**
+ * Hours past local midnight before a day's duel is scored. Late HealthKit
+ * syncs (phone locked overnight, Watch backlog) can add workouts to a
+ * finished day; waiting until 6 AM local absorbs most of them. There is no
+ * revocation path for challenge completions, so scoring too early records a
+ * wrong winner permanently.
+ */
+const RESOLVE_GRACE_HOURS = 6;
+
+/**
+ * Score every unresolved matchup whose day is over — for BOTH sides — plus the
+ * grace period (the rival's late-night miles are part of the outcome, so their
+ * clock matters too). Winner inserts the day's challenge completion; the push
+ * is deferred to notifyPendingWinners. Hourly-cron safe: idempotent per row.
+ */
+export async function resolveDueMatchups(): Promise<void> {
+  const cutoff = `(m.local_date::timestamp + INTERVAL '1 day' + INTERVAL '${RESOLVE_GRACE_HOURS} hours')`;
+  const due = await db.query<{
+    local_date: string;
+    user_id: string;
+    rival_id: string;
+  }>(
+    `SELECT m.local_date::text AS local_date, m.user_id, m.rival_id
+		FROM h2h_matchups m
+		WHERE m.resolved_at IS NULL
+			AND m.local_date >= (CURRENT_DATE - INTERVAL '7 days')
+			AND ${localNowSql("m.user_id")} >= ${cutoff}
+			AND ${localNowSql("m.rival_id")} >= ${cutoff}`,
+  );
+  if (due.length === 0) return;
+  console.log(`[H2H] Resolving ${due.length} finished matchup(s)...`);
+
+  for (const row of due) {
+    try {
+      await resolveOne(row.local_date, row.user_id, row.rival_id);
+    } catch (e: any) {
+      console.error(
+        `[H2H] Failed to resolve ${row.user_id} @ ${row.local_date}:`,
+        e?.message ?? e,
+      );
+    }
+  }
+}
+
+async function resolveOne(
+  localDate: string,
+  userId: string,
+  rivalId: string,
+): Promise<void> {
+  let awarded = false;
+
+  // The pin can go stale between morning and scoring: friendship ended, or an
+  // eligibility flip re-selected the user onto a different challenge (their
+  // card stopped showing the duel). Only award what the user actually saw.
+  const stillFriends = await db.query(
+    `SELECT 1 FROM friendships WHERE user_id = $1 AND friend_id = $2 AND status = 'accepted'`,
+    [userId, rivalId],
+  );
+  if (
+    stillFriends.length > 0 &&
+    (await selectedChallengeKey(userId, localDate)) === "head_to_head"
+  ) {
+    const [mineRaw, theirsRaw, goal] = await Promise.all([
+      dayTotalDistance(userId, localDate),
+      dayTotalDistance(rivalId, localDate),
+      getGoalMiles(userId),
+    ]);
+    // Compare at display precision: the duel card shows 2-decimal miles, so
+    // 2dp is the truth that decides it. A 2dp tie awards nobody ("Dead even").
+    const mine = Math.round(mineRaw * 100) / 100;
+    const theirs = Math.round(theirsRaw * 100) / 100;
+    if (mine >= goal * 0.95 && mine > theirs) {
+      const completingWorkoutId = await latestWorkoutId(userId, localDate);
+      const inserted = await db.query<{ id: string }>(
+        `INSERT INTO user_challenge_completions (user_id, local_date, challenge_key, completing_workout_id)
+				VALUES ($1, $2, 'head_to_head', $3)
+				ON CONFLICT (user_id, local_date) DO NOTHING
+				RETURNING id`,
+        [userId, localDate, completingWorkoutId],
+      );
+      awarded = inserted.length > 0;
+    }
+  }
+
+  // `won` doubles as "notify this user": TRUE only when the completion row
+  // was actually inserted by this resolution.
+  await db.query(
+    `UPDATE h2h_matchups SET resolved_at = NOW(), won = $3
+		WHERE local_date = $1 AND user_id = $2`,
+    [localDate, userId, awarded],
+  );
+}
+
+/**
+ * Re-derive which challenge the rotation gave this user for the date. Mirrors
+ * dailyChallengeService.selectChallengeForUser exactly (shared walkRotation +
+ * key sets); kept separate to avoid a service import cycle.
+ */
+async function selectedChallengeKey(
+  userId: string,
+  localDate: string,
+): Promise<string | null> {
+  const rows = await db.query<ChallengeRow>(
+    `SELECT challenge_key, title, description_template, icon, gradient_start, gradient_end, type
+		FROM daily_challenges WHERE active = TRUE ORDER BY rotation_index ASC`,
+  );
+  if (rows.length === 0) return null;
+
+  let friendCount: number | null = null;
+  let hasFeed: boolean | null = null;
+  const picked = await walkRotation(rows, localDate, async (row) => {
+    if (SOCIAL_CHALLENGE_KEYS.has(row.challenge_key)) {
+      if (friendCount === null) {
+        const r = await db.query<{ c: string }>(
+          `SELECT COUNT(*)::text AS c FROM friendships WHERE user_id = $1 AND status = 'accepted'`,
+          [userId],
+        );
+        friendCount = parseInt(r[0]?.c ?? "0", 10) || 0;
+      }
+      if (friendCount === 0) return false;
+    }
+    if (FEED_CHALLENGE_KEYS.has(row.challenge_key)) {
+      if (hasFeed === null) {
+        const r = await db.query<{ ok: boolean }>(
+          `SELECT (EXISTS (SELECT 1 FROM posts WHERE user_id = $1)
+						OR EXISTS (SELECT 1 FROM users WHERE user_id = $1 AND terms_accepted_at IS NOT NULL)) AS ok`,
+          [userId],
+        );
+        hasFeed = r[0]?.ok === true;
+      }
+      if (!hasFeed) return false;
+    }
+    return true;
+  });
+  return picked.challenge_key;
+}
+
+// ─── Winner notification (cron) ─────────────────────────────────────
+
+/**
+ * Push the "you won" celebration during the winner's local morning/daytime
+ * (9 AM–9:59 PM) rather than at the 6 AM scoring moment — a middle-of-the-
+ * night push would only land in the quiet-hours queue and resurface as a
+ * degraded digest. Claim-then-send keeps it exactly-once per matchup.
+ */
+export async function notifyPendingWinners(): Promise<void> {
+  const winners = await db.query<{
+    local_date: string;
+    user_id: string;
+    rival_id: string;
+  }>(
+    `SELECT m.local_date::text AS local_date, m.user_id, m.rival_id
+		FROM h2h_matchups m
+		WHERE m.won = TRUE AND m.notified_at IS NULL
+			AND m.local_date >= (CURRENT_DATE - INTERVAL '7 days')
+			AND EXTRACT(HOUR FROM ${localNowSql("m.user_id")}) BETWEEN 9 AND 21`,
+  );
+
+  for (const w of winners) {
+    const claimed = await db.query<{ user_id: string }>(
+      `UPDATE h2h_matchups SET notified_at = NOW()
+			WHERE local_date = $1 AND user_id = $2 AND notified_at IS NULL
+			RETURNING user_id`,
+      [w.local_date, w.user_id],
+    );
+    if (claimed.length === 0) continue;
+
+    try {
+      const [rival] = await db.query<{ username: string | null }>(
+        `SELECT username FROM users WHERE user_id = $1`,
+        [w.rival_id],
+      );
+      const [mine, theirs] = await Promise.all([
+        dayTotalDistance(w.user_id, w.local_date),
+        dayTotalDistance(w.rival_id, w.local_date),
+      ]);
+      const name = rival?.username ?? "your rival";
+      await sendPush(w.user_id, {
+        title: "You won your Head-to-Head! 🏆",
+        body: `You out-ran ${name} ${mine.toFixed(2)} to ${theirs.toFixed(2)} mi. Daily challenge complete!`,
+        type: "challenge_won",
+        data: {
+          challenge_key: "head_to_head",
+          local_date: w.local_date,
+          rival_id: w.rival_id,
+          rival_username: rival?.username ?? "",
+        },
+      });
+    } catch (e: any) {
+      console.error(
+        `[H2H] Winner push failed for ${w.user_id} @ ${w.local_date}:`,
+        e?.message ?? e,
+      );
+    }
+  }
+}
+
+// ─── Local SQL helpers (mirrors of dailyChallengeService's) ─────────
+
+async function dayTotalDistance(
+  userId: string,
+  localDate: string,
+): Promise<number> {
+  const rows = await db.query<{ total: string | null }>(
+    `SELECT COALESCE(SUM(distance),0)::text AS total FROM workouts
+		WHERE user_id = $1 AND local_date = $2 AND deleted_at IS NULL AND exclusion_reason IS NULL`,
+    [userId, localDate],
+  );
+  return parseFloat(rows[0]?.total ?? "0") || 0;
+}
+
+async function getGoalMiles(userId: string): Promise<number> {
+  const rows = await db.query<{ goal_miles: string }>(
+    `SELECT goal_miles::text AS goal_miles FROM users WHERE user_id = $1`,
+    [userId],
+  );
+  return parseFloat(rows[0]?.goal_miles ?? "1.0") || 1.0;
+}
+
+async function latestWorkoutId(
+  userId: string,
+  localDate: string,
+): Promise<string | null> {
+  const rows = await db.query<{ workout_id: string }>(
+    `SELECT workout_id FROM workouts
+		WHERE user_id = $1 AND local_date = $2 AND deleted_at IS NULL AND exclusion_reason IS NULL
+		ORDER BY device_end_date DESC LIMIT 1`,
+    [userId, localDate],
+  );
+  return rows[0]?.workout_id ?? null;
+}
