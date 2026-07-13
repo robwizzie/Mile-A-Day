@@ -1,5 +1,5 @@
 import { PostgresService } from "./DbService.js";
-import { START_OF_TODAY_ET_SQL } from "./dailyResetTime.js";
+import { START_OF_TODAY_ET_SQL, TODAY_ET_DATE_SQL } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -26,11 +26,14 @@ export async function getOverview() {
       (SELECT COUNT(*) FROM users)::int AS total_users,
       (SELECT COALESCE(SUM(distance), 0) FROM workouts
          WHERE deleted_at IS NULL AND exclusion_reason IS NULL)::float AS total_miles,
+      -- "Today" must be the ET calendar day like every other daily counter:
+      -- CURRENT_DATE is the DB server's UTC date, which flips at 8pm ET and
+      -- zeroed miles_today every evening.
       (SELECT COALESCE(SUM(distance), 0) FROM workouts
-         WHERE local_date = CURRENT_DATE
+         WHERE local_date = ${TODAY_ET_DATE_SQL}
            AND deleted_at IS NULL AND exclusion_reason IS NULL)::float AS miles_today,
       (SELECT COUNT(DISTINCT user_id) FROM workouts
-         WHERE local_date >= CURRENT_DATE - INTERVAL '7 days'
+         WHERE local_date >= ${TODAY_ET_DATE_SQL} - 7
            AND deleted_at IS NULL AND exclusion_reason IS NULL)::int AS active_users_7d,
       (SELECT COUNT(*) FROM hype_log)::int AS total_hypes,
       (SELECT COUNT(*) FROM hype_log
@@ -54,7 +57,7 @@ export async function getOverview() {
 export async function getMilesByDay() {
   return db.query(`
     SELECT d::date::text AS date, COALESCE(SUM(w.distance), 0)::float AS miles
-    FROM generate_series(CURRENT_DATE - INTERVAL '29 days', CURRENT_DATE, INTERVAL '1 day') d
+    FROM generate_series(${TODAY_ET_DATE_SQL} - 29, ${TODAY_ET_DATE_SQL}, INTERVAL '1 day') d
     LEFT JOIN workouts w
       ON w.local_date = d::date
       AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL

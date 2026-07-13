@@ -99,6 +99,13 @@
       "when": 1783532891538,
       "tag": "0013_flashy_psylocke",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1783903836569,
+      "tag": "0014_lyrical_shatterstar",
+      "breakpoints": true
     }
   ]
 }
