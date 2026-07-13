@@ -113,30 +113,6 @@ struct DashboardView: View {
         )
     }
 
-    /// Build test stats for admin testing — uses real data if available, otherwise realistic placeholders
-    private func buildTestGoalCompletionStats() -> GoalCompletionStats {
-        let real = buildGoalCompletionStats()
-        if real.todaysDistance > 0 { return real }
-        return GoalCompletionStats(
-            todaysDistance: 1.75,
-            goalDistance: userManager.currentUser.goalMiles,
-            currentStreak: max(userManager.currentUser.streak, 7),
-            totalLifetimeMiles: max(healthManager.totalLifetimeMiles, 150),
-            bestDayMiles: max(healthManager.cachedMostMilesInOneDay, 3.2),
-            todaysAveragePace: 9.15,
-            todaysFastestPace: 8.32,
-            personalBestPace: 7.8,
-            todaysTotalDuration: 1050,
-            todaysCalories: 215,
-            todaysWorkoutCount: 2,
-            workoutBreakdowns: [
-                WorkoutBreakdown(type: "running", distance: 1.25, duration: 750, displayName: "Run", icon: "figure.run"),
-                WorkoutBreakdown(type: "walking", distance: 0.50, duration: 300, displayName: "Walk", icon: "figure.walk")
-            ],
-            latestWorkout: WorkoutBreakdown(type: "running", distance: 1.25, duration: 750, displayName: "Run", icon: "figure.run")
-        )
-    }
-
     /// Re-play today's celebration so the user can re-watch and re-share at any time.
     /// Picks the right animation for the day: yearly milestone if the streak crossed a
     /// year boundary, otherwise the standard goal-completed celebration (which itself
@@ -157,20 +133,6 @@ struct DashboardView: View {
             let stats = buildGoalCompletionStats()
             celebrationManager.replayCelebration(.goalCompleted(stats: stats))
         }
-    }
-
-    /// Build a yearly milestone test payload using realistic-ish stats from the user.
-    private func triggerYearlyTest(years: Int) {
-        celebrationManager.clearAll()
-        let totalDays = years * 365
-        let lifetimeMiles = max(userManager.currentUser.totalMiles, Double(totalDays) * 1.15)
-        let info = YearlyMilestoneInfo(
-            years: years,
-            totalMiles: lifetimeMiles,
-            totalStreakDays: max(userManager.currentUser.streak, totalDays),
-            streakStartDate: Calendar.current.date(byAdding: .day, value: -totalDays, to: Date())
-        )
-        celebrationManager.addCelebration(.yearMilestone(info: info))
     }
 
     /// Group today's workouts by activity type into breakdowns

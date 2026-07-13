@@ -130,10 +130,6 @@ app.get("/status/schema", async (req, res) => {
   });
 });
 
-app.get("/test-signin.html", (req, res) => {
-  res.sendFile(path.join(process.cwd(), "test-signin.html"));
-});
-
 // Public endpoint: get profile image URL by username
 app.get(
   "/public/profile-image/:username",
@@ -214,9 +210,12 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
     },
   });
 
+  // Generic body only: raw err.message can carry SQL fragments or file paths.
+  // The full message + stack already went to error_log above (admin dashboard).
+  // `message` field kept for response-shape compatibility with shipped clients.
   res.status(500).json({
     error: "Internal Server Error",
-    message: err.message,
+    message: "Something went wrong. Please try again.",
   });
 });
 

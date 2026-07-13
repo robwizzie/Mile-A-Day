@@ -1,43 +1,46 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
-import Image from "next/image"
-import { Menu, X } from "lucide-react"
+import { useState, useEffect } from "react";
+import Image from "next/image";
+import { Menu, X } from "lucide-react";
 
 const navLinks = [
   { label: "Features", href: "#features" },
   { label: "Competitions", href: "#competitions" },
   { label: "Our Story", href: "#story" },
-]
+];
 
 export function Navbar() {
-  const [scrolled, setScrolled] = useState(false)
-  const [mobileOpen, setMobileOpen] = useState(false)
+  const [scrolled, setScrolled] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    let ticking = false
+    let ticking = false;
     const handleScroll = () => {
       if (!ticking) {
         requestAnimationFrame(() => {
-          setScrolled(window.scrollY > 20)
-          ticking = false
-        })
-        ticking = true
+          setScrolled(window.scrollY > 20);
+          ticking = false;
+        });
+        ticking = true;
       }
-    }
-    window.addEventListener("scroll", handleScroll, { passive: true })
-    return () => window.removeEventListener("scroll", handleScroll)
-  }, [])
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   return (
     <nav
       className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${
         scrolled ? "glass-nav py-3" : "py-5 bg-transparent"
       }`}
-      style={{ transition: "opacity 0.6s ease, transform 0.6s ease, padding 0.5s ease, background 0.5s ease" }}
+      style={{
+        transition:
+          "opacity 0.6s ease, transform 0.6s ease, padding 0.5s ease, background 0.5s ease",
+      }}
     >
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6">
-        <a href="#" className="flex items-center gap-3">
+        <a href="/" className="flex items-center gap-3">
           <Image
             src="/images/mad-circle-icon.png"
             alt="Mile A Day logo"
@@ -46,7 +49,9 @@ export function Navbar() {
             className="rounded-full"
             loading="lazy"
           />
-          <span className="font-heading text-[22px] tracking-[2px] text-[#f5f5f5]">MILE A DAY</span>
+          <span className="font-heading text-[22px] tracking-[2px] text-[#f5f5f5]">
+            MILE A DAY
+          </span>
         </a>
 
         {/* Desktop nav */}
@@ -79,7 +84,11 @@ export function Navbar() {
           className="text-[#f5f5f5] md:hidden"
           aria-label="Toggle navigation menu"
         >
-          {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+          {mobileOpen ? (
+            <X className="h-6 w-6" />
+          ) : (
+            <Menu className="h-6 w-6" />
+          )}
         </button>
       </div>
 
@@ -112,5 +121,5 @@ export function Navbar() {
         </div>
       )}
     </nav>
-  )
+  );
 }

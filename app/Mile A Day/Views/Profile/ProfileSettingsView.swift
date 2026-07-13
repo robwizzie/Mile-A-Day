@@ -18,9 +18,11 @@ struct ProfileSettingsView: View {
         ScrollView {
             VStack(spacing: MADTheme.Spacing.lg) {
                 settingsSection
+                #if DEBUG
                 if showsDevelopmentSection {
                     developmentSection
                 }
+                #endif
             }
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.vertical, MADTheme.Spacing.md)
@@ -144,6 +146,8 @@ struct ProfileSettingsView: View {
 
     // MARK: - Development
 
+    // DEBUG builds only — compiled out of Release so no dev tooling ships.
+    #if DEBUG
     private var showsDevelopmentSection: Bool {
         AppEnvironment.isDevelopment && userManager.currentUser.role == "admin"
     }
@@ -195,4 +199,5 @@ struct ProfileSettingsView: View {
                 )
         )
     }
+    #endif
 }
