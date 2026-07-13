@@ -102,7 +102,7 @@ export function FeaturesSection() {
             className="reveal-scale reveal-delay-4 glass-card type-card group rounded-2xl p-6 lg:col-span-3"
             style={{ "--accent": "#D94059" } as React.CSSProperties}
           >
-            <div className="flex items-start gap-4 mb-4">
+            <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start">
               <div
                 className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
                 style={{
@@ -124,7 +124,7 @@ export function FeaturesSection() {
             </div>
 
             {/* Device mockups — matching app's actual UI */}
-            <div className="mt-6 flex items-end justify-center gap-6 sm:gap-10">
+            <div className="mt-6 flex flex-wrap items-end justify-center gap-6 sm:gap-10">
               {/* Home screen widget mockup — the app's actual streak widget is
                   a progress ring with the day count in orange (StreakCountWidget) */}
               <div className="flex flex-col items-center gap-2">
