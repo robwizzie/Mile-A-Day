@@ -705,6 +705,7 @@ struct NotificationInboxView: View {
         case "friend_badge_earned": return "FRIEND BADGE"
         case "friend_personal_best": return "FRIEND PR"
         case "friend_challenge_completed": return "FRIEND CHALLENGE"
+        case "challenge_won": return "CHALLENGE WON"
         case "competition_invite": return "COMP INVITE"
         case "competition_accepted": return "COMP JOINED"
         case "competition_started": return "COMP STARTED"
@@ -747,6 +748,7 @@ struct NotificationInboxView: View {
         case "personal_best": return ("medal.fill", .yellow)
         case "lead_change": return ("arrow.up.right", .green)
         case "clash_tie": return ("equal.circle.fill", .purple)
+        case "challenge_won": return ("flag.2.crossed.fill", .yellow)
         default: return ("bell.fill", .white.opacity(0.5))
         }
     }

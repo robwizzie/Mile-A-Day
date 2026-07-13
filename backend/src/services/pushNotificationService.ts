@@ -125,6 +125,7 @@ export type NotificationType =
   | "badge_earned"
   | "friend_badge_earned"
   | "friend_challenge_completed"
+  | "challenge_won"
   | "hype_received"
   | "friend_post"
   | "story_reaction"
@@ -376,10 +377,9 @@ export async function sendPush(
   const tokens = await db.query<{
     device_token: string;
     environment: string | null;
-  }>(
-    "SELECT device_token, environment FROM device_tokens WHERE user_id = $1",
-    [userId],
-  );
+  }>("SELECT device_token, environment FROM device_tokens WHERE user_id = $1", [
+    userId,
+  ]);
 
   if (tokens.length === 0) {
     console.log(`[Push] No device tokens found for user ${userId}`);
@@ -553,10 +553,9 @@ export async function sendSilentPushToUser(
   const tokens = await db.query<{
     device_token: string;
     environment: string | null;
-  }>(
-    "SELECT device_token, environment FROM device_tokens WHERE user_id = $1",
-    [userId],
-  );
+  }>("SELECT device_token, environment FROM device_tokens WHERE user_id = $1", [
+    userId,
+  ]);
   if (tokens.length === 0) return 0;
 
   const results = await Promise.all(

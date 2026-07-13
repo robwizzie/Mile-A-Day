@@ -259,6 +259,8 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         let profileImageUrl: String?
         let miles: Double
         let myMiles: Double
+        // Optional: older server builds don't send it.
+        let mutual: Bool?
 
         func toOpponent() -> ChallengeOpponent {
             ChallengeOpponent(
@@ -266,7 +268,8 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
                 username: username,
                 profileImageUrl: profileImageUrl,
                 miles: miles,
-                myMiles: myMiles
+                myMiles: myMiles,
+                mutual: mutual ?? false
             )
         }
     }

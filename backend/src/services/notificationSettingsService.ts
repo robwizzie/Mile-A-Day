@@ -23,6 +23,7 @@ export interface NotificationPreferences {
   friend_posts_enabled: boolean; // notify me when a friend shares a new post
   share_route_maps: boolean; // show my GPS route maps on my feed entries/posts
   weekly_recap_enabled: boolean; // Sunday-evening weekly recap push + story card
+  h2h_close_friends_only: boolean; // Head-to-Head rivals only from my close friends
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferences = {
@@ -44,6 +45,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   friend_posts_enabled: true,
   share_route_maps: true,
   weekly_recap_enabled: true,
+  h2h_close_friends_only: false,
 };
 
 export async function getNotificationPreferences(
@@ -76,6 +78,7 @@ export async function getNotificationPreferences(
     friend_posts_enabled: row.friend_posts_enabled ?? true,
     share_route_maps: row.share_route_maps ?? true,
     weekly_recap_enabled: row.weekly_recap_enabled ?? true,
+    h2h_close_friends_only: row.h2h_close_friends_only ?? false,
   };
 }
 
@@ -120,6 +123,7 @@ export async function updateNotificationPreferences(
     { key: "friend_posts_enabled", value: prefs.friend_posts_enabled },
     { key: "share_route_maps", value: prefs.share_route_maps },
     { key: "weekly_recap_enabled", value: prefs.weekly_recap_enabled },
+    { key: "h2h_close_friends_only", value: prefs.h2h_close_friends_only },
   ];
 
   for (const field of fields) {

@@ -36,10 +36,11 @@ globs: backend/**
 - Use `requireSelfAccess('paramName')` middleware when a route should only allow users to access their own resources.
 
 ## Adding a New Endpoint
-1. Add service function in `services/` (DB queries + business logic)
-2. Add controller function in `controllers/` (req/res handling)
-3. Add route in `routes/` (wire to controller)
-4. If new route file, register in `server.ts` (before or after `authenticateToken` depending on auth needs)
+Service (`services/`) → controller (`controllers/`) → route (`routes/`) → if a new route file, register in `server.ts` (before/after `authenticateToken` per auth needs).
+
+## Daily Challenges
+- `head_to_head` is scored END-OF-DAY by `h2hChallengeCron` (after BOTH users' local midnight + 6h late-sync grace), never at workout sync — `evaluatePredicate` returns false for it and live progress caps at 0.99. Winner push (`challenge_won`) is deferred to the winner's local 9 AM–10 PM.
+- Rivals are PINNED per day in `h2h_matchups` (reciprocal `mutual` pairs where the friend graph + each side's `h2h_close_friends_only` pref allow; one-sided fallbacks prefer 7-day-active friends; a restricted user with no close friends skips h2h in rotation). FRIENDLESS users get the `add_friend` substitute instead (catalog row with active=FALSE, awarded at friendship-accept via `evaluateAddFriendCompletion` — the sync path can't catch it). Selection parity between per-user reads and the matchmaker lives in `challengeRotation.ts` + `hasH2hRivalCandidates` — never fork that walk.
 
 ## Competition Resolution
 - Standings are recomputed LIVE on every read (`getUserScores` in `getCompetition`) — even for finished comps. So a competition's stored `end_date` directly bounds which days count (scoring includes `local_date <= end_date`; `local_date` = workout START date in user tz).

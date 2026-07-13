@@ -89,6 +89,17 @@ struct ProfileSettingsView: View {
 
             settingsDivider
 
+            NavigationLink(destination: DailyChallengeSettingsView(friendService: friendService)) {
+                MADSettingsRow(
+                    icon: "flag.2.crossed.fill",
+                    title: "Daily Challenges",
+                    subtitle: "Head-to-Head matchup preferences",
+                    iconColor: Color.purple
+                )
+            }
+
+            settingsDivider
+
             Button(action: onPrivacySettings) {
                 MADSettingsRow(
                     icon: "lock.shield.fill",

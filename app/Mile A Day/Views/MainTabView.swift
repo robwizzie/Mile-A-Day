@@ -137,6 +137,10 @@ struct MainTabView: View {
                      // silently. Route to Dashboard + open the inbox so the
                      // user actually sees the badge they earned.
                      "badge_earned", "friend_badge_earned",
+                     // challenge_won = the overnight Head-to-Head verdict; the
+                     // completion already sits in the history by the time the
+                     // push arrives, so Dashboard + inbox shows the full story.
+                     "challenge_won",
                      "friend_challenge_completed", "friend_personal_best":
                     selectedTab = 0
                     showNotificationInbox = true

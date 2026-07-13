@@ -926,6 +926,8 @@ struct ChallengeOpponent: Equatable {
     let profileImageUrl: String?
     let miles: Double
     let myMiles: Double
+    /// TRUE when the rival's own Head-to-Head is against you too (reciprocal pair).
+    let mutual: Bool
 }
 
 /// Fun "you vs rival" strip for the Head-to-Head daily challenge. Shows both
@@ -954,25 +956,38 @@ struct HeadToHeadStrip: View {
     private var statusColor: Color { tied ? .yellow : (leading ? .green : .orange) }
 
     var body: some View {
-        HStack(spacing: 10) {
-            side(name: "You", image: myImage, miles: opponent.myMiles,
-                 highlight: leading, color: accent)
+        VStack(spacing: 6) {
+            HStack(spacing: 10) {
+                side(name: "You", image: myImage, miles: opponent.myMiles,
+                     highlight: leading, color: accent)
 
-            VStack(spacing: 2) {
-                Text("VS")
-                    .font(.system(size: 13, weight: .black, design: .rounded))
-                    .foregroundColor(.primary.opacity(0.6))
-                Text(statusText)
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .foregroundColor(statusColor)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(spacing: 2) {
+                    Text("VS")
+                        .font(.system(size: 13, weight: .black, design: .rounded))
+                        .foregroundColor(.primary.opacity(0.6))
+                    Text(statusText)
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundColor(statusColor)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(width: 86)
+
+                side(name: rivalName, image: opponent.profileImageUrl, miles: opponent.miles,
+                     highlight: !leading && !tied, color: .orange)
             }
-            .frame(width: 86)
 
-            side(name: rivalName, image: opponent.profileImageUrl, miles: opponent.miles,
-                 highlight: !leading && !tied, color: .orange)
+            // The duel is a whole-day total scored after midnight, so the lead
+            // shown above is live standings, not a verdict.
+            Text(opponent.mutual
+                 ? "\(rivalName) got the same matchup · winner decided at day's end"
+                 : "Winner decided at day's end")
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)

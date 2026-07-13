@@ -258,6 +258,12 @@ export const notificationSettings = pgTable("notification_settings", {
   ),
   dailyReminderEnabled: boolean("daily_reminder_enabled").default(true),
   dailyReminderHour: integer("daily_reminder_hour").default(18),
+  // Head-to-Head rivals drawn only from the user's close-friends list.
+  // Not a notification pref, but this table is the de-facto per-user
+  // preferences row (see share_workouts_to_feed / share_route_maps).
+  h2hCloseFriendsOnly: boolean("h2h_close_friends_only")
+    .default(false)
+    .notNull(),
   timezoneOffsetMinutes: integer("timezone_offset_minutes"),
   // Social feed settings (added v2). share_workouts_to_feed: include my raw
   // walks/runs as activity cards in friends' unified feed. friend_posts_enabled:
@@ -691,6 +697,49 @@ export const userChallengeCompletions = pgTable(
       table.userId,
       table.localDate,
     ),
+  ],
+);
+
+export const h2hMatchups = pgTable(
+  "h2h_matchups",
+  {
+    localDate: date("local_date").notNull(),
+    userId: text("user_id").notNull(),
+    rivalId: text("rival_id").notNull(),
+    // TRUE only when this row is half of a reciprocal pair (both users see
+    // each other). Fallback assignments (odd-one-out, mid-day joiners) are FALSE.
+    mutual: boolean().default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    // Stamped by the end-of-day cron once the duel outcome is final.
+    // `won` is TRUE only when the user won AND the completion row was inserted.
+    resolvedAt: timestamp("resolved_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    won: boolean(),
+    // Stamped when the winner push was sent (deferred to the winner's local morning).
+    notifiedAt: timestamp("notified_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "h2h_matchups_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.rivalId],
+      foreignColumns: [users.userId],
+      name: "h2h_matchups_rival_id_fkey",
+    }).onDelete("cascade"),
+    primaryKey({
+      columns: [table.localDate, table.userId],
+      name: "h2h_matchups_pkey",
+    }),
   ],
 );
 

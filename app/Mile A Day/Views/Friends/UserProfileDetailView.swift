@@ -1392,6 +1392,13 @@ private struct FriendHeadToHeadStrip: View {
                 .foregroundColor(statusColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
+
+            // Live standings, not a verdict — the duel is a whole-day total
+            // the server scores after midnight.
+            Text("Winner decided at day's end")
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+                .lineLimit(1)
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 12)
