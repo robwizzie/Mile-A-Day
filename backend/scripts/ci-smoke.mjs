@@ -139,18 +139,34 @@ const routes = await getUserRoutes(BOB);
 assert.equal(routes.length, 1, "Bob has one stored route");
 assert.equal(routes[0].workout_id, "ci-workout-bob");
 
-// Mile hype: canonicalize a workout id to the composite key, send, dedupe.
+// Mile hype: feed workout-card hypes keep the exact workout id so a second
+// same-day workout remains hypeable. Legacy notification-style composite keys
+// are still normalized to the target user.
 const ctx = await canonicalizeMileContext(BOB, {
   contextType: "mile",
   contextId: "ci-workout-bob",
   contextLabel: "mile",
 });
-assert.equal(ctx.contextId, `${BOB}:${localDate}`, "mile key canonicalized");
+assert.equal(ctx.contextId, "ci-workout-bob", "feed mile key stays exact");
+const legacyCtx = await canonicalizeMileContext(BOB, {
+  contextType: "mile",
+  contextId: `${ALICE}:${localDate}`,
+  contextLabel: "mile",
+});
+assert.equal(
+  legacyCtx.contextId,
+  `${BOB}:${localDate}`,
+  "legacy mile key canonicalized",
+);
 const hype = await logHypeIfUnderLimit(ALICE, BOB, ctx);
 assert.ok(hype?.id, "hype logged");
 assert.equal(await hasHypedMile(ALICE, BOB, ctx.contextId), true);
 const feedAfterHype = await getUnifiedFeed(ALICE, 20, null);
 assert.ok(feedAfterHype.length >= 1, "feed still reads after hype");
+const hypedFeedPost = feedAfterHype.find(
+  (r) => r.kind === "post" && r.id === post.post_id,
+);
+assert.equal(hypedFeedPost?.is_hyped, true, "exact workout hype marks post hyped");
 
 // Signed media urls: sign, verify via the real middleware, and reject tampering.
 process.env.MEDIA_SIGNING_SECRET ||= "ci-signing-secret";
