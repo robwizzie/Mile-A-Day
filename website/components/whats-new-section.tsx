@@ -57,7 +57,7 @@ export function WhatsNewSection() {
             Just shipped
           </span>
           <h2 className="reveal reveal-delay-1 font-heading text-[clamp(40px,6vw,72px)] leading-none tracking-[-1px] text-[#f5f5f5]">
-            NEW IN <span className="text-[#c72554]">2.0</span>
+            NEW IN <span className="text-[#c72554]">1.2.0</span>
           </h2>
           <p className="reveal reveal-delay-2 mt-4 text-base leading-relaxed text-[#a0a0a0]">
             The biggest update since launch — built from what the community
