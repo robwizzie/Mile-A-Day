@@ -64,8 +64,8 @@ function StatCard({
 }) {
   return (
     <div
-      className={`reveal reveal-delay-${delay} group relative overflow-hidden rounded-3xl border border-white/[0.07] bg-white/[0.03] px-6 py-7 text-center backdrop-blur-xl transition-all duration-300 hover:-translate-y-1`}
-      style={{ boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)" }}
+      className={`reveal-scale reveal-delay-${delay} glass-card type-card group relative overflow-hidden rounded-2xl px-6 py-7 text-center`}
+      style={{ "--accent": color } as React.CSSProperties}
     >
       {/* Accent glow that breathes on hover */}
       <div
