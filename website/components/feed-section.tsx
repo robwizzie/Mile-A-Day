@@ -2,7 +2,18 @@
 
 import Image from "next/image";
 import { useRef, useCallback, useState } from "react";
-import { Camera, Hand, Hourglass, Map, Plus } from "lucide-react";
+import {
+  Camera,
+  Ellipsis,
+  Flame,
+  Footprints,
+  Gauge,
+  Hand,
+  Hourglass,
+  Map,
+  Plus,
+  type LucideIcon,
+} from "lucide-react";
 import { ProfileAvatar } from "@/components/profile-avatar";
 
 // App palette (MADTheme). Hype is ALWAYS represented by a clap/hand action in
@@ -144,29 +155,44 @@ const MINI_CLAPS = Array.from({ length: 6 }, (_, i) => {
   };
 });
 
-/** One real feed-post screenshot with a double-tap hype burst layered on top. */
+/** Feed mock chrome stays custom; the media panel uses the real feed example
+ * photo cropped out of the app screenshot. */
 function FeedPostCard() {
   const [burst, setBurst] = useState(0);
 
-  // Mirrors doubleTapHype(): the burst replays on every double-tap, but the
-  // real screenshot already carries the post chrome and hype count.
+  // Mirrors doubleTapHype(): the burst replays on every double-tap.
   const hype = useCallback(() => {
     setBurst((b) => b + 1);
   }, []);
 
   return (
-    <div className="rounded-2xl bg-white/[0.04] p-2.5">
+    <div className="rounded-2xl bg-white/[0.04] p-3">
+      <div className="mb-3 flex items-center gap-2.5">
+        <ProfileAvatar username="rob" initials="RW" size={40} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[15px] font-bold text-white">Rob</div>
+          <div className="text-xs font-medium text-white/50">2h ago</div>
+        </div>
+        <div
+          className="flex h-8 w-8 items-center justify-center rounded-full"
+          style={{ background: `${HYPE_ORANGE}1F` }}
+        >
+          <Footprints className="h-4 w-4" style={{ color: HYPE_ORANGE }} />
+        </div>
+        <Ellipsis className="h-5 w-5 text-white/45" />
+      </div>
+
       <div
-        className="relative cursor-pointer select-none overflow-hidden rounded-xl"
+        className="relative aspect-[4/5] cursor-pointer select-none overflow-hidden rounded-xl bg-black"
         onDoubleClick={hype}
       >
         <Image
           src="/images/feed-example.png"
-          alt="Mile A Day feed post example"
+          alt="Rob's Mile A Day feed photo"
           width={1185}
           height={1928}
           priority={false}
-          className="h-auto w-full rounded-xl"
+          className="h-full w-full object-cover object-[center_42%]"
           sizes="(min-width: 1024px) 420px, 90vw"
         />
 
@@ -199,6 +225,52 @@ function FeedPostCard() {
           </div>
         )}
       </div>
+
+      <div className="mt-2.5 flex flex-wrap gap-2">
+        <FeedChip icon={Flame} text="423 day streak" color={HYPE_ORANGE} />
+        <FeedChip icon={Footprints} text="1.11 mi" />
+        <FeedChip icon={Gauge} text="21:36 /mi" />
+      </div>
+
+      <p className="mt-3 text-[15px] font-medium leading-snug text-white/90">
+        Bugs tried to get me while I took the trash out, they did not succeed
+      </p>
+
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-[14px] font-bold text-white/90">
+          <Hand
+            className="h-4 w-4"
+            style={{ color: HYPE_ORANGE, fill: `${HYPE_ORANGE}22` }}
+          />
+          <span>2 hypes</span>
+        </div>
+        <button
+          type="button"
+          className="flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-bold text-white shadow-[0_8px_24px_rgba(255,153,0,0.28)]"
+          style={{ background: HYPE_ORANGE }}
+          onClick={hype}
+        >
+          <Hand className="h-4 w-4" />
+          Hype
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FeedChip({
+  icon: Icon,
+  text,
+  color = "rgba(255,255,255,0.78)",
+}: {
+  icon: LucideIcon;
+  text: string;
+  color?: string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5 rounded-full bg-white/[0.08] px-2.5 py-1.5 text-xs font-bold text-white/80">
+      <Icon className="h-3.5 w-3.5" style={{ color }} />
+      <span style={{ color }}>{text}</span>
     </div>
   );
 }
