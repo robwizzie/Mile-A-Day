@@ -285,20 +285,76 @@ class UserManager: ObservableObject {
         mostMilesInDay: Double
     ) {
         currentUser.updateFromHealthKit(
-            streak: retroactiveStreak,
+            streak: vettedHealthKitStreak(retroactiveStreak),
             miles: currentMiles,
             totalMiles: totalMiles,
             fastestPace: fastestPace,
             mostMilesInDay: mostMilesInDay,
             date: Date()
         )
-        
+
         // Check for retroactive badges after updating stats
         checkForRetroactiveBadges()
-        
+
         // CRITICAL FIX: Save data to persist streak update
         // Without this, streak updates are only in memory and revert when app reopens
         saveUserData()
+    }
+
+    // MARK: - Streak trust & verification
+
+    // A HealthKit-derived streak that collapses by 2+ days in one recompute is
+    // almost always a WorkoutIndex artifact (a day whose workout reached
+    // HealthKit late, was deleted there, or never synced locally) — not a real
+    // break. Applying it unconditionally made the dashboard, widgets, and watch
+    // flash "1 day" on every launch until the backend rescue raised it back,
+    // and persisted/pushed the bad number everywhere in between.
+    private static let backendStreakKey = "lastKnownBackendStreak"
+    private static let backendStreakAtKey = "lastKnownBackendStreakAt"
+    /// Stamped by HealthKitManager.buildWorkoutIndex() when a full rebuild completes.
+    private static let indexRebuildCompletedKey = "lastFullIndexRebuildCompletedAt"
+    /// Shared with DashboardView.repairWorkoutIndexIfStale — max one rebuild per day.
+    private static let indexRebuildTriggerKey = "lastStreakMismatchIndexRebuild"
+
+    /// Gate for lowering the displayed streak: equal/higher values and 1-day
+    /// corrections always apply; a 2+ day collapse applies only when verified —
+    /// the backend (which recomputes from its own workout rows on every stats
+    /// fetch, within 48h) agrees it broke, or a full-history index rebuild
+    /// completed today and the backend doesn't contradict it. Otherwise the
+    /// currently displayed value is kept and a rebuild is scheduled to either
+    /// repair the index hole or confirm the break.
+    private func vettedHealthKitStreak(_ localStreak: Int) -> Int {
+        let displayed = currentUser.streak
+        guard localStreak < displayed - 1 else { return localStreak }
+
+        let defaults = UserDefaults.standard
+        let backendAt = defaults.object(forKey: Self.backendStreakAtKey) as? Date
+        let backendFresh = backendAt.map { Date().timeIntervalSince($0) < 48 * 3600 } ?? false
+        let backendStreak = defaults.integer(forKey: Self.backendStreakKey)
+
+        if backendFresh && backendStreak <= localStreak + 1 {
+            return localStreak
+        }
+        if let rebuiltAt = defaults.object(forKey: Self.indexRebuildCompletedKey) as? Date,
+           Calendar.current.isDateInToday(rebuiltAt),
+           !(backendFresh && backendStreak > localStreak + 1) {
+            return localStreak
+        }
+        scheduleWorkoutIndexRepair()
+        return displayed
+    }
+
+    /// Kick a full WorkoutIndex rebuild (max once per calendar day) so a held
+    /// streak either gets its hole repaired or its break confirmed.
+    private func scheduleWorkoutIndexRepair() {
+        #if !os(watchOS)
+        let defaults = UserDefaults.standard
+        if let last = defaults.object(forKey: Self.indexRebuildTriggerKey) as? Date,
+           Calendar.current.isDateInToday(last) { return }
+        defaults.set(Date(), forKey: Self.indexRebuildTriggerKey)
+        print("[UserManager] 🔧 Unverified streak collapse — rebuilding workout index to verify")
+        Task { await HealthKitManager.shared.buildWorkoutIndex() }
+        #endif
     }
     
     // Set fastest mile pace from backend. The backend's workout_splits table is the
@@ -317,6 +373,11 @@ class UserManager: ObservableObject {
     // for users whose history lives in the backend. HealthKit's notification path
     // will still overwrite via updateUserWithHealthKitData() once it computes.
     func updateStreakFromBackend(_ streak: Int) {
+        // Record every backend answer (with freshness) even when it doesn't
+        // raise anything — vettedHealthKitStreak uses it to decide whether a
+        // local streak collapse is real or a WorkoutIndex hole.
+        UserDefaults.standard.set(streak, forKey: Self.backendStreakKey)
+        UserDefaults.standard.set(Date(), forKey: Self.backendStreakAtKey)
         guard streak > currentUser.streak else { return }
         currentUser.streak = streak
         #if !os(watchOS)

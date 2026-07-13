@@ -29,6 +29,7 @@ globs: app/**
 - Widget timeline policies are fallbacks (the app reloads on every data write). Never request sub-15-min refreshes: a 60s policy drained the ~40-70/day budget by morning and iOS then silently dropped ALL reloads — widgets froze on stale data while the app was correct.
 - Background HealthKit reads must gate on `hasLoadedInitialData`, not a fixed sleep — on a locked device queries error, `retroactiveStreak` reads 0, and `updateFromHealthKit` persists it unconditionally (streak 0 stuck in widgets).
 - WorkoutIndex incremental updates need the 48h lookback + record-id dedup: querying strictly from `lastUpdated` permanently drops workouts that reached HealthKit late (Watch sync), leaving a `qualifyingDays` hole — `activeStreak()` stops there and the dashboard flashes a tiny streak until the backend rescue lands. Backend-streak ≫ local triggers a debounced rebuild (`repairWorkoutIndexIfStale`).
+- The displayed streak (`currentUser.streak`) is quarantine-gated: `UserManager.vettedHealthKitStreak` refuses 2+ day drops from local recomputes unless the backend (48h-fresh, recomputed server-side every `getUserStats`) agrees or a same-day full index rebuild confirms. Never write `hk.retroactiveStreak` raw to UI/widgets/watch — it flaps on index holes; route through `updateUserWithHealthKitData` / push `max(hk, user.streak)`.
 
 ## Key Patterns
 - Use `@Observable` (iOS 17+ Observation framework) for new view models.

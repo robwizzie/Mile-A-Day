@@ -487,7 +487,11 @@ class HealthKitManager: ObservableObject {
         if cachedTotalLifetimeMiles > 0 {
             totalLifetimeMiles = cachedTotalLifetimeMiles
         }
-        if cachedRetroactiveStreak > 0 {
+        // Raise-only: on iOS, init already derived retroactiveStreak from the
+        // workout index (activeStreak() as of now), which is fresher truth than
+        // this snapshot — the cache may hold a transient low value saved while
+        // the index had a hole (see UserManager.vettedHealthKitStreak).
+        if cachedRetroactiveStreak > retroactiveStreak {
             retroactiveStreak = cachedRetroactiveStreak
         }
             }
@@ -1454,7 +1458,11 @@ final class MADWatchBridge: NSObject {
         let user = UserManager.shared.currentUser
 
         var payload: [String: Any] = [
-            "streak": hk.retroactiveStreak,
+            // Display-grade streak: hk.retroactiveStreak can transiently hold an
+            // unverified low value mid-recompute (WorkoutIndex hole). The user
+            // model's streak is quarantine-protected (vettedHealthKitStreak), so
+            // never push below it — the watch renders this number directly.
+            "streak": max(hk.retroactiveStreak, user.streak),
             "todayMiles": hk.todaysDistance,
             "goalMiles": user.goalMiles > 0 ? user.goalMiles : 1.0,
             "firstName": user.firstName ?? "",
