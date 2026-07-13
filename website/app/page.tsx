@@ -15,6 +15,11 @@ import { CtaSection } from "@/components/cta-section";
 import { Footer } from "@/components/footer";
 import { ScrollReveal } from "@/components/scroll-reveal";
 
+// Section order tells the story top to bottom: hook (hero) → live proof the
+// community is real (stats band) → what the app does (features) → the new
+// social experience (feed, then friends/nudges) → the competitive layer
+// (competitions, medals) → what just shipped (2.0) → why one mile works
+// (habit) → how to start → who built it → download.
 export default function Home() {
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a]">
@@ -23,13 +28,13 @@ export default function Home() {
       <HeroSection />
       <MarqueeSection />
       <LiveStatsBand />
-      <FeedSection />
-      <WhatsNewSection />
       <FeaturesSection />
-      <BadgeShowcaseSection />
-      <HabitSection />
-      <CompetitionsSection />
+      <FeedSection />
       <SocialSection />
+      <CompetitionsSection />
+      <BadgeShowcaseSection />
+      <WhatsNewSection />
+      <HabitSection />
       <HowItWorksSection />
       <StorySection />
       <CtaSection />

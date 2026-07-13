@@ -69,25 +69,25 @@ export function WhatsNewSection() {
           {FEATURES.map((feature, i) => (
             <div
               key={feature.title}
-              className={`reveal reveal-delay-${(i % 3) + 1} group glass-card relative overflow-hidden rounded-3xl p-7 transition-all duration-300 hover:-translate-y-1`}
+              className={`reveal-scale reveal-delay-${(i % 3) + 1} glass-card type-card group relative overflow-hidden rounded-2xl p-6`}
+              style={{ "--accent": feature.color } as React.CSSProperties}
             >
               <div
                 className="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full opacity-[0.07] blur-2xl transition-opacity duration-300 group-hover:opacity-20"
                 style={{ background: feature.color }}
               />
               <div
-                className="relative mb-4 flex h-11 w-11 items-center justify-center rounded-2xl"
+                className="relative mb-4 flex h-12 w-12 items-center justify-center rounded-xl"
                 style={{
-                  background: `${feature.color}1A`,
-                  border: `1px solid ${feature.color}33`,
+                  background: `linear-gradient(135deg, ${feature.color}20, ${feature.color}08)`,
                 }}
               >
                 <feature.icon
-                  className="h-5 w-5"
+                  className="h-6 w-6"
                   style={{ color: feature.color }}
                 />
               </div>
-              <h3 className="relative mb-2 text-lg font-bold text-[#f5f5f5]">
+              <h3 className="font-heading relative mb-2 text-[22px] uppercase tracking-[1px] text-[#f5f5f5]">
                 {feature.title}
               </h3>
               <p className="relative text-sm leading-relaxed text-[#a0a0a0]">
