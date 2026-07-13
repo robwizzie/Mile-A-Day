@@ -1242,3 +1242,20 @@ export const errorLog = pgTable(
     ),
   ],
 );
+
+export const androidWaitlist = pgTable(
+  "android_waitlist",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    // Stored normalized (trimmed + lowercased by waitlistService); the UNIQUE
+    // constraint makes signups idempotent so the endpoint can't be used to
+    // probe whether an address is already on the list.
+    email: text().notNull(),
+    source: text().default("website").notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "string",
+    }).defaultNow(),
+  },
+  (table) => [unique("android_waitlist_email_unique").on(table.email)],
+);
