@@ -118,6 +118,9 @@ final class PostComposerViewModel: ObservableObject {
     @Published var hasRoute = false
     /// User choice: show the route map with this post (carousel slide 2).
     @Published var includeRoute = true
+    /// Publish was rejected server-side for unaccepted guidelines — the view
+    /// re-presents the gate when this flips true.
+    @Published var needsTermsGate = false
 
     let stats: RunStatsInput
     /// Captured on-screen canvas size (points), reused to render the composite.
@@ -133,6 +136,10 @@ final class PostComposerViewModel: ObservableObject {
         cfg.enabled = cfg.enabled.filter { available.contains($0) }
         if cfg.enabled.isEmpty { cfg.enabled = Array(available.prefix(1)) }
         self.config = cfg
+        // Bring the sticker back at the size and spot it was last posted at
+        // (StickerConfig sanitizes on decode; ranges live there too).
+        self.stickerScale = cfg.scale
+        self.stickerPos = CGPoint(x: cfg.posX, y: cfg.posY)
         // Seed a pre-chosen photo (mid-run snap) AFTER all stored properties
         // are initialized — the @Published setter touches self.
         self.pickedImage = initialImage
@@ -208,6 +215,11 @@ final class PostComposerViewModel: ObservableObject {
                 let rememberedUnavailable = StickerConfig.load().enabled
                     .filter { !available.contains($0) }
                 toSave.enabled = config.enabled + rememberedUnavailable
+                // Remember the transform too, so the next post's sticker shows
+                // up at this exact size and position.
+                toSave.scale = stickerScale
+                toSave.posX = stickerPos.x
+                toSave.posY = stickerPos.y
                 toSave.save()
             }
             return true
@@ -215,7 +227,10 @@ final class PostComposerViewModel: ObservableObject {
             errorMessage = "Finish today's mile before you post."
             return false
         } catch let APIError.apiError(message) where message == "terms_not_accepted" {
-            errorMessage = "Please accept the community terms to post."
+            // Stale local acceptance — clear the memo and re-gate.
+            PostService.cacheTermsAccepted(false)
+            needsTermsGate = true
+            errorMessage = "Please accept the community guidelines to post."
             return false
         } catch APIError.conflict {
             // One deliberate post per workout — a reward, not a redo.
@@ -260,12 +275,33 @@ struct PostCanvas: View {
 }
 
 struct PostComposerView: View {
+    /// Community-guidelines acceptance, resolved before sharing is allowed
+    /// (App Review 1.2 — and the server rejects un-accepted posts anyway, so
+    /// gating up front beats a dead-end publish error). The CAMERA is never
+    /// blocked on this: capturing preserves the moment (and lands in the
+    /// user's camera roll) — only composing/sharing waits for acceptance.
+    private enum TermsState { case unknown, accepted, needsAcceptance }
+
     @StateObject private var vm: PostComposerViewModel
     @State private var showCamera = false
+    /// Seeded from the local cache so a returning poster never waits on (or
+    /// races) the network check in `resolveTermsIfNeeded`.
+    @State private var termsState: TermsState =
+        PostService.termsAcceptedCached ? .accepted : .unknown
+    @State private var showTermsGate = false
+    /// Gate outcome relayed by PostTermsGateView.onAccepted, read in the
+    /// cover's onDismiss — deliberately not inferred from the cache so gate
+    /// internals can change without silently breaking this flow.
+    @State private var gateAccepted = false
+    /// The auto camera open must fire exactly once: .onAppear re-fires every
+    /// time a fullScreenCover dismisses, and re-opening on each pass would
+    /// trap the user in the camera with no way back.
+    @State private var didAutoOpenCamera = false
     @State private var gestureBaseScale: CGFloat = 1.0
     /// Sticker position at drag start (normalized) — drags apply translation
     /// relative to this instead of jumping to the touch point.
     @State private var gestureBasePos: CGPoint? = nil
+    @FocusState private var captionFocused: Bool
     /// Launch straight into the camera on first appear (post-run prompt flow) —
     /// the user already tapped "Take a photo" once to get here.
     let autoOpenCamera: Bool
@@ -307,47 +343,90 @@ struct PostComposerView: View {
                     }
                     .padding(MADTheme.Spacing.md)
                 }
+                .scrollDismissesKeyboard(.interactively)
+                // The guidelines gate rides on the ScrollView so it never
+                // collides with the camera cover attached to the ZStack —
+                // two covers on one node drop one of the presentations.
+                .fullScreenCover(isPresented: $showTermsGate, onDismiss: {
+                    if gateAccepted {
+                        gateAccepted = false
+                        termsState = .accepted
+                        vm.errorMessage = nil
+                    } else if vm.pickedImage == nil {
+                        // Declined with nothing composed — nothing to lose;
+                        // back out so the post-run prompt / feed takes over.
+                        onFinished(.cancelled)
+                        dismiss()
+                    } else {
+                        // Declined with a draft on screen: NEVER destroy it.
+                        // Share stays locked (tapping it re-opens the gate);
+                        // Cancel remains the deliberate way out.
+                        vm.errorMessage = "Accept the community guidelines to share your post."
+                    }
+                }) {
+                    PostTermsGateView { gateAccepted = true }
+                }
             }
             .navigationTitle("New Post")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
+                    // Disabled while publishing: publish() has no cancellation
+                    // hook, so a Cancel racing an in-flight upload would fire
+                    // onFinished twice with contradictory outcomes (the
+                    // post-run prompt would auto-post the route card AND the
+                    // photo post would land server-side).
                     Button("Cancel") { onFinished(.cancelled); dismiss() }
-                        .foregroundColor(.white)
+                        .foregroundColor(.white.opacity(vm.isPublishing ? 0.4 : 1))
+                        .disabled(vm.isPublishing)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if vm.isPublishing {
                         ProgressView().tint(.white)
                     } else {
                         Button("Share") {
-                            Task {
-                                let ok = await vm.publish()
-                                if ok {
-                                    onFinished(.published(
-                                        toFeed: vm.destination.toFeed,
-                                        toStory: vm.destination.toStory
-                                    ))
-                                    dismiss()
+                            switch termsState {
+                            case .accepted:
+                                Task {
+                                    let ok = await vm.publish()
+                                    if ok {
+                                        onFinished(.published(
+                                            toFeed: vm.destination.toFeed,
+                                            toStory: vm.destination.toStory
+                                        ))
+                                        dismiss()
+                                    }
                                 }
+                            case .needsAcceptance:
+                                // Not allowed to post yet — the button routes
+                                // to the guidelines instead of a dead upload.
+                                presentGateIfNeeded()
+                            case .unknown:
+                                // Still resolving; the gate auto-presents if
+                                // the answer comes back unaccepted.
+                                break
                             }
                         }
                         .fontWeight(.bold)
-                        .foregroundColor(vm.canPublish ? MADTheme.Colors.madRed : .white.opacity(0.3))
+                        .foregroundColor(vm.canPublish && termsState == .accepted
+                            ? MADTheme.Colors.madRed : .white.opacity(0.3))
                         .disabled(!vm.canPublish)
                     }
                 }
             }
             .toolbarBackground(.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+            .madKeyboardDoneButton(focus: $captionFocused)
             .fullScreenCover(isPresented: $showCamera) {
-                CameraPicker(image: $vm.pickedImage)
-                    .ignoresSafeArea()
+                MADCameraView(image: $vm.pickedImage)
             }
             .onAppear {
-                if autoOpenCamera, vm.pickedImage == nil, CameraPicker.isAvailable {
-                    showCamera = true
+                if autoOpenCamera, !didAutoOpenCamera, vm.pickedImage == nil {
+                    didAutoOpenCamera = true
+                    requestCamera()
                 }
             }
+            .task { await resolveTermsIfNeeded() }
             .task { await vm.checkRouteAvailability() }
             // Re-probe once a photo lands — todaysWorkouts may not have been
             // loaded yet when the composer first appeared.
@@ -355,7 +434,50 @@ struct PostComposerView: View {
                 guard newImage != nil else { return }
                 Task { await vm.checkRouteAvailability() }
             }
+            // A gate held back while the camera cover was up presents as soon
+            // as the camera closes.
+            .onChange(of: showCamera) { _, isUp in
+                guard !isUp else { return }
+                presentGateIfNeeded()
+            }
+            // The server rejected a publish for unaccepted terms (stale local
+            // state) — re-gate instead of dead-ending on the error label.
+            .onChange(of: vm.needsTermsGate) { _, needs in
+                guard needs else { return }
+                vm.needsTermsGate = false
+                termsState = .needsAcceptance
+                presentGateIfNeeded()
+            }
         }
+    }
+
+    // MARK: - Guidelines gate
+
+    /// Opening the camera never waits on the guidelines — see TermsState.
+    private func requestCamera() {
+        guard MADCameraView.isAvailable else { return }
+        showCamera = true
+    }
+
+    private func resolveTermsIfNeeded() async {
+        guard termsState == .unknown else { return }
+        if PostService.termsAcceptedCached {
+            termsState = .accepted
+            return
+        }
+        // Failed check (offline) ⇒ treat as not accepted: the gate explains
+        // the block and Share stays locked, while the camera keeps working so
+        // the moment itself is never lost.
+        let accepted = (try? await PostService.termsStatus())?.accepted ?? false
+        termsState = accepted ? .accepted : .needsAcceptance
+        presentGateIfNeeded()
+    }
+
+    /// Present the gate once no other cover is up — presenting while the
+    /// camera cover is active would drop the presentation entirely.
+    private func presentGateIfNeeded() {
+        guard termsState == .needsAcceptance, !showCamera, !showTermsGate else { return }
+        showTermsGate = true
     }
 
     /// Offer to ride the run's GPS route along with the photo (shown as a
@@ -404,9 +526,17 @@ struct PostComposerView: View {
                     }
                     .frame(width: width, height: height)
                     .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous))
-                    .onAppear { vm.canvasSize = CGSize(width: width, height: height) }
+                    // Track the LIVE geometry (initial + every later pass) —
+                    // a size captured once on appear can go stale (e.g. first
+                    // layout while the camera cover is up) and flatten() would
+                    // render the sticker at a different relative size than the
+                    // preview. geo.size is already 4:5 via the aspectRatio.
+                    .onChange(of: geo.size, initial: true) { _, size in
+                        guard size.width > 0 else { return }
+                        vm.canvasSize = size
+                    }
                     .overlay(alignment: .topTrailing) {
-                        Button { showCamera = true } label: {
+                        Button { requestCamera() } label: {
                             HStack(spacing: 5) {
                                 Image(systemName: "camera.fill")
                                     .font(.system(size: 12, weight: .bold))
@@ -439,7 +569,7 @@ struct PostComposerView: View {
     }
 
     private var photoPlaceholder: some View {
-        Button { if CameraPicker.isAvailable { showCamera = true } } label: {
+        Button { requestCamera() } label: {
             VStack(spacing: MADTheme.Spacing.md) {
                 ZStack {
                     Circle()
@@ -452,10 +582,10 @@ struct PostComposerView: View {
                 }
 
                 VStack(spacing: 4) {
-                    Text(CameraPicker.isAvailable ? "Take a photo" : "Camera unavailable")
+                    Text(MADCameraView.isAvailable ? "Take a photo" : "Camera unavailable")
                         .font(.system(size: 18, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
-                    Text(CameraPicker.isAvailable
+                    Text(MADCameraView.isAvailable
                         ? "Snap today's walk or run — camera keeps it real."
                         : "A camera is required to share a post.")
                         .font(.system(size: 13, weight: .medium, design: .rounded))
@@ -464,7 +594,7 @@ struct PostComposerView: View {
                         .padding(.horizontal, MADTheme.Spacing.lg)
                 }
 
-                if CameraPicker.isAvailable {
+                if MADCameraView.isAvailable {
                     HStack(spacing: 6) {
                         Image(systemName: "camera.fill").font(.system(size: 13, weight: .bold))
                         Text("Open camera").font(.system(size: 14, weight: .bold, design: .rounded))
@@ -487,12 +617,15 @@ struct PostComposerView: View {
             )
         }
         .buttonStyle(.plain)
-        .disabled(!CameraPicker.isAvailable)
+        .disabled(!MADCameraView.isAvailable)
     }
 
     private func stickerGestureLayer(canvas: CGSize) -> some View {
         Color.clear
             .contentShape(Rectangle())
+            // Base the first pinch on the RESTORED scale — the default 1.0
+            // would make a remembered smaller/larger sticker jump on touch.
+            .onAppear { gestureBaseScale = vm.stickerScale }
             .gesture(
                 SimultaneousGesture(
                     DragGesture()
@@ -505,14 +638,15 @@ struct PostComposerView: View {
                             let x = base.x + value.translation.width / canvas.width
                             let y = base.y + value.translation.height / canvas.height
                             vm.stickerPos = CGPoint(
-                                x: min(max(x, 0.12), 0.88),
-                                y: min(max(y, 0.1), 0.9)
+                                x: x.clamped(to: StickerConfig.posXRange),
+                                y: y.clamped(to: StickerConfig.posYRange)
                             )
                         }
                         .onEnded { _ in gestureBasePos = nil },
                     MagnificationGesture()
                         .onChanged { value in
-                            vm.stickerScale = min(max(gestureBaseScale * value, 0.6), 1.9)
+                            vm.stickerScale = (gestureBaseScale * value)
+                                .clamped(to: StickerConfig.scaleRange)
                         }
                         .onEnded { _ in gestureBaseScale = vm.stickerScale }
                 )
@@ -614,6 +748,7 @@ struct PostComposerView: View {
         VStack(alignment: .leading, spacing: 6) {
             TextField("", text: $vm.caption, prompt: Text("Add a caption…").foregroundColor(.white.opacity(0.4)), axis: .vertical)
                 .lineLimit(1...4)
+                .focused($captionFocused)
                 .font(.system(size: 15, weight: .medium, design: .rounded))
                 .foregroundColor(.white)
                 .padding(MADTheme.Spacing.md)

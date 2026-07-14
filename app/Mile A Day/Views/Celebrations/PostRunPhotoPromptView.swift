@@ -14,13 +14,15 @@ struct PostRunPhotoPromptView: View {
     let workoutType: String
 
     @ObservedObject private var manager = CelebrationManager.shared
-    @State private var showComposer = false
     @State private var appeared = false
     @State private var didAct = false
     /// Photos captured during the run via the tracking screen's camera button.
     @State private var midRunSnaps: [UIImage] = []
-    /// The mid-run snap chosen for the composer; nil = fresh camera capture.
-    @State private var selectedSnap: UIImage?
+    /// Composer launch request — carries the tapped snap (nil = fresh camera).
+    /// Item-based so the cover is always built from THIS value; the old
+    /// isPresented + separate-selection pair could build the composer with a
+    /// stale nil snap and wrongly launch the live camera.
+    @State private var composerLaunch: ComposerLaunch?
 
     private var isWalk: Bool { workoutType == "walking" }
     private var accent: Color { isWalk ? .blue : MADTheme.Colors.madRed }
@@ -57,8 +59,7 @@ struct PostRunPhotoPromptView: View {
 
                 VStack(spacing: MADTheme.Spacing.sm) {
                     Button {
-                        selectedSnap = nil
-                        showComposer = true
+                        composerLaunch = ComposerLaunch(image: nil)
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "camera.fill")
@@ -83,22 +84,21 @@ struct PostRunPhotoPromptView: View {
             midRunSnaps = MidRunPhotoStash.loadAll()
             withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { appeared = true }
         }
-        .fullScreenCover(isPresented: $showComposer) {
+        .fullScreenCover(item: $composerLaunch) { launch in
             PostComposerView(
                 stats: RunPostService.todayStats(workoutId: workoutId),
                 destination: .story,
                 // A chosen mid-run snap goes straight onto the canvas; only a
                 // fresh capture launches the camera.
-                autoOpenCamera: selectedSnap == nil,
-                initialImage: selectedSnap
+                autoOpenCamera: launch.image == nil,
+                initialImage: launch.image
             ) { outcome in
-                showComposer = false
+                composerLaunch = nil
                 switch outcome {
                 case .cancelled where !midRunSnaps.isEmpty:
                     // Backed out with snaps still to consider — return to this
                     // prompt so they can pick a different one or Skip. Nothing
                     // is finalized yet.
-                    selectedSnap = nil
                     return
                 case .published(let toFeed, _) where toFeed:
                     // The photo went to the feed, so it IS the feed item.
@@ -172,28 +172,46 @@ struct PostRunPhotoPromptView: View {
         }
     }
 
+    /// One snap gets a big hero card; multiples shrink so two still sit side
+    /// by side on the smallest screens. Always 4:5, like the post.
+    private var snapCardSize: CGSize {
+        midRunSnaps.count == 1
+            ? CGSize(width: 216, height: 270)
+            : CGSize(width: 150, height: 187)
+    }
+
     private func snapCard(index: Int, snap: UIImage) -> some View {
         Button {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            selectedSnap = snap
-            showComposer = true
+            composerLaunch = ComposerLaunch(image: snap)
         } label: {
             Image(uiImage: snap)
                 .resizable()
                 .scaledToFill()
-                .frame(width: 132, height: 165) // 4:5, like the post
+                .frame(width: snapCardSize.width, height: snapCardSize.height)
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
                 )
-                .overlay(alignment: .bottomTrailing) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(.white, accent)
-                        .padding(8)
+                // An unmissable "this is the button" label — the old corner
+                // arrow read as decoration and people hunted for a tap target.
+                .overlay(alignment: .bottom) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 13, weight: .bold))
+                        Text(midRunSnaps.count == 1 ? "Use this photo" : "Use photo")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(accent))
+                    .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
+                    .padding(.bottom, 10)
                 }
                 .shadow(color: .black.opacity(0.4), radius: 10, y: 5)
+                .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
         .scaleEffect(appeared ? 1 : 0.8)
@@ -217,4 +235,12 @@ struct PostRunPhotoPromptView: View {
         MidRunPhotoStash.clear()
         manager.dismissCurrentCelebration()
     }
+}
+
+/// Identifiable wrapper for launching the composer, so the fullScreenCover is
+/// built from the exact tapped value instead of separately-tracked state.
+private struct ComposerLaunch: Identifiable {
+    let id = UUID()
+    /// The chosen mid-run snap; nil means open the live camera for a fresh shot.
+    let image: UIImage?
 }

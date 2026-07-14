@@ -260,7 +260,7 @@ struct WorkoutTrackingView: View {
                     // one tap, keep moving — the end-of-run prompt asks whether
                     // it becomes the post. Pinned in the top bar so it never
                     // crowds the metrics or the Stop button.
-                    if CameraPicker.isAvailable && !isStopping {
+                    if MADCameraView.isAvailable && !isStopping {
                         midRunCameraButton
                             .padding(.trailing, 20)
                     }
@@ -339,8 +339,7 @@ struct WorkoutTrackingView: View {
         }
         .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showMidRunCamera) {
-            CameraPicker(image: $midRunImage)
-                .ignoresSafeArea()
+            MADCameraView(image: $midRunImage)
         }
         .onChange(of: midRunImage) { _, newImage in
             guard let image = newImage else { return }

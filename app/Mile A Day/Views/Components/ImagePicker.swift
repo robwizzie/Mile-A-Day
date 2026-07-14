@@ -70,58 +70,9 @@ enum PhotoRollSaver {
 
 // MARK: - Camera Capture
 
-/// Camera-only capture (no photo library picking). Used by the post composer
-/// and the mid-run snap button so shared walks/runs are captured in the
-/// moment rather than uploaded from the roll. Every capture is ALSO saved to
-/// the camera roll (see PhotoRollSaver) — the user's own copy, independent of
-/// what happens to the post.
-struct CameraPicker: UIViewControllerRepresentable {
-    @Binding var image: UIImage?
-    @Environment(\.presentationMode) var presentationMode
-
-    /// Whether the device actually has a camera (false on Simulator).
-    static var isAvailable: Bool {
-        UIImagePickerController.isSourceTypeAvailable(.camera)
-    }
-
-    func makeUIViewController(context: Context) -> UIViewController {
-        // Guard against unavailable cameras (e.g. Simulator) — presenting a
-        // `.camera` source there would crash. Callers gate on `isAvailable`.
-        guard Self.isAvailable else { return UIViewController() }
-
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.cameraCaptureMode = .photo
-        picker.allowsEditing = false
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let parent: CameraPicker
-        init(_ parent: CameraPicker) { self.parent = parent }
-
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-        ) {
-            if let img = info[.originalImage] as? UIImage {
-                parent.image = img
-                // Every in-app capture also lands in the camera roll.
-                PhotoRollSaver.save(img)
-            }
-            parent.presentationMode.wrappedValue.dismiss()
-        }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.presentationMode.wrappedValue.dismiss()
-        }
-    }
-}
+// In-app camera capture lives in MADCameraView (Views/Components/MADCameraView.swift) —
+// an AVFoundation camera with full flash control and a self-timer, which
+// replaced the UIImagePickerController-based CameraPicker that used to be here.
 
 // MARK: - Profile Image Cropper
 

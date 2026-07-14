@@ -495,16 +495,54 @@ enum PostService {
     }
 
     static func termsStatus() async throws -> TermsStatus {
-        try await APIClient.fancyFetch(endpoint: "/posts/terms", responseType: TermsStatus.self)
+        // Pin the cache key BEFORE the await: if the account switches while
+        // the request is in flight, the response must land under the user
+        // who made it, not whoever is signed in when it returns.
+        let cacheKey = termsCacheKey(userId: currentUserId)
+        let status: TermsStatus = try await APIClient.fancyFetch(
+            endpoint: "/posts/terms",
+            responseType: TermsStatus.self
+        )
+        UserDefaults.standard.set(status.accepted, forKey: cacheKey)
+        return status
     }
 
     @discardableResult
     static func acceptTerms() async throws -> TermsStatus {
-        try await APIClient.fancyFetch(
+        let cacheKey = termsCacheKey(userId: currentUserId)
+        let status: TermsStatus = try await APIClient.fancyFetch(
             endpoint: "/posts/terms/accept",
             method: .POST,
             responseType: TermsStatus.self
         )
+        UserDefaults.standard.set(status.accepted, forKey: cacheKey)
+        return status
+    }
+
+    // MARK: Community-guidelines acceptance cache
+
+    /// Same accessor the sibling services (WorkoutService, FriendService…)
+    /// keep for the logged-in backend user id.
+    private static var currentUserId: String? {
+        UserDefaults.standard.string(forKey: "backendUserId")
+    }
+
+    /// Local memo of the server-side guidelines acceptance so composer gates
+    /// can decide instantly (and offline) instead of blocking on a round-trip.
+    /// The server stays the source of truth: every termsStatus/acceptTerms
+    /// response refreshes it, and a `terms_not_accepted` publish rejection
+    /// clears it. Keyed per backend user so account switches can't leak an
+    /// acceptance across users.
+    private static func termsCacheKey(userId: String?) -> String {
+        "post.terms.accepted.\(userId ?? "anon")"
+    }
+
+    static var termsAcceptedCached: Bool {
+        UserDefaults.standard.bool(forKey: termsCacheKey(userId: currentUserId))
+    }
+
+    static func cacheTermsAccepted(_ accepted: Bool) {
+        UserDefaults.standard.set(accepted, forKey: termsCacheKey(userId: currentUserId))
     }
 }
 
