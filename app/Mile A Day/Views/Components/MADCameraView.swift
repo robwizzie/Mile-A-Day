@@ -23,6 +23,12 @@ struct MADCameraView: View {
     /// A capture attempt produced nothing (session interrupted, processing
     /// error) — surfaced instead of silently doing nothing.
     @State private var showCaptureFailed = false
+    /// Staggered entrance for the chrome so opening feels composed, not popped.
+    @State private var controlsAppeared = false
+    /// Quick white blink at shutter time — the classic capture acknowledgment.
+    @State private var captureFlash = false
+    /// Accumulated flip-icon rotation (each flip adds a half turn).
+    @State private var flipRotation: Double = 0
 
     /// Whether the device has a camera the controller can actually drive
     /// (false on Simulator). Asks AVFoundation — the same stack that
@@ -35,8 +41,38 @@ struct MADCameraView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
+            // Preview fades in once frames are actually flowing — no black
+            // pop, and a soft spinner while the session spins up.
             MADCameraPreview(session: camera.session)
                 .ignoresSafeArea()
+                .opacity(camera.isSessionRunning ? 1 : 0)
+                .animation(.easeIn(duration: 0.35), value: camera.isSessionRunning)
+
+            if !camera.isSessionRunning && !camera.authorizationDenied {
+                ProgressView()
+                    .tint(.white.opacity(0.6))
+                    .scaleEffect(1.2)
+            }
+
+            // Legibility scrims behind the chrome — controls read cleanly on
+            // any scene without boxing the whole preview.
+            VStack(spacing: 0) {
+                LinearGradient(colors: [.black.opacity(0.45), .clear],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 130)
+                Spacer()
+                LinearGradient(colors: [.clear, .black.opacity(0.5)],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: 190)
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            // Countdown: dim the scene and pop the seconds, Apple-style.
+            Color.black.opacity(countdown != nil ? 0.28 : 0)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .animation(.easeInOut(duration: 0.25), value: countdown != nil)
 
             if camera.authorizationDenied {
                 permissionDeniedView
@@ -53,16 +89,33 @@ struct MADCameraView: View {
 
             VStack {
                 topBar
+                    .opacity(controlsAppeared ? 1 : 0)
+                    .offset(y: controlsAppeared ? 0 : -14)
                 Spacer()
                 bottomBar
+                    .opacity(controlsAppeared ? 1 : 0)
+                    .offset(y: controlsAppeared ? 0 : 16)
             }
+
+            // Shutter acknowledgment blink.
+            Color.white.opacity(captureFlash ? 0.85 : 0)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
             if showCaptureFailed {
                 captureFailedToast
             }
         }
+        // Camera chrome is a dark surface regardless of system setting —
+        // keeps the material pills consistent over the live preview.
+        .environment(\.colorScheme, .dark)
         .statusBarHidden()
-        .onAppear { camera.start() }
+        .onAppear {
+            camera.start()
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8).delay(0.08)) {
+                controlsAppeared = true
+            }
+        }
         .onDisappear {
             countdownTask?.cancel()
             camera.stop()
@@ -100,7 +153,8 @@ struct MADCameraView: View {
     }
 
     private func glassCircleButton(
-        icon: String, size: CGFloat, iconSize: CGFloat, action: @escaping () -> Void
+        icon: String, size: CGFloat, iconSize: CGFloat,
+        rotation: Double = 0, action: @escaping () -> Void
     ) -> some View {
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -109,11 +163,12 @@ struct MADCameraView: View {
             Image(systemName: icon)
                 .font(.system(size: iconSize, weight: .bold))
                 .foregroundColor(.white)
+                .rotationEffect(.degrees(rotation))
                 .frame(width: size, height: size)
-                .background(Circle().fill(Color.black.opacity(0.45)))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.2), lineWidth: 1))
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CameraControlButtonStyle())
     }
 
     private func controlPill(
@@ -132,10 +187,12 @@ struct MADCameraView: View {
             .foregroundColor(active ? .yellow : .white)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Capsule().fill(Color.black.opacity(0.45)))
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 1))
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+            .contentTransition(.symbolEffect(.replace))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(CameraControlButtonStyle())
+        .animation(.easeInOut(duration: 0.15), value: active)
     }
 
     private var bottomBar: some View {
@@ -143,7 +200,13 @@ struct MADCameraView: View {
             shutterButton
             HStack {
                 Spacer()
-                glassCircleButton(icon: "arrow.triangle.2.circlepath.camera.fill", size: 48, iconSize: 18) {
+                glassCircleButton(
+                    icon: "arrow.triangle.2.circlepath.camera.fill",
+                    size: 48, iconSize: 18, rotation: flipRotation
+                ) {
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                        flipRotation += 180
+                    }
                     camera.flip()
                 }
             }
@@ -158,19 +221,23 @@ struct MADCameraView: View {
                 Circle()
                     .strokeBorder(Color.white, lineWidth: 4)
                     .frame(width: 78, height: 78)
+                    .shadow(color: .black.opacity(0.25), radius: 8, y: 2)
                 if countdownTask != nil {
                     // A running countdown turns the shutter into a stop button.
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(Color.white)
                         .frame(width: 30, height: 30)
+                        .transition(.scale.combined(with: .opacity))
                 } else {
                     Circle()
                         .fill(Color.white)
                         .frame(width: 64, height: 64)
+                        .transition(.scale.combined(with: .opacity))
                 }
             }
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: countdownTask != nil)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ShutterButtonStyle())
         .disabled(camera.authorizationDenied || didCapture)
     }
 
@@ -254,6 +321,12 @@ struct MADCameraView: View {
         // Latch immediately — the shutter disables and a second tap during
         // the capture round-trip can't start a competing capture.
         didCapture = true
+        // Classic white blink acknowledges the shutter instantly, before the
+        // capture round-trip finishes.
+        withAnimation(.easeIn(duration: 0.06)) { captureFlash = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation(.easeOut(duration: 0.2)) { captureFlash = false }
+        }
         camera.capturePhoto { captured in
             guard let captured else {
                 // Failed (session interrupted, processing error): re-arm the
@@ -277,6 +350,26 @@ struct MADCameraView: View {
     }
 }
 
+// MARK: - Button styles
+
+/// Shutter press: a satisfying squeeze instead of the default opacity dip.
+private struct ShutterButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.86 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: configuration.isPressed)
+    }
+}
+
+/// Small chrome buttons: subtle press scale, no opacity flash over the preview.
+private struct CameraControlButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .animation(.spring(response: 0.2, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
 // MARK: - Session controller
 
 /// Owns the AVCaptureSession. All session mutation happens on `sessionQueue`;
@@ -286,6 +379,9 @@ final class MADCameraController {
     @ObservationIgnored let session = AVCaptureSession()
 
     var authorizationDenied = false
+    /// Frames are flowing — the view fades the preview in on this so opening
+    /// never black-pops.
+    var isSessionRunning = false
     /// Whether the CURRENT camera can flash — front cameras count too on
     /// modern iPhones (Retina screen-flash), per supportedFlashModes.
     var isFlashAvailable = false
@@ -377,6 +473,7 @@ final class MADCameraController {
             guard let self else { return }
             self.userStopped = true
             if self.session.isRunning { self.session.stopRunning() }
+            DispatchQueue.main.async { self.isSessionRunning = false }
         }
     }
 
@@ -448,6 +545,8 @@ final class MADCameraController {
             self.userStopped = false
             self.configureIfNeeded()
             if !self.session.isRunning { self.session.startRunning() }
+            let running = self.session.isRunning
+            DispatchQueue.main.async { self.isSessionRunning = running }
         }
     }
 
@@ -505,8 +604,19 @@ final class MADCameraController {
                 guard let self, self.configured, !self.userStopped,
                       !self.session.isRunning else { return }
                 self.session.startRunning()
+                let running = self.session.isRunning
+                DispatchQueue.main.async { self.isSessionRunning = running }
             }
         }
+        // Interruption began (phone call, another app claimed the camera):
+        // reflect the stop immediately so the view swaps the frozen frame
+        // for the spinner and the shutter reads as not-live.
+        sessionObservers.append(center.addObserver(
+            forName: AVCaptureSession.wasInterruptedNotification,
+            object: session, queue: nil
+        ) { [weak self] _ in
+            self?.publishSessionRunning()
+        })
         sessionObservers.append(center.addObserver(
             forName: AVCaptureSession.interruptionEndedNotification,
             object: session, queue: nil
@@ -514,7 +624,8 @@ final class MADCameraController {
         sessionObservers.append(center.addObserver(
             forName: AVCaptureSession.runtimeErrorNotification,
             object: session, queue: nil
-        ) { note in
+        ) { [weak self] note in
+            self?.publishSessionRunning()
             // AVCam's rule: only a media-services reset warrants a restart. A
             // failed startRunning() itself posts a runtime error, so a
             // blanket retry ping-pongs forever under persistent failure.
@@ -522,6 +633,15 @@ final class MADCameraController {
             guard error?.code == .mediaServicesWereReset else { return }
             restart()
         })
+    }
+
+    /// Re-read the session's actual running state (on its queue) and publish.
+    private func publishSessionRunning() {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            let running = self.session.isRunning
+            DispatchQueue.main.async { self.isSessionRunning = running }
+        }
     }
 
     private static func mirroredHorizontally(_ image: UIImage) -> UIImage {

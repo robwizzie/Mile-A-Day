@@ -1,5 +1,23 @@
 import SwiftUI
 
+/// One-shot handoff from the notification inbox (or any other surface) to the
+/// feed: which workout's entry to reveal. Parked statically because the Feed
+/// tab may not be mounted when the tap happens — the feed consumes it on
+/// appear, or immediately via the `poke` notification when already mounted.
+enum FeedDeepLink {
+    struct Target {
+        /// Exact match against FeedEntry.workout_id (workout + linked posts).
+        var workoutId: String?
+        /// mile_completed notifications carry no workout id — fall back to
+        /// the friend's newest entry on that local day.
+        var userId: String?
+        var localDate: String?
+    }
+
+    static var pending: Target?
+    static let poke = NSNotification.Name("MAD_OpenFeedWorkout")
+}
+
 /// The single social surface inside the Friends tab: a stories rail, an optional
 /// "On this day" memories card, then one unified, infinitely-scrollable feed of
 /// photo posts AND raw walk/run activity. Posting and viewing friends' stories
@@ -50,6 +68,9 @@ struct SocialFeedView: View {
     @State private var showAlreadySharedHint = false
     @State private var showMemories = false
     @State private var showWeeklyRecap = false
+    /// Entry briefly ringed after a notification deep-link lands on it, so
+    /// the user can tell exactly which workout they were brought to.
+    @State private var highlightedEntryId: String?
     @State private var profileUser: BackendUser?
     /// Tapped hype tally — presents the "who hyped this" sheet.
     @State private var hypersContext: HypersListContext?
@@ -155,6 +176,7 @@ struct SocialFeedView: View {
                     }
                 }
 
+            ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: MADTheme.Spacing.md) {
                     StoriesRailView(
@@ -191,6 +213,16 @@ struct SocialFeedView: View {
                     } else {
                         ForEach(feed) { entry in
                             feedCard(entry)
+                                // Deep-link landing ring — fades once seen.
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                                        .strokeBorder(
+                                            Color.orange.opacity(highlightedEntryId == entry.id ? 0.75 : 0),
+                                            lineWidth: 2
+                                        )
+                                        .allowsHitTesting(false)
+                                )
+                                .animation(.easeInOut(duration: 0.35), value: highlightedEntryId)
                                 // Prefetch a few cards early (not just on the
                                 // very last row) so the next page is usually
                                 // there before the user reaches the bottom.
@@ -200,6 +232,7 @@ struct SocialFeedView: View {
                                     }
                                 }
                                 .padding(.horizontal, MADTheme.Spacing.md)
+                                .id(entry.id)
                         }
                         if isLoadingMore {
                             ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
@@ -215,6 +248,14 @@ struct SocialFeedView: View {
             .refreshable {
                 await refresh()
                 await loadHypeStatus()
+            }
+            // Deep-link consumption: the poke covers "feed already mounted";
+            // the task covers "feed first mounted because of the deep link"
+            // (the poke fires before this view exists and is missed).
+            .onReceive(NotificationCenter.default.publisher(for: FeedDeepLink.poke)) { _ in
+                revealDeepLink(using: proxy)
+            }
+            .task { revealDeepLink(using: proxy) }
             }
         }
         .background(MADTheme.Colors.appBackgroundGradient)
@@ -247,7 +288,7 @@ struct SocialFeedView: View {
             }
         }
         .sheet(isPresented: $presentingComposer) {
-            PostComposerView(stats: statsInput, destination: .feed) { outcome in
+            PostComposerView(stats: statsInput) { outcome in
                 if case .published = outcome { Task { await refresh() } }
             }
         }
@@ -465,6 +506,90 @@ struct SocialFeedView: View {
         }
         .padding(.top, MADTheme.Spacing.xxl)
         .padding(.horizontal, MADTheme.Spacing.xl)
+    }
+
+    // MARK: - Notification deep link
+
+    /// Scroll the feed to the workout a tapped notification pointed at.
+    /// Resolves against loaded entries, refreshing once and then paging a
+    /// few times if needed (an inbox tapped a day later usually points past
+    /// page 1). Double scrollTo — a LazyVStack lands short on deep targets
+    /// (see ProfilePostsFeedSheet).
+    private func revealDeepLink(using proxy: ScrollViewProxy) {
+        guard FeedDeepLink.pending != nil else { return }
+        Task {
+            // Let an in-flight (initial) load settle before looking.
+            var waited = 0
+            while isLoading, waited < 40 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                waited += 1
+            }
+            if resolvedDeepLinkEntry() == nil {
+                await refresh()
+            }
+            // Older target: page deeper, bounded so a pruned/ancient target
+            // can't fetch the whole feed history.
+            var pagesLoaded = 0
+            while resolvedDeepLinkEntry() == nil, nextBefore != nil, pagesLoaded < 3 {
+                await loadMore()
+                pagesLoaded += 1
+            }
+            guard let entry = resolvedDeepLinkEntry() else {
+                // Not in the feed (very old, or friendship changed) — land at
+                // the top rather than pretending.
+                FeedDeepLink.pending = nil
+                return
+            }
+            FeedDeepLink.pending = nil
+            withAnimation(.easeInOut(duration: 0.35)) {
+                proxy.scrollTo(entry.id, anchor: .top)
+            }
+            highlightedEntryId = entry.id
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(entry.id, anchor: .top)
+            }
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            highlightedEntryId = nil
+        }
+    }
+
+    private func resolvedDeepLinkEntry() -> FeedEntry? {
+        guard let target = FeedDeepLink.pending else { return nil }
+        // Precise: workout ids match both raw workout entries and the post
+        // that replaced one (the backend surfaces exactly one of the two).
+        if let wid = target.workoutId,
+           let hit = feed.first(where: { $0.workout_id == wid }) {
+            return hit
+        }
+        // mile_completed carries no workout id — the friend's entry on that
+        // local day (±1 day: their `local_date` is stamped in THEIR timezone,
+        // our timestamps render in OURS), else their newest entry.
+        if let uid = target.userId {
+            let sameUser = feed.filter { $0.user_id == uid && !$0.is_self }
+            if let date = target.localDate,
+               let hit = sameUser.first(where: { dayDistance(of: $0, to: date).map { $0 <= 1 } ?? false }) {
+                return hit
+            }
+            return sameUser.first
+        }
+        return nil
+    }
+
+    /// Whole days between an entry's timestamp (viewer tz) and a
+    /// "yyyy-MM-dd" target day; nil when either side doesn't parse.
+    private func dayDistance(of entry: FeedEntry, to targetDay: String) -> Int? {
+        guard let entryDate = RelativeTime.date(from: entry.sort_ts) else { return nil }
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        guard let target = f.date(from: targetDay) else { return nil }
+        let cal = Calendar.current
+        let days = cal.dateComponents(
+            [.day],
+            from: cal.startOfDay(for: entryDate),
+            to: cal.startOfDay(for: target)
+        ).day ?? 0
+        return abs(days)
     }
 
     // MARK: - Compose flow

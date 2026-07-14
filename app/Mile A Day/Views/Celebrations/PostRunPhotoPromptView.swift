@@ -25,7 +25,8 @@ struct PostRunPhotoPromptView: View {
     @State private var composerLaunch: ComposerLaunch?
 
     private var isWalk: Bool { workoutType == "walking" }
-    private var accent: Color { isWalk ? .blue : MADTheme.Colors.madRed }
+    /// App-wide type language: walks blue, runs red.
+    private var accent: Color { MADTheme.workoutColor(workoutType) }
 
     var body: some View {
         ZStack {
@@ -87,7 +88,6 @@ struct PostRunPhotoPromptView: View {
         .fullScreenCover(item: $composerLaunch) { launch in
             PostComposerView(
                 stats: RunPostService.todayStats(workoutId: workoutId),
-                destination: .story,
                 // A chosen mid-run snap goes straight onto the canvas; only a
                 // fresh capture launches the camera.
                 autoOpenCamera: launch.image == nil,
