@@ -474,7 +474,9 @@ struct SocialFeedView: View {
         // Reachable from the rail's own-story cell even after the FAB hides —
         // enforce one-share-per-workout at the entry point too.
         guard !alreadySharedWorkout else { showAlreadySharedHint = true; return }
-        if termsAccepted == true {
+        // The cache also covers acceptance that happened OUTSIDE this view
+        // (post-run composer gate) after our one-shot loadTermsStatus ran.
+        if termsAccepted == true || PostService.termsAcceptedCached {
             presentingComposer = true
         } else {
             pendingCompose = true

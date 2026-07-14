@@ -36,6 +36,7 @@ globs: app/**
 - Feature views live in `Views/<FeatureName>/` subdirectories.
 - Shared UI components in `Views/Components/`.
 - Watch app is a separate target at `Mile A Day Watch App/`.
+- fullScreenCover gotchas (post composer): pass tap-selected content via `.fullScreenCover(item:)` (isPresented + separate @State races to a stale nil), guard onAppear side effects with a one-shot flag (onAppear RE-FIRES when a cover dismisses — an auto-opened camera re-traps the user), and attach two covers to two different nodes or one drops.
 - iOS 26 auto-wraps custom `ToolbarItem` views in a shared glass capsule. For a custom-styled pill, apply `.sharedBackgroundVisibility(.hidden)` to the `ToolbarItem` itself (it's on `CustomizableToolbarContent`, NOT a `View` modifier; gate with `#available(iOS 26)`) or it renders pill-inside-a-pill. Also `.fixedSize()` toolbar HStacks — leading items truncate `Text` to zero width otherwise.
 
 ## Entitlements

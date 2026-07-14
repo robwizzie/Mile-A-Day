@@ -86,6 +86,7 @@ struct EditCaptionSheet: View {
                     .disabled(isSaving)
                 }
             }
+            .madKeyboardDoneButton(focus: $focused)
             .onAppear { focused = true }
         }
         .presentationDetents([.medium])
