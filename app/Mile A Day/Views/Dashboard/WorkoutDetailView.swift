@@ -74,13 +74,7 @@ struct WorkoutDetailView: View {
     // Same accent per type as the feed (ActivityCardView.color) — one color
     // language for a workout everywhere it appears.
     private var workoutColor: Color {
-        switch workout.workoutActivityType {
-        case .running: return MADTheme.Colors.madRed
-        case .walking: return .orange
-        case .hiking: return .green
-        case .cycling: return .blue
-        default: return MADTheme.Colors.madRed
-        }
+        MADTheme.workoutColor(workout.workoutActivityType.madTypeKey)
     }
 
     private var distanceMiles: Double {

@@ -1112,13 +1112,7 @@ struct FriendWorkoutDetailSheet: View {
     }
 
     private var workoutColor: Color {
-        switch workout.workoutType.lowercased() {
-        case "running": return MADTheme.Colors.madRed
-        case "walking": return .blue
-        case "cycling": return .green
-        case "hiking": return .orange
-        default: return MADTheme.Colors.madRed
-        }
+        MADTheme.workoutColor(workout.workoutType)
     }
 
     private var workoutIcon: String {
@@ -1663,13 +1657,7 @@ struct Last7DaysChart: View {
     }
 
     private func workoutTypeColor(_ type: String) -> Color {
-        switch type.lowercased() {
-        case "running": return .red
-        case "walking": return .blue
-        case "cycling": return .green
-        case "hiking": return .brown
-        default: return .gray
-        }
+        MADTheme.workoutColor(type)
     }
 
     /// Three-letter localized weekday ("Sun", "Mon", "Tue"…). Unambiguous

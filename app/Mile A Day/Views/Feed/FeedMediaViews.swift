@@ -87,7 +87,11 @@ struct FeedImageView: View {
 /// overlay side-steps all of that. One- finger gestures (paging, scrolling)
 /// are untouched — the pinch needs two fingers.
 struct InstagramZoomModifier: ViewModifier {
-    let image: UIImage?
+    /// Resolved at pinch-BEGIN, not stored: photo slides hand back their
+    /// already-loaded image for free, while composite slides (route maps,
+    /// stats cards) render their floating copy on demand — nothing is baked
+    /// eagerly or retained per-card for a gesture most cards never receive.
+    let imageProvider: () -> UIImage?
     var cornerRadius: CGFloat = MADTheme.CornerRadius.medium
     var onDoubleTap: (() -> Void)? = nil
 
@@ -100,7 +104,7 @@ struct InstagramZoomModifier: ViewModifier {
             .opacity(isZooming ? 0 : 1)
             .overlay(
                 ZoomGestureHost(
-                    image: image,
+                    imageProvider: imageProvider,
                     cornerRadius: cornerRadius,
                     isZooming: $isZooming,
                     onDoubleTap: onDoubleTap
@@ -116,12 +120,23 @@ extension View {
         cornerRadius: CGFloat = MADTheme.CornerRadius.medium,
         onDoubleTap: (() -> Void)? = nil
     ) -> some View {
-        modifier(InstagramZoomModifier(image: image, cornerRadius: cornerRadius, onDoubleTap: onDoubleTap))
+        modifier(InstagramZoomModifier(
+            imageProvider: { image }, cornerRadius: cornerRadius, onDoubleTap: onDoubleTap))
+    }
+
+    /// Variant for slides whose floating copy is composed on demand.
+    func instagramZoomable(
+        imageProvider: @escaping () -> UIImage?,
+        cornerRadius: CGFloat = MADTheme.CornerRadius.medium,
+        onDoubleTap: (() -> Void)? = nil
+    ) -> some View {
+        modifier(InstagramZoomModifier(
+            imageProvider: imageProvider, cornerRadius: cornerRadius, onDoubleTap: onDoubleTap))
     }
 }
 
 private struct ZoomGestureHost: UIViewRepresentable {
-    let image: UIImage?
+    let imageProvider: () -> UIImage?
     let cornerRadius: CGFloat
     @Binding var isZooming: Bool
     let onDoubleTap: (() -> Void)?
@@ -179,7 +194,7 @@ private struct ZoomGestureHost: UIViewRepresentable {
 
             switch gesture.state {
             case .began:
-                guard parent.image != nil, floatingImageView == nil else { return }
+                guard floatingImageView == nil, let image = parent.imageProvider() else { return }
                 sourceFrame = hostView.convert(hostView.bounds, to: window)
                 startCentroid = gesture.location(in: window)
 
@@ -189,7 +204,7 @@ private struct ZoomGestureHost: UIViewRepresentable {
                 window.addSubview(dim)
                 dimView = dim
 
-                let iv = UIImageView(image: parent.image)
+                let iv = UIImageView(image: image)
                 iv.frame = sourceFrame
                 iv.contentMode = .scaleAspectFill
                 iv.clipsToBounds = true

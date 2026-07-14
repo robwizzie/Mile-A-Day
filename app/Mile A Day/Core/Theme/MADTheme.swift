@@ -66,10 +66,28 @@ struct MADTheme {
         static let success = Color(red: 0.2, green: 0.7, blue: 0.3)
         static let warning = Color(red: 1.0, green: 0.6, blue: 0.0)
         static let error = Color(red: 0.9, green: 0.2, blue: 0.2)
-        
+
+        // Workout-type accent: walks are BLUE everywhere (runs use madRed).
+        static let walkBlue = Color(red: 0.25, green: 0.6, blue: 0.95)
+
         // Shadow and overlay - adapt to dark mode
         static let shadow = Color.primary.opacity(0.1)
         static let overlay = Color.primary.opacity(0.3)
+    }
+
+    /// THE workout-type color language, app-wide: runs are red, walks are
+    /// blue — on the feed, dashboard, profiles, prompts, and the route
+    /// heatmap alike. Every surface must route through this (directly or via
+    /// ActivityCardView.color); local switch statements drifted into three
+    /// conflicting palettes before this existed.
+    static func workoutColor(_ type: String?) -> Color {
+        switch (type ?? "").lowercased() {
+        case "running": return Colors.madRed
+        case "walking": return Colors.walkBlue
+        case "hiking": return Colors.success
+        case "cycling": return Colors.warning
+        default: return Colors.madRed
+        }
     }
     
     // MARK: - Typography

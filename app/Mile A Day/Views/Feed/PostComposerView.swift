@@ -106,7 +106,10 @@ enum PostComposeOutcome {
 final class PostComposerViewModel: ObservableObject {
     @Published var pickedImage: UIImage?
     @Published var caption: String = ""
-    @Published var destination: PostDestination
+    /// Where the post goes. Starts nil ON PURPOSE — the user must make the
+    /// story/feed/both choice themselves before Share enables, so nobody
+    /// posts somewhere they didn't mean to.
+    @Published var destination: PostDestination?
     @Published var stickerEnabled: Bool = true
     /// Sticker center in normalized canvas coordinates (0…1).
     @Published var stickerPos: CGPoint = CGPoint(x: 0.5, y: 0.82)
@@ -126,9 +129,8 @@ final class PostComposerViewModel: ObservableObject {
     /// Captured on-screen canvas size (points), reused to render the composite.
     var canvasSize: CGSize = .zero
 
-    init(stats: RunStatsInput, destination: PostDestination, initialImage: UIImage? = nil) {
+    init(stats: RunStatsInput, initialImage: UIImage? = nil) {
         self.stats = stats
-        self.destination = destination
         var cfg = StickerConfig.load()
         // Drop any remembered stats that aren't available today, and make sure
         // at least one available stat is shown.
@@ -146,7 +148,7 @@ final class PostComposerViewModel: ObservableObject {
     }
 
     var canPublish: Bool {
-        pickedImage != nil && !isPublishing
+        pickedImage != nil && destination != nil && !isPublishing
     }
 
     /// Check whether the linked workout has GPS route data, enabling the
@@ -187,6 +189,10 @@ final class PostComposerViewModel: ObservableObject {
         guard !isPublishing else { return false }
         guard let flat = flatten() else {
             errorMessage = "Add a photo first."
+            return false
+        }
+        guard let destination else {
+            errorMessage = "Choose where to share — story, feed, or both."
             return false
         }
         isPublishing = true
@@ -310,13 +316,12 @@ struct PostComposerView: View {
 
     init(
         stats: RunStatsInput,
-        destination: PostDestination = .feed,
         autoOpenCamera: Bool = false,
         initialImage: UIImage? = nil,
         onFinished: @escaping (PostComposeOutcome) -> Void
     ) {
         _vm = StateObject(wrappedValue: PostComposerViewModel(
-            stats: stats, destination: destination, initialImage: initialImage))
+            stats: stats, initialImage: initialImage))
         self.autoOpenCamera = autoOpenCamera
         self.onFinished = onFinished
     }
@@ -389,10 +394,10 @@ struct PostComposerView: View {
                             case .accepted:
                                 Task {
                                     let ok = await vm.publish()
-                                    if ok {
+                                    if ok, let dest = vm.destination {
                                         onFinished(.published(
-                                            toFeed: vm.destination.toFeed,
-                                            toStory: vm.destination.toStory
+                                            toFeed: dest.toFeed,
+                                            toStory: dest.toStory
                                         ))
                                         dismiss()
                                     }
@@ -768,46 +773,80 @@ struct PostComposerView: View {
 
     /// Story / Feed / Both — a single deliberate destination choice, so the
     /// story stays the ephemeral moment and the feed stays the curated record.
+    /// Nothing is preselected: Share stays disabled until the user picks, and
+    /// the picked card is unmistakable (gradient fill + checkmark badge).
     private var destinationToggles: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             editorLabel("SHARE TO")
             HStack(spacing: MADTheme.Spacing.sm) {
                 ForEach(PostDestination.allCases) { dest in
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.15)) { vm.destination = dest }
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: dest.icon)
-                                .font(.system(size: 16, weight: .bold))
-                            Text(dest.title)
-                                .font(.system(size: 13, weight: .bold, design: .rounded))
-                        }
-                        .foregroundColor(vm.destination == dest ? .white : .white.opacity(0.55))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                        .background(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
-                                .fill(vm.destination == dest
-                                    ? AnyShapeStyle(MADTheme.Colors.redGradient)
-                                    : AnyShapeStyle(Color.white.opacity(0.06)))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
-                                .strokeBorder(Color.white.opacity(vm.destination == dest ? 0 : 0.1), lineWidth: 1)
-                        )
-                    }
-                    .buttonStyle(.plain)
+                    destinationCard(dest, selected: vm.destination == dest)
                 }
             }
-            Text(vm.destination.footnote)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
-                .fixedSize(horizontal: false, vertical: true)
+            if let dest = vm.destination {
+                Text(dest.footnote)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Label("Pick where this goes — Share unlocks once you choose.",
+                      systemImage: "hand.tap.fill")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(MADTheme.Colors.madRed.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(MADTheme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                 .fill(Color.white.opacity(0.04))
         )
+        // Until a destination is chosen this section is the one thing left to
+        // do — a soft accent border pulls the eye to it.
+        .overlay(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                .strokeBorder(
+                    MADTheme.Colors.madRed.opacity(vm.destination == nil ? 0.45 : 0),
+                    lineWidth: 1.5
+                )
+        )
+        .animation(.easeInOut(duration: 0.2), value: vm.destination)
+    }
+
+    private func destinationCard(_ dest: PostDestination, selected: Bool) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.easeInOut(duration: 0.15)) { vm.destination = dest }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: dest.icon)
+                    .font(.system(size: 16, weight: .bold))
+                Text(dest.title)
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+            }
+            .foregroundColor(selected ? .white : .white.opacity(0.55))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                    .fill(selected
+                        ? AnyShapeStyle(MADTheme.Colors.redGradient)
+                        : AnyShapeStyle(Color.white.opacity(0.06)))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                    .strokeBorder(Color.white.opacity(selected ? 0 : 0.1), lineWidth: 1)
+            )
+            .overlay(alignment: .topTrailing) {
+                if selected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white, .black.opacity(0.35))
+                        .padding(5)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 }

@@ -232,6 +232,21 @@ struct StatBox: View {
     }
 }
 
+/// Bridges HealthKit's activity enum onto the app's canonical workout-type
+/// strings so HK-sourced views hit the SAME MADTheme.workoutColor language
+/// as backend-sourced ones (walks blue, runs red — everywhere).
+extension HKWorkoutActivityType {
+    var madTypeKey: String {
+        switch self {
+        case .running: return "running"
+        case .walking: return "walking"
+        case .hiking: return "hiking"
+        case .cycling: return "cycling"
+        default: return "running"
+        }
+    }
+}
+
 // Workout row component
 struct WorkoutRow: View {
     let workout: HKWorkout
@@ -261,13 +276,7 @@ struct WorkoutRow: View {
     // Same accent per type as the feed (ActivityCardView.color) — one color
     // language for a workout everywhere it appears.
     private var workoutColor: Color {
-        switch workout.workoutActivityType {
-        case .running: return MADTheme.Colors.madRed
-        case .walking: return .orange
-        case .hiking: return .green
-        case .cycling: return .blue
-        default: return MADTheme.Colors.madRed
-        }
+        MADTheme.workoutColor(workout.workoutActivityType.madTypeKey)
     }
 
     private var workoutSource: WorkoutSource {

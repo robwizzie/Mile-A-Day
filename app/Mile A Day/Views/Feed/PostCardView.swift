@@ -34,6 +34,9 @@ struct PostCardView: View {
     /// (the card-level SwiftUI gesture AND the zoom host's UIKit one) into a
     /// single burst + hype.
     @State private var lastDoubleTapAt = Date.distantPast
+    /// The route slide's raw map snapshot (~400×300) — the only piece kept
+    /// around; the zoom's floating composite is rendered on demand from it.
+    @State private var routeSnapshot: UIImage?
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
@@ -154,6 +157,18 @@ struct PostCardView: View {
         return stats
     }
 
+    /// The celebration both hype paths share — the Instagram-style clap
+    /// burst + haptic, then the hype call if this post isn't hyped yet.
+    /// Double-tap AND the footer HypeButton land here so tapping the button
+    /// feels identical to double-tapping the photo.
+    private func celebrateAndHype() {
+        hypeBurst += 1
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        if !post.is_hyped {
+            onHype()
+        }
+    }
+
     /// Double-tap anywhere on the post body: clap burst + hype (friends'
     /// posts only, once — a re-double-tap replays the burst without
     /// double-counting).
@@ -162,11 +177,7 @@ struct PostCardView: View {
         let now = Date()
         guard now.timeIntervalSince(lastDoubleTapAt) > 0.35 else { return }
         lastDoubleTapAt = now
-        hypeBurst += 1
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        if !post.is_hyped {
-            onHype()
-        }
+        celebrateAndHype()
     }
 
     /// A single photo, or a full-size swipeable carousel:
@@ -212,10 +223,25 @@ struct PostCardView: View {
 
     /// The run itself as a branded stats card — the second slide when a photo
     /// post has no GPS route to show. The card-level double-tap covers it.
+    /// Zooms like every other slide; the card is pure SwiftUI so its zoom
+    /// copy renders on demand at pinch-begin from the same inputs.
     private func workoutCardSlide(_ stats: PostStats) -> some View {
         FeedWorkoutCard(stats: stats, workoutType: post.workout_type)
             .frame(maxWidth: .infinity)
             .aspectRatio(4.0 / 5.0, contentMode: .fit)
+            .instagramZoomable(
+                imageProvider: {
+                    let renderer = ImageRenderer(content:
+                        FeedWorkoutCard(stats: stats, workoutType: post.workout_type)
+                            .frame(width: RunStatsCardView.designSize.width,
+                                   height: RunStatsCardView.designSize.height)
+                    )
+                    renderer.scale = 2
+                    renderer.isOpaque = true
+                    return renderer.uiImage
+                },
+                onDoubleTap: post.is_self ? nil : doubleTapHype
+            )
     }
 
     /// Stats to overlay on the live route slide — same band the auto post
@@ -239,7 +265,8 @@ struct PostCardView: View {
     private func routeSlide(_ coords: [CLLocationCoordinate2D]) -> some View {
         WorkoutRouteMapView(
             coordinates: coords,
-            routeColor: ActivityCardView.color(post.workout_type)
+            routeColor: ActivityCardView.color(post.workout_type),
+            onSnapshot: { routeSnapshot = $0 }
         )
         .frame(maxWidth: .infinity)
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
@@ -262,6 +289,35 @@ struct PostCardView: View {
             // the bare-map fallback (posts without a stats snapshot).
             if routeOverlayStats == nil {
                 slideBadge("Route", icon: "map.fill")
+            }
+        }
+        // Same pinch-zoom as the photo slides. The floating copy (map +
+        // route + stats band) is composed at pinch-begin from the small
+        // retained snapshot — nothing big is baked per card up front.
+        .instagramZoomable(
+            imageProvider: { routeZoomComposite(coords) },
+            onDoubleTap: post.is_self ? nil : doubleTapHype
+        )
+    }
+
+    /// The route slide's floating zoom copy, on demand. 720×900 keeps the
+    /// photo slides' 4:5 so the lift is pixel-identical.
+    private func routeZoomComposite(_ coords: [CLLocationCoordinate2D]) -> UIImage? {
+        guard let snapshot = routeSnapshot else { return nil }
+        let type = post.workout_type ?? "running"
+        let stats = routeOverlayStats
+        return WorkoutRouteMapView.zoomComposite(
+            snapshot: snapshot,
+            coordinates: coords,
+            routeColor: ActivityCardView.color(post.workout_type),
+            size: CGSize(width: 720, height: 900)
+        ) {
+            if let stats {
+                RouteStatsOverlayView(stats: stats, workoutType: type)
+                    .frame(width: RunStatsCardView.designSize.width,
+                           height: RunStatsCardView.designSize.height,
+                           alignment: .topLeading)
+                    .scaleEffect(720 / RunStatsCardView.designSize.width, anchor: .topLeading)
             }
         }
     }
@@ -297,7 +353,7 @@ struct PostCardView: View {
                     isHyped: post.is_hyped,
                     isBusy: isHyping,
                     isOutOfHypes: isOutOfHypes && !post.is_hyped,
-                    action: onHype
+                    action: celebrateAndHype
                 )
             }
         }
