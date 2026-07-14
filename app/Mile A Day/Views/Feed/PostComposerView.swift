@@ -371,8 +371,14 @@ struct PostComposerView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
+                    // Disabled while publishing: publish() has no cancellation
+                    // hook, so a Cancel racing an in-flight upload would fire
+                    // onFinished twice with contradictory outcomes (the
+                    // post-run prompt would auto-post the route card AND the
+                    // photo post would land server-side).
                     Button("Cancel") { onFinished(.cancelled); dismiss() }
-                        .foregroundColor(.white)
+                        .foregroundColor(.white.opacity(vm.isPublishing ? 0.4 : 1))
+                        .disabled(vm.isPublishing)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if vm.isPublishing {

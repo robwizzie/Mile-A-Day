@@ -299,6 +299,9 @@ final class MADCameraController {
     /// Session-queue-owned; also the source of truth for the active position.
     @ObservationIgnored private var videoInput: AVCaptureDeviceInput?
     @ObservationIgnored private var configured = false
+    /// True between stop() and the next start() — blocks lifecycle-observer
+    /// restarts from reviving a session the user already closed.
+    @ObservationIgnored private var userStopped = false
     /// In-flight capture delegates keyed by settings id — AVCapturePhotoOutput
     /// does NOT retain its delegate, and a single slot would let overlapping
     /// captures free each other mid-flight. Session-queue-owned.
@@ -371,8 +374,9 @@ final class MADCameraController {
 
     func stop() {
         sessionQueue.async { [weak self] in
-            guard let self, self.session.isRunning else { return }
-            self.session.stopRunning()
+            guard let self else { return }
+            self.userStopped = true
+            if self.session.isRunning { self.session.stopRunning() }
         }
     }
 
@@ -441,6 +445,7 @@ final class MADCameraController {
     private func startSession() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            self.userStopped = false
             self.configureIfNeeded()
             if !self.session.isRunning { self.session.startRunning() }
         }
@@ -494,21 +499,29 @@ final class MADCameraController {
     /// back to a frozen preview with a dead shutter.
     private func observeSessionLifecycle() {
         let center = NotificationCenter.default
-        let restart: (Notification) -> Void = { [weak self] _ in
+        let restart: () -> Void = { [weak self] in
             guard let self else { return }
             self.sessionQueue.async { [weak self] in
-                guard let self, self.configured, !self.session.isRunning else { return }
+                guard let self, self.configured, !self.userStopped,
+                      !self.session.isRunning else { return }
                 self.session.startRunning()
             }
         }
         sessionObservers.append(center.addObserver(
             forName: AVCaptureSession.interruptionEndedNotification,
-            object: session, queue: nil, using: restart
-        ))
+            object: session, queue: nil
+        ) { _ in restart() })
         sessionObservers.append(center.addObserver(
             forName: AVCaptureSession.runtimeErrorNotification,
-            object: session, queue: nil, using: restart
-        ))
+            object: session, queue: nil
+        ) { note in
+            // AVCam's rule: only a media-services reset warrants a restart. A
+            // failed startRunning() itself posts a runtime error, so a
+            // blanket retry ping-pongs forever under persistent failure.
+            let error = note.userInfo?[AVCaptureSessionErrorKey] as? AVError
+            guard error?.code == .mediaServicesWereReset else { return }
+            restart()
+        })
     }
 
     private static func mirroredHorizontally(_ image: UIImage) -> UIImage {
