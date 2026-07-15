@@ -1007,11 +1007,18 @@ struct WorkoutTrackingView: View {
 
         workoutStartDate = Date()
 
-        // Fresh session: drop any mid-run snaps left over from a previous
-        // workout (crash, force-quit) so an old photo can't hijack this run's
-        // post-run prompt.
-        MidRunPhotoStash.clear()
-        midRunSnapCount = 0
+        // Fresh session: drop mid-run snaps left over from a previous workout
+        // ONLY when today's goal was already met before this one. A workout on
+        // an already-completed day is "extra", so a stale snap shouldn't hijack
+        // its prompt. But when the goal ISN'T met yet, keep leftover snaps so a
+        // photo taken on an earlier sub-goal effort survives into the workout
+        // that finally finishes the mile (24h prune still bounds staleness).
+        if startingDistance >= goalDistance {
+            MidRunPhotoStash.clear()
+            midRunSnapCount = 0
+        } else {
+            midRunSnapCount = MidRunPhotoStash.count
+        }
 
         // Immediately persist initial workout state
         let initialState = InProgressWorkoutState(

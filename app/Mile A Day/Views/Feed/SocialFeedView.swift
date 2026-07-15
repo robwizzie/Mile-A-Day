@@ -34,6 +34,12 @@ struct SocialFeedView: View {
     /// FriendService inside the sheet closure re-instantiated it on every feed
     /// state change, wiping the loaded friends list mid-view.
     @StateObject private var profileFriendService = FriendService()
+    /// Fresh-post window: drives the compose FAB / rail countdown ring and the
+    /// "Fresh" badge on the viewer's own in-window posts. Never gates posting.
+    @StateObject private var freshWindow = FreshPostWindowManager.shared
+    /// Bumped 1 Hz while the window is open so the ring shrinks and unmounts at
+    /// expiry — gated to `freshWindow.isOpen`, never a permanent timer.
+    @State private var windowTick = Date()
 
     @State private var feed: [FeedEntry] = []
     @State private var stories: [StoryGroup] = []
@@ -251,6 +257,8 @@ struct SocialFeedView: View {
                         myImageURL: userManager.currentUser.profileImageUrl,
                         canPost: mileDone,
                         hasSharedWorkout: alreadySharedWorkout,
+                        windowOpen: freshWindow.isOpen,
+                        windowFraction: freshWindow.fractionRemaining,
                         isGroupViewable: { canViewStories(of: $0) },
                         isGroupUnviewed: { isGroupUnviewed(of: $0) },
                         onTapAdd: handleCompose,
@@ -327,6 +335,16 @@ struct SocialFeedView: View {
         .background(MADTheme.Colors.appBackgroundGradient)
         .toolbar(.hidden, for: .navigationBar)
         .overlay(alignment: .bottomTrailing) { composeButton }
+        // Drive the countdown rings' 1 Hz shrink (and their unmount at expiry)
+        // only while a window is open — no permanent timer on the feed. Kept on
+        // the root, not the FAB, so the rail ring keeps ticking after the FAB
+        // hides (once the workout is shared).
+        .background {
+            if freshWindow.isOpen {
+                Color.clear
+                    .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { windowTick = $0 }
+            }
+        }
         .overlay(alignment: .top) {
             if showHypeLimitBanner {
                 hypeLimitBanner
@@ -518,6 +536,8 @@ struct SocialFeedView: View {
             PostCardView(
                 post: post,
                 storyPhotoURL: entry.storyPhotoURL,
+                isFresh: entry.is_self
+                    && freshWindow.wasPostedLive(postId: post.post_id, workoutId: post.workout_id),
                 isHyping: hypingIds.contains(entry.id),
                 isOutOfHypes: isOutOfHypes,
                 onHype: { Task { await hype(entry) } },
@@ -554,6 +574,14 @@ struct SocialFeedView: View {
                     .background(
                         Circle().fill(mileDone ? AnyShapeStyle(MADTheme.Colors.redGradient) : AnyShapeStyle(Color.gray.opacity(0.6)))
                     )
+                    // Fresh-window countdown ring around the FAB while open.
+                    .overlay {
+                        if mileDone && freshWindow.isOpen {
+                            FreshWindowRing(fraction: freshWindow.fractionRemaining,
+                                            color: .white, lineWidth: 3)
+                                .padding(-5)
+                        }
+                    }
                     .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
             }
             .padding(.trailing, MADTheme.Spacing.lg)

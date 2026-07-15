@@ -201,7 +201,7 @@ final class PostComposerViewModel: ObservableObject {
 
         do {
             let mediaUrl = try await PostService.uploadMedia(flat)
-            _ = try await PostService.createPost(
+            let created = try await PostService.createPost(
                 mediaUrl: mediaUrl,
                 caption: caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : caption,
                 workoutId: stats.workoutId,
@@ -210,6 +210,12 @@ final class PostComposerViewModel: ObservableObject {
                 stats: stats.snapshot,
                 isAuto: false,
                 includeRoute: includeRoute
+            )
+            // Reward posts shared inside the run's 10-min fresh window with a
+            // "Fresh" badge. No-op when the window is closed.
+            FreshPostWindowManager.shared.markPostedLive(
+                postId: created.post_id,
+                workoutId: created.workout_id ?? stats.workoutId
             )
             if stickerEnabled {
                 // Remember the user's overlay style — but merge back any stats

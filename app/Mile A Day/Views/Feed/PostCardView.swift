@@ -14,6 +14,9 @@ struct PostCardView: View {
     let post: PostItem
     /// The run's story-only photo, when different from the post media.
     var storyPhotoURL: URL? = nil
+    /// The viewer's OWN post that went out during the 10-min fresh window —
+    /// wears a "Fresh" chip. Client-derived, so it shows only to the poster.
+    var isFresh: Bool = false
     var isHyping: Bool = false
     /// Daily hype allowance spent (never true for unlimited roles) — dims the
     /// unspent Hype button, same as the friends list.
@@ -71,6 +74,20 @@ struct PostCardView: View {
         )
     }
 
+    /// "Fresh" chip for a post shared inside the run's 10-minute window.
+    private var freshChip: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 9, weight: .black))
+            Text("FRESH")
+                .font(.system(size: 10, weight: .black, design: .rounded))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(MADTheme.Colors.madRed))
+    }
+
     private var header: some View {
         HStack(spacing: 10) {
             Button {
@@ -91,6 +108,7 @@ struct PostCardView: View {
             }
             .buttonStyle(.plain)
             .disabled(onTapAuthor == nil)
+            if isFresh { freshChip }
             Spacer()
             if let type = post.workout_type {
                 Image(systemName: ActivityCardView.icon(type))
