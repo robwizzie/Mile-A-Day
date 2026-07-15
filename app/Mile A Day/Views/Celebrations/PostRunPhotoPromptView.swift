@@ -129,25 +129,27 @@ struct PostRunPhotoPromptView: View {
                 .padding(.horizontal, MADTheme.Spacing.lg)
                 .padding(.bottom, MADTheme.Spacing.xl)
             }
+            // Import cover rides the VStack node — the gradient owns the
+            // gallery cover and the ZStack owns the composer cover; a third
+            // cover on the ZStack would silently drop one (.claude/rules/ios.md).
+            .fullScreenCover(isPresented: $showLibraryImport, onDismiss: {
+                // Launch the composer only AFTER this cover is gone — a second
+                // cover in the same dismiss transaction races and drops.
+                if let image = pendingUseImage {
+                    pendingUseImage = nil
+                    composerLaunch = ComposerLaunch(image: image)
+                }
+            }) {
+                WorkoutPhotoImportPicker(window: importWindow) { result in
+                    handleImportResult(result)
+                    showLibraryImport = false
+                }
+                .ignoresSafeArea()
+            }
         }
         .onAppear {
             midRunSnaps = MidRunPhotoStash.entries()
             withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { appeared = true }
-        }
-        .fullScreenCover(isPresented: $showLibraryImport, onDismiss: {
-            // Launch the composer only AFTER this cover is fully gone —
-            // presenting a second cover in the dismiss transaction races and
-            // one gets dropped (see .claude/rules/ios.md).
-            if let image = pendingUseImage {
-                pendingUseImage = nil
-                composerLaunch = ComposerLaunch(image: image)
-            }
-        }) {
-            WorkoutPhotoImportPicker(window: importWindow) { result in
-                handleImportResult(result)
-                showLibraryImport = false
-            }
-            .ignoresSafeArea()
         }
         .alert("Couldn't add that photo", isPresented: Binding(
             get: { importError != nil },
@@ -321,12 +323,20 @@ struct PostRunPhotoPromptView: View {
     /// Accepted capture-time window from the workout's own start/end (HealthKit),
     /// with grace on both ends: a shot at the trailhead just before starting,
     /// or right after finishing before this prompt appeared, both count.
+    ///
+    /// When the just-finished workout hasn't synced into `todaysWorkouts` yet
+    /// (async fetch / Watch lag), we do NOT fall back to the whole day — that
+    /// would let an unrelated earlier photo pass. Instead we bound to a
+    /// generous recent window (a daily mile is minutes; even a long hike fits
+    /// 3h), so authenticity holds even without the exact workout.
     private var importWindow: ClosedRange<Date> {
-        let workout = HealthKitManager.shared.todaysWorkouts
-            .first { $0.uuid.uuidString == workoutId }
-        let start = (workout?.startDate ?? Calendar.current.startOfDay(for: Date()))
-            .addingTimeInterval(-5 * 60)
-        let end = (workout?.endDate ?? Date()).addingTimeInterval(30 * 60)
+        let now = Date()
+        guard let workout = HealthKitManager.shared.todaysWorkouts
+            .first(where: { $0.uuid.uuidString == workoutId }) else {
+            return now.addingTimeInterval(-3 * 60 * 60)...now.addingTimeInterval(2 * 60)
+        }
+        let start = workout.startDate.addingTimeInterval(-5 * 60)
+        let end = workout.endDate.addingTimeInterval(30 * 60)
         return start...max(start, end)
     }
 

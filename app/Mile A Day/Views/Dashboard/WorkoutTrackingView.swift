@@ -439,11 +439,11 @@ struct WorkoutTrackingView: View {
                 await MainActor.run {
                     midRunSnapCount = count
                     lastSnapThumb = thumb
-                    showImportToast("Added to your walk", ok: true)
+                    showImportToast("Added to your \(activityNoun)", ok: true)
                 }
             }
         case .outsideWindow:
-            showImportToast("That photo wasn't taken on this walk", ok: false)
+            showImportToast("That photo wasn't taken on this \(activityNoun)", ok: false)
         case .noCaptureDate:
             showImportToast("Couldn't confirm when that photo was taken", ok: false)
         case .failed:
@@ -451,6 +451,11 @@ struct WorkoutTrackingView: View {
         case .cancelled:
             break
         }
+    }
+
+    /// "run"/"walk" for user-facing copy, matching the active workout type.
+    private var activityNoun: String {
+        selectedActivityType == .running ? "run" : "walk"
     }
 
     private func showImportToast(_ text: String, ok: Bool) {

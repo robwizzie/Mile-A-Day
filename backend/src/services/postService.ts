@@ -913,19 +913,26 @@ export async function notifyFriendsOfPost(input: {
       return;
     }
 
-    // Rolling-window coalesce: don't buzz friends again if this author
-    // already triggered a friend_post push in the last few hours. A morning
-    // walk and an evening run (>window apart) both notify; three quick posts
-    // in a session don't triple-buzz. (The mile-merge above handles the
-    // just-finished case; this caps the later-post path.) The post itself
-    // still lands in the feed — only the push is suppressed.
+    // Rolling-window coalesce: don't buzz friends again if this author made
+    // another deliberate post in the last few hours. A morning walk and an
+    // evening run (>window apart) both notify; three quick posts in a session
+    // don't triple-buzz. (The mile-merge above handles the just-finished
+    // case; this caps the later-post path.) The post itself still lands in
+    // the feed — only the push is suppressed.
+    //
+    // Probed against posts (not in_app_notifications): a prior deliberate
+    // post in the window is the proxy for "already notified", and this hits
+    // idx_posts_user_created (user_id, created_at) instead of full-scanning
+    // the ever-growing inbox table on data->>'user_id'.
     const recent = await db.query<{ id: string }>(
-      `SELECT 1 AS id FROM in_app_notifications
-			 WHERE type = 'friend_post'
-				 AND data->>'user_id' = $1
+      `SELECT 1 AS id FROM posts
+			 WHERE user_id = $1
+				 AND post_id <> $2
+				 AND is_auto = false
+				 AND deleted_at IS NULL
 				 AND created_at > NOW() - INTERVAL '6 hours'
 			 LIMIT 1`,
-      [authorId],
+      [authorId, postId],
     );
     if (recent.length > 0) return;
 
