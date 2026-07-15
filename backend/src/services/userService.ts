@@ -83,6 +83,50 @@ export async function updateProfileImage({ userId, profileImageUrl }: { userId: 
 	return { success: true };
 }
 
+/**
+ * Persist the optional onboarding personalization fields captured on the
+ * signup "about you" step. Only the keys provided (non-undefined) are written,
+ * so a partial submit (or a later re-submit) doesn't clobber existing values
+ * with nulls. `onboarding_completed_at` is always stamped so the client knows
+ * the step is done and we can measure completion. All fields are additive and
+ * nullable — passing nothing but stamping the timestamp records a "skipped".
+ */
+export async function updateOnboardingInfo({
+	userId,
+	referralSource,
+	referralDetail,
+	signupGoal,
+	experienceLevel
+}: {
+	userId: string;
+	referralSource?: string | null;
+	referralDetail?: string | null;
+	signupGoal?: string | null;
+	experienceLevel?: string | null;
+}) {
+	const updates: string[] = [];
+	const values: any[] = [];
+
+	const setField = (column: string, value: string | null | undefined) => {
+		if (value === undefined) return;
+		values.push(value);
+		updates.push(`${column} = $${values.length}`);
+	};
+
+	setField('referral_source', referralSource);
+	setField('referral_detail', referralDetail);
+	setField('signup_goal', signupGoal);
+	setField('experience_level', experienceLevel);
+
+	// Always mark the step complete, even on a pure skip (no fields provided).
+	updates.push('onboarding_completed_at = NOW()');
+
+	values.push(userId);
+	await db.query(`UPDATE users SET ${updates.join(', ')} WHERE user_id = $${values.length}`, values);
+
+	return { success: true };
+}
+
 export async function checkUsernameAvailability(username: string): Promise<boolean> {
 	// Drizzle ORM equivalent of `SELECT user_id FROM users WHERE username = $1`.
 	const existingUser = await orm.select({ userId: schema.users.userId }).from(schema.users).where(eq(schema.users.username, username));

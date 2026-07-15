@@ -1,6 +1,7 @@
 import SwiftUI
 import HealthKit
 import UserNotifications
+import StoreKit
 
 struct MainTabView: View {
     @Environment(\.appStateManager) var appStateManager
@@ -21,6 +22,10 @@ struct MainTabView: View {
     @StateObject private var trackingManager = WorkoutLocationManager.shared
     @State private var activeWorkoutForBanner: InProgressWorkoutState?
     @State private var showGuidedTour = false
+
+    // "Leave us a review" moment — gated to streak milestones by ReviewPromptManager.
+    @StateObject private var reviewManager = ReviewPromptManager.shared
+    @Environment(\.requestReview) private var requestReview
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -105,6 +110,9 @@ struct MainTabView: View {
             await competitionService.refreshAllData()
             await friendService.refreshAllData()
             await refreshUnreadCount()
+            // Existing users already past a streak milestone get asked on this
+            // first calm pass — the retroactive path.
+            scheduleReviewEvaluation()
         }
         .onReceive(NotificationCenter.default.publisher(for: .didReceivePushNotification)) { notification in
             guard let type = notification.userInfo?["type"] as? String else { return }
@@ -189,6 +197,7 @@ struct MainTabView: View {
                 // Refresh health data and re-evaluate the daily reminder
                 // so "Mile still waiting" is cancelled if the user completed their mile
                 healthManager.fetchTodaysDistance()
+                scheduleReviewEvaluation()
             }
         }
         .onChange(of: healthManager.todaysDistance) { _, newDistance in
@@ -237,6 +246,12 @@ struct MainTabView: View {
             withAnimation(.easeIn(duration: 0.25)) {
                 showGuidedTour = true
             }
+        }
+        .sheet(isPresented: $reviewManager.isPresented, onDismiss: handleReviewSheetDismiss) {
+            ReviewPromptView(manager: reviewManager)
+        }
+        .onChange(of: userManager.currentUser.streak) { _, _ in
+            scheduleReviewEvaluation()
         }
         .animation(.easeInOut(duration: 0.25), value: trackingManager.isTracking)
     }
@@ -322,6 +337,35 @@ struct MainTabView: View {
             }
         } catch {
             // Silently fail
+        }
+    }
+
+    // MARK: - Review prompt
+
+    /// Consider showing the review moment, but only when the screen is calm:
+    /// on the Dashboard tab and with no celebration on-screen or queued (so it
+    /// never stacks on top of a goal/badge celebration). Deferred briefly so it
+    /// lands on a settled screen rather than mid-transition. Never shows during
+    /// onboarding — this view only exists once setup is complete.
+    private func scheduleReviewEvaluation() {
+        guard selectedTab == 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            let celebrations = CelebrationManager.shared
+            guard !celebrations.isShowingCelebration, celebrations.celebrationQueue.isEmpty else { return }
+            reviewManager.evaluate(streak: userManager.currentUser.streak, allowPresent: true)
+        }
+    }
+
+    /// After the review sheet dismisses, if the user tapped the positive CTA,
+    /// fire the native StoreKit review request on the now-clean screen. A short
+    /// delay lets the sheet finish dismissing so the system prompt isn't racing
+    /// the dismissal animation.
+    private func handleReviewSheetDismiss() {
+        guard reviewManager.pendingRateRequest else { return }
+        reviewManager.pendingRateRequest = false
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            requestReview()
         }
     }
 

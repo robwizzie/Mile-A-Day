@@ -13,6 +13,7 @@ class AppStateManager: ObservableObject {
         case onboarding
         case authentication
         case usernameSetup
+        case personalization
         case welcome
         case healthAccess
         case main
@@ -104,8 +105,20 @@ class AppStateManager: ObservableObject {
         }
     }
     
-    /// Complete username setup and move to welcome screen
+    /// Complete username setup and move to the personalization ("about you") step
     func completeUsernameSetup() {
+        DispatchQueue.main.async {
+            withAnimation(MADTheme.Animation.standard) {
+                self.currentState = .personalization
+            }
+        }
+    }
+
+    /// Complete the optional personalization step and move to the welcome screen.
+    /// This step is optional (data-collection only) so it is intentionally NOT
+    /// part of the `hasCompletedFullSetup` gate — a user who quits here still
+    /// resumes straight to the main app on next launch.
+    func completePersonalization() {
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 self.currentState = .welcome

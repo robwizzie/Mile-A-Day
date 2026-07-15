@@ -127,6 +127,13 @@
       "when": 1784000060000,
       "tag": "0017_faulty_shiver_man",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1784150224132,
+      "tag": "0018_aberrant_sersi",
+      "breakpoints": true
     }
   ]
 }

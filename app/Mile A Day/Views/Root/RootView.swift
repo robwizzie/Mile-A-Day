@@ -36,6 +36,14 @@ struct RootView: View {
                         removal: .move(edge: .leading).combined(with: .opacity)
                     ))
 
+            case .personalization:
+                PersonalizationView()
+                    .environmentObject(userManager)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+
             case .welcome:
                 WelcomeView()
                     .environmentObject(userManager)

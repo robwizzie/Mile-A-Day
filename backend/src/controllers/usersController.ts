@@ -10,6 +10,7 @@ import {
 	checkUsernameAvailability,
 	updateBio,
 	updateProfileImage,
+	updateOnboardingInfo,
 	getUserCount,
 	getPublicStreak
 } from '../services/userService.js';
@@ -265,6 +266,68 @@ export async function updateUserProfileImage(req: Request, res: Response) {
 	} catch (error) {
 		res.status(400).json({
 			error: 'Profile image update failed',
+			message: error instanceof Error ? error.message : 'Unknown error'
+		});
+	}
+}
+
+// Fixed catalog of "how did you hear about us" answers. Anything the client
+// sends outside this set is normalized to 'other' so referral analytics stay
+// clean even if a future client adds a chip the server doesn't know yet.
+const REFERRAL_SOURCES = new Set([
+	'app_store',
+	'friend',
+	'instagram',
+	'tiktok',
+	'reddit',
+	'google',
+	'youtube',
+	'other'
+]);
+
+/**
+ * Trim a string body field and cap it to the column's varchar length so an
+ * over-long value can never overflow the column (Postgres errors, not
+ * truncates). Returns undefined for missing/blank values so the service skips
+ * the column instead of nulling it out.
+ */
+function normalizeOnboardingField(value: unknown, maxLength: number): string | undefined {
+	if (typeof value !== 'string') return undefined;
+	const trimmed = value.trim();
+	if (!trimmed) return undefined;
+	return trimmed.slice(0, maxLength);
+}
+
+export async function updateUserOnboarding(req: Request, res: Response) {
+	const userId = req.params.userId;
+
+	const existing = await db.query('SELECT user_id FROM users WHERE user_id = $1', [userId]);
+	if (!existing.length) {
+		return res.status(404).json({ error: 'User not found' });
+	}
+
+	let referralSource = normalizeOnboardingField(req.body.referral_source, 40);
+	if (referralSource) {
+		referralSource = referralSource.toLowerCase();
+		if (!REFERRAL_SOURCES.has(referralSource)) referralSource = 'other';
+	}
+
+	const referralDetail = normalizeOnboardingField(req.body.referral_detail, 120);
+	const signupGoal = normalizeOnboardingField(req.body.signup_goal, 40);
+	const experienceLevel = normalizeOnboardingField(req.body.experience_level, 40);
+
+	try {
+		await updateOnboardingInfo({
+			userId,
+			referralSource,
+			referralDetail,
+			signupGoal,
+			experienceLevel
+		});
+		res.json({ success: true });
+	} catch (error) {
+		res.status(400).json({
+			error: 'Onboarding update failed',
 			message: error instanceof Error ? error.message : 'Unknown error'
 		});
 	}

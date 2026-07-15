@@ -217,8 +217,8 @@ private struct TourPage {
         ),
         TourPage(
             badge: "Challenges",
-            title: "Challenges & Medals",
-            subtitle: "A fresh bonus challenge drops every day. Crush milestones to unlock medals and show them off on your profile.",
+            title: "Challenges & Rivals",
+            subtitle: "A fresh challenge drops every day — including head-to-head duels against a friend. Win them to unlock medals for your profile.",
             accent: TourPalette.purple,
             visual: .challenges
         ),
@@ -237,6 +237,13 @@ private struct TourPage {
             visual: .friends
         ),
         TourPage(
+            badge: "Share",
+            title: "Share Your Miles",
+            subtitle: "Post a photo from today's run with your stats baked in, drop a story, and hype your friends' miles. The feed keeps everyone moving.",
+            accent: TourPalette.blue,
+            visual: .feed
+        ),
+        TourPage(
             badge: "Ready",
             title: "You're All Set!",
             subtitle: "Your streak starts with today's mile. Lace up and go get it.",
@@ -247,7 +254,7 @@ private struct TourPage {
 }
 
 private enum TourVisual {
-    case welcome, dailyMile, track, streak, challenges, compete, friends, allSet
+    case welcome, dailyMile, track, streak, challenges, compete, friends, feed, allSet
 
     @ViewBuilder
     var view: some View {
@@ -259,6 +266,7 @@ private enum TourVisual {
         case .challenges: TourChallengesVisual()
         case .compete:    TourCompeteVisual()
         case .friends:    TourFriendsVisual()
+        case .feed:       TourFeedVisual()
         case .allSet:     TourAllSetVisual()
         }
     }
@@ -710,6 +718,105 @@ private struct TourFriendsVisual: View {
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.white.opacity(0.05))
+        )
+    }
+}
+
+// MARK: - Visual: Feed (share a run)
+
+private struct TourFeedVisual: View {
+    @State private var pulse = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Post header
+            HStack(spacing: 10) {
+                TourAvatar(initials: "MA", color: TourPalette.purple, size: 34)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Maya")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("just now")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.45))
+                }
+                Spacer()
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(.bottom, 12)
+
+            // "Photo" with a stats sticker overlaid — nods to the shareable run cards.
+            ZStack(alignment: .bottomLeading) {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [TourPalette.blue.opacity(0.55), TourPalette.purple.opacity(0.55)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(height: 128)
+                    .overlay(
+                        Image(systemName: "figure.run")
+                            .font(.system(size: 54, weight: .bold))
+                            .foregroundColor(.white.opacity(0.25))
+                    )
+
+                HStack(spacing: 10) {
+                    statChip(value: "1.42", unit: "mi")
+                    statChip(value: "9:12", unit: "/mi")
+                    statChip(value: "13:04", unit: "time")
+                }
+                .padding(10)
+            }
+            .padding(.bottom, 12)
+
+            // Hype row
+            HStack(spacing: 16) {
+                HStack(spacing: 6) {
+                    Image(systemName: "flame.fill")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundColor(TourPalette.orange)
+                        .scaleEffect(pulse ? 1.15 : 1.0)
+                    Text("12")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.85))
+                }
+                Image(systemName: "bubble.right")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.55))
+                Spacer()
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+        }
+        .padding(16)
+        .tourPanel()
+        .frame(maxWidth: 300)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
+    }
+
+    private func statChip(value: String, unit: String) -> some View {
+        VStack(spacing: 0) {
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+            Text(unit.uppercased())
+                .font(.system(size: 8, weight: .heavy, design: .rounded))
+                .tracking(0.5)
+                .foregroundColor(.white.opacity(0.7))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.black.opacity(0.35))
         )
     }
 }
