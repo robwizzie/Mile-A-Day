@@ -94,6 +94,10 @@ struct StickerConfig: Equatable, Codable {
     var scale: CGFloat = 1.0
     var posX: CGFloat = 0.5
     var posY: CGFloat = 0.82
+    /// Remembered rotation in degrees. Added after v1 — absent from older
+    /// configs, which decode to 0 (no tilt). Not clamped: rotation can't push
+    /// the sticker off-canvas (the position clamp handles bounds).
+    var rotation: CGFloat = 0
 
     init() {}
 
@@ -113,6 +117,7 @@ struct StickerConfig: Equatable, Codable {
             .clamped(to: Self.posXRange)
         posY = ((try? c.decode(CGFloat.self, forKey: .posY)) ?? defaults.posY)
             .clamped(to: Self.posYRange)
+        rotation = (try? c.decode(CGFloat.self, forKey: .rotation)) ?? defaults.rotation
     }
 
     func isOn(_ kind: RunStatKind) -> Bool { enabled.contains(kind) }
@@ -155,7 +160,7 @@ struct RunStatDatum: Identifiable {
 /// Config-driven run-stats overlay. Renders only the stats the user enabled, in
 /// the chosen style + accent. Used live in the composer (draggable/scalable) and
 /// baked into the photo via ImageRenderer.
-struct RunStatsStickerView: View {
+struct RunStatsStickerView: View, Equatable {
     let input: RunStatsInput
     let config: StickerConfig
 
