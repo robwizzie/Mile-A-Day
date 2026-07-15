@@ -100,6 +100,10 @@ struct StoryGroup: Codable, Identifiable {
     /// Distinct author-local days ("yyyy-MM-dd") this group's stories span —
     /// drives the per-day viewing gate. Optional: absent from older servers.
     let story_local_dates: [String]?
+    /// Author-local days with an unseen story — the ring lights only when one
+    /// of these is a day the viewer can actually watch. Optional (older
+    /// servers omit it → fall back to has_unviewed).
+    let unviewed_local_dates: [String]?
 
     var id: String { user_id }
 

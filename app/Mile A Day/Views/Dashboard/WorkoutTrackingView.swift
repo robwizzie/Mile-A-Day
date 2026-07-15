@@ -68,6 +68,15 @@ struct WorkoutTrackingView: View {
     /// Cheap downsampled thumb of the newest snap for the tray chip.
     @State private var lastSnapThumb: UIImage?
     @State private var showSnapSavedToast = false
+    /// Import a photo taken on THIS walk from the library (time-windowed).
+    @State private var showLibraryImport = false
+    /// Transient result banner for a library import (message, success?).
+    @State private var importToast: ImportToast?
+
+    private struct ImportToast: Equatable {
+        let text: String
+        let ok: Bool
+    }
 
     // Workout distance only (starts at 0)
     private var currentDistance: Double {
@@ -270,6 +279,7 @@ struct WorkoutTrackingView: View {
                             if midRunSnapCount > 0 {
                                 midRunTrayButton
                             }
+                            midRunLibraryButton
                             midRunCameraButton
                         }
                         .padding(.trailing, 20)
@@ -317,6 +327,7 @@ struct WorkoutTrackingView: View {
         .overlay(previousProgressOverlay)
         .overlay(goalCompletionOverlay)
         .overlay(alignment: .top) { snapSavedToast }
+        .overlay(alignment: .top) { importToastView }
     }
 
     // MARK: - Mid-Run Photo Capture
@@ -375,6 +386,86 @@ struct WorkoutTrackingView: View {
     private func refreshSnapState() {
         midRunSnapCount = MidRunPhotoStash.count
         lastSnapThumb = MidRunPhotoStash.latestThumbnail()
+    }
+
+    /// Import a photo taken DURING this walk/run from the library. Camera-only
+    /// authenticity is preserved by the time-window check in the picker — you
+    /// can use a system-camera shot from this walk, but not an old photo.
+    private var midRunLibraryButton: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showLibraryImport = true
+        } label: {
+            Image(systemName: "photo.badge.plus")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 40, height: 40)
+                .background(
+                    Circle()
+                        .fill(Color.white.opacity(0.14))
+                        .overlay(Circle().strokeBorder(Color.white.opacity(0.28), lineWidth: 1))
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .fullScreenCover(isPresented: $showLibraryImport) {
+            WorkoutPhotoImportPicker(window: importWindow) { result in
+                showLibraryImport = false
+                handleImportResult(result)
+            }
+            .ignoresSafeArea()
+        }
+        .onChange(of: isStopping) { _, stopping in
+            if stopping { showLibraryImport = false }
+        }
+    }
+
+    /// Accepted capture-time window: from just before the workout started
+    /// (a photo snapped at the trailhead counts) through now, with a small
+    /// forward buffer so a shot taken while browsing the picker still passes.
+    private var importWindow: ClosedRange<Date> {
+        let start = (workoutStartDate ?? Date()).addingTimeInterval(-5 * 60)
+        let end = Date().addingTimeInterval(2 * 60)
+        return start...max(start, end)
+    }
+
+    private func handleImportResult(_ result: WorkoutPhotoImportResult) {
+        switch result {
+        case .accepted(let image):
+            Task.detached(priority: .utility) {
+                let saved = MidRunPhotoStash.add(image)
+                let count = MidRunPhotoStash.count
+                let thumb = MidRunPhotoStash.latestThumbnail()
+                guard saved else { return }
+                await MainActor.run {
+                    midRunSnapCount = count
+                    lastSnapThumb = thumb
+                    showImportToast("Added to your \(activityNoun)", ok: true)
+                }
+            }
+        case .outsideWindow:
+            showImportToast("That photo wasn't taken on this \(activityNoun)", ok: false)
+        case .noCaptureDate:
+            showImportToast("Couldn't confirm when that photo was taken", ok: false)
+        case .failed:
+            showImportToast("Couldn't load that photo", ok: false)
+        case .cancelled:
+            break
+        }
+    }
+
+    /// "run"/"walk" for user-facing copy, matching the active workout type.
+    private var activityNoun: String {
+        selectedActivityType == .running ? "run" : "walk"
+    }
+
+    private func showImportToast(_ text: String, ok: Bool) {
+        if ok { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            importToast = ImportToast(text: text, ok: ok)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+            withAnimation(.easeOut(duration: 0.25)) { importToast = nil }
+        }
     }
 
     private var midRunCameraButton: some View {
@@ -442,6 +533,32 @@ struct WorkoutTrackingView: View {
                     .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
             )
             .padding(.top, 72)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .allowsHitTesting(false)
+        }
+    }
+
+    @ViewBuilder
+    private var importToastView: some View {
+        if let toast = importToast {
+            HStack(spacing: 8) {
+                Image(systemName: toast.ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(toast.ok ? .green : .orange)
+                Text(toast.text)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.78))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+            )
+            .padding(.top, 72)
+            .padding(.horizontal, MADTheme.Spacing.lg)
             .transition(.move(edge: .top).combined(with: .opacity))
             .allowsHitTesting(false)
         }
