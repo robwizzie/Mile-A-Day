@@ -80,6 +80,10 @@ export interface StoryGroup {
   story_count: number;
   has_unviewed: boolean;
   latest_at: string;
+  /** Distinct author-local days ("yyyy-MM-dd") this group's stories span —
+   *  lets the client gate viewing PER DAY (yesterday's stories stay viewable
+   *  for a viewer who completed yesterday). Additive field. */
+  story_local_dates: string[];
 }
 
 /**
@@ -284,11 +288,13 @@ export async function getStoriesRail(viewerId: string): Promise<StoryGroup[]> {
     profile_image_url: string | null;
     created_at: string;
     is_viewed: boolean;
+    local_date: string | null;
   }>(
     `
 		${CIRCLE_CTE}
 		SELECT
 			p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url, p.created_at,
+			p.local_date::text AS local_date,
 			EXISTS (
 				SELECT 1 FROM story_views sv WHERE sv.post_id = p.post_id AND sv.viewer_id = $1
 			) AS is_viewed
@@ -317,11 +323,15 @@ export async function getStoriesRail(viewerId: string): Promise<StoryGroup[]> {
         story_count: 1,
         has_unviewed: !r.is_viewed,
         latest_at: r.created_at,
+        story_local_dates: r.local_date ? [r.local_date] : [],
       });
     } else {
       g.story_count += 1;
       g.has_unviewed = g.has_unviewed || !r.is_viewed;
       if (r.created_at > g.latest_at) g.latest_at = r.created_at;
+      if (r.local_date && !g.story_local_dates.includes(r.local_date)) {
+        g.story_local_dates.push(r.local_date);
+      }
     }
   }
 
@@ -835,28 +845,80 @@ export async function getUserPosts(
 }
 
 /**
- * Best-effort push to the author's friends that they shared a new feed post.
- * Respects each friend's `friend_posts_enabled` (default on), excludes blocks
- * both ways, and is capped to avoid fan-out storms. Never throws into the
- * caller — notifications must not block post creation.
+ * Best-effort push to the author's friends that they shared a new post/story.
+ * One notification per deliberate createPost — a post going to the story AND
+ * the feed together still produces a single push. Respects each friend's
+ * `friend_posts_enabled` (default on), excludes blocks both ways, only
+ * reaches friends whose build can open the feed/stories UI (same signal as
+ * userHasFeedFeature), and is capped to avoid fan-out storms.
+ *
+ * Anti-spam via UPGRADE, not dismissal: when the deferred "got their mile
+ * in" push is still pending (the 10-min merge window, send_after_at set —
+ * audience-'ask' confirm cards have it NULL and are never touched), its
+ * payload is upgraded in place to carry the photo (body + data.post_id) and
+ * NO separate friend_post is sent. The original recipient pool — including
+ * competition co-participants and friends on pre-feed builds — still gets
+ * exactly one push on the original schedule. Only when nothing is pending
+ * (posted later, mile push already sent) does the immediate friend_post
+ * fan-out fire. Never throws into the caller.
  */
-export async function notifyFriendsOfPost(
-  authorId: string,
-  caption: string | null,
-): Promise<void> {
+export async function notifyFriendsOfPost(input: {
+  authorId: string;
+  postId: string;
+  caption: string | null;
+  toFeed: boolean;
+  toStory: boolean;
+  localDate: string;
+}): Promise<void> {
+  const { authorId, postId, caption, toFeed, toStory, localDate } = input;
   try {
+    const trimmedCaption = caption?.trim() ?? "";
+    const storyOnly = toStory && !toFeed;
+    const mergedBody =
+      trimmedCaption.length > 0
+        ? `📸 ${trimmedCaption.slice(0, 110)}`
+        : storyOnly
+          ? "and shared a story from it 📸"
+          : "and shared a photo from it 📸";
+
+    const upgraded = await db.query<{ id: string }>(
+      `UPDATE pending_friend_notifications
+			 SET payload = jsonb_set(
+				 jsonb_set(payload, '{body}', to_jsonb($3::text)),
+				 '{data,post_id}', to_jsonb($4::text)
+			 )
+			 WHERE user_id = $1 AND event_type = 'mile_completed'
+				 AND status = 'pending' AND send_after_at IS NOT NULL
+				 AND local_date = $2::date
+			 RETURNING id`,
+      [authorId, localDate, mergedBody, postId],
+    );
+    if (upgraded.length > 0) {
+      // The scheduled mile push now carries the photo — one merged
+      // notification per run, original pool, original timing.
+      return;
+    }
+
     const recipients = await db.query<{ uid: string }>(
       `SELECT f.friend_id AS uid
-			 FROM friendships f
-			 LEFT JOIN notification_settings ns ON ns.user_id = f.friend_id
-			 WHERE f.user_id = $1 AND f.status = 'accepted'
-				 AND COALESCE(ns.friend_posts_enabled, true) = true
-				 AND f.friend_id NOT IN (
-					 SELECT blocked_id FROM user_blocks WHERE blocker_id = $1
-					 UNION
-					 SELECT blocker_id FROM user_blocks WHERE blocked_id = $1
-				 )
-			 LIMIT 25`,
+				 FROM friendships f
+				 LEFT JOIN notification_settings ns ON ns.user_id = f.friend_id
+				 WHERE f.user_id = $1 AND f.status = 'accepted'
+					 AND COALESCE(ns.friend_posts_enabled, true) = true
+					 AND f.friend_id NOT IN (
+						 SELECT blocked_id FROM user_blocks WHERE blocker_id = $1
+						 UNION
+						 SELECT blocker_id FROM user_blocks WHERE blocked_id = $1
+					 )
+					 AND (
+						 EXISTS (SELECT 1 FROM posts fp WHERE fp.user_id = f.friend_id)
+						 OR EXISTS (
+							 SELECT 1 FROM users fu
+							 WHERE fu.user_id = f.friend_id
+								 AND fu.terms_accepted_at IS NOT NULL
+						 )
+					 )
+				 LIMIT 25`,
       [authorId],
     );
     if (recipients.length === 0) return;
@@ -866,16 +928,28 @@ export async function notifyFriendsOfPost(
       [authorId],
     );
     const name = authorRows[0]?.username ?? "A friend";
-    const trimmed = caption?.trim() ?? "";
+    const title = storyOnly
+      ? `${name} added to their story ✨`
+      : `${name} posted 📸`;
     const body =
-      trimmed.length > 0 ? trimmed.slice(0, 120) : "shared a new post";
+      trimmedCaption.length > 0
+        ? trimmedCaption.slice(0, 120)
+        : storyOnly
+          ? "shared a new story"
+          : "shared a new post";
 
     for (const r of recipients) {
       sendPush(r.uid, {
-        title: `${name} posted 📸`,
+        title,
         body,
         type: "friend_post",
-        data: { user_id: authorId, kind: "post" },
+        // kind routes the tap client-side ("story" opens the story viewer,
+        // "post" lands on the feed entry); post_id is additive deep-link data.
+        data: {
+          user_id: authorId,
+          kind: storyOnly ? "story" : "post",
+          post_id: postId,
+        },
       }).catch((e: any) =>
         console.error("[notifyFriendsOfPost]", e?.message ?? e),
       );

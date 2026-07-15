@@ -6,6 +6,11 @@ import SwiftUI
 struct StoryViewerView: View {
     let group: StoryGroup
     let currentUserId: String?
+    /// Story days ("yyyy-MM-dd") the viewer has EARNED (completed that day).
+    /// nil = no filtering (own stories). Items outside these days are hidden:
+    /// yesterday's stories play for a viewer who completed yesterday while a
+    /// not-yet-earned today story stays out of the deck.
+    var allowedDays: Set<String>? = nil
     /// Called when the viewer dismisses, with whether anything changed (a story
     /// was deleted) so the parent can refresh the rail.
     let onClose: (_ changed: Bool) -> Void
@@ -420,14 +425,23 @@ struct StoryViewerView: View {
 
     private func load() async {
         do {
-            let loaded = try await PostService.fetchUserStories(userId: group.user_id)
+            var loaded = try await PostService.fetchUserStories(userId: group.user_id)
+            // Per-day viewing gate: drop stories from days the viewer hasn't
+            // earned (no local_date ⇒ legacy row, leave it visible).
+            if let allowedDays {
+                loaded = loaded.filter { story in
+                    guard let day = story.local_date else { return true }
+                    return allowedDays.contains(day)
+                }
+            }
             await MainActor.run {
                 stories = loaded
                 isLoading = false
                 if loaded.isEmpty {
                     // The group's stories expired/vanished since the rail
-                    // loaded — report changed so the parent removes the dead
-                    // ring instead of re-presenting a black flash forever.
+                    // loaded (or none are viewable yet) — report changed so
+                    // the parent refreshes instead of re-presenting a black
+                    // flash forever.
                     changed = true
                     close()
                 } else {

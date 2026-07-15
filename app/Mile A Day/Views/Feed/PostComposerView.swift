@@ -307,10 +307,16 @@ struct PostComposerView: View {
     /// Sticker position at drag start (normalized) — drags apply translation
     /// relative to this instead of jumping to the touch point.
     @State private var gestureBasePos: CGPoint? = nil
+    /// "Saved to Photos" confirmation for the canvas Save button.
+    @State private var showSavedToPhotos = false
     @FocusState private var captionFocused: Bool
     /// Launch straight into the camera on first appear (post-run prompt flow) —
     /// the user already tapped "Take a photo" once to get here.
     let autoOpenCamera: Bool
+    /// Post-run prompt flow: leaving returns to the snap picker with nothing
+    /// lost, so the exit reads "‹ Back" instead of "Cancel" (which made
+    /// people fear their photos would be discarded).
+    let backNavigation: Bool
     let onFinished: (PostComposeOutcome) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -318,11 +324,13 @@ struct PostComposerView: View {
         stats: RunStatsInput,
         autoOpenCamera: Bool = false,
         initialImage: UIImage? = nil,
+        backNavigation: Bool = false,
         onFinished: @escaping (PostComposeOutcome) -> Void
     ) {
         _vm = StateObject(wrappedValue: PostComposerViewModel(
             stats: stats, initialImage: initialImage))
         self.autoOpenCamera = autoOpenCamera
+        self.backNavigation = backNavigation
         self.onFinished = onFinished
     }
 
@@ -381,9 +389,19 @@ struct PostComposerView: View {
                     // onFinished twice with contradictory outcomes (the
                     // post-run prompt would auto-post the route card AND the
                     // photo post would land server-side).
-                    Button("Cancel") { onFinished(.cancelled); dismiss() }
-                        .foregroundColor(.white.opacity(vm.isPublishing ? 0.4 : 1))
-                        .disabled(vm.isPublishing)
+                    Button { onFinished(.cancelled); dismiss() } label: {
+                        if backNavigation {
+                            HStack(spacing: 3) {
+                                Image(systemName: "chevron.left")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text("Back")
+                            }
+                        } else {
+                            Text("Cancel")
+                        }
+                    }
+                    .foregroundColor(.white.opacity(vm.isPublishing ? 0.4 : 1))
+                    .disabled(vm.isPublishing)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if vm.isPublishing {
@@ -421,7 +439,6 @@ struct PostComposerView: View {
             }
             .toolbarBackground(.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
-            .madKeyboardDoneButton(focus: $captionFocused)
             .fullScreenCover(isPresented: $showCamera) {
                 MADCameraView(image: $vm.pickedImage)
             }
@@ -554,6 +571,35 @@ struct PostComposerView: View {
                             .background(Capsule().fill(.black.opacity(0.5)))
                         }
                         .padding(10)
+                    }
+                    // Keep a copy exactly as composed — stats sticker baked
+                    // in (the camera already saved the RAW shot at capture).
+                    .overlay(alignment: .topLeading) {
+                        Button {
+                            guard let flat = vm.flatten() else { return }
+                            PhotoRollSaver.save(flat)
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                showSavedToPhotos = true
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                                withAnimation(.easeOut(duration: 0.25)) { showSavedToPhotos = false }
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: showSavedToPhotos
+                                    ? "checkmark.circle.fill" : "square.and.arrow.down")
+                                    .font(.system(size: 12, weight: .bold))
+                                Text(showSavedToPhotos ? "Saved" : "Save")
+                                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                            }
+                            .foregroundColor(showSavedToPhotos ? .green : .white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(Capsule().fill(.black.opacity(0.5)))
+                        }
+                        .padding(10)
+                        .disabled(showSavedToPhotos)
                     }
                     .overlay(alignment: .bottom) {
                         if vm.stickerEnabled {
@@ -761,10 +807,35 @@ struct PostComposerView: View {
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                         .fill(Color.white.opacity(0.06))
                 )
-            Text("\(vm.caption.count)/280")
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundColor(vm.caption.count > 280 ? MADTheme.Colors.error : .white.opacity(0.4))
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            HStack {
+                // Anchored to the field it dismisses (a keyboard-toolbar Done
+                // floated as a detached pill over the counter on iOS 26) —
+                // Return adds newlines in this multi-line field, so this is
+                // THE way to put the keyboard away.
+                if captionFocused {
+                    Button {
+                        captionFocused = false
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "keyboard.chevron.compact.down")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("Done")
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(MADTheme.Colors.redGradient))
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                }
+                Spacer()
+                Text("\(vm.caption.count)/280")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(vm.caption.count > 280 ? MADTheme.Colors.error : .white.opacity(0.4))
+            }
+            .animation(.easeInOut(duration: 0.15), value: captionFocused)
         }
         .onChange(of: vm.caption) { _, newValue in
             if newValue.count > 280 { vm.caption = String(newValue.prefix(280)) }

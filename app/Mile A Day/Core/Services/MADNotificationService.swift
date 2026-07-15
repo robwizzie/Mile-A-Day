@@ -318,6 +318,7 @@ final class MADNotificationService: NSObject, ObservableObject {
         case "friend_request_accepted": return prefs.friendRequestAcceptedEnabled
         case "friend_nudge": return prefs.friendNudgeEnabled
         case "friend_activity": return prefs.friendCompletedEnabled
+        case "friend_post": return prefs.friendPostsEnabled
         case "competition_invite": return prefs.competitionInviteEnabled
         case "competition_accepted": return prefs.competitionAcceptedEnabled
         case "competition_started", "competition_updates": return prefs.competitionStartEnabled

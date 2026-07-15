@@ -97,6 +97,9 @@ struct StoryGroup: Codable, Identifiable {
     let story_count: Int
     let has_unviewed: Bool
     let latest_at: String
+    /// Distinct author-local days ("yyyy-MM-dd") this group's stories span —
+    /// drives the per-day viewing gate. Optional: absent from older servers.
+    let story_local_dates: [String]?
 
     var id: String { user_id }
 
