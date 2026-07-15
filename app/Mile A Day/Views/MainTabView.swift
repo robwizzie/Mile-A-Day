@@ -141,6 +141,10 @@ struct MainTabView: View {
                      // completion already sits in the history by the time the
                      // push arrives, so Dashboard + inbox shows the full story.
                      "challenge_won",
+                     // Post/story pushes carry no payload data through the
+                     // cold path, so land in the inbox — its row tap then
+                     // deep-links to the exact post/story.
+                     "friend_post", "story_reaction",
                      "friend_challenge_completed", "friend_personal_best":
                     selectedTab = 0
                     showNotificationInbox = true
@@ -298,7 +302,8 @@ struct MainTabView: View {
                 selectedTab = 1
             case "competition_flex", "competition_milestone", "friend_nudge",
                  "friend_activity", "streak_broken", "personal_best",
-                 "lead_change", "clash_tie":
+                 "lead_change", "clash_tie",
+                 "friend_post", "story_reaction":
                 selectedTab = 0
                 showNotificationInbox = true
                 notificationService.pendingNotificationType = nil

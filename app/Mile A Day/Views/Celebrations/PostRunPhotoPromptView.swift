@@ -17,12 +17,19 @@ struct PostRunPhotoPromptView: View {
     @State private var appeared = false
     @State private var didAct = false
     /// Photos captured during the run via the tracking screen's camera button.
-    @State private var midRunSnaps: [UIImage] = []
+    @State private var midRunSnaps: [MidRunPhotoStash.Entry] = []
     /// Composer launch request — carries the tapped snap (nil = fresh camera).
     /// Item-based so the cover is always built from THIS value; the old
     /// isPresented + separate-selection pair could build the composer with a
     /// stale nil snap and wrongly launch the live camera.
     @State private var composerLaunch: ComposerLaunch?
+    /// Full-screen review of the run's snaps (save / delete / pick one).
+    @State private var showGallery = false
+    @State private var galleryStartIndex = 0
+    /// "Use this photo" chosen INSIDE the gallery — the composer presents
+    /// after the gallery cover fully dismisses (two covers in one transaction
+    /// race and drop, see .claude/rules/ios.md).
+    @State private var pendingUseImage: UIImage?
 
     private var isWalk: Bool { workoutType == "walking" }
     /// App-wide type language: walks blue, runs red.
@@ -33,6 +40,25 @@ struct PostRunPhotoPromptView: View {
             LinearGradient(colors: [Color(red: 0.08, green: 0.06, blue: 0.10), .black],
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
+                // Snap review rides on the gradient node — the composer cover
+                // owns the ZStack, and two covers on one node drop one.
+                .fullScreenCover(isPresented: $showGallery, onDismiss: {
+                    // Refresh after deletions; a "Use this photo" choice made
+                    // inside the gallery presents the composer only now, after
+                    // this cover is fully gone (same-transaction covers race).
+                    midRunSnaps = MidRunPhotoStash.entries()
+                    if let image = pendingUseImage {
+                        pendingUseImage = nil
+                        composerLaunch = ComposerLaunch(image: image)
+                    }
+                }) {
+                    SnapGalleryView(
+                        title: "Your snaps",
+                        initialIndex: galleryStartIndex,
+                        onUse: { pendingUseImage = $0.image },
+                        onStashChanged: { midRunSnaps = MidRunPhotoStash.entries() }
+                    )
+                }
 
             VStack(spacing: MADTheme.Spacing.lg) {
                 Spacer()
@@ -82,7 +108,7 @@ struct PostRunPhotoPromptView: View {
             }
         }
         .onAppear {
-            midRunSnaps = MidRunPhotoStash.loadAll()
+            midRunSnaps = MidRunPhotoStash.entries()
             withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) { appeared = true }
         }
         .fullScreenCover(item: $composerLaunch) { launch in
@@ -91,7 +117,10 @@ struct PostRunPhotoPromptView: View {
                 // A chosen mid-run snap goes straight onto the canvas; only a
                 // fresh capture launches the camera.
                 autoOpenCamera: launch.image == nil,
-                initialImage: launch.image
+                initialImage: launch.image,
+                // Leaving returns to this prompt with the snaps intact —
+                // "‹ Back", not "Cancel", so nobody fears losing photos.
+                backNavigation: true
             ) { outcome in
                 composerLaunch = nil
                 switch outcome {
@@ -155,15 +184,15 @@ struct PostRunPhotoPromptView: View {
     private var midRunSnapStrip: some View {
         if midRunSnaps.count <= 2 {
             HStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(Array(midRunSnaps.enumerated()), id: \.offset) { index, snap in
-                    snapCard(index: index, snap: snap)
+                ForEach(Array(midRunSnaps.enumerated()), id: \.element.id) { index, entry in
+                    snapCard(index: index, entry: entry)
                 }
             }
         } else {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: MADTheme.Spacing.sm) {
-                    ForEach(Array(midRunSnaps.enumerated()), id: \.offset) { index, snap in
-                        snapCard(index: index, snap: snap)
+                    ForEach(Array(midRunSnaps.enumerated()), id: \.element.id) { index, entry in
+                        snapCard(index: index, entry: entry)
                     }
                 }
                 .padding(.horizontal, MADTheme.Spacing.lg)
@@ -180,12 +209,12 @@ struct PostRunPhotoPromptView: View {
             : CGSize(width: 150, height: 187)
     }
 
-    private func snapCard(index: Int, snap: UIImage) -> some View {
+    private func snapCard(index: Int, entry: MidRunPhotoStash.Entry) -> some View {
         Button {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            composerLaunch = ComposerLaunch(image: snap)
+            composerLaunch = ComposerLaunch(image: entry.image)
         } label: {
-            Image(uiImage: snap)
+            Image(uiImage: entry.image)
                 .resizable()
                 .scaledToFill()
                 .frame(width: snapCardSize.width, height: snapCardSize.height)
@@ -214,6 +243,25 @@ struct PostRunPhotoPromptView: View {
                 .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
+        // Peek before you post: full-screen review with save/delete. A
+        // SIBLING overlay (not nested in the card button's label) so its
+        // taps can never double-fire the use-photo action.
+        .overlay(alignment: .topTrailing) {
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                galleryStartIndex = index
+                showGallery = true
+            } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(Color.black.opacity(0.55)))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .padding(8)
+        }
         .scaleEffect(appeared ? 1 : 0.8)
         .opacity(appeared ? 1 : 0)
         .animation(

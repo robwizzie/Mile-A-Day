@@ -12,8 +12,10 @@ struct StoriesRailView: View {
     /// The viewer has already shared this workout — the "+" add badge hides
     /// (one post per walk/run); the ring still opens their own story.
     var hasSharedWorkout: Bool = false
-    /// Friends' stories stay locked until the viewer finishes their mile.
-    var canViewStories: Bool = true
+    /// Per-group viewing gate: viewing is earned per story DAY (yesterday's
+    /// stories stay open for a viewer who completed yesterday; a new today
+    /// story locks until today's mile is done). The feed owns the rule.
+    var isGroupViewable: (StoryGroup) -> Bool = { _ in true }
     let onTapAdd: () -> Void
     let onTapGroup: (StoryGroup) -> Void
     var onLockedStoryTap: () -> Void = {}
@@ -30,14 +32,15 @@ struct StoriesRailView: View {
             HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
                 addCell
                 ForEach(friendGroups) { group in
+                    let viewable = isGroupViewable(group)
                     Button {
-                        if canViewStories { onTapGroup(group) } else { onLockedStoryTap() }
+                        if viewable { onTapGroup(group) } else { onLockedStoryTap() }
                     } label: {
                         cell(
                             name: group.displayName,
                             imageURL: group.profile_image_url,
                             unviewed: group.has_unviewed,
-                            locked: !canViewStories
+                            locked: !viewable
                         )
                     }
                     .buttonStyle(.plain)

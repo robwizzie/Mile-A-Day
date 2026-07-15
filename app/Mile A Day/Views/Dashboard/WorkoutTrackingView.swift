@@ -63,6 +63,10 @@ struct WorkoutTrackingView: View {
     @State private var showMidRunCamera = false
     @State private var midRunImage: UIImage?
     @State private var midRunSnapCount = 0
+    /// Mid-run snap review tray (view + delete without touching tracking).
+    @State private var showSnapTray = false
+    /// Cheap downsampled thumb of the newest snap for the tray chip.
+    @State private var lastSnapThumb: UIImage?
     @State private var showSnapSavedToast = false
 
     // Workout distance only (starts at 0)
@@ -259,10 +263,16 @@ struct WorkoutTrackingView: View {
                     // Mid-run snap: see something worth keeping, capture it in
                     // one tap, keep moving — the end-of-run prompt asks whether
                     // it becomes the post. Pinned in the top bar so it never
-                    // crowds the metrics or the Stop button.
+                    // crowds the metrics or the Stop button. Once snaps exist,
+                    // a camera-app-style thumbnail chip opens the review tray.
                     if MADCameraView.isAvailable && !isStopping {
-                        midRunCameraButton
-                            .padding(.trailing, 20)
+                        HStack(spacing: 10) {
+                            if midRunSnapCount > 0 {
+                                midRunTrayButton
+                            }
+                            midRunCameraButton
+                        }
+                        .padding(.trailing, 20)
                     }
                 }
                 .padding(.top, 16)
@@ -311,6 +321,62 @@ struct WorkoutTrackingView: View {
 
     // MARK: - Mid-Run Photo Capture
 
+    /// Camera-app pattern: the newest snap as a thumbnail chip beside the
+    /// shutter. Tapping it opens the review tray — a sheet OVER the tracking
+    /// screen, so distance/time keep counting underneath — where shots can be
+    /// checked full-size, saved, or deleted on the spot instead of waiting
+    /// for the end-of-run prompt.
+    private var midRunTrayButton: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showSnapTray = true
+        } label: {
+            Group {
+                if let thumb = lastSnapThumb {
+                    Image(uiImage: thumb)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.white.opacity(0.18))
+                }
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
+            )
+            .overlay(alignment: .topTrailing) {
+                Text("\(midRunSnapCount)")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.white)
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill(Color.orange))
+                    .offset(x: 5, y: -5)
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .sheet(isPresented: $showSnapTray) {
+            SnapGalleryView(title: "Your snaps", onStashChanged: refreshSnapState)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        // Stop flow takes over the screen — the tray must not sit on top.
+        .onChange(of: isStopping) { _, stopping in
+            if stopping { showSnapTray = false }
+        }
+    }
+
+    private func refreshSnapState() {
+        midRunSnapCount = MidRunPhotoStash.count
+        lastSnapThumb = MidRunPhotoStash.latestThumbnail()
+    }
+
     private var midRunCameraButton: some View {
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -325,17 +391,6 @@ struct WorkoutTrackingView: View {
                         .fill(Color.white.opacity(0.18))
                         .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
                 )
-                .overlay(alignment: .topTrailing) {
-                    if midRunSnapCount > 0 {
-                        Text("\(midRunSnapCount)")
-                            .font(.system(size: 11, weight: .heavy, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundColor(.white)
-                            .frame(width: 18, height: 18)
-                            .background(Circle().fill(Color.orange))
-                            .offset(x: 4, y: -4)
-                    }
-                }
         }
         .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showMidRunCamera) {
@@ -349,9 +404,11 @@ struct WorkoutTrackingView: View {
             Task.detached(priority: .utility) {
                 let saved = MidRunPhotoStash.add(image)
                 let count = MidRunPhotoStash.count
+                let thumb = MidRunPhotoStash.latestThumbnail()
                 guard saved else { return }
                 await MainActor.run {
                     midRunSnapCount = count
+                    lastSnapThumb = thumb
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                         showSnapSavedToast = true
@@ -744,9 +801,9 @@ struct WorkoutTrackingView: View {
             showCountdown = false
             isTracking = true
 
-            // Restore the snap-count badge — mid-run photos survive an app
-            // relaunch alongside the workout itself.
-            midRunSnapCount = MidRunPhotoStash.count
+            // Restore the snap chip (count + thumbnail) — mid-run photos
+            // survive an app relaunch alongside the workout itself.
+            refreshSnapState()
 
             // Resume tracking with the saved distance as the starting point.
             // For pedometer: new pedometer readings will ADD to saved.currentDistance.

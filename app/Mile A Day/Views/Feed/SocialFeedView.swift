@@ -12,6 +12,11 @@ enum FeedDeepLink {
         /// the friend's newest entry on that local day.
         var userId: String?
         var localDate: String?
+        /// friend_post notifications: exact post entry to land on.
+        var postId: String?
+        /// Story notifications: open this user's story viewer instead of
+        /// scrolling the feed (respects the day-scoped viewing gate).
+        var storyUserId: String?
     }
 
     static var pending: Target?
@@ -85,6 +90,56 @@ struct SocialFeedView: View {
             current: healthManager.todaysDistance,
             goal: userManager.currentUser.goalMiles
         )
+    }
+
+    /// Server-day formatter: Postgres emits Gregorian "yyyy-MM-dd" — pin the
+    /// locale/calendar so a device on Buddhist/Japanese calendars can't emit
+    /// keys (e.g. "2569-07-15") that never match.
+    private static let serverDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// Story viewing is earned PER DAY, not reset at midnight: a story from
+    /// day D stays viewable for a viewer who completed day D. So yesterday's
+    /// stories don't lock when a new day starts (if the viewer completed
+    /// yesterday) — only a poster's NEW today-story hides until today's mile
+    /// is done. Keys are local "yyyy-MM-dd" matching the server's local_date.
+    /// Today's completion also unlocks the viewer-local TOMORROW string: an
+    /// author far ahead in timezones stamps "their today" a calendar day
+    /// past ours, and their story shouldn't wait out most of its 24h window.
+    private var viewableStoryDays: Set<String> {
+        var days = Set<String>()
+        let fmt = Self.serverDayFormatter
+        if mileDone {
+            days.insert(fmt.string(from: Date()))
+            if let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) {
+                days.insert(fmt.string(from: tomorrow))
+            }
+        }
+        if let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()),
+           healthManager.workoutIndex?.hasQualifyingWorkout(on: yesterday) == true {
+            days.insert(fmt.string(from: yesterday))
+        }
+        return days
+    }
+
+    /// Whether the viewer has earned at least one of this group's story days.
+    /// Own stories are always viewable. Groups from a server that predates
+    /// `story_local_dates` fall back to the legacy all-or-nothing gate.
+    private func canViewStories(of group: StoryGroup) -> Bool {
+        if group.user_id == currentUserId { return true }
+        guard let days = group.story_local_dates, !days.isEmpty else { return mileDone }
+        return !viewableStoryDays.isDisjoint(with: days)
+    }
+
+    /// The story days the viewer may watch for a group (nil = no filtering,
+    /// used for own stories).
+    private func allowedStoryDays(for group: StoryGroup) -> Set<String>? {
+        group.user_id == currentUserId ? nil : viewableStoryDays
     }
 
     /// Workout ids of the user's own stories (fetched when the rail shows an
@@ -186,7 +241,7 @@ struct SocialFeedView: View {
                         myImageURL: userManager.currentUser.profileImageUrl,
                         canPost: mileDone,
                         hasSharedWorkout: alreadySharedWorkout,
-                        canViewStories: mileDone,
+                        isGroupViewable: { canViewStories(of: $0) },
                         onTapAdd: handleCompose,
                         onTapGroup: { viewerGroup = $0 },
                         onLockedStoryTap: { showMileHint = true }
@@ -276,7 +331,11 @@ struct SocialFeedView: View {
             }
         }
         .fullScreenCover(item: $viewerGroup) { group in
-            StoryViewerView(group: group, currentUserId: currentUserId) { changed in
+            StoryViewerView(
+                group: group,
+                currentUserId: currentUserId,
+                allowedDays: allowedStoryDays(for: group)
+            ) { changed in
                 viewerGroup = nil
                 if changed {
                     Task { await refresh() }
@@ -361,10 +420,10 @@ struct SocialFeedView: View {
                 )
             }
         }
-        .alert("Finish today's mile first", isPresented: $showMileHint) {
+        .alert("Finish your mile first", isPresented: $showMileHint) {
             Button("Got it", role: .cancel) {}
         } message: {
-            Text("Complete your daily mile to post and to see your friends' stories today. Keep going — you've got this! 🏃")
+            Text("Each day's stories unlock for the days you complete: finish today's mile to post and to watch today's stories — yesterday's stay open if you completed yesterday. Keep going — you've got this! 🏃")
         }
         .alert("You've already shared this one", isPresented: $showAlreadySharedHint) {
             Button("Got it", role: .cancel) {}
@@ -516,7 +575,39 @@ struct SocialFeedView: View {
     /// page 1). Double scrollTo — a LazyVStack lands short on deep targets
     /// (see ProfilePostsFeedSheet).
     private func revealDeepLink(using proxy: ScrollViewProxy) {
-        guard FeedDeepLink.pending != nil else { return }
+        guard let target = FeedDeepLink.pending else { return }
+
+        // Story notifications open the story viewer, not a feed scroll.
+        if let storyUser = target.storyUserId {
+            FeedDeepLink.pending = nil
+            Task {
+                var waited = 0
+                while isLoading, waited < 40 {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    waited += 1
+                }
+                if !stories.contains(where: { $0.user_id == storyUser }) {
+                    await refresh()
+                }
+                guard let group = stories.first(where: { $0.user_id == storyUser }) else {
+                    // Story expired/deleted since the notification — fall back
+                    // to the author's latest FEED entry instead of a silent
+                    // no-op that reads as a broken tap.
+                    FeedDeepLink.pending = FeedDeepLink.Target(userId: storyUser)
+                    revealDeepLink(using: proxy)
+                    return
+                }
+                if canViewStories(of: group) {
+                    viewerGroup = group
+                } else {
+                    // The story exists but isn't earned yet — same hint the
+                    // locked ring gives.
+                    showMileHint = true
+                }
+            }
+            return
+        }
+
         Task {
             // Let an in-flight (initial) load settle before looking.
             var waited = 0
@@ -556,6 +647,12 @@ struct SocialFeedView: View {
 
     private func resolvedDeepLinkEntry() -> FeedEntry? {
         guard let target = FeedDeepLink.pending else { return nil }
+        // Most precise: the exact post a friend_post notification announced
+        // (also reachable when the post has no linked workout).
+        if let pid = target.postId,
+           let hit = feed.first(where: { $0.isPost && $0.entryId == pid }) {
+            return hit
+        }
         // Precise: workout ids match both raw workout entries and the post
         // that replaced one (the backend surfaces exactly one of the two).
         if let wid = target.workoutId,
@@ -580,9 +677,7 @@ struct SocialFeedView: View {
     /// "yyyy-MM-dd" target day; nil when either side doesn't parse.
     private func dayDistance(of entry: FeedEntry, to targetDay: String) -> Int? {
         guard let entryDate = RelativeTime.date(from: entry.sort_ts) else { return nil }
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        guard let target = f.date(from: targetDay) else { return nil }
+        guard let target = Self.serverDayFormatter.date(from: targetDay) else { return nil }
         let cal = Calendar.current
         let days = cal.dateComponents(
             [.day],

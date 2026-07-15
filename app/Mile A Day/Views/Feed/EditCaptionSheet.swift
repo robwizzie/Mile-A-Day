@@ -51,6 +51,26 @@ struct EditCaptionSheet: View {
                                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                                 .foregroundColor(.red)
                         }
+                        // Anchored dismiss for the multi-line keyboard (Return
+                        // adds newlines) — same inline pattern as the composer.
+                        if focused {
+                            Button {
+                                focused = false
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "keyboard.chevron.compact.down")
+                                        .font(.system(size: 11, weight: .bold))
+                                    Text("Done")
+                                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(Capsule().fill(MADTheme.Colors.redGradient))
+                            }
+                            .buttonStyle(.plain)
+                            .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                        }
                         Spacer()
                         Text("\(text.count)/\(Self.maxLength)")
                             .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -58,6 +78,7 @@ struct EditCaptionSheet: View {
                             .foregroundColor(.white.opacity(0.4))
                     }
                     .padding(.horizontal, 2)
+                    .animation(.easeInOut(duration: 0.15), value: focused)
 
                     Spacer()
                 }
@@ -86,7 +107,6 @@ struct EditCaptionSheet: View {
                     .disabled(isSaving)
                 }
             }
-            .madKeyboardDoneButton(focus: $focused)
             .onAppear { focused = true }
         }
         .presentationDetents([.medium])

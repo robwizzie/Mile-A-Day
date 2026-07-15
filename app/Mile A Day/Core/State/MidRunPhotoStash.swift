@@ -1,3 +1,4 @@
+import ImageIO
 import UIKit
 
 /// Transient holding pen for photos snapped DURING a tracked walk/run. The
@@ -68,12 +69,45 @@ enum MidRunPhotoStash {
         return true
     }
 
-    /// All stashed snaps, oldest first (the order they were taken on the run).
-    static func loadAll() -> [UIImage] {
+    /// A stashed snap with a stable identity, so galleries can page and
+    /// DELETE individual shots (mid-run review) instead of all-or-nothing.
+    struct Entry: Identifiable, Equatable {
+        let url: URL
+        let image: UIImage
+        var id: String { url.lastPathComponent }
+
+        static func == (lhs: Entry, rhs: Entry) -> Bool { lhs.url == rhs.url }
+    }
+
+    /// All stashed snaps with identities, oldest first.
+    static func entries() -> [Entry] {
         fileURLs().compactMap { url in
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            return UIImage(data: data)
+            guard let data = try? Data(contentsOf: url), let img = UIImage(data: data) else {
+                return nil
+            }
+            return Entry(url: url, image: img)
         }
+    }
+
+    /// Drop one snap (mid-run "actually, not that one").
+    static func remove(_ entry: Entry) {
+        try? FileManager.default.removeItem(at: entry.url)
+    }
+
+    /// Cheap small thumbnail of the NEWEST snap for the tracking screen's
+    /// tray button — downsampled at decode so a 1Hz-updating screen never
+    /// holds full-size bitmaps for a 40pt chip.
+    static func latestThumbnail(maxPixel: CGFloat = 160) -> UIImage? {
+        guard let url = fileURLs().last else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else { return nil }
+        return UIImage(cgImage: cg)
     }
 
     static func clear() {
