@@ -14,9 +14,9 @@ struct StoriesRailView: View {
     var hasSharedWorkout: Bool = false
     /// Fresh-post window state (owned by the feed). When open, the "Your story"
     /// cell wears a shrinking countdown ring — an in-the-moment nudge, never a
-    /// gate. `windowFraction` is 0…1 of the window remaining.
+    /// gate. `windowOpenedAt` anchors the self-ticking ring.
     var windowOpen: Bool = false
-    var windowFraction: Double = 0
+    var windowOpenedAt: Date? = nil
     /// Per-group viewing gate: viewing is earned per story DAY (yesterday's
     /// stories stay open for a viewer who completed yesterday; a new today
     /// story locks until today's mile is done). The feed owns the rule.
@@ -83,8 +83,8 @@ struct StoriesRailView: View {
                     // Fresh-window countdown ring, just outside the avatar —
                     // only while there's still something to post this window.
                     .overlay {
-                        if windowOpen && canPost && !hasSharedWorkout {
-                            FreshWindowRing(fraction: windowFraction,
+                        if windowOpen && canPost && !hasSharedWorkout, let openedAt = windowOpenedAt {
+                            FreshWindowRing(openedAt: openedAt,
                                             color: MADTheme.Colors.madRed,
                                             lineWidth: 2.5)
                                 .padding(-3)

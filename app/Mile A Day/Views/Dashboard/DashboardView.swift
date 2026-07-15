@@ -538,6 +538,8 @@ struct DashboardView: View {
                     checkAndShowGoalCelebration()
                     // Pick up ask-mode pendings created while backgrounded.
                     loadPendingNotifications()
+                    // A mid-run snap may have been taken in another surface.
+                    refreshMidRunPhotoWaiting()
                 } else if newPhase == .background || newPhase == .inactive {
                     celebrationManager.onAppResignedActive()
                 }

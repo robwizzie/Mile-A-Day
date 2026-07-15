@@ -112,11 +112,6 @@ final class FreshPostWindowManager: ObservableObject {
         return max(0, Self.duration - Date().timeIntervalSince(opened))
     }
 
-    /// 0…1 share of the window still remaining — drives the countdown ring.
-    var fractionRemaining: Double {
-        Self.duration > 0 ? secondsRemaining / Self.duration : 0
-    }
-
     /// End instant for `Text(timerInterval:)`. Falls back to now when closed.
     var windowEndDate: Date {
         (windowOpenedAt ?? Date()).addingTimeInterval(Self.duration)
@@ -175,20 +170,26 @@ final class FreshPostWindowManager: ObservableObject {
 }
 
 /// A thin countdown ring drawn around content (the compose FAB, a story "+"
-/// cell). `fraction` is 0…1 of the window remaining; the parent recomputes it
-/// on its own 1 Hz tick and only mounts the ring while the window is open, so
-/// no timer runs otherwise. Decoupled from the manager on purpose — components
-/// like `StoriesRailView` receive a plain fraction, not the singleton.
+/// cell). Self-ticks via `TimelineView` from `openedAt`, so it needs no parent
+/// timer and stops the moment it's unmounted (i.e. when the window closes and
+/// the parent stops showing it). Once the window elapses the trim reaches 0 and
+/// nothing is drawn, so it also self-hides even before the parent re-renders.
+/// Decoupled from the manager — callers pass a plain `openedAt`, not the
+/// singleton — so components like `StoriesRailView` stay independent.
 struct FreshWindowRing: View {
-    let fraction: Double
+    let openedAt: Date
+    var duration: TimeInterval = FreshPostWindowManager.duration
     var color: Color = .white
     var lineWidth: CGFloat = 3
 
     var body: some View {
-        Circle()
-            .trim(from: 0, to: max(0, min(1, fraction)))
-            .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-            .rotationEffect(.degrees(-90))
-            .animation(.linear(duration: 1), value: fraction)
+        TimelineView(.periodic(from: openedAt, by: 1)) { context in
+            let remaining = max(0, duration - context.date.timeIntervalSince(openedAt))
+            let fraction = duration > 0 ? remaining / duration : 0
+            Circle()
+                .trim(from: 0, to: fraction)
+                .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
     }
 }

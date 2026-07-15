@@ -232,7 +232,8 @@ struct PostRunPhotoPromptView: View {
             )
             .font(.system(size: 13, weight: .bold, design: .rounded))
             .monospacedDigit()
-            .frame(width: 46, alignment: .leading)
+            .lineLimit(1)
+            .fixedSize()
         }
         .foregroundColor(.white)
         .padding(.horizontal, 14)

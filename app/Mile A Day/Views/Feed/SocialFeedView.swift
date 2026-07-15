@@ -36,10 +36,8 @@ struct SocialFeedView: View {
     @StateObject private var profileFriendService = FriendService()
     /// Fresh-post window: drives the compose FAB / rail countdown ring and the
     /// "Fresh" badge on the viewer's own in-window posts. Never gates posting.
+    /// The rings self-tick via `TimelineView`, so no feed-level timer is needed.
     @StateObject private var freshWindow = FreshPostWindowManager.shared
-    /// Bumped 1 Hz while the window is open so the ring shrinks and unmounts at
-    /// expiry — gated to `freshWindow.isOpen`, never a permanent timer.
-    @State private var windowTick = Date()
 
     @State private var feed: [FeedEntry] = []
     @State private var stories: [StoryGroup] = []
@@ -258,7 +256,7 @@ struct SocialFeedView: View {
                         canPost: mileDone,
                         hasSharedWorkout: alreadySharedWorkout,
                         windowOpen: freshWindow.isOpen,
-                        windowFraction: freshWindow.fractionRemaining,
+                        windowOpenedAt: freshWindow.windowOpenedAt,
                         isGroupViewable: { canViewStories(of: $0) },
                         isGroupUnviewed: { isGroupUnviewed(of: $0) },
                         onTapAdd: handleCompose,
@@ -335,16 +333,6 @@ struct SocialFeedView: View {
         .background(MADTheme.Colors.appBackgroundGradient)
         .toolbar(.hidden, for: .navigationBar)
         .overlay(alignment: .bottomTrailing) { composeButton }
-        // Drive the countdown rings' 1 Hz shrink (and their unmount at expiry)
-        // only while a window is open — no permanent timer on the feed. Kept on
-        // the root, not the FAB, so the rail ring keeps ticking after the FAB
-        // hides (once the workout is shared).
-        .background {
-            if freshWindow.isOpen {
-                Color.clear
-                    .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { windowTick = $0 }
-            }
-        }
         .overlay(alignment: .top) {
             if showHypeLimitBanner {
                 hypeLimitBanner
@@ -576,9 +564,8 @@ struct SocialFeedView: View {
                     )
                     // Fresh-window countdown ring around the FAB while open.
                     .overlay {
-                        if mileDone && freshWindow.isOpen {
-                            FreshWindowRing(fraction: freshWindow.fractionRemaining,
-                                            color: .white, lineWidth: 3)
+                        if mileDone && freshWindow.isOpen, let openedAt = freshWindow.windowOpenedAt {
+                            FreshWindowRing(openedAt: openedAt, color: .white, lineWidth: 3)
                                 .padding(-5)
                         }
                     }
