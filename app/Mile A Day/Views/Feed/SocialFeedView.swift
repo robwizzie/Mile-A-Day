@@ -142,6 +142,16 @@ struct SocialFeedView: View {
         group.user_id == currentUserId ? nil : viewableStoryDays
     }
 
+    /// Ring "unviewed" state: only when there's an unseen story on a day the
+    /// viewer can actually open. Own stories and pre-field servers fall back
+    /// to the server's has_unviewed aggregate. This stops an unearned
+    /// today-story from lighting a ring the viewer can never clear.
+    private func isGroupUnviewed(of group: StoryGroup) -> Bool {
+        if group.user_id == currentUserId { return group.has_unviewed }
+        guard let unseen = group.unviewed_local_dates else { return group.has_unviewed }
+        return !viewableStoryDays.isDisjoint(with: unseen)
+    }
+
     /// Workout ids of the user's own stories (fetched when the rail shows an
     /// own-story group) — a story share counts as that workout's one share.
     @State private var myStoryWorkoutIds: Set<String> = []
@@ -242,6 +252,7 @@ struct SocialFeedView: View {
                         canPost: mileDone,
                         hasSharedWorkout: alreadySharedWorkout,
                         isGroupViewable: { canViewStories(of: $0) },
+                        isGroupUnviewed: { isGroupUnviewed(of: $0) },
                         onTapAdd: handleCompose,
                         onTapGroup: { viewerGroup = $0 },
                         onLockedStoryTap: { showMileHint = true }

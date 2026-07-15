@@ -219,12 +219,7 @@ private struct RoutePath: Shape {
     let points: [CGPoint]
 
     func path(in rect: CGRect) -> Path {
-        var path = Path()
-        guard let first = points.first else { return path }
-        path.move(to: first)
-        for point in points.dropFirst() {
-            path.addLine(to: point)
-        }
-        return path
+        // Smoothed identically to the baked auto-post image (RunPostService).
+        Path(RouteSmoothing.smoothedPath(through: points))
     }
 }

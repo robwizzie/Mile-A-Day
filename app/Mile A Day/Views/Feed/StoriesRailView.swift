@@ -16,6 +16,9 @@ struct StoriesRailView: View {
     /// stories stay open for a viewer who completed yesterday; a new today
     /// story locks until today's mile is done). The feed owns the rule.
     var isGroupViewable: (StoryGroup) -> Bool = { _ in true }
+    /// Whether the ring should read "unviewed" — an unseen story on a day the
+    /// viewer can actually watch. The feed owns this (it knows earned days).
+    var isGroupUnviewed: (StoryGroup) -> Bool = { $0.has_unviewed }
     let onTapAdd: () -> Void
     let onTapGroup: (StoryGroup) -> Void
     var onLockedStoryTap: () -> Void = {}
@@ -39,7 +42,10 @@ struct StoriesRailView: View {
                         cell(
                             name: group.displayName,
                             imageURL: group.profile_image_url,
-                            unviewed: group.has_unviewed,
+                            // Light the ring only for unseen stories the viewer
+                            // can actually open — otherwise an unearned
+                            // today-story leaves a ring that never clears.
+                            unviewed: isGroupUnviewed(group),
                             locked: !viewable
                         )
                     }

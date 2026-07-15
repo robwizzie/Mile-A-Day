@@ -84,6 +84,11 @@ export interface StoryGroup {
    *  lets the client gate viewing PER DAY (yesterday's stories stay viewable
    *  for a viewer who completed yesterday). Additive field. */
   story_local_dates: string[];
+  /** Author-local days with at least one story the viewer HASN'T seen —
+   *  lets the client light the "unviewed" ring only for days the viewer can
+   *  actually watch, so an unearned today-story can't leave a permanently
+   *  unclearable ring. Additive field. */
+  unviewed_local_dates: string[];
 }
 
 /**
@@ -324,6 +329,8 @@ export async function getStoriesRail(viewerId: string): Promise<StoryGroup[]> {
         has_unviewed: !r.is_viewed,
         latest_at: r.created_at,
         story_local_dates: r.local_date ? [r.local_date] : [],
+        unviewed_local_dates:
+          !r.is_viewed && r.local_date ? [r.local_date] : [],
       });
     } else {
       g.story_count += 1;
@@ -331,6 +338,13 @@ export async function getStoriesRail(viewerId: string): Promise<StoryGroup[]> {
       if (r.created_at > g.latest_at) g.latest_at = r.created_at;
       if (r.local_date && !g.story_local_dates.includes(r.local_date)) {
         g.story_local_dates.push(r.local_date);
+      }
+      if (
+        !r.is_viewed &&
+        r.local_date &&
+        !g.unviewed_local_dates.includes(r.local_date)
+      ) {
+        g.unviewed_local_dates.push(r.local_date);
       }
     }
   }
@@ -898,6 +912,22 @@ export async function notifyFriendsOfPost(input: {
       // notification per run, original pool, original timing.
       return;
     }
+
+    // Rolling-window coalesce: don't buzz friends again if this author
+    // already triggered a friend_post push in the last few hours. A morning
+    // walk and an evening run (>window apart) both notify; three quick posts
+    // in a session don't triple-buzz. (The mile-merge above handles the
+    // just-finished case; this caps the later-post path.) The post itself
+    // still lands in the feed — only the push is suppressed.
+    const recent = await db.query<{ id: string }>(
+      `SELECT 1 AS id FROM in_app_notifications
+			 WHERE type = 'friend_post'
+				 AND data->>'user_id' = $1
+				 AND created_at > NOW() - INTERVAL '6 hours'
+			 LIMIT 1`,
+      [authorId],
+    );
+    if (recent.length > 0) return;
 
     const recipients = await db.query<{ uid: string }>(
       `SELECT f.friend_id AS uid
