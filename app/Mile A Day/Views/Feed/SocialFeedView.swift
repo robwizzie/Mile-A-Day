@@ -34,6 +34,10 @@ struct SocialFeedView: View {
     /// FriendService inside the sheet closure re-instantiated it on every feed
     /// state change, wiping the loaded friends list mid-view.
     @StateObject private var profileFriendService = FriendService()
+    /// Fresh-post window: drives the compose FAB / rail countdown ring and the
+    /// "Fresh" badge on the viewer's own in-window posts. Never gates posting.
+    /// The rings self-tick via `TimelineView`, so no feed-level timer is needed.
+    @StateObject private var freshWindow = FreshPostWindowManager.shared
 
     @State private var feed: [FeedEntry] = []
     @State private var stories: [StoryGroup] = []
@@ -251,6 +255,8 @@ struct SocialFeedView: View {
                         myImageURL: userManager.currentUser.profileImageUrl,
                         canPost: mileDone,
                         hasSharedWorkout: alreadySharedWorkout,
+                        windowOpen: freshWindow.isOpen,
+                        windowOpenedAt: freshWindow.windowOpenedAt,
                         isGroupViewable: { canViewStories(of: $0) },
                         isGroupUnviewed: { isGroupUnviewed(of: $0) },
                         onTapAdd: handleCompose,
@@ -518,6 +524,8 @@ struct SocialFeedView: View {
             PostCardView(
                 post: post,
                 storyPhotoURL: entry.storyPhotoURL,
+                isFresh: entry.is_self
+                    && freshWindow.wasPostedLive(postId: post.post_id, workoutId: post.workout_id),
                 isHyping: hypingIds.contains(entry.id),
                 isOutOfHypes: isOutOfHypes,
                 onHype: { Task { await hype(entry) } },
@@ -554,6 +562,13 @@ struct SocialFeedView: View {
                     .background(
                         Circle().fill(mileDone ? AnyShapeStyle(MADTheme.Colors.redGradient) : AnyShapeStyle(Color.gray.opacity(0.6)))
                     )
+                    // Fresh-window countdown ring around the FAB while open.
+                    .overlay {
+                        if mileDone && freshWindow.isOpen, let openedAt = freshWindow.windowOpenedAt {
+                            FreshWindowRing(openedAt: openedAt, color: .white, lineWidth: 3)
+                                .padding(-5)
+                        }
+                    }
                     .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
             }
             .padding(.trailing, MADTheme.Spacing.lg)

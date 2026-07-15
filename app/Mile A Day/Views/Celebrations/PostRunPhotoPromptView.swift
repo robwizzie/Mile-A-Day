@@ -14,6 +14,7 @@ struct PostRunPhotoPromptView: View {
     let workoutType: String
 
     @ObservedObject private var manager = CelebrationManager.shared
+    @ObservedObject private var freshWindow = FreshPostWindowManager.shared
     @State private var appeared = false
     @State private var didAct = false
     /// Photos captured during the run via the tracking screen's camera button.
@@ -70,6 +71,13 @@ struct PostRunPhotoPromptView: View {
                     cameraHero
                 } else {
                     midRunSnapStrip
+                }
+
+                // Countdown pill — the fresh window is open for this run. Purely
+                // an in-the-moment nudge; posting stays available after it ends.
+                if freshWindow.isOpen(forWorkout: workoutId) {
+                    countdownPill
+                        .opacity(appeared ? 1 : 0)
                 }
 
                 VStack(spacing: 8) {
@@ -206,6 +214,32 @@ struct PostRunPhotoPromptView: View {
         return count == 1
             ? "You snapped a photo out there — tap it to share it, or take a fresh one."
             : "You snapped \(count) photos out there — tap your favorite to share it, or take a fresh one."
+    }
+
+    // MARK: - Fresh-window countdown
+
+    /// Self-ticking countdown for the run's 10-minute fresh window. Uses the
+    /// native `Text(timerInterval:)` (no manual timer) so it stays cheap.
+    private var countdownPill: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 11, weight: .bold))
+            Text("Post now — fresh for")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+            Text(
+                timerInterval: (freshWindow.windowOpenedAt ?? Date())...freshWindow.windowEndDate,
+                countsDown: true
+            )
+            .font(.system(size: 13, weight: .bold, design: .rounded))
+            .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Capsule().fill(accent.opacity(0.9)))
+        .shadow(color: accent.opacity(0.4), radius: 8, y: 2)
     }
 
     // MARK: - Hero (no mid-run snaps)

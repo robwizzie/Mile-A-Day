@@ -3,7 +3,7 @@ import SwiftUI
 /// Run stats handed to the composer to seed the overlay sticker. Carries every
 /// stat we can show; `datum(for:)` formats one and returns nil when there's no
 /// data, so unavailable stats simply don't appear (and aren't offered as toggles).
-struct RunStatsInput {
+struct RunStatsInput: Equatable {
     var distance: Double
     var paceSecondsPerMile: Double?
     var durationSeconds: Double?
@@ -55,10 +55,16 @@ struct RunStatsInput {
         }
     }
 
-    private static func grouped(_ n: Int) -> String {
+    /// Shared decimal formatter — allocating a `NumberFormatter` per render was
+    /// a needless per-frame cost. Rendering is @MainActor, so sharing is safe.
+    private static let stepsFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .decimal
-        return f.string(from: NSNumber(value: n)) ?? "\(n)"
+        return f
+    }()
+
+    private static func grouped(_ n: Int) -> String {
+        stepsFormatter.string(from: NSNumber(value: n)) ?? "\(n)"
     }
 }
 
@@ -114,6 +120,8 @@ final class PostComposerViewModel: ObservableObject {
     /// Sticker center in normalized canvas coordinates (0…1).
     @Published var stickerPos: CGPoint = CGPoint(x: 0.5, y: 0.82)
     @Published var stickerScale: CGFloat = 1.0
+    /// Sticker rotation (two-finger twist), baked into the shared image.
+    @Published var stickerRotation: Angle = .zero
     @Published var config: StickerConfig
     @Published var isPublishing = false
     @Published var errorMessage: String?
@@ -142,6 +150,7 @@ final class PostComposerViewModel: ObservableObject {
         // (StickerConfig sanitizes on decode; ranges live there too).
         self.stickerScale = cfg.scale
         self.stickerPos = CGPoint(x: cfg.posX, y: cfg.posY)
+        self.stickerRotation = Angle(degrees: cfg.rotation)
         // Seed a pre-chosen photo (mid-run snap) AFTER all stored properties
         // are initialized — the @Published setter touches self.
         self.pickedImage = initialImage
@@ -174,6 +183,7 @@ final class PostComposerViewModel: ObservableObject {
             showSticker: stickerEnabled,
             stickerPos: stickerPos,
             stickerScale: stickerScale,
+            stickerRotation: stickerRotation,
             input: stats,
             config: config
         )
@@ -201,7 +211,7 @@ final class PostComposerViewModel: ObservableObject {
 
         do {
             let mediaUrl = try await PostService.uploadMedia(flat)
-            _ = try await PostService.createPost(
+            let created = try await PostService.createPost(
                 mediaUrl: mediaUrl,
                 caption: caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : caption,
                 workoutId: stats.workoutId,
@@ -210,6 +220,12 @@ final class PostComposerViewModel: ObservableObject {
                 stats: stats.snapshot,
                 isAuto: false,
                 includeRoute: includeRoute
+            )
+            // Reward posts shared inside the run's 10-min fresh window with a
+            // "Fresh" badge. No-op when the window is closed.
+            FreshPostWindowManager.shared.markPostedLive(
+                postId: created.post_id,
+                workoutId: created.workout_id ?? stats.workoutId
             )
             if stickerEnabled {
                 // Remember the user's overlay style — but merge back any stats
@@ -226,6 +242,7 @@ final class PostComposerViewModel: ObservableObject {
                 toSave.scale = stickerScale
                 toSave.posX = stickerPos.x
                 toSave.posY = stickerPos.y
+                toSave.rotation = stickerRotation.degrees
                 toSave.save()
             }
             return true
@@ -256,6 +273,7 @@ struct PostCanvas: View {
     let showSticker: Bool
     let stickerPos: CGPoint
     let stickerScale: CGFloat
+    var stickerRotation: Angle = .zero
     let input: RunStatsInput
     let config: StickerConfig
 
@@ -271,12 +289,91 @@ struct PostCanvas: View {
                 if showSticker {
                     RunStatsStickerView(input: input, config: config)
                         .scaleEffect(stickerScale)
+                        .rotationEffect(stickerRotation)
                         .position(x: stickerPos.x * geo.size.width, y: stickerPos.y * geo.size.height)
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
         }
+    }
+}
+
+/// The live, manipulable sticker in the composer editor. Holds the in-flight
+/// drag / pinch / twist as transient `@GestureState` and applies it directly to
+/// the sticker, committing to the bindings ONLY on `.onEnded`. Because the
+/// committed VM values aren't touched mid-gesture, the rest of the composer
+/// never re-renders during a manipulation — this is what makes it feel as
+/// smooth as Instagram instead of re-laying-out the whole screen every frame.
+/// The sticker is wrapped in `.equatable()` (outside the transforms) so its own
+/// body — drop shadow, number formatting — is rendered once and only its cheap
+/// transform matrix changes per frame.
+private struct StickerEditorLayer: View {
+    let input: RunStatsInput
+    let config: StickerConfig
+    /// Canvas size in points — the SAME value `flatten()` renders at, so the
+    /// live sticker and the baked image land pixel-identically.
+    let canvas: CGSize
+    @Binding var pos: CGPoint      // normalized 0…1 center (committed)
+    @Binding var scale: CGFloat    // committed
+    @Binding var rotation: Angle   // committed
+
+    // Identity-at-rest transients — SwiftUI auto-resets these when the gesture
+    // ends, in the same transaction the `.onEnded` commit lands, so there's no
+    // jump between "committed ∘ transient" and the new committed value.
+    @GestureState private var dragTranslation: CGSize = .zero
+    @GestureState private var magnifyFactor: CGFloat = 1
+    @GestureState private var twist: Angle = .zero
+
+    var body: some View {
+        RunStatsStickerView(input: input, config: config)
+            .equatable()                       // MUST stay OUTSIDE the transforms
+            .scaleEffect(liveScale)
+            .rotationEffect(liveRotation)
+            // Generous, invisible hit margin so a shrunk-down sticker stays easy
+            // to grab. After the transforms → a fixed screen-space margin.
+            .padding(20)
+            .contentShape(Rectangle())
+            .gesture(manipulation)             // BEFORE .position → grab the sticker itself
+            .position(liveCenter)
+    }
+
+    // Live = committed ∘ transient, clamped IDENTICALLY to the `.onEnded` commit
+    // so releasing never snaps the sticker to a different spot/size.
+    private var liveScale: CGFloat {
+        (scale * magnifyFactor).clamped(to: StickerConfig.scaleRange)
+    }
+    private var liveRotation: Angle { rotation + twist }
+    private var liveCenter: CGPoint {
+        CGPoint(x: committedX(addingDrag: dragTranslation.width) * canvas.width,
+                y: committedY(addingDrag: dragTranslation.height) * canvas.height)
+    }
+
+    private func committedX(addingDrag dx: CGFloat) -> CGFloat {
+        (pos.x + dx / max(canvas.width, 1)).clamped(to: StickerConfig.posXRange)
+    }
+    private func committedY(addingDrag dy: CGFloat) -> CGFloat {
+        (pos.y + dy / max(canvas.height, 1)).clamped(to: StickerConfig.posYRange)
+    }
+
+    private var manipulation: some Gesture {
+        let drag = DragGesture()
+            .updating($dragTranslation) { value, state, _ in state = value.translation }
+            .onEnded { value in
+                pos = CGPoint(x: committedX(addingDrag: value.translation.width),
+                              y: committedY(addingDrag: value.translation.height))
+            }
+        let magnify = MagnifyGesture()
+            .updating($magnifyFactor) { value, state, _ in state = value.magnification }
+            .onEnded { value in
+                scale = (scale * value.magnification).clamped(to: StickerConfig.scaleRange)
+            }
+        let rotate = RotateGesture()
+            .updating($twist) { value, state, _ in state = value.rotation }
+            .onEnded { value in
+                rotation = rotation + value.rotation
+            }
+        return drag.simultaneously(with: magnify).simultaneously(with: rotate)
     }
 }
 
@@ -303,10 +400,6 @@ struct PostComposerView: View {
     /// time a fullScreenCover dismisses, and re-opening on each pass would
     /// trap the user in the camera with no way back.
     @State private var didAutoOpenCamera = false
-    @State private var gestureBaseScale: CGFloat = 1.0
-    /// Sticker position at drag start (normalized) — drags apply translation
-    /// relative to this instead of jumping to the touch point.
-    @State private var gestureBasePos: CGPoint? = nil
     /// "Saved to Photos" confirmation for the canvas Save button.
     @State private var showSavedToPhotos = false
     @FocusState private var captionFocused: Bool
@@ -534,16 +627,29 @@ struct PostComposerView: View {
             Group {
                 if let image = vm.pickedImage {
                     ZStack {
+                        // Photo only. The sticker is a SEPARATE, isolated layer
+                        // (StickerEditorLayer) so dragging/pinching/rotating it
+                        // never re-renders this canvas or the rest of the
+                        // composer — the key to an Instagram-smooth feel.
                         PostCanvas(
                             image: image,
-                            showSticker: vm.stickerEnabled,
+                            showSticker: false,
                             stickerPos: vm.stickerPos,
                             stickerScale: vm.stickerScale,
                             input: vm.stats,
                             config: vm.config
                         )
                         if vm.stickerEnabled {
-                            stickerGestureLayer(canvas: CGSize(width: width, height: height))
+                            // Pass geo.size — the exact value flatten() renders
+                            // at (via vm.canvasSize) — for pixel-perfect parity.
+                            StickerEditorLayer(
+                                input: vm.stats,
+                                config: vm.config,
+                                canvas: geo.size,
+                                pos: $vm.stickerPos,
+                                scale: $vm.stickerScale,
+                                rotation: $vm.stickerRotation
+                            )
                         }
                     }
                     .frame(width: width, height: height)
@@ -603,7 +709,7 @@ struct PostComposerView: View {
                     }
                     .overlay(alignment: .bottom) {
                         if vm.stickerEnabled {
-                            Text("Drag to move · pinch to resize")
+                            Text("Drag · pinch · twist")
                                 .font(.system(size: 10, weight: .semibold, design: .rounded))
                                 .foregroundColor(.white.opacity(0.65))
                                 .padding(.horizontal, 10).padding(.vertical, 4)
@@ -669,39 +775,6 @@ struct PostComposerView: View {
         }
         .buttonStyle(.plain)
         .disabled(!MADCameraView.isAvailable)
-    }
-
-    private func stickerGestureLayer(canvas: CGSize) -> some View {
-        Color.clear
-            .contentShape(Rectangle())
-            // Base the first pinch on the RESTORED scale — the default 1.0
-            // would make a remembered smaller/larger sticker jump on touch.
-            .onAppear { gestureBaseScale = vm.stickerScale }
-            .gesture(
-                SimultaneousGesture(
-                    DragGesture()
-                        .onChanged { value in
-                            // Move RELATIVE to where the sticker started — a
-                            // location-based move teleports the sticker to
-                            // wherever the finger first lands on the canvas.
-                            let base = gestureBasePos ?? vm.stickerPos
-                            if gestureBasePos == nil { gestureBasePos = vm.stickerPos }
-                            let x = base.x + value.translation.width / canvas.width
-                            let y = base.y + value.translation.height / canvas.height
-                            vm.stickerPos = CGPoint(
-                                x: x.clamped(to: StickerConfig.posXRange),
-                                y: y.clamped(to: StickerConfig.posYRange)
-                            )
-                        }
-                        .onEnded { _ in gestureBasePos = nil },
-                    MagnificationGesture()
-                        .onChanged { value in
-                            vm.stickerScale = (gestureBaseScale * value)
-                                .clamped(to: StickerConfig.scaleRange)
-                        }
-                        .onEnded { _ in gestureBaseScale = vm.stickerScale }
-                )
-            )
     }
 
     // MARK: - Overlay editor

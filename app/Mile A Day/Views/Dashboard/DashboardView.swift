@@ -93,6 +93,11 @@ struct DashboardView: View {
     /// competitions, badges) has loaded and we confirm items remain incomplete.
     @State private var gettingStartedReady = false
 
+    /// Cached "a mid-run photo is waiting but the goal isn't done" flag, so the
+    /// nudge renders without touching disk in `body` (MidRunPhotoStash.count
+    /// enumerates the sandbox dir). Refreshed on appear + workout changes.
+    @State private var midRunPhotoWaiting = false
+
 
     /// Build goal completion stats for the celebration
     private func buildGoalCompletionStats() -> GoalCompletionStats {
@@ -266,10 +271,16 @@ struct DashboardView: View {
 
             // Finale: BeReal-style "add a photo of your run" prompt for the mile
             // that just completed. Skipping still shares the run (route/stats).
-            if autoShareRunsToFeed, let uuid = healthManager.workoutIndex?.latestWorkoutUUID {
-                let hk = healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
-                let wtype = hk?.workoutActivityType == .walking ? "walking" : "running"
-                celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: uuid, workoutType: wtype))
+            if let uuid = healthManager.workoutIndex?.latestWorkoutUUID {
+                // Open the 10-min fresh-post window on the goal-completing run
+                // regardless of the auto-share prompt, so the feed countdown /
+                // ring and "Fresh" reward work even when auto-share is off.
+                FreshPostWindowManager.shared.open(workoutId: uuid)
+                if autoShareRunsToFeed {
+                    let hk = healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
+                    let wtype = hk?.workoutActivityType == .walking ? "walking" : "running"
+                    celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: uuid, workoutType: wtype))
+                }
             }
         }
     }
@@ -296,10 +307,15 @@ struct DashboardView: View {
         // Every walk/run gets its own photo moment, not just the goal-crossing
         // one — same finale as the goal path. The celebration id is keyed by
         // workout uuid, so each new workout prompts exactly once.
-        if autoShareRunsToFeed, let uuid = healthManager.workoutIndex?.latestWorkoutUUID {
-            let hk = healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
-            let wtype = hk?.workoutActivityType == .walking ? "walking" : "running"
-            celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: uuid, workoutType: wtype))
+        if let uuid = healthManager.workoutIndex?.latestWorkoutUUID {
+            // Each extra qualifying walk/run reopens a fresh 10-min window (a
+            // new uuid resets it), regardless of the auto-share prompt.
+            FreshPostWindowManager.shared.open(workoutId: uuid)
+            if autoShareRunsToFeed {
+                let hk = healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
+                let wtype = hk?.workoutActivityType == .walking ? "walking" : "running"
+                celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: uuid, workoutType: wtype))
+            }
         }
     }
 
@@ -343,6 +359,16 @@ struct DashboardView: View {
                         && celebrationManager.hasShownGoalCelebrationToday
                         && !celebrationManager.isShowingCelebration {
                         replayTodaysCelebrationCard
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                            .padding(.top, MADTheme.Spacing.sm)
+                    }
+
+                    // "Photo waiting" nudge — a mid-run snap is held but the
+                    // goal isn't done yet. It does NOT unlock posting (the goal
+                    // gate stands); it reassures the user the shot is kept and
+                    // will be offered once they finish the mile.
+                    if midRunPhotoWaiting {
+                        photoWaitingBanner
                             .padding(.horizontal, MADTheme.Spacing.md)
                             .padding(.top, MADTheme.Spacing.sm)
                     }
@@ -413,6 +439,9 @@ struct DashboardView: View {
                 }
                 // A workout just finished/synced — refresh ask-mode pendings.
                 loadPendingNotifications()
+                // A mid-run snap may have been taken (or the goal met) — refresh
+                // the "photo waiting" nudge.
+                refreshMidRunPhotoWaiting()
             }) {
                 // One WorkoutTrackingView with stable structural identity. This was
                 // an if/else between two WorkoutTrackingView initializers — when the
@@ -431,6 +460,7 @@ struct DashboardView: View {
             }
             .onAppear {
                 refreshData()
+                refreshMidRunPhotoWaiting()
                 // Sync widget data immediately
                 syncWidgetData()
                 // Load ask-mode pending notifications (cheap-guarded on settings).
@@ -508,6 +538,8 @@ struct DashboardView: View {
                     checkAndShowGoalCelebration()
                     // Pick up ask-mode pendings created while backgrounded.
                     loadPendingNotifications()
+                    // A mid-run snap may have been taken in another surface.
+                    refreshMidRunPhotoWaiting()
                 } else if newPhase == .background || newPhase == .inactive {
                     celebrationManager.onAppResignedActive()
                 }
@@ -543,6 +575,9 @@ struct DashboardView: View {
                     // Also check for goal celebration when completion status changes
                     checkAndShowGoalCelebration()
                 }
+                // Completing the goal clears the "photo waiting" state (the
+                // post-run prompt now offers the snap directly).
+                refreshMidRunPhotoWaiting()
             }
             .onChange(of: healthManager.todaysDistance) { oldValue, newValue in
                 // Check for extra mile when distance increases after goal already celebrated
@@ -555,6 +590,8 @@ struct DashboardView: View {
                 if newValue > oldValue && celebrationManager.hasShownGoalCelebrationToday {
                     checkAndShowPostGoalEncouragement()
                 }
+                // A workout finishing may leave a mid-run snap waiting.
+                refreshMidRunPhotoWaiting()
             }
             .confetti(isShowing: $showConfetti)
             .overlay(
@@ -866,6 +903,51 @@ struct DashboardView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    /// Nudge shown when a mid-run snap is waiting but today's goal isn't met.
+    /// Tapping reopens the tracker so the user can finish their mile.
+    private var photoWaitingBanner: some View {
+        Button {
+            showWorkoutView = true
+        } label: {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "camera.badge.clock")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.white, MADTheme.Colors.walkBlue], startPoint: .top, endPoint: .bottom)
+                    )
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Photo waiting")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("Finish today's mile to share it")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .strokeBorder(MADTheme.Colors.walkBlue.opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Cache whether a mid-run photo is waiting to be shared while today's goal
+    /// is still unmet, so `photoWaitingBanner` never enumerates the sandbox dir
+    /// from within `body`.
+    private func refreshMidRunPhotoWaiting() {
+        midRunPhotoWaiting = !currentState.isCompleted && MidRunPhotoStash.count > 0
     }
 
     // MARK: - HealthKit Permission Banner
