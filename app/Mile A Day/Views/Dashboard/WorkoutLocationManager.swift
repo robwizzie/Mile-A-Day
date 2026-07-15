@@ -23,6 +23,8 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     private let locationManager = CLLocationManager()
     private let pedometer = CMPedometer()
     private var lastLocation: CLLocation?
+    /// Last fix ACCEPTED into the route trace (stricter bar than distance).
+    private var lastRoutePoint: CLLocation?
     private var isUsingPedometer = false
     /// Published so the app-wide "workout in progress" banner can appear/hide.
     @Published private(set) var isTracking = false
@@ -71,6 +73,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
 
         currentDistance = initialDistance
         lastLocation = nil
+        lastRoutePoint = nil
         isUsingPedometer = (locationType == .indoor)
         pedometerOffset = initialDistance
 
@@ -124,6 +127,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // for pedometer) — always stop it.
         locationManager.stopUpdatingLocation()
         lastLocation = nil
+        lastRoutePoint = nil
     }
 
     // MARK: - CLLocationManagerDelegate
@@ -156,8 +160,36 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
 
         lastLocation = newLocation
 
-        // Persist route point for recovery
-        InProgressWorkoutStore.addRoutePoint(newLocation)
+        // Route trace: a STRICTER quality bar than distance accrual. Distance
+        // tolerates 50m-accuracy fixes fine (deltas average out, and its
+        // semantics feed streaks — untouched). But drawing those same fixes
+        // sent the line wandering into lakes: waterside multipath yields
+        // 25-50m fixes that sit well off the real path, and standing still
+        // sprays jitter clusters. Skipping a bad fix here only straightens
+        // the drawn line between good neighbors.
+        if isRoutePointWorthKeeping(newLocation) {
+            InProgressWorkoutStore.addRoutePoint(newLocation)
+            lastRoutePoint = newLocation
+        }
+    }
+
+    private func isRoutePointWorthKeeping(_ location: CLLocation) -> Bool {
+        // Tight accuracy: reflections near water/buildings live in the
+        // 25-50m band that distance accepts.
+        guard location.horizontalAccuracy <= 25 else { return false }
+        // No stale/cached fixes (cold-start replays land seconds old).
+        guard abs(location.timestamp.timeIntervalSinceNow) < 10 else { return false }
+
+        guard let last = lastRoutePoint else { return true }
+        let displacement = location.distance(from: last)
+        // Minimum displacement scaled to the fix's own uncertainty — a
+        // stationary user's jitter (± accuracy) never becomes scribble.
+        guard displacement >= max(4, location.horizontalAccuracy * 0.35) else { return false }
+        // Teleport cap: 12 m/s covers any run (and downhill cycling bursts);
+        // multipath jumps are far faster.
+        let dt = location.timestamp.timeIntervalSince(last.timestamp)
+        if dt > 0, displacement / dt > 12 { return false }
+        return true
     }
 
     /// Persist live distance straight to the recovery store from the background
