@@ -812,7 +812,13 @@ class HealthKitManager: ObservableObject {
     // The date predicate keeps HealthKit from scanning all-time history just to
     // pull the most recent samples — far cheaper for users with long histories.
     func fetchRecentWorkouts() {
-        guard isAuthorized else { return }
+        // print, not log(): log() is a no-op stub, so this path had no voice at
+        // all — an empty Recent Workouts list looked identical whether the query
+        // was skipped, errored, or genuinely returned nothing.
+        guard isAuthorized else {
+            print("[HealthKit] ⏭️ fetchRecentWorkouts skipped — isAuthorized == false")
+            return
+        }
 
         let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
         let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
@@ -839,12 +845,14 @@ class HealthKitManager: ObservableObject {
             // because swallowing the error left the list empty until something
             // else happened to call fetchAllWorkoutData again.
             guard error == nil, let workouts = samples as? [HKWorkout] else {
+                print("[HealthKit] ⚠️ fetchRecentWorkouts failed: \(error?.localizedDescription ?? "nil samples") — will retry")
                 self.retryFetchRecentWorkouts()
                 return
             }
 
             // Successful query: trust the result, empty or not (a real zero).
             DispatchQueue.main.async {
+                print("[HealthKit] ✅ fetchRecentWorkouts → \(workouts.count) workouts")
                 self.recentWorkoutsRetriesLeft = 3
                 self.recentWorkouts = workouts
             }
