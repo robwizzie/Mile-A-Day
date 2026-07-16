@@ -864,8 +864,8 @@ class HealthKitManager: ObservableObject {
     /// Re-run a failed recent-workouts query a few times, backing off, so a
     /// launch behind a locked screen still fills the list once it unlocks.
     private func retryFetchRecentWorkouts() {
-        DispatchQueue.main.async {
-            guard self.recentWorkoutsRetriesLeft > 0 else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.recentWorkoutsRetriesLeft > 0 else { return }
             let attempt = 4 - self.recentWorkoutsRetriesLeft
             self.recentWorkoutsRetriesLeft -= 1
             let delay = Double(attempt) * 2.0
