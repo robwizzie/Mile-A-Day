@@ -199,14 +199,30 @@ struct ProfilePostsGridView: View {
             .aspectRatio(1, contentMode: .fit)
             .overlay(
                 // The real picture leads when the run has one; the workout
-                // card is only the face of the post when no photo exists.
-                AsyncImage(url: post.storyPhotoURL ?? post.mediaURL) { phase in
-                    switch phase {
-                    case .success(let image): image.resizable().scaledToFill()
-                    case .failure:
-                        ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) }
-                    default:
-                        ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
+                // card is only the face of the post when no photo exists. When
+                // the server locks today's photo (viewer hasn't run), show a
+                // lock tile instead — tapping it opens the same locked card.
+                Group {
+                    if post.isPhotoLocked {
+                        ZStack {
+                            LinearGradient(
+                                colors: [MADTheme.Colors.madRed.opacity(0.30), Color.black.opacity(0.6)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                    } else {
+                        AsyncImage(url: post.storyPhotoURL ?? post.mediaURL) { phase in
+                            switch phase {
+                            case .success(let image): image.resizable().scaledToFill()
+                            case .failure:
+                                ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) }
+                            default:
+                                ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
+                            }
+                        }
                     }
                 }
             )

@@ -7,6 +7,7 @@ import {
   getUserStoriesController,
   markStoryViewedController,
   getStoryViewersController,
+  getStoryReactorsController,
   reactToStoryController,
   getPostMemoriesController,
   getFeedController,
@@ -47,6 +48,7 @@ router.get("/stories", getStoriesRailController);
 router.get("/stories/:userId", getUserStoriesController);
 router.post("/stories/:postId/view", markStoryViewedController);
 router.get("/stories/:postId/viewers", getStoryViewersController);
+router.get("/stories/:postId/reactions", getStoryReactorsController);
 router.post("/stories/:postId/react", reactToStoryController);
 
 // "On this day" — the caller's own past post photos.

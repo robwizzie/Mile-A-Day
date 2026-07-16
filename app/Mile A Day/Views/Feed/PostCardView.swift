@@ -198,11 +198,49 @@ struct PostCardView: View {
         celebrateAndHype()
     }
 
+    /// The media block: a lock card when the server withheld today's photo
+    /// (the viewer hasn't run yet), otherwise the real photo/route carousel.
+    @ViewBuilder
+    private var media: some View {
+        if post.isPhotoLocked {
+            lockedMediaCard
+        } else {
+            unlockedMedia
+        }
+    }
+
+    /// Shown in place of the photo when it's locked — a frosted "run to unlock"
+    /// card, matching the app's earn-to-view story gate.
+    private var lockedMediaCard: some View {
+        ZStack {
+            LinearGradient(
+                colors: [MADTheme.Colors.madRed.opacity(0.30), Color.black.opacity(0.65)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            VStack(spacing: 10) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundColor(.white)
+                Text("Finish your mile to unlock")
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                Text("Today's photos open up once you complete your own mile.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        .clipped()
+    }
+
     /// A single photo, or a full-size swipeable carousel:
     /// photo → route/stats card → route map. The hype burst plays centered
     /// over whichever slide is showing.
     @ViewBuilder
-    private var media: some View {
+    private var unlockedMedia: some View {
         let slides = photoURLs
         let coords = routeSlideCoordinates
         let cardStats = workoutCardStats
