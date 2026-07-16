@@ -342,7 +342,6 @@ struct WorkoutRow: View {
                         }
                     }
                     .padding(.top, 1)
-                    .transition(.opacity)
                 }
             }
             Spacer()
@@ -359,10 +358,10 @@ struct WorkoutRow: View {
         }
         .task(id: workout.uuid) {
             // Cheap existence probe (limit 1) — never enumerates route points.
+            // No withAnimation: an animated size-jump made the list rows visibly
+            // reflow a beat after appearing; a crisp appearance reads cleaner.
             let found = await healthManager.hasRouteData(for: workout)
-            await MainActor.run {
-                withAnimation(.easeInOut(duration: 0.25)) { hasRoute = found }
-            }
+            await MainActor.run { hasRoute = found }
         }
     }
 
