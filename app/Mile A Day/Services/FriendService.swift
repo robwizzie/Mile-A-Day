@@ -13,6 +13,11 @@ class FriendService: ObservableObject {
     /// not in view @State — so every refresh trigger (app foreground, tab switch,
     /// push, pull-to-refresh) updates the same data all friend rows read.
     @Published var nudgeStatuses: [String: NudgeStatusResponse] = [:]
+    /// Friend-streak count (consecutive days both the viewer and the friend
+    /// completed their mile) per friend id. Populated only by the feature build
+    /// via the `/friends/shared-streaks` endpoint; empty by default so friend
+    /// rows simply omit the shared-streak badge when there's no data.
+    @Published var sharedStreaks: [String: Int] = [:]
     @Published var isLoading = false
     @Published var errorMessage: String?
     
@@ -422,13 +427,18 @@ class FriendService: ObservableObject {
         let friendIds = friends.map { $0.user_id }
         guard !friendIds.isEmpty else {
             nudgeStatuses = [:]
+            sharedStreaks = [:]
             return
         }
+        // Friend streaks load alongside nudge statuses (same friend ids) so
+        // every row has both when it renders. Concurrent; best-effort.
+        async let sharedTask: Void = loadSharedStreaks(friendIds: friendIds)
         do {
             nudgeStatuses = try await checkNudgeStatusBatch(friendIds: friendIds)
         } catch {
             print("[FriendService] ❌ refreshNudgeStatuses failed: \(error)")
         }
+        await sharedTask
     }
     
     /// Get current user ID from UserDefaults
@@ -492,6 +502,25 @@ class FriendService: ObservableObject {
             responseType: NudgeStatusBatchResponse.self
         )
         return response.statuses
+    }
+
+    /// Fetch friend streaks (shared consecutive-day streaks) for the given
+    /// friends and publish them into `sharedStreaks`. Best-effort: failures are
+    /// swallowed so a friend-streak hiccup never blocks the friends list.
+    func loadSharedStreaks(friendIds: [String]) async {
+        guard !friendIds.isEmpty else { return }
+        do {
+            let body = try JSONSerialization.data(withJSONObject: ["friend_ids": friendIds])
+            let response: SharedStreaksResponse = try await makeRequest(
+                endpoint: "/friends/shared-streaks",
+                method: .POST,
+                body: body,
+                responseType: SharedStreaksResponse.self
+            )
+            sharedStreaks.merge(response.shared_streaks) { _, new in new }
+        } catch {
+            print("[FriendService] loadSharedStreaks failed: \(error)")
+        }
     }
 
     // MARK: - Notification Settings
