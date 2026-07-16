@@ -76,6 +76,8 @@ struct RaceHistoryView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var history: [RaceRecord] = []
     @State private var isLoading = true
+    /// Rendered PR card presented in the system share sheet.
+    @State private var shareItem: ShareableImage?
 
     private var best: RaceRecord? {
         history.min(by: { $0.durationSec < $1.durationSec })
@@ -101,12 +103,38 @@ struct RaceHistoryView: View {
             .navigationTitle(distance.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if let best {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            if let image = renderAchievementShareImage(PRShareCardView(record: prShareRecord(best))) {
+                                shareItem = ShareableImage(image: image)
+                            }
+                        } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
             }
+            .sheet(item: $shareItem) { item in
+                ShareSheet(items: [item.image])
+            }
         }
         .task { await load() }
+    }
+
+    /// Build the shareable-card model for this distance's best run.
+    private func prShareRecord(_ rec: RaceRecord) -> PRShareRecord {
+        PRShareRecord(
+            icon: "stopwatch.fill",
+            banner: "PERSONAL RECORD",
+            value: RaceCatalog.formatTime(rec.durationSec),
+            unit: "",
+            title: "\(distance.name) PR",
+            caption: "\(RaceCatalog.formatPace(seconds: rec.durationSec, miles: rec.distanceMiles)) · \(formatDate(rec.achievedDate))"
+        )
     }
 
     private func prHeader(_ rec: RaceRecord) -> some View {
