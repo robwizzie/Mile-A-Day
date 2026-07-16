@@ -408,11 +408,13 @@ struct WorkoutTrackingView: View {
         }
         .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showLibraryImport) {
-            WorkoutPhotoImportPicker(window: importWindow) { result in
+            WorkoutPhotoImportPicker(
+                window: importWindow,
+                activityNoun: activityNoun
+            ) { result in
                 showLibraryImport = false
                 handleImportResult(result)
             }
-            .ignoresSafeArea()
         }
         .onChange(of: isStopping) { _, stopping in
             if stopping { showLibraryImport = false }
@@ -442,10 +444,6 @@ struct WorkoutTrackingView: View {
                     showImportToast("Added to your \(activityNoun)", ok: true)
                 }
             }
-        case .outsideWindow:
-            showImportToast("That photo wasn't taken on this \(activityNoun)", ok: false)
-        case .noCaptureDate:
-            showImportToast("Couldn't confirm when that photo was taken", ok: false)
         case .failed:
             showImportToast("Couldn't load that photo", ok: false)
         case .cancelled:
