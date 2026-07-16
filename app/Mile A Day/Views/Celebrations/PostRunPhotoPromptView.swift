@@ -148,11 +148,13 @@ struct PostRunPhotoPromptView: View {
                     composerLaunch = ComposerLaunch(image: image)
                 }
             }) {
-                WorkoutPhotoImportPicker(window: importWindow) { result in
+                WorkoutPhotoImportPicker(
+                    window: importWindow,
+                    activityNoun: isWalk ? "walk" : "run"
+                ) { result in
                     handleImportResult(result)
                     showLibraryImport = false
                 }
-                .ignoresSafeArea()
             }
         }
         .onAppear {
@@ -380,10 +382,6 @@ struct PostRunPhotoPromptView: View {
             // Deferred to the import cover's onDismiss (composer is a second
             // cover — presenting it now would race this one's dismissal).
             pendingUseImage = image
-        case .outsideWindow:
-            importError = "That photo wasn't taken on this \(isWalk ? "walk" : "run"). You can use a photo you snapped between starting and finishing."
-        case .noCaptureDate:
-            importError = "We couldn't confirm when that photo was taken, so we can't add it to this \(isWalk ? "walk" : "run")."
         case .failed:
             importError = "Couldn't load that photo. Try another one."
         case .cancelled:

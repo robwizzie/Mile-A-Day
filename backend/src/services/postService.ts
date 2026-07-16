@@ -170,14 +170,16 @@ const CREATED_POST_SELECT = `
  * Insert a post and return it shaped as a PostRow (is_self=true, no hypes yet).
  * story_expires_at is set to now()+24h only when the post is shared to a story.
  *
- * One-post-per-workout rules (per destination — feed and story-only are
- * separate slots, enforced by partial unique indexes):
+ * One-deliberate-share-per-workout rules:
  * - Legacy clients (isAuto undefined) keep the original upsert-in-place.
  * - An AUTO post fills an empty slot or replaces an existing auto post; it
  *   never clobbers a deliberate user post (returns the existing post instead).
- * - A USER post fills an empty slot or replaces the auto post; if a live user
- *   post already exists for the workout it throws "workout_already_posted" —
- *   deleting the old post frees the slot again.
+ * - A USER post (feed OR story) is allowed once per workout, across BOTH the
+ *   feed and story-only slots: it fills an empty slot / replaces the auto post,
+ *   but if a live user share already exists for the run — in EITHER slot — it
+ *   throws "workout_already_posted". Deleting that share (or starting the next
+ *   workout) frees it again. The per-slot partial unique indexes enforce the
+ *   same-slot case; the cross-slot pre-check above closes the other-slot gap.
  */
 export async function createPost(input: CreatePostInput): Promise<PostRow> {
   // A workout can have ONE live feed post and ONE live story-only photo
@@ -199,6 +201,27 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
     !input.shareToStory;
   const isAutoValue =
     input.isAuto === undefined ? legacyLooksAuto : input.isAuto === true;
+  // One deliberate share (a feed post OR a story) per workout — across BOTH
+  // destination slots. The per-slot unique indexes already stop a second post
+  // to the SAME slot; this closes the cross-slot gap where a feed post AND a
+  // separate story-only photo could both be created for one run ("posting
+  // again after I've posted"). Auto route/stats cards don't count as the user's
+  // share and never block (a real photo still replaces them). The slot frees
+  // when the existing share is deleted or the next workout starts.
+  if (!isAutoValue && input.workoutId) {
+    const otherSlotFilter = input.shareToFeed
+      ? `(p.share_to_story AND NOT p.share_to_feed)`
+      : `p.share_to_feed`;
+    const existingShare = await db.query<{ post_id: string }>(
+      `SELECT p.post_id FROM posts p
+			WHERE p.workout_id = $1 AND p.user_id = $2
+				AND p.deleted_at IS NULL AND NOT p.is_auto
+				AND ${otherSlotFilter}
+			LIMIT 1`,
+      [input.workoutId, input.userId],
+    );
+    if (existingShare[0]) throw new Error("workout_already_posted");
+  }
   // Only the slot's AUTO post may be overwritten in place — for legacy
   // requests too. Legacy upserts used to overwrite ANYTHING the caller owned,
   // which let an old build's background auto-card post silently DESTROY a

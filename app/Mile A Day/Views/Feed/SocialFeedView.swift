@@ -160,6 +160,13 @@ struct SocialFeedView: View {
     /// own-story group) — a story share counts as that workout's one share.
     @State private var myStoryWorkoutIds: Set<String> = []
 
+    /// Workout ids just shared via the composer, held only until the next
+    /// refresh reflects them. Closes the window where the async refresh() hasn't
+    /// yet updated `feed`/`myStoryWorkoutIds`, which previously let the composer
+    /// re-open for a workout the user had just posted. Reconciled in refresh()
+    /// (cleared once the server state is authoritative) and on delete.
+    @State private var optimisticSharedWorkoutIds: Set<String> = []
+
     /// Workout ids of today's walks/runs that already carry the user's
     /// DELIBERATE share — a photo post on the feed or a story. The auto
     /// route/stats card doesn't count (a photo can still replace it).
@@ -169,6 +176,7 @@ struct SocialFeedView: View {
             return entry.workout_id
         })
         ids.formUnion(myStoryWorkoutIds)
+        ids.formUnion(optimisticSharedWorkoutIds)
         return ids
     }
 
@@ -365,7 +373,15 @@ struct SocialFeedView: View {
         }
         .sheet(isPresented: $presentingComposer) {
             PostComposerView(stats: statsInput) { outcome in
-                if case .published = outcome { Task { await refresh() } }
+                if case .published = outcome {
+                    // Lock this run's share slot immediately — refresh() is async
+                    // and its window previously let the composer re-open for the
+                    // same workout. (The backend also 409s a second share now.)
+                    if let wid = statsInput.workoutId {
+                        optimisticSharedWorkoutIds.insert(wid)
+                    }
+                    Task { await refresh() }
+                }
             }
         }
         .sheet(item: $reportingPost) { post in
@@ -782,6 +798,12 @@ struct SocialFeedView: View {
                 stories = storyGroups
                 myStoryWorkoutIds = storyWorkoutIds
             }
+            // Both fetches succeeded → feed + stories now reflect every real
+            // share, so the optimistic bridge can be dropped. Keep it on a failed
+            // fetch so a stale feed doesn't re-open an already-shared slot.
+            if feedResponse != nil, storyGroups != nil {
+                optimisticSharedWorkoutIds.removeAll()
+            }
             isLoading = false
             loadedOnce = true
         }
@@ -936,7 +958,14 @@ struct SocialFeedView: View {
     private func deletePost(_ entry: FeedEntry) async {
         do {
             try await PostService.deletePost(postId: entry.entryId)
-            await MainActor.run { feed.removeAll { $0.id == entry.id } }
+            await MainActor.run {
+                feed.removeAll { $0.id == entry.id }
+                // Deleting a share frees that run's slot — drop any optimistic
+                // lock so the composer can re-open for it.
+                if let wid = entry.workout_id {
+                    optimisticSharedWorkoutIds.remove(wid)
+                }
+            }
         } catch {}
     }
 

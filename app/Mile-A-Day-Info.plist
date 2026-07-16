@@ -23,6 +23,8 @@
 	<string>Mile A Day uses the camera to take photos for your walk and run posts and stories, and to scan a friend's profile QR code so you can add each other quickly.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Photos you take in Mile A Day are also saved to your photo library so you always keep your own copy.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Mile A Day shows the photos you took during a walk or run so you can pick one to share on that workout. Only photos taken while you were moving are shown, and nothing is accessed until you choose to add a picture.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>Mile A Day reads your workouts, walking and running distance, active energy, step count, and workout routes to track your daily mile, calculate streaks, and show your progress. This data is synced to Mile A Day's servers so you can compete with friends and view your history across devices.</string>
 	<key>NSHealthUpdateUsageDescription</key>

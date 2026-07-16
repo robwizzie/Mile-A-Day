@@ -152,6 +152,31 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
       });
     }
 
+    // A context-less hype — older clients' push-notification "🔥 Hype" button
+    // sends only target_user_id — has no run identity, so it would skip the
+    // per-run dedupe below and let the same daily mile be hyped again from the
+    // feed or inbox. Resolve it to the target's most recent daily-mile composite
+    // (the same key those surfaces use) so it dedupes and counts as one hype.
+    if (!context) {
+      const recent = await db.query<{ local_date: string }>(
+        `SELECT local_date::text AS local_date
+				FROM workouts
+				WHERE user_id = $1 AND deleted_at IS NULL AND exclusion_reason IS NULL
+					AND device_end_date >= NOW() - INTERVAL '36 hours'
+				ORDER BY device_end_date DESC
+				LIMIT 1`,
+        [targetUserId],
+      );
+      const localDate = recent[0]?.local_date;
+      if (localDate) {
+        context = {
+          contextType: "mile",
+          contextId: `${targetUserId}:${localDate}`,
+          contextLabel: "today's mile",
+        };
+      }
+    }
+
     // No event-occurred validation: the recipient only sees a hype affordance
     // when a real notification exists, so the notification itself is the proof.
     // Abuse is bounded by the friend/co-participant gate, per-context dedupe,
