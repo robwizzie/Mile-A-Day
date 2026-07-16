@@ -117,6 +117,23 @@ export const users = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // Onboarding personalization captured at signup (all optional — collected on
+    // a skippable step). `referralSource` is one of a fixed catalog (app_store,
+    // friend, instagram, tiktok, …); `referralDetail` is free text for the
+    // "friend's username" / "other" follow-up. `signupGoal` and
+    // `experienceLevel` segment users for future personalization + analytics.
+    // Nullable with no default so the additive migration is safe for the live
+    // table and existing rows read null.
+    referralSource: varchar("referral_source", { length: 40 }),
+    referralDetail: varchar("referral_detail", { length: 120 }),
+    signupGoal: varchar("signup_goal", { length: 40 }),
+    experienceLevel: varchar("experience_level", { length: 40 }),
+    // Stamped the first time the user submits (or skips) the personalization
+    // step, so we never re-show it and can measure onboarding completion.
+    onboardingCompletedAt: timestamp("onboarding_completed_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
     // Signup time. Backfilled for existing users from their earliest workout's
     // upload timestamp (MIN(workouts.created_at)) — see migration 0013. New
     // rows default to now() on insert.

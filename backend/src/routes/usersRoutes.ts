@@ -9,6 +9,7 @@ import {
   checkUsername,
   updateUserBio,
   updateUserProfileImage,
+  updateUserOnboarding,
   uploadProfileImage,
 } from "../controllers/usersController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
@@ -38,6 +39,11 @@ router.patch(
   updateUserUsername,
 );
 router.patch("/:userId/bio", requireSelfAccess("userId"), updateUserBio);
+router.patch(
+  "/:userId/onboarding",
+  requireSelfAccess("userId"),
+  updateUserOnboarding,
+);
 router.patch(
   "/:userId/profile-image",
   requireSelfAccess("userId"),
