@@ -6,6 +6,14 @@ import MapKit
 
 struct WorkoutDetailView: View {
     let workout: HKWorkout
+    /// The run's linked post, when the presenting list already fetched it — lets
+    /// the photo appear instantly instead of re-scanning pages of posts here.
+    var preloadedPost: PostItem? = nil
+    /// Whether this page is the one on screen. In the swipe pager every page is
+    /// built up front, so the heavy loads (HealthKit + network) gate on this so
+    /// only the visible workout actually fetches. Standalone presentations pass
+    /// the default (always active).
+    var isActive: Bool = true
     @Environment(\.dismiss) private var dismiss
     @State private var calories: Double?
     @State private var splitTimes: [TimeInterval]?
@@ -174,11 +182,20 @@ struct WorkoutDetailView: View {
                     currentWorkoutType: workoutTypeString == "Run" ? "running" : workoutTypeString == "Walk" ? "walking" : "running"
                 )
             }
-            .task {
+            .task(id: isActive) {
+                // Only the on-screen page loads (the pager builds every page up
+                // front). Photo FIRST so it shows immediately — when the list
+                // handed us the post, skip the multi-page re-scan that used to
+                // run last (why a "Photo" badge could sit blank for seconds).
+                guard isActive else { return }
+                if let preloadedPost {
+                    linkedPost = preloadedPost
+                } else {
+                    await fetchLinkedPost()
+                }
+                await fetchRouteData()
                 await fetchCalories()
                 await fetchSplitTimes()
-                await fetchRouteData()
-                await fetchLinkedPost()
             }
             .sheet(item: $editingLinkedPost) { post in
                 EditCaptionSheet(post: post) { newCaption in
@@ -825,7 +842,9 @@ struct SplitBarRow: View {
             .frame(width: 74, alignment: .trailing)
         }
         .onAppear {
-            withAnimation(.easeOut(duration: 0.6).delay(Double(mile) * 0.05)) {
+            // All bars grow together — the old per-mile delay made them ripple
+            // unevenly, which is what felt clunky.
+            withAnimation(.easeOut(duration: 0.5)) {
                 grown = true
             }
         }
@@ -835,12 +854,14 @@ struct SplitBarRow: View {
 // MARK: - Staggered reveal
 
 private extension View {
-    /// Fade-and-rise entrance for the detail's sections, offset per index so
-    /// the cards cascade in rather than snapping onscreen all at once.
+    /// A single, cohesive fade-in for the detail's sections. The old per-index
+    /// cascade (each card delayed a beat) read as clunky, so everything now
+    /// settles together with one quick, gentle motion. `index` is kept for the
+    /// call sites but no longer staggers the timing.
     func workoutReveal(_ shown: Bool, index: Int) -> some View {
         self
             .opacity(shown ? 1 : 0)
-            .offset(y: shown ? 0 : 16)
-            .animation(.easeOut(duration: 0.45).delay(Double(index) * 0.07), value: shown)
+            .offset(y: shown ? 0 : 6)
+            .animation(.easeOut(duration: 0.28), value: shown)
     }
 }

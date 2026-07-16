@@ -1357,9 +1357,9 @@ struct DashboardView: View {
                 StatsGridView(user: userManager.currentUser, healthManager: healthManager)
             }
 
-            DashboardCollapsibleSection(title: "Recent Workouts", icon: "figure.run", isCollapsed: $workoutsCollapsed) {
-                RecentWorkoutsView(workouts: healthManager.recentWorkouts)
-            }
+            // Recent Workouts now lives behind a clean preview card that opens
+            // the full Workouts screen (calendar + history + swipeable detail).
+            RecentWorkoutsPreviewCard(healthManager: healthManager)
         }
     }
 }
