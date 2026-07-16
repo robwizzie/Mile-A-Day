@@ -295,14 +295,16 @@ assert.ok(!earned[0].photo_locked, "completed viewer sees no lock");
 // Recent workouts carry has_route / has_photo, so a friend's workout row can
 // show the same Route/Photo chips the owner sees. Bob's run has a GPS route and
 // a real photo post; Alice's has neither.
-const bobRecent = await getRecentWorkouts(BOB, 10);
+// Read as ALICE, Bob's friend — the flags are viewer-dependent, so who's
+// asking is part of the question.
+const bobRecent = await getRecentWorkouts(BOB, 10, ALICE);
 assert.equal(bobRecent.length, 1, "Bob has one recent workout");
 assert.equal(bobRecent[0].workout_id, "ci-workout-bob");
 assert.equal(bobRecent[0].has_route, true, "Bob's run reports its GPS route");
 assert.equal(bobRecent[0].has_photo, true, "Bob's run reports its real photo");
 assert.equal(bobRecent[0].distance, 1.5, "the workout's own columns survive");
 
-const aliceRecent = await getRecentWorkouts(ALICE, 10);
+const aliceRecent = await getRecentWorkouts(ALICE, 10, ALICE);
 assert.equal(aliceRecent.length, 1, "Alice has one recent workout");
 assert.equal(aliceRecent[0].has_route, false, "no route → has_route false");
 assert.equal(aliceRecent[0].has_photo, false, "no post → has_photo false");
@@ -313,7 +315,7 @@ await db.query(
 	 VALUES ($1, $2, $3, $4, TRUE, FALSE, TRUE)`,
   [ALICE, "/uploads/posts/ci-alice-auto.jpg", "ci-workout-alice", localDate],
 );
-const aliceAfterAuto = await getRecentWorkouts(ALICE, 10);
+const aliceAfterAuto = await getRecentWorkouts(ALICE, 10, ALICE);
 assert.equal(
   aliceAfterAuto.length,
   1,
@@ -332,12 +334,12 @@ await db.query(
 	 VALUES ($1, $2, $3, $4, FALSE, TRUE, FALSE)`,
   [BOB, "/uploads/posts/ci-bob-story.jpg", "ci-workout-bob", localDate],
 );
-const bobTwoPosts = await getRecentWorkouts(BOB, 10);
+const bobTwoPosts = await getRecentWorkouts(BOB, 10, ALICE);
 assert.equal(bobTwoPosts.length, 1, "two posts on one workout → still one row");
 assert.equal(bobTwoPosts[0].has_photo, true);
 
 // The controller passes null when ?limit is absent — LIMIT NULL means "all".
-const bobNoLimit = await getRecentWorkouts(BOB, null);
+const bobNoLimit = await getRecentWorkouts(BOB, null, ALICE);
 assert.equal(bobNoLimit.length, 1, "a null limit returns rows, not zero");
 
 // --- Route privacy. Routes start at people's homes; these are the assertions
