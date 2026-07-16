@@ -391,20 +391,27 @@ struct WorkoutTrackingView: View {
     /// Import a photo taken DURING this walk/run from the library. Camera-only
     /// authenticity is preserved by the time-window check in the picker — you
     /// can use a system-camera shot from this walk, but not an old photo.
+    /// Shared look for the mid-run photo buttons so the camera and library
+    /// controls are the exact same size and weight (they used to differ — 40 vs
+    /// 44, icon 15 vs 17). Both read as one matched pair sitting in the top bar.
+    private func midRunCircleIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundColor(.white)
+            .frame(width: 44, height: 44)
+            .background(
+                Circle()
+                    .fill(Color.white.opacity(0.18))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
+            )
+    }
+
     private var midRunLibraryButton: some View {
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             showLibraryImport = true
         } label: {
-            Image(systemName: "photo.badge.plus")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(width: 40, height: 40)
-                .background(
-                    Circle()
-                        .fill(Color.white.opacity(0.14))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.28), lineWidth: 1))
-                )
+            midRunCircleIcon("photo.badge.plus")
         }
         .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showLibraryImport) {
@@ -471,15 +478,7 @@ struct WorkoutTrackingView: View {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             showMidRunCamera = true
         } label: {
-            Image(systemName: "camera.fill")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(width: 44, height: 44)
-                .background(
-                    Circle()
-                        .fill(Color.white.opacity(0.18))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
-                )
+            midRunCircleIcon("camera.fill")
         }
         .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showMidRunCamera) {
