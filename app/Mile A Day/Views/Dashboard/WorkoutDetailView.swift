@@ -30,8 +30,6 @@ struct WorkoutDetailView: View {
     @State private var showPostDeleteConfirm = false
     @State private var isAddingToFeed = false
     @State private var addToFeedError: String?
-    /// Drives the staggered fade-in of the detail's sections.
-    @State private var revealed = false
     @EnvironmentObject var healthManager: HealthKitManager
 
     private let workoutService = WorkoutService()
@@ -102,45 +100,43 @@ struct WorkoutDetailView: View {
                 MADTheme.Colors.appBackgroundGradient
                     .ignoresSafeArea()
 
+                // No entrance animation here on purpose. The sheet's own
+                // presentation IS the animation; fading + sliding the content in
+                // on top of it read as a second, mushier motion — and in the
+                // pager it was inconsistent besides, since TabView builds
+                // adjacent pages off-screen, so the reveal fired where nobody
+                // could see it and swiped-to pages just appeared.
                 ScrollView {
                     VStack(spacing: MADTheme.Spacing.lg) {
                         // Hero — type, hero distance, date, and route/photo tags.
                         heroCard
-                            .workoutReveal(revealed, index: 0)
 
                         // The run's feed/story post, rendered exactly like the
                         // feed shows it (photo, route + stats, caption). Owner
                         // actions — edit caption, add to feed, delete — live
                         // in the card's menu + header pill.
                         linkedPostSection
-                            .workoutReveal(revealed, index: 1)
 
                         // Route — pulled up front so a run with a GPS trace leads
                         // with the map (hidden when the post card above already
                         // carries the run's visuals — no double map).
                         if linkedPost == nil {
                             routeMapSection
-                                .workoutReveal(revealed, index: 2)
                         }
 
                         // The numbers — one home, no repeats across cards.
                         statsSection
-                            .workoutReveal(revealed, index: 3)
 
                         // Mile splits as a pace bar chart.
                         mileSplitsSection
-                            .workoutReveal(revealed, index: 4)
 
                         // When it started and ended.
                         timelineCard
-                            .workoutReveal(revealed, index: 5)
 
                         // Delete — remove an accidental / vehicle workout.
                         deleteButton
-                            .workoutReveal(revealed, index: 6)
                     }
                     .padding(MADTheme.Spacing.md)
-                    .onAppear { revealed = true }
                 }
             }
             .alert("Delete this workout?", isPresented: $showDeleteConfirm) {
@@ -419,62 +415,21 @@ struct WorkoutDetailView: View {
     // MARK: - Hero Card
 
     private var heroCard: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
-            // Manual/edited warning banner
-            if workoutSource != .healthkit {
-                ManualWorkoutBanner(source: workoutSource)
-            }
-
+        WorkoutHeroCard(
+            icon: workoutIcon,
+            typeLabel: workoutTypeString,
+            color: workoutColor,
+            distanceText: workout.formattedDistance,
+            dateText: correctedEndTime.formattedDate,
+            source: workoutSource,
+            hasRoute: heroHasRoute,
+            hasPhoto: heroHasPhoto
+        ) {
             // Vehicle-speed warning — surfaces a likely drive so the user can remove it.
             if vehicleSuspicion != .none {
                 vehicleWarningBanner
             }
-
-            // Workout type badge
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: workoutIcon)
-                    .font(.system(size: 14, weight: .semibold))
-                Text(workoutTypeString)
-                    .font(MADTheme.Typography.smallBold)
-            }
-            .foregroundColor(workoutColor)
-            .padding(.horizontal, MADTheme.Spacing.md)
-            .padding(.vertical, MADTheme.Spacing.xs + 2)
-            .background(
-                Capsule()
-                    .fill(workoutColor.opacity(0.15))
-            )
-
-            // Distance — the hero number
-            Text(workout.formattedDistance)
-                .font(.system(size: 52, weight: .bold, design: .rounded))
-                .foregroundColor(.primary)
-
-            // Date
-            Text(correctedEndTime.formattedDate)
-                .font(MADTheme.Typography.body)
-                .foregroundColor(.secondary)
-
-            // Route / photo tags — makes it obvious at a glance that this run
-            // carries a map or a picture, without scrolling to find them.
-            if heroHasRoute || heroHasPhoto {
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    if heroHasRoute {
-                        heroTag(icon: "map.fill", label: "Route", color: workoutColor)
-                    }
-                    if heroHasPhoto {
-                        heroTag(icon: "photo.fill", label: "Photo", color: .pink)
-                    }
-                }
-                .padding(.top, MADTheme.Spacing.xs)
-                .transition(.opacity.combined(with: .scale(scale: 0.9)))
-            }
         }
-        .padding(MADTheme.Spacing.lg)
-        .frame(maxWidth: .infinity)
-        .madLiquidGlass()
-        .animation(.easeInOut(duration: 0.3), value: heroHasRoute)
-        .animation(.easeInOut(duration: 0.3), value: heroHasPhoto)
     }
 
     /// Does this run have a drawable GPS trace (drives the hero "Route" tag).
@@ -490,31 +445,10 @@ struct WorkoutDetailView: View {
         return post.is_auto != true && !post.media_url.isEmpty
     }
 
-    private func heroTag(icon: String, label: String, color: Color) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .bold))
-            Text(label)
-                .font(.system(size: 12, weight: .heavy, design: .rounded))
-        }
-        .foregroundColor(color)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(Capsule().fill(color.opacity(0.15)))
-    }
-
     // MARK: - Section header (shared across the detail's cards)
 
     private func sectionHeader(_ icon: String, _ title: String) -> some View {
-        HStack(spacing: MADTheme.Spacing.sm) {
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(MADTheme.Colors.redGradient)
-            Text(title)
-                .font(MADTheme.Typography.headline)
-                .foregroundColor(.primary)
-            Spacer()
-        }
+        WorkoutDetailSectionHeader(icon: icon, title: title)
     }
 
     // MARK: - Stats
@@ -523,46 +457,20 @@ struct WorkoutDetailView: View {
     /// everything else lives here (no more repeating pace/calories in a second
     /// "Performance" card).
     private var statsSection: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            sectionHeader("chart.bar.fill", "Stats")
-            HStack(spacing: MADTheme.Spacing.sm) {
-                DashboardStatBox(
-                    title: "Duration",
-                    value: workout.formattedDuration,
-                    icon: "clock.fill",
-                    color: .orange
-                )
-
-                DashboardStatBox(
-                    title: "Pace",
-                    value: workout.pace,
-                    icon: "speedometer",
-                    color: .green
-                )
-
-                if let calories = calories {
-                    DashboardStatBox(
-                        title: "Calories",
-                        value: "\(Int(calories))",
-                        icon: "flame.fill",
-                        color: MADTheme.Colors.madRed
-                    )
-                }
-            }
-        }
+        WorkoutStatsCard(
+            duration: workout.formattedDuration,
+            pace: workout.pace,
+            calories: calories.map { Int($0) }
+        )
     }
 
     // MARK: - Timeline Card
 
     private var timelineCard: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            sectionHeader("clock.arrow.2.circlepath", "Timeline")
-
-            DetailRow(icon: "play.fill", iconColor: .green, title: "Start", value: correctedStartTime.formattedTime)
-            DetailRow(icon: "stop.fill", iconColor: MADTheme.Colors.madRed, title: "End", value: correctedEndTime.formattedTime)
-        }
-        .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        WorkoutTimelineCard(
+            startText: correctedStartTime.formattedTime,
+            endText: correctedEndTime.formattedTime
+        )
     }
 
     // MARK: - Mile Splits
@@ -848,20 +756,5 @@ struct SplitBarRow: View {
                 grown = true
             }
         }
-    }
-}
-
-// MARK: - Staggered reveal
-
-private extension View {
-    /// A single, cohesive fade-in for the detail's sections. The old per-index
-    /// cascade (each card delayed a beat) read as clunky, so everything now
-    /// settles together with one quick, gentle motion. `index` is kept for the
-    /// call sites but no longer staggers the timing.
-    func workoutReveal(_ shown: Bool, index: Int) -> some View {
-        self
-            .opacity(shown ? 1 : 0)
-            .offset(y: shown ? 0 : 6)
-            .animation(.easeOut(duration: 0.28), value: shown)
     }
 }

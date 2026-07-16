@@ -2,6 +2,10 @@ import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { shouldSendNotification } from "./notificationSettingsService.js";
 import {
+  VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL,
+  OWNER_NOT_PRIVATE_SQL,
+} from "./visibilityService.js";
+import {
   postHypeMatchSql,
   postHypedByViewerMatchSql,
   runHypeMatchSql,
@@ -340,6 +344,7 @@ export async function getStoriesRail(viewerId: string): Promise<StoryGroup[]> {
 			AND p.deleted_at IS NULL
 			AND p.story_expires_at > NOW()
 			AND p.user_id NOT IN (SELECT uid FROM blocked)
+			AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
 		ORDER BY p.created_at ASC
 		`,
     [viewerId],
@@ -423,6 +428,7 @@ export async function getUserActiveStories(
 			AND p.deleted_at IS NULL
 			AND p.story_expires_at > NOW()
 			AND p.user_id NOT IN (SELECT uid FROM blocked)
+			AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
 		ORDER BY p.created_at ASC
 		`,
     [viewerId, authorId],
@@ -701,6 +707,8 @@ export interface ViewerGoalGate {
  *
  * media_url is blanked to "" rather than nulled so existing (non-optional)
  * clients still decode; new clients read `photo_locked` to draw the lock state.
+ * `photo_locked` marks a row that LOST a photo here — not merely one that fell
+ * under the gate — so a row whose every slide survived never renders as locked.
  */
 export function lockUnearnedPhotos<
   T extends {
@@ -716,10 +724,20 @@ export function lockUnearnedPhotos<
   for (const r of rows) {
     if (r.user_id === viewerId) continue;
     if ((r.local_date ?? null) !== gate.localDate) continue;
-    if (r.story_photo_url) r.story_photo_url = null;
+    let withheld = false;
+    if (r.story_photo_url) {
+      r.story_photo_url = null;
+      withheld = true;
+    }
     // Leave auto route/stats cards visible; only real photos are locked.
-    if (r.is_auto !== true && r.media_url) r.media_url = "";
-    r.photo_locked = true;
+    if (r.is_auto !== true && r.media_url) {
+      r.media_url = "";
+      withheld = true;
+    }
+    // Only flag rows that actually LOST a photo. An auto route/stats card with
+    // no story photo has nothing withheld, so it must not read as locked —
+    // flagging it made clients hide a card they were meant to see.
+    if (withheld) r.photo_locked = true;
   }
   return rows;
 }
@@ -869,6 +887,7 @@ export async function getUnifiedFeed(
 			LEFT JOIN notification_settings nsp ON nsp.user_id = p.user_id
 			WHERE p.share_to_feed AND p.deleted_at IS NULL
 				AND p.user_id NOT IN (SELECT uid FROM blocked)
+				AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
 
 			UNION ALL
 
@@ -910,6 +929,9 @@ export async function getUnifiedFeed(
 			LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
 			WHERE w.user_id NOT IN (SELECT uid FROM blocked)
 				AND COALESCE(ns.share_workouts_to_feed, true) = true
+				-- The feed is always YOUR circle, so 'public' must not pour
+				-- strangers in; only the tightening direction applies here.
+				AND ${OWNER_NOT_PRIVATE_SQL("w.user_id")}
 				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 				AND NOT EXISTS (
 					SELECT 1 FROM posts p2
@@ -943,9 +965,11 @@ export async function getUserPosts(
   before?: string | null,
   includeStoryOnly = false,
 ): Promise<PostRow[]> {
+  // No CIRCLE_CTE here: a profile read is exactly where `workout_visibility`
+  // decides who gets in, and a hardcoded circle join would have made 'public'
+  // impossible. The feed still uses the circle — that one IS friends-by-nature.
   const rows = await db.query<PostRow>(
     `
-		${CIRCLE_CTE}
 		SELECT ${POST_SELECT},
 			${URL_SAFE_CURSOR("p.created_at")} AS cursor,
 			-- The run's story photo, so the profile grid + detail cards lead
@@ -983,8 +1007,7 @@ export async function getUserPosts(
 					)
 				)
 			)
-			AND EXISTS (SELECT 1 FROM circle WHERE uid = $2)
-			AND $2 NOT IN (SELECT uid FROM blocked)
+			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$2", "$1")}
 			AND ($3::timestamptz IS NULL OR p.created_at < $3::timestamptz)
 		ORDER BY p.created_at DESC
 		LIMIT $4

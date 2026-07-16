@@ -244,56 +244,74 @@ export const workoutRoutes = pgTable(
   ],
 );
 
-export const notificationSettings = pgTable("notification_settings", {
-  userId: text("user_id").primaryKey().notNull(),
-  nudgesEnabled: boolean("nudges_enabled").default(true),
-  flexesEnabled: boolean("flexes_enabled").default(true),
-  friendActivityEnabled: boolean("friend_activity_enabled").default(true),
-  competitionInvitesEnabled: boolean("competition_invites_enabled").default(
-    true,
-  ),
-  competitionUpdatesEnabled: boolean("competition_updates_enabled").default(
-    true,
-  ),
-  competitionMilestonesEnabled: boolean(
-    "competition_milestones_enabled",
-  ).default(true),
-  quietHoursStart: integer("quiet_hours_start"),
-  quietHoursEnd: integer("quiet_hours_end"),
-  createdAt: timestamp("created_at", {
-    withTimezone: true,
-    mode: "string",
-  }).defaultNow(),
-  updatedAt: timestamp("updated_at", {
-    withTimezone: true,
-    mode: "string",
-  }).defaultNow(),
-  hypesEnabled: boolean("hypes_enabled").default(true).notNull(),
-  stepGoalEnabled: boolean("step_goal_enabled").default(true).notNull(),
-  friendPersonalBestEnabled: boolean("friend_personal_best_enabled").default(
-    true,
-  ),
-  dailyReminderEnabled: boolean("daily_reminder_enabled").default(true),
-  dailyReminderHour: integer("daily_reminder_hour").default(18),
-  // Head-to-Head rivals drawn only from the user's close-friends list.
-  // Not a notification pref, but this table is the de-facto per-user
-  // preferences row (see share_workouts_to_feed / share_route_maps).
-  h2hCloseFriendsOnly: boolean("h2h_close_friends_only")
-    .default(false)
-    .notNull(),
-  timezoneOffsetMinutes: integer("timezone_offset_minutes"),
-  // Social feed settings (added v2). share_workouts_to_feed: include my raw
-  // walks/runs as activity cards in friends' unified feed. friend_posts_enabled:
-  // notify me when a friend shares a new photo post.
-  shareWorkoutsToFeed: boolean("share_workouts_to_feed").default(true),
-  friendPostsEnabled: boolean("friend_posts_enabled").default(true),
-  // share_route_maps: expose my GPS route maps (workout_routes traces) on my
-  // feed entries/posts. Explicit consent surface — when off, friends see the
-  // cards without the route slide/map.
-  shareRouteMaps: boolean("share_route_maps").default(true),
-  // weekly_recap_enabled: Sunday-evening "Your week" recap push + story card.
-  weeklyRecapEnabled: boolean("weekly_recap_enabled").default(true),
-});
+export const notificationSettings = pgTable(
+  "notification_settings",
+  {
+    userId: text("user_id").primaryKey().notNull(),
+    nudgesEnabled: boolean("nudges_enabled").default(true),
+    flexesEnabled: boolean("flexes_enabled").default(true),
+    friendActivityEnabled: boolean("friend_activity_enabled").default(true),
+    competitionInvitesEnabled: boolean("competition_invites_enabled").default(
+      true,
+    ),
+    competitionUpdatesEnabled: boolean("competition_updates_enabled").default(
+      true,
+    ),
+    competitionMilestonesEnabled: boolean(
+      "competition_milestones_enabled",
+    ).default(true),
+    quietHoursStart: integer("quiet_hours_start"),
+    quietHoursEnd: integer("quiet_hours_end"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "string",
+    }).defaultNow(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "string",
+    }).defaultNow(),
+    hypesEnabled: boolean("hypes_enabled").default(true).notNull(),
+    stepGoalEnabled: boolean("step_goal_enabled").default(true).notNull(),
+    friendPersonalBestEnabled: boolean("friend_personal_best_enabled").default(
+      true,
+    ),
+    dailyReminderEnabled: boolean("daily_reminder_enabled").default(true),
+    dailyReminderHour: integer("daily_reminder_hour").default(18),
+    // Head-to-Head rivals drawn only from the user's close-friends list.
+    // Not a notification pref, but this table is the de-facto per-user
+    // preferences row (see share_workouts_to_feed / share_route_maps).
+    h2hCloseFriendsOnly: boolean("h2h_close_friends_only")
+      .default(false)
+      .notNull(),
+    timezoneOffsetMinutes: integer("timezone_offset_minutes"),
+    // Social feed settings (added v2). share_workouts_to_feed: include my raw
+    // walks/runs as activity cards in friends' unified feed. friend_posts_enabled:
+    // notify me when a friend shares a new photo post.
+    shareWorkoutsToFeed: boolean("share_workouts_to_feed").default(true),
+    friendPostsEnabled: boolean("friend_posts_enabled").default(true),
+    // share_route_maps: expose my GPS route maps (workout_routes traces) on my
+    // feed entries/posts. Explicit consent surface — when off, friends see the
+    // cards without the route slide/map.
+    shareRouteMaps: boolean("share_route_maps").default(true),
+    // weekly_recap_enabled: Sunday-evening "Your week" recap push + story card.
+    weeklyRecapEnabled: boolean("weekly_recap_enabled").default(true),
+    // workout_visibility: who may see my workout CONTENT — routes and photos.
+    // 'friends' (the default, and what every user effectively has today) =
+    // accepted friends only, the same circle the feed uses. 'public' = any
+    // signed-in user. 'private' = nobody but me.
+    //
+    // This is a coarser, content-level gate that sits ABOVE share_route_maps:
+    // visibility decides WHO, share_route_maps decides WHETHER routes are part
+    // of what they get. Both must pass.
+    workoutVisibility: text("workout_visibility").default("friends").notNull(),
+  },
+  (table) => [
+    check(
+      "notification_settings_workout_visibility_check",
+      sql`workout_visibility = ANY (ARRAY['public'::text, 'friends'::text, 'private'::text])`,
+    ),
+  ],
+);
 
 // One row per (user, week) the recap push was sent for — the cron runs hourly
 // to catch every timezone's Sunday evening, so this is what makes it fire

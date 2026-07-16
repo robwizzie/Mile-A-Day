@@ -153,12 +153,14 @@ struct PostCardView: View {
 
     /// Image slides, real moment first: when the run has a story photo it
     /// leads, and the post media (photo or route/stats card) becomes the
-    /// second slide — never a cramped corner thumbnail.
-    private var photoURLs: [URL?] {
+    /// second slide — never a cramped corner thumbnail. Photos the server
+    /// withheld arrive blank and drop out here; `mediaSlides` puts a single
+    /// lock in their place, ahead of whatever survived.
+    private var photoURLs: [URL] {
         if let storyPhotoURL {
-            return [storyPhotoURL, post.mediaURL]
+            return [storyPhotoURL, post.mediaURL].compactMap { $0 }
         }
-        return [post.mediaURL]
+        return [post.mediaURL].compactMap { $0 }
     }
 
     /// Whether to append a branded workout-stats card as the run's second
@@ -198,19 +200,10 @@ struct PostCardView: View {
         celebrateAndHype()
     }
 
-    /// The media block: a lock card when the server withheld today's photo
-    /// (the viewer hasn't run yet), otherwise the real photo/route carousel.
-    @ViewBuilder
-    private var media: some View {
-        if post.isPhotoLocked {
-            lockedMediaCard
-        } else {
-            unlockedMedia
-        }
-    }
-
-    /// Shown in place of the photo when it's locked — a frosted "run to unlock"
-    /// card, matching the app's earn-to-view story gate.
+    /// Shown in place of a WITHHELD PHOTO — a frosted "run to unlock" card,
+    /// matching the app's earn-to-view story gate. It's one slide among the
+    /// rest, so it clips like a photo slide rather than squaring off next to
+    /// them.
     private var lockedMediaCard: some View {
         ZStack {
             LinearGradient(
@@ -233,42 +226,81 @@ struct PostCardView: View {
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
-        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
     }
 
-    /// A single photo, or a full-size swipeable carousel:
-    /// photo → route/stats card → route map. The hype burst plays centered
-    /// over whichever slide is showing.
+    /// One page of the media carousel.
+    private enum MediaSlide {
+        /// Stands in for the photo(s) the server withheld.
+        case locked
+        case photo(url: URL, badged: Bool)
+        case route(coords: [CLLocationCoordinate2D])
+        case statsCard(stats: PostStats)
+    }
+
+    /// The carousel's pages in swipe order: the lock (standing in for ANY
+    /// withheld photo, however many were held back) → the photos that survived
+    /// the gate → the route map, or the stats card when there's no route.
+    ///
+    /// The lock only ever replaces a picture. An auto route/stats card, a route
+    /// map, and the page dots all survive it — so a viewer who hasn't run yet
+    /// can still swipe a friend's run, just not see their photo.
+    private var mediaSlides: [MediaSlide] {
+        var slides: [MediaSlide] = []
+        if post.isPhotoLocked { slides.append(.locked) }
+        for url in photoURLs {
+            // Badge an auto route/stats card that trails a photo (or its lock)
+            // so the swipe reads "photo → stats".
+            slides.append(.photo(url: url, badged: !slides.isEmpty && post.is_auto == true))
+        }
+        if let coords = routeSlideCoordinates {
+            slides.append(.route(coords: coords))
+        } else if let stats = workoutCardStats {
+            slides.append(.statsCard(stats: stats))
+        }
+        return slides
+    }
+
     @ViewBuilder
-    private var unlockedMedia: some View {
-        let slides = photoURLs
-        let coords = routeSlideCoordinates
-        let cardStats = workoutCardStats
+    private func slideView(_ slide: MediaSlide) -> some View {
+        switch slide {
+        case .locked:
+            lockedMediaCard
+        case .photo(let url, let badged):
+            ZoomablePhotoSlide(
+                url: url,
+                badge: badged ? ("Stats", "chart.bar.fill") : nil,
+                onDoubleTap: post.is_self ? nil : doubleTapHype
+            )
+        case .route(let coords):
+            routeSlide(coords)
+        case .statsCard(let stats):
+            workoutCardSlide(stats)
+        }
+    }
+
+    /// A single slide, or a full-size swipeable carousel. The hype burst plays
+    /// centered over whichever slide is showing.
+    @ViewBuilder
+    private var media: some View {
+        let slides = mediaSlides
         Group {
-            if slides.count > 1 || coords != nil || cardStats != nil {
+            if slides.count > 1 {
                 TabView {
-                    ForEach(Array(slides.enumerated()), id: \.offset) { index, url in
-                        // When the story photo leads, badge the trailing auto
-                        // route/stats card so the swipe reads as "photo → stats".
-                        ZoomablePhotoSlide(
-                            url: url,
-                            badge: index > 0 && post.is_auto == true ? ("Stats", "chart.bar.fill") : nil,
-                            onDoubleTap: post.is_self ? nil : doubleTapHype
-                        )
-                    }
-                    if let coords {
-                        routeSlide(coords)
-                    } else if let cardStats {
-                        workoutCardSlide(cardStats)
+                    ForEach(Array(slides.enumerated()), id: \.offset) { _, slide in
+                        slideView(slide)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .always))
                 .indexViewStyle(.page(backgroundDisplayMode: .interactive))
                 .frame(maxWidth: .infinity)
                 .aspectRatio(4.0 / 5.0, contentMode: .fit)
+            } else if let only = slides.first {
+                slideView(only)
             } else {
+                // No media at all — the empty-state placeholder.
                 ZoomablePhotoSlide(
-                    url: post.mediaURL,
+                    url: nil,
                     badge: nil,
                     onDoubleTap: post.is_self ? nil : doubleTapHype
                 )

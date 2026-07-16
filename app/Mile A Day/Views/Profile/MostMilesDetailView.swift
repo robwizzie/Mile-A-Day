@@ -314,11 +314,13 @@ struct WorkoutRow: View {
                     Text(verb)
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundColor(MADTheme.Colors.secondaryText)
+                        .lineLimit(1)
                     Text(workoutDistance)
                         .font(.system(size: 17, weight: .black, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(MADTheme.Colors.primaryText)
-                    ManualWorkoutBadge(source: workoutSource)
+                        .lineLimit(1)
+                        .layoutPriority(1)
                 }
                 HStack(spacing: 5) {
                     Image(systemName: "clock.fill")
@@ -328,23 +330,19 @@ struct WorkoutRow: View {
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(MADTheme.Colors.secondaryText)
+                        .lineLimit(1)
                 }
 
-                // Route / photo chips — surfaces at a glance that tapping in
-                // reveals a map or a picture, so those runs stand out.
-                if hasRoute || hasPhoto {
-                    HStack(spacing: 6) {
-                        if hasRoute {
-                            rowTag(icon: "map.fill", label: "Route", color: workoutColor)
-                        }
-                        if hasPhoto {
-                            rowTag(icon: "photo.fill", label: "Photo", color: .pink)
-                        }
-                    }
-                    .padding(.top, 1)
-                }
+                // How it was recorded + what tapping in reveals — so a manual
+                // entry, a mapped route, or a photo stands out at a glance.
+                WorkoutRowTags(
+                    source: workoutSource,
+                    hasRoute: hasRoute,
+                    hasPhoto: hasPhoto,
+                    routeColor: workoutColor
+                )
             }
-            Spacer()
+            Spacer(minLength: MADTheme.Spacing.sm)
             VStack(alignment: .trailing, spacing: 2) {
                 if showDate {
                     Text(workoutDateString)
@@ -355,6 +353,8 @@ struct WorkoutRow: View {
                     .font(.system(size: 12, weight: .medium, design: .rounded))
                     .foregroundColor(MADTheme.Colors.secondaryText)
             }
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
         }
         .task(id: workout.uuid) {
             // Cheap existence probe (limit 1) — never enumerates route points.
@@ -363,20 +363,6 @@ struct WorkoutRow: View {
             let found = await healthManager.hasRouteData(for: workout)
             await MainActor.run { hasRoute = found }
         }
-    }
-
-    /// Small rounded chip used for the route/photo indicators.
-    private func rowTag(icon: String, label: String, color: Color) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: icon)
-                .font(.system(size: 9, weight: .bold))
-            Text(label)
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
-        }
-        .foregroundColor(color)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(Capsule().fill(color.opacity(0.15)))
     }
 
     /// Feed-style verb ("Ran", "Walked") for the headline.

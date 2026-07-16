@@ -7,6 +7,10 @@ import {
   updateFriendNotificationSettings,
 } from "../services/notificationSettingsService.js";
 import { getCloseFriendIds } from "../services/closeFriendsService.js";
+import {
+  isWorkoutVisibility,
+  WORKOUT_VISIBILITY_VALUES,
+} from "../services/visibilityService.js";
 
 export async function getPreferences(req: AuthenticatedRequest, res: Response) {
   try {
@@ -28,7 +32,18 @@ export async function updatePreferences(
       quiet_hours_end,
       daily_reminder_hour,
       timezone_offset_minutes,
+      workout_visibility,
     } = req.body;
+    // The DB has a CHECK for this too; validating here turns a would-be 500
+    // into a clear 400.
+    if (
+      workout_visibility !== undefined &&
+      !isWorkoutVisibility(workout_visibility)
+    ) {
+      return res.status(400).json({
+        error: `workout_visibility must be one of: ${WORKOUT_VISIBILITY_VALUES.join(", ")}`,
+      });
+    }
     if (
       quiet_hours_start !== undefined &&
       quiet_hours_start !== null &&

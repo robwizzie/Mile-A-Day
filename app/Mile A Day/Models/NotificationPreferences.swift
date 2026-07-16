@@ -1,5 +1,47 @@
 import Foundation
 
+/// Who may see my workout CONTENT — routes and photos. Mirrors the backend's
+/// `workout_visibility` on /notifications/preferences; the raw values must stay
+/// exactly these three strings (the DB has a CHECK constraint on them).
+///
+/// This is the coarse gate: it decides WHO gets in at all. The sharing toggles
+/// below it (`shareRouteMaps`, `shareWorkoutsToFeed`) decide WHAT those people
+/// then see. Both apply.
+enum WorkoutVisibility: String, Codable, CaseIterable, Identifiable {
+    case `public`
+    case friends
+    case `private`
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .public: return "Everyone"
+        case .friends: return "Friends only"
+        case .private: return "Only me"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .public:
+            return "Any Mile A Day user can open your profile and see your runs, routes and photos."
+        case .friends:
+            return "Only friends you've accepted. People you block never see them."
+        case .private:
+            return "Nobody but you. Your posts leave your friends' feeds too."
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .public: return "globe.americas.fill"
+        case .friends: return "person.2.fill"
+        case .private: return "lock.fill"
+        }
+    }
+}
+
 struct NotificationPreferences: Codable {
     var dailyReminderEnabled: Bool = true
     var dailyReminderHour: Int = 18 // 24-hour format
@@ -54,6 +96,15 @@ struct NotificationPreferences: Codable {
     var weeklyRecapEnabled: Bool {
         get { weeklyRecapEnabledRaw ?? true }
         set { weeklyRecapEnabledRaw = newValue }
+    }
+
+    /// Who can see my routes and photos. Same optional-backing pattern, and an
+    /// unrecognised stored value falls back to `.friends` rather than to
+    /// something more exposed.
+    private var workoutVisibilityRaw: String?
+    var workoutVisibility: WorkoutVisibility {
+        get { workoutVisibilityRaw.flatMap(WorkoutVisibility.init(rawValue:)) ?? .friends }
+        set { workoutVisibilityRaw = newValue.rawValue }
     }
 
     // Do Not Disturb schedule

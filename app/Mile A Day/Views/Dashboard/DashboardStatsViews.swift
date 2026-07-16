@@ -210,11 +210,14 @@ struct RecentWorkoutsView: View {
 // MARK: - Recent Workouts Preview (dashboard)
 
 /// Compact dashboard card: a peek at the few most-recent workouts with a
-/// "See All" that opens the full Workouts screen (calendar + history + swipeable
-/// detail). Replaces the old buried collapsible list.
+/// "See All" that PUSHES the full Workouts screen (calendar + history +
+/// swipeable detail) as its own page. Replaces the old buried collapsible list.
+///
+/// The flag is owned by DashboardView so its `navigationDestination` can sit on
+/// the stack root; this card only sets it.
 struct RecentWorkoutsPreviewCard: View {
     @ObservedObject var healthManager: HealthKitManager
-    @State private var showWorkouts = false
+    @Binding var showWorkouts: Bool
 
     private var preview: [HKWorkout] { Array(healthManager.recentWorkouts.prefix(3)) }
 
@@ -262,8 +265,5 @@ struct RecentWorkoutsPreviewCard: View {
             .cardStyle()
         }
         .buttonStyle(.plain)
-        .sheet(isPresented: $showWorkouts) {
-            WorkoutsView(healthManager: healthManager)
-        }
     }
 }

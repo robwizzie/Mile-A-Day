@@ -195,15 +195,17 @@ struct ProfilePostsGridView: View {
     }
 
     private func thumbnail(_ post: PostItem) -> some View {
-        Color.clear
+        // The real picture leads when the run has one; the workout card is only
+        // the face of the post when no photo exists.
+        let url = post.storyPhotoURL ?? post.mediaURL
+        return Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay(
-                // The real picture leads when the run has one; the workout
-                // card is only the face of the post when no photo exists. When
-                // the server locks today's photo (viewer hasn't run), show a
-                // lock tile instead — tapping it opens the same locked card.
+                // The lock tile is for when the withheld photo WAS the tile —
+                // an auto route/stats card that survived the gate still shows
+                // its face, since only the picture is locked.
                 Group {
-                    if post.isPhotoLocked {
+                    if url == nil, post.isPhotoLocked {
                         ZStack {
                             LinearGradient(
                                 colors: [MADTheme.Colors.madRed.opacity(0.30), Color.black.opacity(0.6)],
@@ -214,7 +216,7 @@ struct ProfilePostsGridView: View {
                                 .foregroundColor(.white.opacity(0.9))
                         }
                     } else {
-                        AsyncImage(url: post.storyPhotoURL ?? post.mediaURL) { phase in
+                        AsyncImage(url: url) { phase in
                             switch phase {
                             case .success(let image): image.resizable().scaledToFill()
                             case .failure:
@@ -325,6 +327,15 @@ struct ProfilePostsFeedSheet: View {
     @State private var deletingPost: PostItem?
     @State private var reportingPost: PostItem?
     @State private var hypingIds: Set<String> = []
+    /// The list starts at the TOP and only then scrolls to the tapped post, so
+    /// the first frames show whoever is newest — reading as a flash of someone
+    /// else's card (a lock card, when today's photo is still unearned) before
+    /// settling. Stay invisible until we're parked on the right post.
+    @State private var didPosition = false
+
+    /// Tapping the newest post needs no scroll at all — show it immediately
+    /// rather than fading in after a settle delay it doesn't need.
+    private var needsScroll: Bool { posts.first?.post_id != initialPostId }
 
     var body: some View {
         NavigationStack {
@@ -345,14 +356,24 @@ struct ProfilePostsFeedSheet: View {
                         .padding(MADTheme.Spacing.md)
                         .padding(.bottom, MADTheme.Spacing.xl)
                     }
+                    // Held invisible (not unbuilt — opacity doesn't affect
+                    // layout, so the LazyVStack still lays out and scrollTo
+                    // still lands) until we're parked on the tapped post.
+                    .opacity(didPosition ? 1 : 0)
                     .onAppear {
+                        guard needsScroll else {
+                            didPosition = true
+                            return
+                        }
                         // LazyVStack hasn't laid out far-down cards yet when
                         // onAppear fires, so a single scrollTo can land short
                         // for deep taps — jump, then correct once layout has
-                        // caught up.
+                        // caught up. Reveal only after the correction, which
+                        // lands while the sheet is still animating in.
                         proxy.scrollTo(initialPostId, anchor: .top)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             proxy.scrollTo(initialPostId, anchor: .top)
+                            withAnimation(.easeOut(duration: 0.12)) { didPosition = true }
                         }
                     }
                 }

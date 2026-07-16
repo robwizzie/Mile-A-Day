@@ -27,6 +27,10 @@ struct DashboardView: View {
     @State private var showConfetti = false
     @State private var showGoalSheet = false
     @State private var showDashboardSettings = false
+    /// "See All" on the Recent Workouts card. Lives here, not on the card, so
+    /// the destination is registered on the stack's root — a
+    /// navigationDestination declared inside the scroll content can miss.
+    @State private var showWorkouts = false
     @State private var newGoalMiles: Double = 1.0
     @State private var isRefreshing = false
     @State private var showWorkoutUploadAlert = false
@@ -417,6 +421,9 @@ struct DashboardView: View {
                 currentGoal: userManager.currentUser.goalMiles,
                 onSetGoal: { showGoalSheet = true }
             )
+        }
+        .navigationDestination(isPresented: $showWorkouts) {
+            WorkoutsView(healthManager: healthManager)
         }
             .sheet(isPresented: $showManualWorkoutEntry) {
                 ManualWorkoutEntryView()
@@ -1359,7 +1366,7 @@ struct DashboardView: View {
 
             // Recent Workouts now lives behind a clean preview card that opens
             // the full Workouts screen (calendar + history + swipeable detail).
-            RecentWorkoutsPreviewCard(healthManager: healthManager)
+            RecentWorkoutsPreviewCard(healthManager: healthManager, showWorkouts: $showWorkouts)
         }
     }
 }

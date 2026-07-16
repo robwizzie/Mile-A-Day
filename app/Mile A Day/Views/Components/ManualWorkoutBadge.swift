@@ -47,7 +47,13 @@ extension ManualWorkoutBanner {
 
 // MARK: - Inline Capsule Badge (for rows and cards)
 
-/// Capsule badge for workout rows — clearly visible next to workout type
+/// Capsule badge for workout rows — clearly visible next to workout type.
+///
+/// `lineLimit(1)` + `fixedSize` are load-bearing: in a row this sits in a
+/// title line that competes with the distance and a trailing date column, and
+/// without them a narrow screen compressed the capsule until "Manual" wrapped
+/// to two lines inside it ("Man / ual"). The badge is a fixed-size atom — the
+/// row gives it room rather than squeezing it.
 struct ManualWorkoutBadge: View {
     let source: WorkoutSource
 
@@ -58,7 +64,9 @@ struct ManualWorkoutBadge: View {
                     .font(.system(size: 9))
                 Text(source == .manual ? "Manual" : "Edited")
                     .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .lineLimit(1)
             }
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundColor(.white)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)

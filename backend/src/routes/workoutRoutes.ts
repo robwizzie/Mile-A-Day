@@ -9,6 +9,7 @@ import {
   recalibrateStreak,
   deleteWorkout,
   getUserRoutesController,
+  getWorkoutRouteController,
   getRaceRecords,
   getRaceHistoryController,
 } from "../controllers/workoutController.js";
@@ -39,6 +40,10 @@ router.get(
   requireSelfAccess("userId"),
   getUserRoutesController,
 );
+// ONE workout's trace, readable by any authenticated user so a friend's workout
+// detail can draw its map — the same share_route_maps consent the feed applies
+// gates it, and it can never become the full-history dump above.
+router.get("/:userId/workout/:workoutId/route", getWorkoutRouteController);
 router.get("/:userId/streak", getStreak);
 router.get("/:userId/range", getWorkoutRange);
 router.get("/:userId/recent", getRecentWorkouts);
