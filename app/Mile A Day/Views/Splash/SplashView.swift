@@ -2,31 +2,32 @@ import SwiftUI
 
 /// Launch experience for Mile A Day.
 ///
-/// Design intent: a calm, premium reveal built around the app's core mental
-/// model — closing your daily mile. An atmospheric glow settles in, a goal
-/// "ring" sweeps closed around the MAD mark (mirroring completing your mile),
-/// the logo lands with a soft pulse, and the wordmark resolves beneath it.
-/// No loose particles or external runner: the logo already carries the runner
-/// + speed lines, so the ring is the only added motion, which keeps it clean
-/// and legible at every screen size.
+/// Design intent: keep the signature "sprint in" entrance, but cleaner. A
+/// runner sprints in from the left trailed by a soft motion blur (ghosted
+/// echoes that converge on center, rather than a fan of speed lines), hands
+/// off to the MAD mark at center with a single glow bloom and one impact
+/// ring (rather than a burst of dust particles), then the wordmark resolves
+/// beneath it. Layout is a single centered stack so it holds at every size.
 struct SplashView: View {
     @Environment(\.colorScheme) private var colorScheme
 
+    // Runner sprint (progress 0 = offscreen left, 1 = centered on the mark)
+    @State private var runProgress: CGFloat = 0
+    @State private var runnerOpacity: Double = 0
+    @State private var trailOpacity: Double = 0
+    @State private var runnerScale: CGFloat = 1.0
+
     // Atmosphere
     @State private var auraOpacity: Double = 0
-    @State private var auraScale: CGFloat = 0.85
-
-    // Goal ring (the "close your mile" sweep)
-    @State private var ringProgress: CGFloat = 0
-    @State private var ringOpacity: Double = 0
-    @State private var trackOpacity: Double = 0
+    @State private var auraIntroScale: CGFloat = 0.85
+    @State private var auraBreathe: CGFloat = 1.0
 
     // Logo
-    @State private var logoScale: CGFloat = 0.7
+    @State private var logoScale: CGFloat = 0.5
     @State private var logoOpacity: Double = 0
 
-    // Completion pulse when the ring closes
-    @State private var pulseScale: CGFloat = 0.9
+    // Impact ring when the runner lands as the mark
+    @State private var pulseScale: CGFloat = 0.6
     @State private var pulseOpacity: Double = 0
 
     // Text
@@ -35,36 +36,32 @@ struct SplashView: View {
     @State private var taglineOpacity: Double = 0
 
     // MARK: - Layout constants (fixed → consistent on every device)
-    private let ringSize: CGFloat = 176
-    private let ringLineWidth: CGFloat = 6
+    private let stageSize: CGFloat = 176
     private let logoSize: CGFloat = 104
+    private let runnerSize: CGFloat = 48
+
+    // Motion-blur echoes: tight spacing + low opacity reads as one clean streak
+    private let echoSpacing: [CGFloat] = [16, 30, 42]
+    private let echoOpacity: [Double] = [0.45, 0.28, 0.15]
 
     // MARK: - Palette
     private var isDark: Bool { colorScheme == .dark }
-
     private var accentRed: Color { MADTheme.Colors.madRed }
     private var accentBright: Color { Color(red: 1.0, green: 0.44, blue: 0.54) }
 
     private var titleColor: Color {
         isDark ? .white : Color(red: 0.11, green: 0.11, blue: 0.13)
     }
-
     private var subtitleColor: Color {
         isDark ? .white.opacity(0.62) : Color(red: 0.42, green: 0.40, blue: 0.44)
     }
 
-    private var trackColor: Color {
-        isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.06)
-    }
-
     private var backgroundView: some View {
         ZStack {
-            // Base atmosphere
             (isDark ? Color(red: 0.05, green: 0.03, blue: 0.04)
                     : Color(red: 0.97, green: 0.96, blue: 0.96))
                 .ignoresSafeArea()
 
-            // Soft vertical depth
             LinearGradient(
                 colors: isDark
                     ? [Color(red: 0.13, green: 0.06, blue: 0.08),
@@ -81,71 +78,68 @@ struct SplashView: View {
     }
 
     var body: some View {
-        ZStack {
-            backgroundView
+        GeometryReader { geo in
+            // Start fully offscreen-left regardless of device width
+            let startX = -(geo.size.width / 2 + 80)
+            let runnerX = startX * (1 - runProgress)
 
-            VStack(spacing: 40) {
-                logoStack
+            ZStack {
+                backgroundView
 
-                textBlock
+                VStack(spacing: 40) {
+                    stage(runnerX: runnerX)
+                    textBlock
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 32)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 32)
+            .frame(width: geo.size.width, height: geo.size.height)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea()
         .onAppear { startAnimations() }
     }
 
-    // MARK: - Logo + ring + glow
+    // MARK: - Runner + logo stage
 
-    private var logoStack: some View {
+    private func stage(runnerX: CGFloat) -> some View {
         ZStack {
-            // Breathing atmospheric glow, centered on the mark
+            // Breathing glow that blooms as the mark lands
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [
-                            accentRed.opacity(isDark ? 0.40 : 0.20),
-                            accentRed.opacity(0)
-                        ],
-                        center: .center,
-                        startRadius: 0,
-                        endRadius: 190
+                        colors: [accentRed.opacity(isDark ? 0.40 : 0.20), accentRed.opacity(0)],
+                        center: .center, startRadius: 0, endRadius: 190
                     )
                 )
                 .frame(width: 360, height: 360)
-                .scaleEffect(auraScale)
+                .scaleEffect(auraIntroScale)
+                .scaleEffect(auraBreathe)
                 .opacity(auraOpacity)
                 .blur(radius: 14)
 
-            // Goal track (the unfilled ring)
-            Circle()
-                .stroke(trackColor, lineWidth: ringLineWidth)
-                .frame(width: ringSize, height: ringSize)
-                .opacity(trackOpacity)
+            // Motion-blur echoes (converge on center as the runner slows)
+            ForEach(0..<echoSpacing.count, id: \.self) { i in
+                Image(systemName: "figure.run")
+                    .font(.system(size: runnerSize, weight: .medium))
+                    .foregroundColor(accentRed)
+                    .scaleEffect(runnerScale)
+                    .opacity(trailOpacity * echoOpacity[i])
+                    .blur(radius: 1.5)
+                    .offset(x: runnerX - echoSpacing[i] * (1 - runProgress))
+            }
 
-            // Progress ring sweeping closed — "complete your mile"
-            Circle()
-                .trim(from: 0, to: ringProgress)
-                .stroke(
-                    AngularGradient(
-                        // First/last stops match so the closed ring is seamless
-                        gradient: Gradient(colors: [accentRed, accentBright, accentRed]),
-                        center: .center,
-                        startAngle: .degrees(-90),
-                        endAngle: .degrees(270)
-                    ),
-                    style: StrokeStyle(lineWidth: ringLineWidth, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
-                .frame(width: ringSize, height: ringSize)
-                .opacity(ringOpacity)
-                .shadow(color: accentRed.opacity(isDark ? 0.55 : 0.30), radius: 9)
+            // Lead runner
+            Image(systemName: "figure.run")
+                .font(.system(size: runnerSize, weight: .semibold))
+                .foregroundColor(accentRed)
+                .scaleEffect(runnerScale)
+                .opacity(runnerOpacity)
+                .offset(x: runnerX)
 
-            // Completion pulse — a quick ring flare when the sweep finishes
+            // Impact ring
             Circle()
                 .stroke(accentBright, lineWidth: 2)
-                .frame(width: ringSize, height: ringSize)
+                .frame(width: stageSize * 0.86, height: stageSize * 0.86)
                 .scaleEffect(pulseScale)
                 .opacity(pulseOpacity)
 
@@ -158,7 +152,7 @@ struct SplashView: View {
                 .opacity(logoOpacity)
                 .shadow(color: accentRed.opacity(isDark ? 0.35 : 0.18), radius: 22, x: 0, y: 10)
         }
-        .frame(width: ringSize, height: ringSize)
+        .frame(width: stageSize, height: stageSize)
     }
 
     // MARK: - Text
@@ -188,45 +182,55 @@ struct SplashView: View {
     // MARK: - Animation timeline (settles well before the 2.5s dismiss)
 
     private func startAnimations() {
-        // Atmosphere fades in and starts a slow breath
-        withAnimation(.easeOut(duration: 0.7)) {
-            auraOpacity = 1.0
-            auraScale = 1.0
-            trackOpacity = 1.0
+        // Phase 1 — runner sprints in from the left and decelerates to center
+        withAnimation(.easeIn(duration: 0.12)) {
+            runnerOpacity = 1.0
+            trailOpacity = 1.0
         }
-        withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true)) {
-            auraScale = 1.08
-        }
-
-        // Ring sweeps closed (0.2s → ~1.2s)
-        withAnimation(.easeOut(duration: 0.25).delay(0.2)) {
-            ringOpacity = 1.0
-        }
-        withAnimation(.easeInOut(duration: 1.0).delay(0.2)) {
-            ringProgress = 1.0
+        withAnimation(.easeOut(duration: 0.72).delay(0.04)) {
+            runProgress = 1.0
         }
 
-        // Logo lands as the ring fills
-        withAnimation(.spring(response: 0.6, dampingFraction: 0.68).delay(0.45)) {
-            logoScale = 1.0
-            logoOpacity = 1.0
+        // Phase 2 — hand off to the mark (~0.6s, as the sprint settles)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            // Runner + trail dissolve and shrink into the mark
+            withAnimation(.easeIn(duration: 0.18)) {
+                runnerOpacity = 0
+                trailOpacity = 0
+                runnerScale = 0.5
+            }
+
+            // Glow blooms, then breathes
+            withAnimation(.easeOut(duration: 0.55)) {
+                auraOpacity = 1.0
+                auraIntroScale = 1.0
+            }
+            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true).delay(0.55)) {
+                auraBreathe = 1.08
+            }
+
+            // Logo punches in
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.62)) {
+                logoScale = 1.0
+                logoOpacity = 1.0
+            }
+
+            // Single impact ring
+            withAnimation(.easeOut(duration: 0.5)) {
+                pulseScale = 1.22
+                pulseOpacity = 0.85
+            }
+            withAnimation(.easeIn(duration: 0.45).delay(0.25)) {
+                pulseOpacity = 0
+            }
         }
 
-        // Completion flare the instant the ring closes (~1.2s)
-        withAnimation(.easeOut(duration: 0.45).delay(1.15)) {
-            pulseScale = 1.16
-            pulseOpacity = 0.9
-        }
-        withAnimation(.easeIn(duration: 0.5).delay(1.35)) {
-            pulseOpacity = 0
-        }
-
-        // Wordmark resolves beneath the mark
-        withAnimation(.easeOut(duration: 0.55).delay(1.35)) {
+        // Phase 3 — wordmark resolves beneath the mark
+        withAnimation(.easeOut(duration: 0.5).delay(1.05)) {
             titleOpacity = 1.0
             titleOffset = 0
         }
-        withAnimation(.easeOut(duration: 0.55).delay(1.6)) {
+        withAnimation(.easeOut(duration: 0.4).delay(1.35)) {
             taglineOpacity = 1.0
         }
     }
