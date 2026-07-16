@@ -20,11 +20,14 @@ import {
   hasAcceptedTerms,
   acceptTerms,
   getStoryViewers,
+  getStoryReactors,
   reactToStory,
   getOwnPostMemories,
   userOwnsWorkout,
+  lockUnearnedPhotos,
   ALLOWED_STORY_REACTIONS,
   PostStatsSnapshot,
+  type ViewerGoalGate,
 } from "../services/postService.js";
 import {
   reportPost,
@@ -303,6 +306,29 @@ export async function getStoryViewersController(
   }
 }
 
+/**
+ * Who reacted to a story, for the reaction-bubble row shown to ALL circle
+ * viewers (not just the author). 404 when the caller can't see the story.
+ */
+export async function getStoryReactorsController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    if (!isUuid(req.params.postId)) {
+      return res.status(404).json({ error: "story_not_found" });
+    }
+    const reactors = await getStoryReactors(req.userId!, req.params.postId);
+    if (reactors === null) {
+      return res.status(404).json({ error: "story_not_found" });
+    }
+    res.json({ reactors, count: reactors.length });
+  } catch (error: any) {
+    console.error("Error getting story reactors:", error.message);
+    res.status(500).json({ error: "Error getting story reactors" });
+  }
+}
+
 /** Emoji-react to a friend's active story. Re-reacting swaps the emoji. */
 export async function reactToStoryController(
   req: AuthenticatedRequest,
@@ -365,6 +391,21 @@ function repairBeforeCursor(req: AuthenticatedRequest): string | null {
   return raw.replace(/ (\d{2}(:?\d{2})?)$/, "+$1");
 }
 
+/**
+ * The viewer's mile status, used to gate today's photos. Fail-OPEN: a stats
+ * hiccup returns `completed:true` so a glitch never blanks the whole feed
+ * (better to briefly over-show than to break the surface).
+ */
+async function viewerPhotoGate(userId: string): Promise<ViewerGoalGate> {
+  try {
+    const goal = await getDailyGoalStatus(userId);
+    return { completed: goal.completed, localDate: goal.localDate };
+  } catch (e: any) {
+    console.error("[viewerPhotoGate] goal status failed:", e?.message ?? e);
+    return { completed: true, localDate: "" };
+  }
+}
+
 export async function getFeedController(
   req: AuthenticatedRequest,
   res: Response,
@@ -376,6 +417,7 @@ export async function getFeedController(
       : DEFAULT_FEED_LIMIT;
     const before = repairBeforeCursor(req);
     const items = await getFeed(req.userId!, limit, before);
+    lockUnearnedPhotos(items, req.userId!, await viewerPhotoGate(req.userId!));
     // `cursor` is the microsecond-precise URL-safe timestamp; created_at
     // (a ms-truncated JS Date) would skip same-millisecond rows at boundaries.
     const last = items[items.length - 1];
@@ -402,6 +444,7 @@ export async function getUnifiedFeedController(
       : DEFAULT_FEED_LIMIT;
     const before = repairBeforeCursor(req);
     const items = await getUnifiedFeed(req.userId!, limit, before);
+    lockUnearnedPhotos(items, req.userId!, await viewerPhotoGate(req.userId!));
     const last = items[items.length - 1];
     const nextBefore =
       items.length === limit ? (last.cursor ?? last.sort_ts) : null;
@@ -442,6 +485,7 @@ export async function getUserPostsController(
       before,
       includeStoryOnly,
     );
+    lockUnearnedPhotos(items, req.userId!, await viewerPhotoGate(req.userId!));
     const last = items[items.length - 1];
     const nextBefore =
       items.length === limit ? (last.cursor ?? last.created_at) : null;

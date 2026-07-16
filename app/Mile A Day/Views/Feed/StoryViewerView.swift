@@ -31,8 +31,12 @@ struct StoryViewerView: View {
     /// the auto-advance can never re-target a destructive action mid-dialog.
     @State private var optionsPost: PostItem?
     @State private var showOptions = false
-    /// postId → emoji the viewer sent this session (server keeps one per story).
+    /// postId → the viewer's own emoji (hydrated from the server on load, so a
+    /// re-view shows the reaction they already left; the server keeps one/story).
     @State private var myReactions: [String: String] = [:]
+    /// postId → everyone who reacted, for the Instagram-style bubble row shown
+    /// to ALL viewers (not just the author).
+    @State private var reactors: [String: [StoryReactor]] = [:]
     /// Own-story extras: seen-by counts per post + the viewers sheet.
     @State private var viewerCounts: [String: Int] = [:]
     @State private var viewersSheetFor: PostItem?
@@ -108,6 +112,13 @@ struct StoryViewerView: View {
             guard let post = current, post.is_self else { return }
             if let resp = try? await PostService.storyViewers(postId: post.post_id) {
                 viewerCounts[post.post_id] = resp.count
+            }
+        }
+        .task(id: current?.post_id) {
+            // Everyone's reactions for the current story → the bubble row.
+            guard let post = current else { return }
+            if let resp = try? await PostService.storyReactors(postId: post.post_id) {
+                reactors[post.post_id] = resp.reactors
             }
         }
         .alert("Couldn't add to feed", isPresented: Binding(
@@ -254,6 +265,8 @@ struct StoryViewerView: View {
     @ViewBuilder
     private func footer(_ post: PostItem) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            reactorBubbles(post)
+
             if let caption = post.caption, !caption.isEmpty {
                 Text(caption)
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
@@ -309,6 +322,40 @@ struct StoryViewerView: View {
             Spacer(minLength: 0)
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: myReactions)
+    }
+
+    /// Instagram-style row of who reacted — overlapping avatars, each badged
+    /// with their emoji. Shown to every viewer (per the product decision).
+    @ViewBuilder
+    private func reactorBubbles(_ post: PostItem) -> some View {
+        let list = reactors[post.post_id] ?? []
+        if !list.isEmpty {
+            HStack(spacing: -8) {
+                ForEach(list.prefix(6)) { reactor in
+                    ZStack(alignment: .bottomTrailing) {
+                        AvatarView(
+                            name: reactor.displayName,
+                            imageURL: reactor.profile_image_url,
+                            size: 30
+                        )
+                        .overlay(Circle().strokeBorder(Color.black.opacity(0.55), lineWidth: 1.5))
+                        Text(reactor.emoji)
+                            .font(.system(size: 12))
+                            .padding(2)
+                            .background(Circle().fill(Color.black.opacity(0.6)))
+                            .offset(x: 5, y: 4)
+                    }
+                }
+                if list.count > 6 {
+                    Text("+\(list.count - 6)")
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.leading, 14)
+                }
+                Spacer(minLength: 0)
+            }
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: list.count)
+        }
     }
 
     private func seenByPill(_ post: PostItem) -> some View {
@@ -436,6 +483,13 @@ struct StoryViewerView: View {
             }
             await MainActor.run {
                 stories = loaded
+                // Hydrate the viewer's prior reactions so re-opening a story
+                // shows the emoji they already picked (server keeps one/story).
+                for story in loaded {
+                    if let emoji = story.viewer_reaction, !emoji.isEmpty {
+                        myReactions[story.post_id] = emoji
+                    }
+                }
                 isLoading = false
                 if loaded.isEmpty {
                     // The group's stories expired/vanished since the rail
@@ -458,7 +512,13 @@ struct StoryViewerView: View {
         // idempotent, so a failed call just means no push went out.
         myReactions[post.post_id] = emoji
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        Task { try? await PostService.reactToStory(postId: post.post_id, emoji: emoji) }
+        Task {
+            try? await PostService.reactToStory(postId: post.post_id, emoji: emoji)
+            // Reconcile the bubble row with the server (adds/updates my bubble).
+            if let resp = try? await PostService.storyReactors(postId: post.post_id) {
+                await MainActor.run { reactors[post.post_id] = resp.reactors }
+            }
+        }
     }
 
     private func promoteToFeed(_ post: PostItem) async {

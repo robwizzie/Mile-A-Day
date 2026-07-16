@@ -51,8 +51,18 @@ struct PostItem: Codable, Identifiable {
     /// Story rows only: does this run already have a live feed post? Hides the
     /// story viewer's "Add to feed" when the workout is already on the feed.
     var workout_on_feed: Bool?
+    /// Server withheld this post's photo because it's from the viewer's local
+    /// today and they haven't finished their own mile yet — the client draws a
+    /// lock instead of a broken image. Absent/false = unlocked.
+    var photo_locked: Bool? = nil
+    /// The viewer's own emoji reaction to this story, hydrated on load so a
+    /// re-view shows the reaction they already left. nil = not reacted.
+    var viewer_reaction: String? = nil
 
     var id: String { post_id }
+
+    /// Whether the server locked this post's photo (viewer hasn't run today).
+    var isPhotoLocked: Bool { photo_locked == true }
 
     /// Decoded route polyline (nil when absent or degenerate).
     var routeCoordinates: [CLLocationCoordinate2D]? { decodeRouteCoordinates(route) }
@@ -155,6 +165,9 @@ struct FeedEntry: Codable, Identifiable {
     let is_self: Bool
     var is_hyped: Bool
     var hype_count: Int?
+    /// Server withheld this post's photo (viewer hasn't run today) — carried
+    /// into the rendered PostItem so the card draws a lock.
+    let photo_locked: Bool?
 
     enum CodingKeys: String, CodingKey {
         case kind
@@ -162,7 +175,7 @@ struct FeedEntry: Codable, Identifiable {
         case sort_ts, user_id, username, first_name, last_name, profile_image_url
         case media_url, caption, stats_snapshot, story_photo_url, is_auto
         case workout_id, workout_type, distance, total_duration, calories, steps, route
-        case is_self, is_hyped, hype_count
+        case is_self, is_hyped, hype_count, photo_locked
     }
 
     var id: String { "\(kind)-\(entryId)" }
@@ -196,7 +209,8 @@ struct FeedEntry: Codable, Identifiable {
             created_at: sort_ts, is_auto: is_auto, workout_type: workout_type,
             route: route, story_photo_url: story_photo_url,
             is_self: is_self, is_hyped: is_hyped,
-            hype_count: hype_count, is_viewed: nil, workout_on_feed: nil
+            hype_count: hype_count, is_viewed: nil, workout_on_feed: nil,
+            photo_locked: photo_locked
         )
     }
 }
@@ -229,6 +243,30 @@ struct StoryViewer: Codable, Identifiable {
 
 struct StoryViewersResponse: Decodable {
     let viewers: [StoryViewer]
+    let count: Int
+}
+
+/// One person who reacted to a story, for the bubble row shown to all viewers.
+struct StoryReactor: Codable, Identifiable {
+    let user_id: String
+    let username: String?
+    let first_name: String?
+    let last_name: String?
+    let profile_image_url: String?
+    let emoji: String
+    let created_at: String
+
+    var id: String { user_id }
+
+    var displayName: String {
+        if let username, !username.isEmpty { return username }
+        if let first_name, !first_name.isEmpty { return first_name }
+        return "Someone"
+    }
+}
+
+struct StoryReactorsResponse: Decodable {
+    let reactors: [StoryReactor]
     let count: Int
 }
 
@@ -386,6 +424,15 @@ enum PostService {
         try await APIClient.fancyFetch(
             endpoint: "/posts/stories/\(postId)/viewers",
             responseType: StoryViewersResponse.self
+        )
+    }
+
+    /// Everyone who reacted to a story — visible to any circle viewer, for the
+    /// reaction-bubble row (not just the author's private viewers list).
+    static func storyReactors(postId: String) async throws -> StoryReactorsResponse {
+        try await APIClient.fancyFetch(
+            endpoint: "/posts/stories/\(postId)/reactions",
+            responseType: StoryReactorsResponse.self
         )
     }
 

@@ -56,6 +56,13 @@ export interface PostRow {
   is_hyped: boolean;
   hype_count: number;
   is_viewed?: boolean;
+  // The viewer's own emoji reaction to this story (getUserActiveStories only),
+  // so re-opening a story they already reacted to shows the reaction. null/absent
+  // = they haven't reacted.
+  viewer_reaction?: string | null;
+  // Set by lockUnearnedPhotos: this post's photo is withheld because it's from
+  // the viewer's local today and they haven't finished their own mile yet.
+  photo_locked?: boolean;
   // Microsecond-precise created_at (Postgres text form) for keyset pagination.
   // node-pg parses timestamptz to a ms-truncated JS Date, and a truncated
   // `before` cursor silently skips same-millisecond rows at page boundaries.
@@ -396,6 +403,10 @@ export async function getUserActiveStories(
 			EXISTS (
 				SELECT 1 FROM story_views sv WHERE sv.post_id = p.post_id AND sv.viewer_id = $1
 			) AS is_viewed,
+			(
+				SELECT sr.emoji FROM story_reactions sr
+				WHERE sr.post_id = p.post_id AND sr.user_id = $1
+			) AS viewer_reaction,
 			EXISTS (
 				SELECT 1 FROM posts pf
 				WHERE pf.workout_id = p.workout_id
@@ -505,6 +516,59 @@ export async function getStoryViewers(
 		LIMIT 200
 		`,
     [postId, authorId],
+  );
+}
+
+export interface StoryReactorRow {
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+  emoji: string;
+  created_at: string;
+}
+
+/**
+ * Everyone who reacted to a story, for the Instagram-style bubble row shown to
+ * ALL circle viewers (not just the author, unlike getStoryViewers). Returns
+ * null when the caller can't see the story (author/accepted-friend, no block) —
+ * the controller maps that to 404. Includes the caller's own reaction.
+ */
+export async function getStoryReactors(
+  viewerId: string,
+  postId: string,
+): Promise<StoryReactorRow[] | null> {
+  const allowed = await db.query(
+    `SELECT 1 FROM posts p
+			 WHERE p.post_id = $1 AND p.share_to_story AND p.deleted_at IS NULL
+				 AND (
+					 p.user_id = $2
+					 OR EXISTS (
+						 SELECT 1 FROM friendships f
+						 WHERE f.user_id = $2 AND f.friend_id = p.user_id AND f.status = 'accepted'
+					 )
+				 )
+				 AND NOT EXISTS (
+					 SELECT 1 FROM user_blocks b
+					 WHERE (b.blocker_id = $2 AND b.blocked_id = p.user_id)
+							OR (b.blocker_id = p.user_id AND b.blocked_id = $2)
+				 )`,
+    [postId, viewerId],
+  );
+  if (allowed.length === 0) return null;
+
+  return db.query<StoryReactorRow>(
+    `
+		SELECT u.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
+			sr.emoji, sr.created_at
+		FROM story_reactions sr
+		JOIN users u ON u.user_id = sr.user_id
+		WHERE sr.post_id = $1
+		ORDER BY sr.created_at DESC
+		LIMIT 200
+		`,
+    [postId],
   );
 }
 
@@ -618,6 +682,48 @@ export async function getOwnPostMemories(
   );
 }
 
+/** The viewer's mile status for a feed read — drives the photo gate. */
+export interface ViewerGoalGate {
+  completed: boolean;
+  localDate: string;
+}
+
+/**
+ * Withhold TODAY's real photos from a viewer who hasn't finished their own mile
+ * yet — "run to see your friends' pictures". Mutates and returns the rows.
+ *
+ * Rules (per the product decision):
+ *  - Only the viewer's LOCAL today is gated; older posts always show.
+ *  - Own posts are never gated (you can always see your own).
+ *  - PHOTOS ONLY: a real user photo (media_url on a non-auto post) and any
+ *    story_photo_url are withheld; auto route/stats cards stay visible.
+ *  - Once the viewer completes their mile, nothing is gated.
+ *
+ * media_url is blanked to "" rather than nulled so existing (non-optional)
+ * clients still decode; new clients read `photo_locked` to draw the lock state.
+ */
+export function lockUnearnedPhotos<
+  T extends {
+    user_id: string;
+    local_date?: string | null;
+    is_auto?: boolean | null;
+    media_url?: string | null;
+    story_photo_url?: string | null;
+    photo_locked?: boolean;
+  },
+>(rows: T[], viewerId: string, gate: ViewerGoalGate): T[] {
+  if (gate.completed || !gate.localDate) return rows;
+  for (const r of rows) {
+    if (r.user_id === viewerId) continue;
+    if ((r.local_date ?? null) !== gate.localDate) continue;
+    if (r.story_photo_url) r.story_photo_url = null;
+    // Leave auto route/stats cards visible; only real photos are locked.
+    if (r.is_auto !== true && r.media_url) r.media_url = "";
+    r.photo_locked = true;
+  }
+  return rows;
+}
+
 /**
  * Persistent feed: photo posts from the viewer's circle, newest first, keyset
  * paginated on created_at. Pass `before` (an ISO timestamp) to fetch older.
@@ -667,6 +773,11 @@ export interface FeedEntryRow {
   story_photo_url: string | null;
   // post-only: system-generated route/stats card vs deliberate user post.
   is_auto: boolean | null;
+  // post-only: the author's local date ("YYYY-MM-DD"), so the viewer's today can
+  // be gated. Null for raw workout entries (they carry no photo to gate).
+  local_date: string | null;
+  // Set by lockUnearnedPhotos when this post's photo is withheld.
+  photo_locked?: boolean;
   // The entry's workout: the linked workout for posts (null when unlinked),
   // the workout itself for workout entries. Lets the client know which of
   // today's runs already carry a deliberate post.
@@ -710,6 +821,7 @@ export async function getUnifiedFeed(
 				p.created_at AS sort_ts,
 				p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
 				p.media_url, p.caption, p.stats_snapshot,
+				p.local_date::text AS local_date,
 				-- Owner's decision: the 24h expiry only ends the STORY (rail/viewer).
 				-- A photo riding on the run's feed card stays permanently — only
 				-- deleting the story removes it.
@@ -766,6 +878,7 @@ export async function getUnifiedFeed(
 				w.device_end_date AS sort_ts,
 				w.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
 				NULL::text AS media_url, NULL::text AS caption, NULL::jsonb AS stats_snapshot,
+				NULL::text AS local_date,
 				NULL::text AS story_photo_url,
 				NULL::boolean AS is_auto,
 				w.workout_id,
