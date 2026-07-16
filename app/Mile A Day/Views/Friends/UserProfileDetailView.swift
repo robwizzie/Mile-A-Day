@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreLocation
 
 /// Detailed view for displaying a user's profile information
 struct UserProfileDetailView: View {
@@ -123,7 +124,7 @@ struct UserProfileDetailView: View {
             }
         }
         .sheet(item: $selectedWorkout) { workout in
-            FriendWorkoutDetailSheet(workout: workout)
+            FriendWorkoutDetailSheet(workout: workout, friendService: friendService)
         }
         .sheet(isPresented: $showCompeteSheet) {
             CreateCompetitionView(
@@ -1101,14 +1102,85 @@ struct UserProfileDetailView: View {
 
 struct FriendWorkoutDetailSheet: View {
     let workout: FriendWorkout
+    /// Passed down rather than constructed here — FriendService has no shared
+    /// instance, and a View struct is rebuilt constantly.
+    @ObservedObject var friendService: FriendService
     @Environment(\.dismiss) private var dismiss
 
+    /// The run's post, so this shows the actual photo — not just a chip saying
+    /// one exists. Same card the feed draws (and the same lock when today's
+    /// photo hasn't been earned yet).
+    @State private var linkedPost: PostItem?
+    /// The run's GPS trace from the server — the owner's own detail gets this
+    /// from HealthKit, which never holds someone else's runs.
+    @State private var routeCoordinates: [CLLocationCoordinate2D]?
+    @State private var isLoadingRoute = false
+
+    /// The same rule your own detail uses, sanity guard included.
     private var pace: String {
-        guard workout.distance > 0, workout.totalDuration > 0 else { return "N/A" }
-        let minutesPerMile = (workout.totalDuration / 60.0) / workout.distance
-        let minutes = Int(minutesPerMile)
-        let seconds = Int((minutesPerMile - Double(minutes)) * 60)
-        return String(format: "%d:%02d /mi", minutes, seconds)
+        workoutPaceText(distanceMiles: workout.distance, durationSeconds: workout.totalDuration)
+    }
+
+    /// The run's post, headed like your own detail's "On the Feed" section but
+    /// without the owner's edit/delete/add-to-feed controls.
+    private func linkedPostSection(_ post: PostItem) -> some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            WorkoutDetailSectionHeader(icon: "photo.on.rectangle.angled", title: "On the Feed")
+            PostCardView(
+                post: post,
+                storyPhotoURL: post.storyPhotoURL,
+                onHype: {},
+                onReport: {},
+                onBlock: {},
+                onDelete: {}
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var routeMapSection: some View {
+        if let routeCoordinates, !routeCoordinates.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                WorkoutDetailSectionHeader(icon: "map.fill", title: "Route")
+                WorkoutRouteMapView(
+                    coordinates: routeCoordinates,
+                    routeColor: workoutColor
+                )
+                .frame(height: 260)
+                .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+            }
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
+        }
+    }
+
+    /// The run's post, found by workout id among the author's posts — the same
+    /// lookup your own detail does, just for someone else's id. The server
+    /// scopes it to your circle and applies the photo gate.
+    private func loadLinkedPost() async {
+        guard linkedPost == nil else { return }
+        let post = try? await PostService.fetchOwnPostForWorkout(
+            workoutId: workout.id, userId: workout.userId
+        )
+        await MainActor.run { linkedPost = post }
+    }
+
+    /// Only when the server said there's a route to draw — no point asking
+    /// otherwise, and `has_route` is already consent-gated.
+    private func loadRoute() async {
+        guard workout.hasRoute == true, routeCoordinates == nil, !isLoadingRoute else { return }
+        await MainActor.run { isLoadingRoute = true }
+        let raw = try? await friendService.fetchWorkoutRoute(
+            for: workout.userId, workoutId: workout.id
+        )
+        await MainActor.run {
+            routeCoordinates = decodeRouteCoordinates(raw)
+            isLoadingRoute = false
+        }
     }
 
     private var workoutColor: Color {
@@ -1125,77 +1197,75 @@ struct FriendWorkoutDetailSheet: View {
         }
     }
 
+    /// End − duration, the same way FriendWorkoutRow derives it. Nil when the
+    /// server has no device timestamp, which is the only reason the timeline
+    /// card is ever missing here.
+    private var startDate: Date? {
+        guard let end = workout.deviceEndDate, let d = RelativeTime.date(from: end) else { return nil }
+        return d.addingTimeInterval(-workout.totalDuration)
+    }
+
+    private var endDate: Date? {
+        guard let end = workout.deviceEndDate else { return nil }
+        return RelativeTime.date(from: end)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
                 MADTheme.Colors.appBackgroundGradient
                     .ignoresSafeArea()
 
+                // Same sections, same order, same components as your own
+                // WorkoutDetailView — a friend's run reads exactly like yours.
+                // Splits, the route map and the post card are the only things
+                // missing, because the server doesn't hand those over for
+                // someone else's workout.
                 ScrollView {
                     VStack(spacing: MADTheme.Spacing.lg) {
-                        // Hero card
-                        VStack(spacing: MADTheme.Spacing.md) {
-                            // Manual/edited warning banner
-                            if workout.isManualOrEdited {
-                                ManualWorkoutBanner(source: workout.source)
-                            }
+                        WorkoutHeroCard(
+                            icon: workoutIcon,
+                            typeLabel: workout.workoutType.capitalized,
+                            color: workoutColor,
+                            distanceText: workout.formattedDistance,
+                            dateText: workout.formattedDate,
+                            source: WorkoutSource(rawValue: workout.source ?? "") ?? .healthkit,
+                            hasRoute: workout.hasRoute == true,
+                            hasPhoto: workout.hasPhoto == true
+                        )
 
-                            // Workout type badge
-                            HStack(spacing: MADTheme.Spacing.sm) {
-                                Image(systemName: workoutIcon)
-                                    .font(.system(size: 14, weight: .semibold))
-                                Text(workout.workoutType.capitalized)
-                                    .font(MADTheme.Typography.smallBold)
-                            }
-                            .foregroundColor(workoutColor)
-                            .padding(.horizontal, MADTheme.Spacing.md)
-                            .padding(.vertical, MADTheme.Spacing.xs + 2)
-                            .background(
-                                Capsule()
-                                    .fill(workoutColor.opacity(0.15))
-                            )
-
-                            // Distance
-                            Text(workout.formattedDistance)
-                                .font(.system(size: 52, weight: .bold, design: .rounded))
-                                .foregroundColor(.primary)
-
-                            // Date
-                            Text(workout.formattedDate)
-                                .font(MADTheme.Typography.body)
-                                .foregroundColor(.secondary)
+                        // The run's post — the real photo, exactly as the feed
+                        // renders it. Read-only: hyping and reporting live on
+                        // the feed, and none of the owner actions apply here.
+                        if let post = linkedPost {
+                            linkedPostSection(post)
                         }
-                        .padding(MADTheme.Spacing.lg)
-                        .frame(maxWidth: .infinity)
-                        .madLiquidGlass()
 
-                        // Stats row
-                        HStack(spacing: MADTheme.Spacing.sm) {
-                            DashboardStatBox(
-                                title: "Duration",
-                                value: workout.formattedDuration,
-                                icon: "clock.fill",
-                                color: .orange
+                        // The map, on the same rule as your own detail: hidden
+                        // when the post card above already carries the run's
+                        // visuals, so there's never a double map.
+                        if linkedPost == nil {
+                            routeMapSection
+                        }
+
+                        WorkoutStatsCard(
+                            duration: workout.formattedDuration,
+                            pace: pace,
+                            calories: workout.calories.flatMap { $0 > 0 ? Int($0) : nil }
+                        )
+
+                        if let start = startDate, let end = endDate {
+                            WorkoutTimelineCard(
+                                startText: start.formattedTime,
+                                endText: end.formattedTime
                             )
-
-                            DashboardStatBox(
-                                title: "Pace",
-                                value: pace,
-                                icon: "speedometer",
-                                color: .green
-                            )
-
-                            if let calories = workout.calories, calories > 0 {
-                                DashboardStatBox(
-                                    title: "Calories",
-                                    value: "\(Int(calories))",
-                                    icon: "flame.fill",
-                                    color: MADTheme.Colors.madRed
-                                )
-                            }
                         }
                     }
                     .padding(MADTheme.Spacing.md)
+                }
+                .task {
+                    await loadLinkedPost()
+                    await loadRoute()
                 }
             }
             .navigationTitle("")

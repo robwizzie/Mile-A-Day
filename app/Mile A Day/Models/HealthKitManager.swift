@@ -441,6 +441,13 @@ class HealthKitManager: ObservableObject {
         // shuttles authoritative iOS data (streak, today's distance, goal,
         // name) to the watch so the two never disagree.
         MADWatchBridge.shared.activate()
+
+        // Resolve real authorization immediately. Nothing else here does: the
+        // flag is set by requestAuthorization, which only the UI calls, so a
+        // background-launched process read HealthKit with it still false and
+        // every query no-opped. This never prompts, and its callback is
+        // deferred to the main queue, so it can't re-enter this init.
+        refreshAuthorizationStatus()
     }
     
     // MARK: - Caching Methods
@@ -616,41 +623,92 @@ class HealthKitManager: ObservableObject {
         return nil
     }
     
-    // Request authorization to access HealthKit data
-    func requestAuthorization(completion: @escaping (Bool) -> Void) {
-        guard HKHealthStore.isHealthDataAvailable() else {
-            completion(false)
-            return
-        }
-        
-        // Define the types we want to read from HealthKit
-        let readTypes: Set = [
+    /// The types we read from HealthKit. Shared by the authorization request and
+    /// the non-prompting status check so the two can never drift apart.
+    private var healthKitReadTypes: Set<HKObjectType> {
+        [
             HKObjectType.workoutType(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
             HKObjectType.quantityType(forIdentifier: .stepCount)!,
             HKSeriesType.workoutRoute()
         ]
+    }
 
-        // Define the types we want to write to HealthKit (for workout tracking).
-        // workoutRoute share access lets in-app GPS workouts save their route,
-        // which is what the feed's route maps are built from at sync time.
-        let writeTypes: Set = [
+    /// The types we write (for workout tracking). workoutRoute share access lets
+    /// in-app GPS workouts save their route, which is what the feed's route maps
+    /// are built from at sync time.
+    private var healthKitWriteTypes: Set<HKSampleType> {
+        [
             HKObjectType.workoutType(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
             HKSeriesType.workoutRoute()
         ]
+    }
 
-        healthStore.requestAuthorization(toShare: writeTypes, read: readTypes) { success, error in
+    /// Resolve authorization WITHOUT prompting, so a process that never shows UI
+    /// can still read HealthKit.
+    ///
+    /// `isAuthorized` only ever became true inside `requestAuthorization`'s
+    /// completion — a UI path — which made it really mean "did someone ask
+    /// during THIS process", not "is this app authorized". It starts false in
+    /// every new process, and HealthKit's own background delivery launches this
+    /// app with no UI constantly, so in those processes every read guarded on
+    /// the flag silently no-opped: the index logged "❌ Not authorized" and
+    /// `recentWorkouts` stayed empty even though the user had granted access
+    /// long ago.
+    ///
+    /// `.unnecessary` means every type we use has already been answered for, so
+    /// queries can run. That is exactly what `requestAuthorization`'s `success`
+    /// already meant — neither reports whether READ access was *granted*, which
+    /// Apple hides by design (a denied read just returns no samples).
+    func refreshAuthorizationStatus(completion: ((Bool) -> Void)? = nil) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            completion?(false)
+            return
+        }
+        healthStore.getRequestStatusForAuthorization(
+            toShare: healthKitWriteTypes,
+            read: healthKitReadTypes
+        ) { [weak self] status, _ in
+            DispatchQueue.main.async {
+                guard let self else {
+                    completion?(false)
+                    return
+                }
+                // Only ever promote to true — never clobber a live grant from an
+                // in-flight requestAuthorization. Deliberately no other side
+                // effects: this is a question, not a request. Background
+                // delivery stays owned by requestAuthorization, which the UI
+                // runs on every foreground launch.
+                if status == .unnecessary && !self.isAuthorized {
+                    self.isAuthorized = true
+                }
+                completion?(self.isAuthorized)
+            }
+        }
+    }
+
+    // Request authorization to access HealthKit data
+    func requestAuthorization(completion: @escaping (Bool) -> Void) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            completion(false)
+            return
+        }
+
+        healthStore.requestAuthorization(
+            toShare: healthKitWriteTypes,
+            read: healthKitReadTypes
+        ) { success, error in
             DispatchQueue.main.async {
                 self.isAuthorized = success
-                
+
                 // Enable background delivery for workouts when authorized
                 if success {
                     self.enableBackgroundDelivery()
                 }
-                
+
                 completion(success)
             }
         }
@@ -745,6 +803,11 @@ class HealthKitManager: ObservableObject {
         healthStore.execute(query)
     }
     
+    /// Retries left for a `fetchRecentWorkouts` that errored out. A locked
+    /// device is the common case and it resolves on its own, so a couple of
+    /// spaced retries recover the list without waiting for the next refresh.
+    private var recentWorkoutsRetriesLeft = 3
+
     // Fetch recent running/walking workouts (last 30 days, capped at 50).
     // The date predicate keeps HealthKit from scanning all-time history just to
     // pull the most recent samples — far cheaper for users with long histories.
@@ -766,15 +829,42 @@ class HealthKitManager: ObservableObject {
             predicate: predicate,
             limit: 50,
             sortDescriptors: [sortDescriptor]
-        ) { [weak self] _, samples, _ in
-            guard let self = self, let workouts = samples as? [HKWorkout] else { return }
+        ) { [weak self] _, samples, error in
+            guard let self = self else { return }
 
+            // Query failed — most commonly because the device is locked
+            // (HealthKit data is protected while locked, so the query errors
+            // rather than returning). Same rule as fetchTodaysDistance: this is
+            // "no answer", NOT "no workouts". Keep the last good list and retry,
+            // because swallowing the error left the list empty until something
+            // else happened to call fetchAllWorkoutData again.
+            guard error == nil, let workouts = samples as? [HKWorkout] else {
+                self.retryFetchRecentWorkouts()
+                return
+            }
+
+            // Successful query: trust the result, empty or not (a real zero).
             DispatchQueue.main.async {
+                self.recentWorkoutsRetriesLeft = 3
                 self.recentWorkouts = workouts
             }
         }
 
         healthStore.execute(query)
+    }
+
+    /// Re-run a failed recent-workouts query a few times, backing off, so a
+    /// launch behind a locked screen still fills the list once it unlocks.
+    private func retryFetchRecentWorkouts() {
+        DispatchQueue.main.async {
+            guard self.recentWorkoutsRetriesLeft > 0 else { return }
+            let attempt = 4 - self.recentWorkoutsRetriesLeft
+            self.recentWorkoutsRetriesLeft -= 1
+            let delay = Double(attempt) * 2.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.fetchRecentWorkouts()
+            }
+        }
     }
     
     // Helper method to check if user has completed their mile goal today

@@ -79,13 +79,13 @@ struct FriendWorkoutRow: View {
                     Text(verb)
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundColor(MADTheme.Colors.secondaryText)
+                        .lineLimit(1)
                     Text(workout.distance.milesFormatted)
                         .font(.system(size: 17, weight: .black, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(MADTheme.Colors.primaryText)
-                    if workout.isManualOrEdited {
-                        ManualWorkoutBadgeFromString(source: workout.source)
-                    }
+                        .lineLimit(1)
+                        .layoutPriority(1)
                 }
                 HStack(spacing: 5) {
                     Image(systemName: "clock.fill")
@@ -97,10 +97,22 @@ struct FriendWorkoutRow: View {
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(MADTheme.Colors.secondaryText)
+                        .lineLimit(1)
                 }
+
+                // Identical chips to the owner's own WorkoutRow — a friend's run
+                // reads the same as yours. Route/photo come from the server
+                // (`has_route`/`has_photo`); older servers omit them and the
+                // chips simply don't draw.
+                WorkoutRowTags(
+                    source: WorkoutSource(rawValue: workout.source ?? "") ?? .healthkit,
+                    hasRoute: workout.hasRoute == true,
+                    hasPhoto: workout.hasPhoto == true,
+                    routeColor: workoutColor
+                )
             }
 
-            Spacer()
+            Spacer(minLength: MADTheme.Spacing.sm)
 
             VStack(alignment: .trailing, spacing: 2) {
                 Text(dateLabel)
@@ -112,6 +124,8 @@ struct FriendWorkoutRow: View {
                         .foregroundColor(MADTheme.Colors.secondaryText)
                 }
             }
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
 
             if showChevron {
                 Image(systemName: "chevron.right")

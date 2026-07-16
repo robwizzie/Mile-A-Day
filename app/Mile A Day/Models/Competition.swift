@@ -870,6 +870,9 @@ struct NotificationSettingsResponse: Codable {
     let quiet_hours_end: Int?
     // Optional: absent on older server builds.
     let h2h_close_friends_only: Bool?
+    /// "public" | "friends" | "private" — who may see my routes and photos.
+    /// Optional: absent on older server builds (treat as "friends").
+    let workout_visibility: String?
 }
 
 struct FriendNotificationSetting: Codable, Identifiable {

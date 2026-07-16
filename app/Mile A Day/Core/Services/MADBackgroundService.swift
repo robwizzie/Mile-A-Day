@@ -132,7 +132,8 @@ final class MADBackgroundService: NSObject, ObservableObject {
 
     @MainActor
     private func handleNewWorkoutData() async {
-        guard await requestHealthKitAuthorizationIfNeeded() else { return }
+        // performBackgroundSync establishes authorization for every reason now,
+        // so this path no longer needs its own check.
         await performBackgroundSync(reason: .healthKitObserver)
     }
     
@@ -166,6 +167,16 @@ final class MADBackgroundService: NSObject, ObservableObject {
         // Only run if user has authenticated.
         guard UserDefaults.standard.bool(forKey: "MAD_IsAuthenticated") else {
             print("[MADBackgroundService] Skipping sync — user not authenticated")
+            return false
+        }
+
+        // Establish HealthKit authorization BEFORE any read. Only the observer
+        // path (handleNewWorkoutData) used to do this, so a background launch,
+        // BGTask, or silent push ran the entire sync with `isAuthorized` still
+        // false — every query returned instantly having done nothing, which is
+        // the "❌ Not authorized to access HealthKit" a background launch logs.
+        guard await requestHealthKitAuthorizationIfNeeded() else {
+            print("[MADBackgroundService] Skipping sync — HealthKit not authorized")
             return false
         }
 
@@ -214,20 +225,22 @@ final class MADBackgroundService: NSObject, ObservableObject {
     }
     
     private func requestHealthKitAuthorizationIfNeeded() async -> Bool {
-        return await withCheckedContinuation { [weak self] continuation in
-            guard let self = self else {
-                continuation.resume(returning: false)
-                return
-            }
-            
-            if self.healthManager.isAuthorized {
-                continuation.resume(returning: true)
-                return
-            }
-            
-            self.healthManager.requestAuthorization { success in
-                continuation.resume(returning: success)
-            }
+        if healthManager.isAuthorized { return true }
+
+        // Resolve WITHOUT prompting first. This service holds its own
+        // HealthKitManager, so its flag starts false in every process no matter
+        // what the UI's instance already knows — and in a background launch
+        // there's no UI to prompt with anyway. A user who granted access long
+        // ago needs no prompt, just a fresh process asking the right question.
+        let resolved = await withCheckedContinuation { continuation in
+            healthManager.refreshAuthorizationStatus { continuation.resume(returning: $0) }
+        }
+        if resolved { return true }
+
+        // Genuinely undetermined (first run) — fall back to the real request,
+        // which prompts if there's UI to prompt with.
+        return await withCheckedContinuation { continuation in
+            healthManager.requestAuthorization { continuation.resume(returning: $0) }
         }
     }
     

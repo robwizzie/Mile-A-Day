@@ -4,10 +4,10 @@ import HealthKit
 /// A dedicated home for a user's runs: a month calendar (completed days lit in
 /// the same language as the streak calendar) plus the selected day's workouts.
 /// Tapping a workout opens a swipeable detail (WorkoutPagerView) so you can flick
-/// through that day's runs. Reached from the Dashboard's "Recent Workouts" card.
+/// through that day's runs. PUSHED from the Dashboard's "Recent Workouts" card,
+/// so it owns no NavigationStack of its own and gets the standard back button.
 struct WorkoutsView: View {
     @ObservedObject var healthManager: HealthKitManager
-    @Environment(\.dismiss) private var dismiss
 
     private enum Mode: Hashable { case calendar, list }
     @State private var mode: Mode = .calendar
@@ -22,49 +22,40 @@ struct WorkoutsView: View {
     private let calendar = Calendar.current
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
-                ScrollView {
-                    VStack(spacing: MADTheme.Spacing.lg) {
-                        Picker("View", selection: $mode) {
-                            Text("Calendar").tag(Mode.calendar)
-                            Text("List").tag(Mode.list)
-                        }
-                        .pickerStyle(.segmented)
-
-                        if mode == .calendar {
-                            calendarCard
-                            selectedDaySection
-                        } else {
-                            RecentWorkoutsView(workouts: healthManager.recentWorkouts)
-                        }
+        ZStack {
+            MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: MADTheme.Spacing.lg) {
+                    Picker("View", selection: $mode) {
+                        Text("Calendar").tag(Mode.calendar)
+                        Text("List").tag(Mode.list)
                     }
-                    .padding(MADTheme.Spacing.md)
+                    .pickerStyle(.segmented)
+
+                    if mode == .calendar {
+                        calendarCard
+                        selectedDaySection
+                    } else {
+                        RecentWorkoutsView(workouts: healthManager.recentWorkouts)
+                    }
                 }
+                .padding(MADTheme.Spacing.md)
             }
-            .navigationTitle("Workouts")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                        .foregroundColor(MADTheme.Colors.madRed)
-                        .fontWeight(.semibold)
-                }
-            }
-            .task {
-                pickDefaultDayIfNeeded()
-                await loadLinkedPosts()
-            }
-            .sheet(item: $selectedWorkout) { identifiable in
-                let list = workouts(on: selectedDay ?? Date())
-                WorkoutPagerView(
-                    workouts: list,
-                    startIndex: list.firstIndex { $0.uuid == identifiable.workout.uuid } ?? 0,
-                    preloadedPosts: postsByWorkout
-                )
-            }
+        }
+        .navigationTitle("Workouts")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .task {
+            pickDefaultDayIfNeeded()
+            await loadLinkedPosts()
+        }
+        .sheet(item: $selectedWorkout) { identifiable in
+            let list = workouts(on: selectedDay ?? Date())
+            WorkoutPagerView(
+                workouts: list,
+                startIndex: list.firstIndex { $0.uuid == identifiable.workout.uuid } ?? 0,
+                preloadedPosts: postsByWorkout
+            )
         }
         // Keep the shared HealthKit manager available to WorkoutRow / the pager's
         // detail views regardless of how this screen was presented.
@@ -74,24 +65,34 @@ struct WorkoutsView: View {
     // MARK: - Calendar
 
     private var calendarCard: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
+        // One pass for the whole month, then every cell just reads its facts.
+        let info = monthInfo
+        return VStack(spacing: MADTheme.Spacing.md) {
             HStack {
                 Button { changeMonth(-1) } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.white)
                         .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
                 }
                 Spacer()
-                Text(monthTitle)
-                    .font(.system(size: 17, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white)
+                VStack(spacing: 1) {
+                    Text(monthTitle)
+                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                    Text(monthSummary(info))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(.white.opacity(0.5))
+                }
                 Spacer()
                 Button { changeMonth(1) } label: {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(canGoNext ? .white : .white.opacity(0.2))
                         .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
                 }
                 .disabled(!canGoNext)
             }
@@ -105,38 +106,105 @@ struct WorkoutsView: View {
                 }
             }
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 8) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 6) {
                 ForEach(Array(monthCells.enumerated()), id: \.offset) { _, cell in
                     if let date = cell {
-                        dayCell(date)
+                        dayCell(
+                            date,
+                            status: dayStatus(date),
+                            info: info[calendar.startOfDay(for: date)] ?? DayInfo()
+                        )
                     } else {
-                        Color.clear.frame(height: 38)
+                        Color.clear.frame(height: Self.cellHeight)
                     }
                 }
             }
+
+            calendarLegend
         }
         .padding()
         .cardStyle()
     }
 
-    private func dayCell(_ date: Date) -> some View {
-        let status = dayStatus(date)
+    /// Height of a day cell: the 36pt disc plus the type-dot strip under it.
+    private static let cellHeight: CGFloat = 47
+
+    /// Without this, the dots and the camera badge are just decoration nobody
+    /// can decode — the legend is what makes the month readable at a glance.
+    private var calendarLegend: some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            legendItem(color: MADTheme.workoutColor("running"), label: "Run")
+            legendItem(color: MADTheme.workoutColor("walking"), label: "Walk")
+            HStack(spacing: 4) {
+                Image(systemName: "camera.fill")
+                    .font(.system(size: 7, weight: .black))
+                    .foregroundColor(.white)
+                    .padding(2.5)
+                    .background(Circle().fill(Color.pink))
+                Text("Photo")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+            }
+            Spacer()
+        }
+        .padding(.top, 2)
+    }
+
+    private func legendItem(color: Color, label: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(label)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.6))
+        }
+    }
+
+    /// A day: the goal-status disc (same language as the streak calendar), a dot
+    /// per activity type under it — two dots is a run-AND-walk day — and a
+    /// camera badge when one of that day's runs carries a photo.
+    private func dayCell(_ date: Date, status: DayStatus, info: DayInfo) -> some View {
         let isToday = calendar.isDateInToday(date)
         let isSelected = selectedDay.map { calendar.isDate($0, inSameDayAs: date) } ?? false
         return Button {
             withAnimation(.easeInOut(duration: 0.15)) { selectedDay = date }
         } label: {
-            Text("\(calendar.component(.day, from: date))")
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundColor(status == .none ? .white.opacity(0.45) : .white)
-                .frame(width: 38, height: 38)
-                .background(Circle().fill(status.fill))
-                .overlay(
-                    Circle().strokeBorder(
-                        isSelected ? Color.white : (isToday ? MADTheme.Colors.madRed : .clear),
-                        lineWidth: isSelected ? 2 : 1.5
+            VStack(spacing: 4) {
+                Text("\(calendar.component(.day, from: date))")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(status == .none ? .white.opacity(0.45) : .white)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(status.fill))
+                    .overlay(
+                        Circle().strokeBorder(
+                            isSelected ? Color.white : (isToday ? MADTheme.Colors.madRed : .clear),
+                            lineWidth: isSelected ? 2 : 1.5
+                        )
                     )
-                )
+                    .overlay(alignment: .topTrailing) {
+                        if info.hasPhoto {
+                            Image(systemName: "camera.fill")
+                                .font(.system(size: 6, weight: .black))
+                                .foregroundColor(.white)
+                                .padding(2.5)
+                                .background(Circle().fill(Color.pink))
+                                .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: 1))
+                                .offset(x: 2, y: -2)
+                        }
+                    }
+
+                // Reserved strip: dots or not, every cell is the same height, so
+                // the grid never reflows row-to-row.
+                HStack(spacing: 3) {
+                    ForEach(info.types, id: \.self) { type in
+                        Circle()
+                            .fill(MADTheme.workoutColor(type))
+                            .frame(width: 5, height: 5)
+                    }
+                }
+                .frame(height: 5)
+            }
+            .frame(height: Self.cellHeight)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -234,6 +302,70 @@ struct WorkoutsView: View {
             case .complete: return MADTheme.Colors.success
             }
         }
+    }
+
+    /// The decoration a single calendar day carries. Goal status is NOT in here
+    /// — it stays with `dayStatus`, which reads the timezone-aware index, so the
+    /// disc's fill keeps matching the streak calendar exactly even when the
+    /// workout cache and the index disagree.
+    private struct DayInfo {
+        /// Distinct activity types that day, run first — one dot each, so a
+        /// run-AND-walk day reads as two dots without any extra chrome.
+        var types: [String] = []
+        var hasPhoto: Bool = false
+    }
+
+    /// The visible month's type dots and photo flags, bucketed in ONE pass over
+    /// the workout cache and keyed by start-of-day.
+    ///
+    /// Deliberately not `workouts(on:)` per cell: that re-filters the entire
+    /// cache for each of the 42 cells, and for a day with no indexed workouts it
+    /// takes the expensive corrected-time fallback — 40k+ calendar comparisons
+    /// per body evaluation on a long history, on every day tap. Bucketing by
+    /// `getCorrectedLocalTime` groups by the same local day that function does.
+    private var monthInfo: [Date: DayInfo] {
+        guard let interval = calendar.dateInterval(of: .month, for: month) else { return [:] }
+        var out: [Date: DayInfo] = [:]
+        for workout in healthManager.cachedWorkouts {
+            let day = calendar.startOfDay(for: healthManager.getCorrectedLocalTime(for: workout))
+            guard day >= interval.start, day < interval.end else { continue }
+            var info = out[day] ?? DayInfo()
+            let key = workout.workoutActivityType.madTypeKey
+            if !info.types.contains(key) { info.types.append(key) }
+            if hasRealPhoto(postsByWorkout[workout.uuid.uuidString]) { info.hasPhoto = true }
+            out[day] = info
+        }
+        for (day, info) in out {
+            out[day] = DayInfo(
+                types: info.types.sorted { typeRank($0) < typeRank($1) },
+                hasPhoto: info.hasPhoto
+            )
+        }
+        return out
+    }
+
+    /// Run before walk before anything else, so a both-day's dots never swap
+    /// order between renders.
+    private func typeRank(_ type: String) -> Int {
+        switch type {
+        case "running": return 0
+        case "walking": return 1
+        default: return 2
+        }
+    }
+
+    /// "12 of 31 days · 38.4 mi" — the month at a glance under its title. Only
+    /// days that actually have workouts are priced, so this costs one index
+    /// lookup per active day rather than a scan per cell.
+    private func monthSummary(_ info: [Date: DayInfo]) -> String {
+        let days = calendar.range(of: .day, in: .month, for: month)?.count ?? 30
+        var complete = 0
+        var total = 0.0
+        for day in info.keys {
+            if dayStatus(day) == .complete { complete += 1 }
+            total += miles(on: day)
+        }
+        return String(format: "%d of %d days \u{00B7} %.1f mi", complete, days, total)
     }
 
     private func dayStatus(_ date: Date) -> DayStatus {
