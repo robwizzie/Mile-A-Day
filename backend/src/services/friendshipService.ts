@@ -362,8 +362,11 @@ export async function getFriendsWorkoutFeed(
 			w.calories::float AS calories,
 			w.steps,
 			(w.user_id = $1) AS is_self,
-			-- Exact workout/post rule for button state: don't let a different
-			-- same-day mile hype make this workout look already hyped.
+			-- Unified RUN rule for button state (matches the feed/inbox): this
+			-- run's mile hypes (day composite OR exact workout id) and its posts'
+			-- hypes are one pool, so a mile hyped from any surface shows hyped
+			-- here too and can't be hyped again. A different same-day workout
+			-- keyed by its own id stays independently hypeable.
 			EXISTS (
 				SELECT 1 FROM hype_log h
 				WHERE h.sender_id = $1
