@@ -99,6 +99,9 @@ struct RecentWorkoutsView: View {
     @EnvironmentObject var healthManager: HealthKitManager
     @State private var selectedWorkout: IdentifiableWorkout?
     @State private var displayCount: Int = 10
+    /// Workout IDs that have a real linked photo, resolved in ONE batched
+    /// lookup for the whole list (never per row).
+    @State private var photoWorkoutIds: Set<String> = []
 
     private static let pageSize: Int = 10
 
@@ -116,9 +119,13 @@ struct RecentWorkoutsView: View {
                         Button {
                             selectedWorkout = IdentifiableWorkout(workout: workout)
                         } label: {
-                            WorkoutRow(workout: workout, showDate: true)
-                                .padding(MADTheme.Spacing.md)
-                                .madLiquidGlass()
+                            WorkoutRow(
+                                workout: workout,
+                                showDate: true,
+                                hasPhoto: photoWorkoutIds.contains(workout.uuid.uuidString)
+                            )
+                            .padding(MADTheme.Spacing.md)
+                            .madLiquidGlass()
                         }
                         .buttonStyle(ScaleButtonStyle())
                     }
@@ -152,5 +159,36 @@ struct RecentWorkoutsView: View {
                 displayCount = Self.pageSize
             }
         }
+        .task {
+            await loadPhotoFlags()
+        }
+    }
+
+    /// One batched pass over the user's own recent posts builds the set of
+    /// workout IDs that have a real photo, so each row can show a "Photo" chip
+    /// without its own network call. Best-effort — failure just leaves chips off.
+    private func loadPhotoFlags() async {
+        guard photoWorkoutIds.isEmpty,
+              let uid = UserManager.shared.currentUser.backendUserId else { return }
+
+        var ids = Set<String>()
+        var before: String? = nil
+        // Two pages (~48 posts) comfortably covers the recent-workouts window.
+        for _ in 0..<2 {
+            guard let page = try? await PostService.fetchUserPosts(
+                userId: uid, before: before, includeStories: true
+            ) else { break }
+            for post in page.items {
+                guard let wid = post.workout_id else { continue }
+                let hasRealPhoto = post.storyPhotoURL != nil
+                    || (post.is_auto != true && !post.media_url.isEmpty)
+                if hasRealPhoto { ids.insert(wid) }
+            }
+            guard let next = page.next_before else { break }
+            before = next
+        }
+
+        let resolved = ids
+        await MainActor.run { photoWorkoutIds = resolved }
     }
 }

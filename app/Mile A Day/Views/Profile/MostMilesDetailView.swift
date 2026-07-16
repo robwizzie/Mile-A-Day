@@ -251,7 +251,13 @@ extension HKWorkoutActivityType {
 struct WorkoutRow: View {
     let workout: HKWorkout
     var showDate: Bool = false
+    /// Whether this run has a linked photo post — supplied by the list so we
+    /// don't do a per-row network scan (the route probe below is cheap/local).
+    var hasPhoto: Bool = false
     @EnvironmentObject var healthManager: HealthKitManager
+
+    /// True once we confirm the workout carries a GPS trace (cheap limit-1 probe).
+    @State private var hasRoute: Bool = false
 
     private var correctedStartTime: Date {
         let correctedEndTime = healthManager.getCorrectedLocalTime(for: workout)
@@ -323,6 +329,21 @@ struct WorkoutRow: View {
                         .monospacedDigit()
                         .foregroundColor(MADTheme.Colors.secondaryText)
                 }
+
+                // Route / photo chips — surfaces at a glance that tapping in
+                // reveals a map or a picture, so those runs stand out.
+                if hasRoute || hasPhoto {
+                    HStack(spacing: 6) {
+                        if hasRoute {
+                            rowTag(icon: "map.fill", label: "Route", color: workoutColor)
+                        }
+                        if hasPhoto {
+                            rowTag(icon: "photo.fill", label: "Photo", color: .pink)
+                        }
+                    }
+                    .padding(.top, 1)
+                    .transition(.opacity)
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
@@ -336,6 +357,27 @@ struct WorkoutRow: View {
                     .foregroundColor(MADTheme.Colors.secondaryText)
             }
         }
+        .task(id: workout.uuid) {
+            // Cheap existence probe (limit 1) — never enumerates route points.
+            let found = await healthManager.hasRouteData(for: workout)
+            await MainActor.run {
+                withAnimation(.easeInOut(duration: 0.25)) { hasRoute = found }
+            }
+        }
+    }
+
+    /// Small rounded chip used for the route/photo indicators.
+    private func rowTag(icon: String, label: String, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .bold))
+            Text(label)
+                .font(.system(size: 10, weight: .heavy, design: .rounded))
+        }
+        .foregroundColor(color)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(color.opacity(0.15)))
     }
 
     /// Feed-style verb ("Ran", "Walked") for the headline.
