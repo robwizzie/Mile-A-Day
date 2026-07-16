@@ -69,10 +69,10 @@ class AppleSignInManager: NSObject, ObservableObject {
 
         // Add timeout to prevent infinite loading
         let result = try await withThrowingTaskGroup(of: ASAuthorization.self) { group in
-            group.addTask {
+            group.addTask { [weak self] in
                 try await withCheckedThrowingContinuation { continuation in
                     let controller = ASAuthorizationController(authorizationRequests: [request])
-                    
+
                     // Create delegate on main actor
                     Task { @MainActor in
                         let delegate = AppleSignInDelegate { [weak self] result in
@@ -81,7 +81,7 @@ class AppleSignInManager: NSObject, ObservableObject {
                         }
 
                         // Retain the delegate to prevent it from being deallocated
-                        self.currentDelegate = delegate
+                        self?.currentDelegate = delegate
                         controller.delegate = delegate
                         controller.presentationContextProvider = delegate
                         controller.performRequests()

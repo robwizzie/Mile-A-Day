@@ -1,7 +1,6 @@
 import SwiftUI
 import HealthKit
 import UserNotifications
-import StoreKit
 
 struct MainTabView: View {
     @Environment(\.appStateManager) var appStateManager
@@ -25,7 +24,6 @@ struct MainTabView: View {
 
     // "Leave us a review" moment — gated to streak milestones by ReviewPromptManager.
     @StateObject private var reviewManager = ReviewPromptManager.shared
-    @Environment(\.requestReview) private var requestReview
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -357,15 +355,19 @@ struct MainTabView: View {
     }
 
     /// After the review sheet dismisses, if the user tapped the positive CTA,
-    /// fire the native StoreKit review request on the now-clean screen. A short
-    /// delay lets the sheet finish dismissing so the system prompt isn't racing
-    /// the dismissal animation.
+    /// open the App Store review page. We deliberately do NOT use StoreKit's
+    /// `requestReview` here: it's for unprompted moments, and Apple silently
+    /// no-ops it once the user is over the ~3/year quota or has already rated —
+    /// which made the button look broken. Our sheet IS the ask, so the tap is
+    /// explicit intent and the deep link always lands. A short delay lets the
+    /// sheet finish dismissing before we hand off to the App Store.
     private func handleReviewSheetDismiss() {
         guard reviewManager.pendingRateRequest else { return }
         reviewManager.pendingRateRequest = false
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            requestReview()
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let url = ReviewPromptManager.writeReviewURL else { return }
+            _ = await UIApplication.shared.open(url)
         }
     }
 

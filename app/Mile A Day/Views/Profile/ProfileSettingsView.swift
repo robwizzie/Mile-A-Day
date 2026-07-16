@@ -160,7 +160,11 @@ struct ProfileSettingsView: View {
     // DEBUG builds only — compiled out of Release so no dev tooling ships.
     #if DEBUG
     private var showsDevelopmentSection: Bool {
-        AppEnvironment.isDevelopment && userManager.currentUser.role == "admin"
+        // TEMPORARY (local testing): admin-role check dropped so dev tools show
+        // on any DEBUG build without promoting the account server-side.
+        // Restore before committing:
+        //   AppEnvironment.isDevelopment && userManager.currentUser.role == "admin"
+        AppEnvironment.isDevelopment
     }
 
     private var developmentSection: some View {

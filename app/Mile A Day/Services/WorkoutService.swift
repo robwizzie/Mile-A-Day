@@ -73,7 +73,12 @@ class WorkoutService: ObservableObject {
     }
 
     // MARK: - Private Helper Methods
-    private func makeRequest<T: Decodable>(
+    /// `nonisolated` because this only forwards to `APIClient.fancyFetch` and
+    /// maps errors — it touches no actor state. Staying on @MainActor made the
+    /// call to the nonisolated `fancyFetch` cross into a @concurrent context,
+    /// which Swift 6 rejects: T's `Decodable` conformance may itself be
+    /// actor-isolated, and an isolated conformance can't be sent across.
+    private nonisolated func makeRequest<T: Decodable & SendableMetatype>(
         endpoint: String,
         method: HTTPMethod = .GET,
         body: Data? = nil,

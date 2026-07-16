@@ -21,6 +21,9 @@ import SwiftUI
 final class ReviewPromptManager: ObservableObject {
     static let shared = ReviewPromptManager()
 
+    /// App Store listing, deep-linked straight to the write-a-review composer.
+    static let writeReviewURL = URL(string: "https://apps.apple.com/app/id6746970905?action=write-review")
+
     /// Streak thresholds that trigger the review moment, ascending.
     private let milestones = [3, 7, 30]
 

@@ -86,6 +86,39 @@ struct DeveloperSettingsView: View {
                 .disabled(workoutService.isLoading)
             }
 
+            // Review Prompt Section
+            Section(
+                header: Text("Review Prompt"),
+                footer: Text("Reset clears the recorded milestones so the prompt can fire again — it reappears on the next calm pass on the Dashboard tab (background then foreground the app). Open goes straight to the App Store review composer; this only works on a real device, not the Simulator.")
+            ) {
+                Button(action: {
+                    ReviewPromptManager.shared.resetForTesting()
+                    successMessage = "Review prompt reset. Go to the Dashboard tab, then background and foreground the app."
+                    showSuccessAlert = true
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.counterclockwise")
+                            .foregroundColor(.orange)
+                        Text("Reset Review Prompt")
+                        Spacer()
+                    }
+                }
+
+                Button(action: {
+                    guard let url = ReviewPromptManager.writeReviewURL else { return }
+                    UIApplication.shared.open(url)
+                }) {
+                    HStack {
+                        Image(systemName: "star.fill")
+                            .foregroundColor(.yellow)
+                        Text("Open App Store Review Page")
+                        Spacer()
+                        Image(systemName: "arrow.up.forward.app")
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
             // Test Push Notification Section
             Section(header: Text("Test Push Notification"), footer: Text("Sends to user f9157a...197b")) {
                 TextField("Notification message", text: $testNotificationMessage)

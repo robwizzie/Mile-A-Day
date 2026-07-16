@@ -20,7 +20,7 @@ func renderAchievementShareImage<Card: View>(_ card: Card) -> UIImage? {
 // MARK: - Shared chrome
 
 /// The dark gradient + a rarity/accent-tinted glow shared by every card.
-private struct ShareCardBackground: View {
+private struct AchievementCardBackground: View {
     let glow: Color
     var body: some View {
         ZStack {
@@ -41,7 +41,7 @@ private struct ShareCardBackground: View {
     }
 }
 
-private struct ShareCardFooter: View {
+private struct AchievementCardFooter: View {
     var body: some View {
         HStack(spacing: 10) {
             MADLogoMark(size: 34)
@@ -62,7 +62,7 @@ struct BadgeShareCardView: View {
 
     var body: some View {
         ZStack {
-            ShareCardBackground(glow: badge.rarity.color)
+            AchievementCardBackground(glow: badge.rarity.color)
 
             VStack(spacing: 22) {
                 Spacer()
@@ -110,7 +110,7 @@ struct BadgeShareCardView: View {
                 .padding(.horizontal, 40)
 
                 Spacer()
-                ShareCardFooter().padding(.bottom, 40)
+                AchievementCardFooter().padding(.bottom, 40)
             }
         }
         .frame(width: cardWidth, height: cardHeight)
@@ -139,7 +139,7 @@ struct PRShareCardView: View {
 
     var body: some View {
         ZStack {
-            ShareCardBackground(glow: record.accent)
+            AchievementCardBackground(glow: record.accent)
 
             VStack(spacing: 20) {
                 Spacer()
@@ -178,7 +178,7 @@ struct PRShareCardView: View {
                 .padding(.horizontal, 40)
 
                 Spacer()
-                ShareCardFooter().padding(.bottom, 40)
+                AchievementCardFooter().padding(.bottom, 40)
             }
         }
         .frame(width: cardWidth, height: cardHeight)
