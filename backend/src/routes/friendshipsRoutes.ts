@@ -15,6 +15,7 @@ import {
   checkNudgeStatus,
   checkNudgeStatusBatch,
 } from "../controllers/friendNudgeController.js";
+import { getSharedStreaksBatch } from "../controllers/sharedStreakController.js";
 import {
   listCloseFriends,
   addCloseFriendHandler,
@@ -79,6 +80,10 @@ router.delete(
   requireSelfAccess("fromUser"),
   getFriendshipHandler("removed"),
 );
+
+// Friend streaks: shared consecutive-day streaks vs the viewer's friends.
+// New endpoint (touches no existing route) — only the feature build calls it.
+router.post("/shared-streaks", getSharedStreaksBatch);
 
 // Nudge routes
 router.post("/:friendId/nudge", nudgeFriend);

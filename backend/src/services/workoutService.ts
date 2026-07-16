@@ -212,7 +212,7 @@ function classifyWorkoutSpeed(
   return { exclusionReason: null, speedFlagged: false };
 }
 
-function dateStringMinus(dateStr: string, days: number): string {
+export function dateStringMinus(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const date = new Date(Date.UTC(y, m - 1, d));
   date.setUTCDate(date.getUTCDate() - days);
