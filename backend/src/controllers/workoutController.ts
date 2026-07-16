@@ -519,7 +519,7 @@ export async function getUserRoutesController(req: Request, res: Response) {
   }
 }
 
-export async function getUserStats(req: Request, res: Response) {
+export async function getUserStats(req: AuthenticatedRequest, res: Response) {
   if (!hasRequiredKeys(["userId"], req, res)) return;
 
   try {
@@ -544,7 +544,10 @@ export async function getUserStats(req: Request, res: Response) {
       getTotalMiles(userId, startDateParam),
       getBestMilesDay(userId, startDateParam),
       getBestSplit(userId, startDateParam),
-      getRecentWorkoutsDb(userId, 10),
+      // Viewer matters here too: this payload's recent_workouts carry
+      // has_route/has_photo, and without it they'd report nothing to anyone —
+      // including the owner looking at their own stats.
+      getRecentWorkoutsDb(userId, 10, req.userId),
       getTodayMiles(userId),
     ]);
 

@@ -424,14 +424,21 @@ export async function getRecentWorkouts(
 		WHERE u.user_id = $1
 	)
 	SELECT r.*,
-		(
+		-- COALESCE the WHOLE expression, not just its parts: with no viewer,
+		-- '$1 = $3' is NULL and the visibility predicate evaluates to NULL
+		-- rather than false, so 'true AND NULL' made these columns come back
+		-- JSON null instead of a boolean. NULL is fail-closed in a WHERE but
+		-- meaningless as a value — these must always be a real true/false.
+		COALESCE(
 			wr.workout_id IS NOT NULL
 			AND COALESCE((SELECT allowed FROM route_consent), false)
-			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$1", "$3")}
+			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$1", "$3")},
+			false
 		) AS has_route,
-		(
+		COALESCE(
 			pw.workout_id IS NOT NULL
-			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$1", "$3")}
+			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$1", "$3")},
+			false
 		) AS has_photo
 	FROM recent r
 	LEFT JOIN workout_routes wr ON wr.workout_id = r.workout_id
