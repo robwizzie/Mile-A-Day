@@ -257,13 +257,17 @@ export async function getUserStoriesController(
   res: Response,
 ) {
   try {
-    res
-      .status(200)
-      .json(
-        signMediaUrlsDeep(
-          await getUserActiveStories(req.userId!, req.params.userId),
-        ),
-      );
+    const stories = await getUserActiveStories(req.userId!, req.params.userId);
+    // Gate today's story photos the same way the feed/profile do — a viewer who
+    // hasn't finished their own mile can't pull a friend's today photo. (The
+    // client already hides today's stories pre-completion; this closes the
+    // server-side bypass so the photo bytes are never handed over.)
+    lockUnearnedPhotos(
+      stories,
+      req.userId!,
+      await viewerPhotoGate(req.userId!),
+    );
+    res.status(200).json(signMediaUrlsDeep(stories));
   } catch (error: any) {
     console.error("Error fetching user stories:", error.message);
     res.status(500).json({ error: "Error fetching stories" });
