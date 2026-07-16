@@ -1000,27 +1000,6 @@ struct FriendsListView: View {
                         }
                         .foregroundColor(.orange)
                     }
-                    // Shared "friend streak" — days you BOTH completed in a row.
-                    // A bordered pill in a distinct pink-red so it never reads as
-                    // the friend's own (orange) streak next to it.
-                    if let shared = friendService.sharedStreaks[friend.user_id], shared > 0 {
-                        HStack(spacing: 2) {
-                            Image(systemName: "flame.fill")
-                                .font(.system(size: 9, weight: .bold))
-                            Text("\(shared)")
-                                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                        }
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color(red: 1.0, green: 0.5, blue: 0.7), MADTheme.Colors.madRed],
-                                startPoint: .top, endPoint: .bottom
-                            )
-                        )
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1.5)
-                        .background(Capsule().fill(Color.white.opacity(0.08)))
-                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5))
-                    }
                 }
 
                 Text(rowSubtitle(isCompleted: isCompleted, todayMiles: todayMiles, goal: goalMiles))
