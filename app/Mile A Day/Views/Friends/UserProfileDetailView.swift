@@ -159,9 +159,6 @@ struct UserProfileDetailView: View {
             // distance never loaded.
             await friendService.refreshAllData()
             await loadNudgeStatus()
-            if friendService.isFriend(user) {
-                await friendService.loadSharedStreaks(friendIds: [user.user_id])
-            }
         }
         .task {
             await closeFriends.loadIfNeeded()
@@ -640,24 +637,6 @@ struct UserProfileDetailView: View {
                         : String(format: "%d%% of today's mile", Int(progress * 100)))
                         .font(.system(size: 11, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.5))
-
-                    // Friend streak — days you BOTH completed in a row. Labeled
-                    // explicitly so it's never confused with their own streak.
-                    if let shared = friendService.sharedStreaks[user.user_id], shared > 0 {
-                        HStack(spacing: 4) {
-                            Image(systemName: "flame.fill")
-                                .font(.system(size: 10, weight: .bold))
-                            Text("\(shared)-day streak with you")
-                                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        }
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color(red: 1.0, green: 0.5, blue: 0.7), MADTheme.Colors.madRed],
-                                startPoint: .leading, endPoint: .trailing
-                            )
-                        )
-                        .padding(.top, 1)
-                    }
                 }
 
                 Spacer()

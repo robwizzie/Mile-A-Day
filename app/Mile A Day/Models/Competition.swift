@@ -857,11 +857,6 @@ struct NudgeStatusBatchResponse: Codable {
     let statuses: [String: NudgeStatusResponse]
 }
 
-/// Friend-streak counts keyed by friend id (from `/friends/shared-streaks`).
-struct SharedStreaksResponse: Codable {
-    let shared_streaks: [String: Int]
-}
-
 // MARK: - Notification Settings Models
 
 struct NotificationSettingsResponse: Codable {
