@@ -43,30 +43,33 @@ enum MidRunPhotoStash {
 
     /// Save a snap. Downscaled to a sane pixel size before writing — the
     /// composer flattens to 1080 wide anyway, and full 48MP camera output
-    /// would burn sandbox space for nothing.
+    /// would burn sandbox space for nothing. Returns the created `Entry`
+    /// (nil on failure) so callers can correlate a camera-roll save with this
+    /// snap's stable id.
     @discardableResult
-    static func add(_ image: UIImage) -> Bool {
+    static func add(_ image: UIImage) -> Entry? {
         let fm = FileManager.default
         try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let sized = downscaled(image, maxDimension: 2160)
-        guard let data = sized.jpegData(compressionQuality: 0.85) else { return false }
+        guard let data = sized.jpegData(compressionQuality: 0.85) else { return nil }
 
         let name = String(format: "%.3f", Date().timeIntervalSince1970)
+        let url = directory.appendingPathComponent("\(name).jpg")
         do {
-            try data.write(to: directory.appendingPathComponent("\(name).jpg"))
+            try data.write(to: url)
         } catch {
-            return false
+            return nil
         }
 
         // Enforce the cap: drop the oldest beyond maxPhotos.
         let files = fileURLs()
         if files.count > maxPhotos {
-            for url in files.prefix(files.count - maxPhotos) {
-                try? fm.removeItem(at: url)
+            for old in files.prefix(files.count - maxPhotos) {
+                try? fm.removeItem(at: old)
             }
         }
-        return true
+        return Entry(url: url, image: sized)
     }
 
     /// A stashed snap with a stable identity, so galleries can page and

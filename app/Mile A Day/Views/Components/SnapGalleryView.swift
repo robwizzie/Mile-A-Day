@@ -15,6 +15,7 @@ struct SnapGalleryView: View {
     var onStashChanged: () -> Void = {}
 
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var savedLedger = SavedPhotoLibraryLedger.shared
     @State private var entries: [MidRunPhotoStash.Entry] = []
     @State private var selectedId: String?
     @State private var showSavedToast = false
@@ -62,6 +63,7 @@ struct SnapGalleryView: View {
         }
         .onAppear {
             entries = MidRunPhotoStash.entries()
+            savedLedger.prune(keeping: entries.map(\.id))
             if entries.indices.contains(initialIndex) {
                 selectedId = entries[initialIndex].id
             } else {
@@ -107,22 +109,39 @@ struct SnapGalleryView: View {
         .padding(.top, MADTheme.Spacing.md)
     }
 
-    /// Save / Use / Delete for the photo on screen. Every capture already
-    /// auto-saved to the camera roll at shutter time — Save is the explicit,
-    /// visible version of that (and covers a denied-then-granted permission).
+    /// Whether the photo on screen is already in the user's photo library —
+    /// true for every capture (auto-saved at shutter time) and every library
+    /// import, unless the capture's auto-save was blocked by a denied
+    /// permission that has since been granted.
+    private var isCurrentSaved: Bool {
+        guard let current else { return false }
+        return savedLedger.contains(current.id)
+    }
+
+    /// Save / Use / Delete for the photo on screen. Photos already in the
+    /// library show a disabled "Saved" — Save only stays active to cover a
+    /// capture whose auto-save was blocked by a denied-then-granted permission.
     private var actionBar: some View {
-        HStack(spacing: MADTheme.Spacing.sm) {
-            galleryAction(icon: "square.and.arrow.down", label: "Save") {
-                guard let current else { return }
-                PhotoRollSaver.save(current.image)
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    showSavedToast = true
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                    withAnimation(.easeOut(duration: 0.25)) { showSavedToast = false }
+        let saved = isCurrentSaved
+        return HStack(spacing: MADTheme.Spacing.sm) {
+            galleryAction(
+                icon: saved ? "checkmark.circle.fill" : "square.and.arrow.down",
+                label: saved ? "Saved" : "Save",
+                tint: saved ? .green : .white
+            ) {
+                guard let current, !saved else { return }
+                PhotoRollSaver.save(current.image, ledgerKey: current.id) { ok in
+                    guard ok else { return }
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        showSavedToast = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                        withAnimation(.easeOut(duration: 0.25)) { showSavedToast = false }
+                    }
                 }
             }
+            .disabled(saved)
 
             if let onUse {
                 Button {
