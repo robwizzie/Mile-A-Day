@@ -54,7 +54,10 @@ struct MainTabView: View {
             .badge(competitionService.invites.count)
 
             NavigationStack {
-                SocialFeedView()
+                // `isActiveTab` lets the feed refresh itself on tab re-entry —
+                // TabView keeps it alive, so its own .task can't (same reason
+                // Compete/Friends refresh in the onChange below).
+                SocialFeedView(isActiveTab: selectedTab == 2)
             }
             .tabItem {
                 Label("Feed", systemImage: "square.stack.fill")
