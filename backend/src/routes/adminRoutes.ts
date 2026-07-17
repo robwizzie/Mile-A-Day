@@ -4,6 +4,16 @@ import {
   overview,
   milesByDay,
   users,
+  userDetail,
+  engagement,
+  signupsByDay,
+  leaderboards,
+  workoutTypes,
+  storage,
+  postsSummary,
+  postsByDay,
+  postsList,
+  referrals,
   errors,
   errorSummary,
   errorsByUser,
@@ -21,7 +31,25 @@ adminAuthRouter.post("/apple", verifyAppleWeb);
 const adminRouter = Router();
 adminRouter.get("/overview", overview);
 adminRouter.get("/miles-by-day", milesByDay);
+adminRouter.get("/engagement", engagement);
+adminRouter.get("/signups-by-day", signupsByDay);
+adminRouter.get("/leaderboards", leaderboards);
+adminRouter.get("/workout-types", workoutTypes);
+
+// Users: paginated + searchable directory, and per-user deep detail.
 adminRouter.get("/users", users);
+adminRouter.get("/users/:userId", userDetail);
+
+// Storage + post/photo analytics.
+adminRouter.get("/storage", storage);
+// Static segments are registered before the ":userId" param route so
+// /posts/summary and /posts/by-day aren't captured as a user id.
+adminRouter.get("/posts", postsList);
+adminRouter.get("/posts/summary", postsSummary);
+adminRouter.get("/posts/by-day", postsByDay);
+
+adminRouter.get("/referrals", referrals);
+
 adminRouter.get("/errors", errors);
 adminRouter.get("/errors/summary", errorSummary);
 adminRouter.get("/errors/by-user", errorsByUser);
