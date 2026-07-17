@@ -441,11 +441,13 @@ struct WorkoutTrackingView: View {
         switch result {
         case .accepted(let image):
             Task.detached(priority: .utility) {
-                let saved = MidRunPhotoStash.add(image)
+                guard let entry = MidRunPhotoStash.add(image) else { return }
                 let count = MidRunPhotoStash.count
                 let thumb = MidRunPhotoStash.latestThumbnail()
-                guard saved else { return }
                 await MainActor.run {
+                    // Imported straight from the photo library — it already
+                    // lives there, so mark it saved and never offer to re-save.
+                    SavedPhotoLibraryLedger.shared.markSaved(entry.id)
                     midRunSnapCount = count
                     lastSnapThumb = thumb
                     showImportToast("Added to your \(activityNoun)", ok: true)
@@ -482,7 +484,9 @@ struct WorkoutTrackingView: View {
         }
         .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showMidRunCamera) {
-            MADCameraView(image: $midRunImage)
+            // Camera-roll save is handled below, keyed to the stash id, so the
+            // review gallery can show "Saved" and never duplicate the shot.
+            MADCameraView(image: $midRunImage, autoSaveToPhotos: false)
         }
         .onChange(of: midRunImage) { _, newImage in
             guard let image = newImage else { return }
@@ -490,11 +494,20 @@ struct WorkoutTrackingView: View {
             // Downscale + JPEG-encode off the main thread — doing it inline
             // stutters the camera dismissal animation on big sensor images.
             Task.detached(priority: .utility) {
-                let saved = MidRunPhotoStash.add(image)
+                let entry = MidRunPhotoStash.add(image)
                 let count = MidRunPhotoStash.count
                 let thumb = MidRunPhotoStash.latestThumbnail()
-                guard saved else { return }
                 await MainActor.run {
+                    // Keep the user's own full-res copy in the camera roll no
+                    // matter what (the camera no longer auto-saves this path).
+                    // When it made it into the stash, key the save to that snap
+                    // so the gallery shows "Saved" instead of a duplicate.
+                    if let entry {
+                        PhotoRollSaver.save(image, ledgerKey: entry.id)
+                    } else {
+                        PhotoRollSaver.save(image)
+                    }
+                    guard entry != nil else { return }
                     midRunSnapCount = count
                     lastSnapThumb = thumb
                     UINotificationFeedbackGenerator().notificationOccurred(.success)

@@ -28,6 +28,12 @@ enum FeedDeepLink {
 /// photo posts AND raw walk/run activity. Posting and viewing friends' stories
 /// are both gated on completing today's mile (the server re-verifies posting).
 struct SocialFeedView: View {
+    /// True while the Feed tab is the selected one. TabView keeps tab views
+    /// alive, so `.onAppear`/`.task` don't re-fire on tab switches — this lets
+    /// the feed silently refresh when the user returns to it (e.g. after
+    /// completing a mile) instead of showing stale posts until a manual pull.
+    var isActiveTab: Bool = false
+
     @StateObject private var healthManager = HealthKitManager.shared
     @StateObject private var userManager = UserManager.shared
     /// One stable service for profiles opened from the feed. Creating a fresh
@@ -352,6 +358,19 @@ struct SocialFeedView: View {
                 await refresh()
                 await loadTermsStatus()
                 loadMemories()
+                await loadHypeStatus()
+            }
+        }
+        // Returning to the Feed tab silently pulls fresh posts so a mile just
+        // completed (or a friend's new post) shows up without a manual pull —
+        // no more "the feed looks locked" after finishing a run. Guarded by
+        // `loadedOnce` so it never races the initial `.task` into a double
+        // fetch; `refresh()` keeps the current cards on screen while data swaps
+        // in (it only shows a spinner when the feed is empty).
+        .onChange(of: isActiveTab) { _, active in
+            guard active, loadedOnce else { return }
+            Task {
+                await refresh()
                 await loadHypeStatus()
             }
         }

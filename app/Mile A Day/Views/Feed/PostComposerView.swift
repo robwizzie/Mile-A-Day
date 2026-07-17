@@ -357,7 +357,14 @@ private struct StickerEditorLayer: View {
     }
 
     private var manipulation: some Gesture {
-        let drag = DragGesture()
+        // Measure the drag in GLOBAL (screen) space, not the default `.local`.
+        // The sticker is moved every frame by `.position(liveCenter)` and sits
+        // below `.scaleEffect`/`.rotationEffect`, so its local space moves AND
+        // rotates with it — a local-space translation feeds back on itself and
+        // makes the sticker jitter (and drags along the rotated axis). Global
+        // space is fixed to the screen, so `translation` is the true finger
+        // delta: smooth, straight, and rotation-independent.
+        let drag = DragGesture(coordinateSpace: .global)
             .updating($dragTranslation) { value, state, _ in state = value.translation }
             .onEnded { value in
                 pos = CGPoint(x: committedX(addingDrag: value.translation.width),

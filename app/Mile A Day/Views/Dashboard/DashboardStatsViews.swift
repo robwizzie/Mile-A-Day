@@ -246,10 +246,24 @@ struct RecentWorkoutsPreviewCard: View {
                 }
 
                 if preview.isEmpty {
-                    Text("No recent workouts yet — log a run to see it here.")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundColor(.secondary)
+                    if healthManager.hasLoadedRecentWorkoutsOnce {
+                        // A successful query genuinely returned nothing.
+                        Text("No recent workouts yet — log a run to see it here.")
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundColor(.secondary)
+                            .padding(.vertical, MADTheme.Spacing.sm)
+                    } else {
+                        // Not loaded yet (or a locked-device query is still
+                        // retrying) — show loading, never the "no workouts" copy,
+                        // which read as "your workouts vanished" on a cold launch.
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Loading recent workouts…")
+                                .font(.system(size: 13, weight: .medium, design: .rounded))
+                                .foregroundColor(.secondary)
+                        }
                         .padding(.vertical, MADTheme.Spacing.sm)
+                    }
                 } else {
                     VStack(spacing: MADTheme.Spacing.sm) {
                         ForEach(preview, id: \.uuid) { workout in

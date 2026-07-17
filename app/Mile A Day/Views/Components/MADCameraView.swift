@@ -8,10 +8,17 @@ import UIKit
 /// reaching for: full flash control (off / auto / on — not just auto) and a
 /// self-timer (3s / 10s) for propped-up group shots. Camera-only by design —
 /// no library picking — so shared walks/runs stay captured in the moment.
-/// Every capture is also saved to the user's camera roll (PhotoRollSaver),
-/// same as the picker it replaces.
+/// By default every capture is also saved to the user's camera roll
+/// (PhotoRollSaver), same as the picker it replaces. Callers that need to
+/// control the camera-roll save themselves (e.g. to key it to a stash id for
+/// duplicate-prevention) pass `autoSaveToPhotos: false` and save the returned
+/// image on their own.
 struct MADCameraView: View {
     @Binding var image: UIImage?
+    /// When true (default), the raw shot is saved straight to the camera roll
+    /// at capture. Mid-run capture turns this off so it can save keyed by the
+    /// snap's stash id instead (see SavedPhotoLibraryLedger).
+    var autoSaveToPhotos: Bool = true
     @Environment(\.dismiss) private var dismiss
     @State private var camera = MADCameraController()
     /// Seconds left on a running self-timer; nil when idle.
@@ -343,8 +350,12 @@ struct MADCameraView: View {
             }
             image = captured
             // Every in-app capture also lands in the camera roll — the user's
-            // own copy, independent of what happens to the post.
-            PhotoRollSaver.save(captured)
+            // own copy, independent of what happens to the post. The mid-run
+            // path opts out (autoSaveToPhotos == false) so it can save keyed to
+            // the snap's stash id and avoid a duplicate on re-save.
+            if autoSaveToPhotos {
+                PhotoRollSaver.save(captured)
+            }
             dismiss()
         }
     }

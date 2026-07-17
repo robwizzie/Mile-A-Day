@@ -362,6 +362,21 @@ class HealthKitManager: ObservableObject {
     var hasTodaysDistanceLoaded: Bool = false
     var hasIndexOrStreakLoaded: Bool = false
 
+    /// True once fetchTodaysDistance() has actually SUCCEEDED this session — not
+    /// merely been attempted. Distinct from `hasTodaysDistanceLoaded`, which flips
+    /// true even when the query ERRORS (locked device) so `hasLoadedInitialData`
+    /// never hangs. Celebrations gate on THIS: on a cold launch behind a locked
+    /// screen the query errors, `todaysDistance` keeps the value `loadCachedData()`
+    /// seeded from last night, and firing on it re-showed "mile complete / streak
+    /// safe" + the photo prompt for yesterday's already-posted mile until a second
+    /// launch refreshed the cache.
+    @Published var hasFreshTodaysDistance: Bool = false
+
+    /// True once fetchRecentWorkouts() has SUCCEEDED at least once this session.
+    /// Lets the UI tell "still loading / query erroring" apart from a genuine
+    /// empty list, so a locked-device launch stops flashing "No recent workouts".
+    @Published var hasLoadedRecentWorkoutsOnce: Bool = false
+
     func checkInitialDataReady() {
         if hasTodaysDistanceLoaded && hasIndexOrStreakLoaded && !hasLoadedInitialData {
             hasLoadedInitialData = true
@@ -768,6 +783,13 @@ class HealthKitManager: ObservableObject {
                 return
             }
 
+            // Reached only on a SUCCESSFUL query (locked-device errors returned
+            // above). Now `todaysDistance` is about to reflect a value we just
+            // fetched, not the cached one init seeded — so celebrations may fire.
+            DispatchQueue.main.async {
+                self.hasFreshTodaysDistance = true
+            }
+
             #if os(watchOS)
             let workouts = ((samples as? [HKWorkout]) ?? [])
             #else
@@ -855,6 +877,9 @@ class HealthKitManager: ObservableObject {
                 print("[HealthKit] ✅ fetchRecentWorkouts → \(workouts.count) workouts")
                 self.recentWorkoutsRetriesLeft = 3
                 self.recentWorkouts = workouts
+                // Only NOW is an empty list meaningful — before the first success
+                // the UI must show "loading", not "no recent workouts".
+                self.hasLoadedRecentWorkoutsOnce = true
             }
         }
 

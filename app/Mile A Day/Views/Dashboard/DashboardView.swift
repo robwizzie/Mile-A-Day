@@ -217,6 +217,17 @@ struct DashboardView: View {
             print("[Dashboard] ⏳ Skipping celebration check - initial data not yet loaded")
             return
         }
+        // Celebrate only on a today's-distance we FRESHLY fetched this session.
+        // hasLoadedInitialData can flip true off a locked-device query that ERRORED
+        // (see fetchTodaysDistance), leaving todaysDistance at the value init cached
+        // from last night — which re-fired the "mile complete / streak safe" screen
+        // and photo prompt for yesterday's already-posted mile every morning until a
+        // second launch refreshed it. The onChange(of: hasFreshTodaysDistance) below
+        // re-runs this once the real fetch lands.
+        guard healthManager.hasFreshTodaysDistance else {
+            print("[Dashboard] ⏳ Skipping celebration check - today's distance not freshly fetched yet")
+            return
+        }
         // Defer while the workout tracker covers the dashboard — the celebration
         // overlay lives on this view, so it would play hidden behind the cover.
         // The cover's onDismiss re-runs this check once the dashboard is visible.
@@ -557,6 +568,13 @@ struct DashboardView: View {
                 if wasShowing && !isShowing {
                     maybePresentPendingSheet()
                 }
+            }
+            .onChange(of: healthManager.hasFreshTodaysDistance) { _, isFresh in
+                // On a locked-device launch the initial fetch errors and the
+                // celebration check bails; when the real fetch finally lands this
+                // re-runs it against fresh data (fires a genuine completion, stays
+                // silent for yesterday's already-handled mile).
+                if isFresh { checkAndShowGoalCelebration() }
             }
             .onChange(of: healthManager.hasLoadedInitialData) { _, isLoaded in
                 if isLoaded {
