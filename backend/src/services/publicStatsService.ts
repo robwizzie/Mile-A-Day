@@ -17,6 +17,12 @@ export interface PublicStats {
   miles_today: number;
   total_hypes: number;
   total_nudges: number;
+  // Additive community aggregates for the marketing band. Global only — a
+  // distinct-active count, a total photo-post count, and the single longest
+  // active streak (a bare max, identifies no one).
+  active_7d: number;
+  photos_shared: number;
+  longest_streak: number;
 }
 
 // The endpoint is public and uncached queries hit five aggregate scans, so a
@@ -39,6 +45,9 @@ export async function getPublicStats(): Promise<PublicStats> {
     miles_today: number;
     total_hypes: number;
     total_nudges: number;
+    active_7d: number;
+    photos_shared: number;
+    longest_streak: number;
   }>(`
     SELECT
       (SELECT COUNT(*) FROM users)::int AS total_users,
@@ -49,7 +58,16 @@ export async function getPublicStats(): Promise<PublicStats> {
            AND deleted_at IS NULL AND exclusion_reason IS NULL)::float AS miles_today,
       (SELECT COUNT(*) FROM hype_log)::int AS total_hypes,
       ((SELECT COUNT(*) FROM nudge_log)
-        + (SELECT COUNT(*) FROM friend_nudge_log))::int AS total_nudges
+        + (SELECT COUNT(*) FROM friend_nudge_log))::int AS total_nudges,
+      -- Distinct runners who logged a counting mile in the last 7 ET days.
+      (SELECT COUNT(DISTINCT user_id) FROM workouts
+         WHERE local_date >= ${TODAY_ET_DATE_SQL} - 6
+           AND deleted_at IS NULL AND exclusion_reason IS NULL)::int AS active_7d,
+      -- Deliberate photo posts (auto route cards excluded).
+      (SELECT COUNT(*) FROM posts
+         WHERE deleted_at IS NULL AND NOT is_auto)::int AS photos_shared,
+      -- The single longest active streak in the community (a bare number).
+      (SELECT COALESCE(MAX(current_streak), 0) FROM users)::int AS longest_streak
   `);
 
   const data: PublicStats = {
@@ -58,6 +76,9 @@ export async function getPublicStats(): Promise<PublicStats> {
     miles_today: Math.round((row?.miles_today ?? 0) * 10) / 10,
     total_hypes: row?.total_hypes ?? 0,
     total_nudges: row?.total_nudges ?? 0,
+    active_7d: row?.active_7d ?? 0,
+    photos_shared: row?.photos_shared ?? 0,
+    longest_streak: row?.longest_streak ?? 0,
   };
   cache = { data, at: Date.now() };
   return data;

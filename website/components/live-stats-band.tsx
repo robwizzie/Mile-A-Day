@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Route, Flame, Hand, Bell } from "lucide-react";
+import {
+  Route,
+  TrendingUp,
+  Users,
+  Activity,
+  Camera,
+  Flame,
+  Hand,
+  Bell,
+} from "lucide-react";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "https://mad.mindgoblin.tech";
@@ -14,6 +23,9 @@ type PublicStats = {
   miles_today: number;
   total_hypes: number;
   total_nudges: number;
+  active_7d: number;
+  photos_shared: number;
+  longest_streak: number;
 };
 
 /** Eases a displayed number toward `target` — same feel as the community
@@ -120,6 +132,12 @@ export function LiveStatsBand() {
 
   const totalMiles = useCountUp(stats ? stats.total_miles : null);
   const milesToday = useCountUp(stats ? stats.miles_today : null, 1);
+  const totalUsers = useCountUp(stats ? stats.total_users : null);
+  // `?? 0` guards the brief window where the site deploys before the backend
+  // ships the new fields — a missing value would otherwise animate to NaN.
+  const activeWeek = useCountUp(stats ? (stats.active_7d ?? 0) : null);
+  const photosShared = useCountUp(stats ? (stats.photos_shared ?? 0) : null);
+  const longestStreak = useCountUp(stats ? (stats.longest_streak ?? 0) : null);
   const hypes = useCountUp(stats ? stats.total_hypes : null);
   const nudges = useCountUp(stats ? stats.total_nudges : null);
 
@@ -161,7 +179,7 @@ export function LiveStatsBand() {
             delay={1}
           />
           <StatCard
-            icon={Flame}
+            icon={TrendingUp}
             color="#33B34D"
             value={milesToday.toLocaleString(undefined, {
               minimumFractionDigits: 1,
@@ -173,20 +191,53 @@ export function LiveStatsBand() {
             delay={2}
           />
           <StatCard
-            icon={Hand}
-            color="#FF9900"
-            value={Math.round(hypes).toLocaleString()}
-            label="Hypes sent"
-            sublabel="double-taps of pure support"
+            icon={Users}
+            color="#38bdf8"
+            value={Math.round(totalUsers).toLocaleString()}
+            label="Runners strong"
+            sublabel="the whole community"
             delay={3}
           />
           <StatCard
-            icon={Bell}
+            icon={Activity}
+            color="#22d3ee"
+            value={Math.round(activeWeek).toLocaleString()}
+            label="Runners this week"
+            sublabel="out logging miles right now"
+            delay={4}
+          />
+          <StatCard
+            icon={Camera}
+            color="#a78bfa"
+            value={Math.round(photosShared).toLocaleString()}
+            label="Photos shared"
+            sublabel="milestones worth capturing"
+            delay={5}
+          />
+          <StatCard
+            icon={Flame}
             color="#FF9900"
+            value={Math.round(longestStreak).toLocaleString()}
+            suffix="days"
+            label="Longest active streak"
+            sublabel="unbroken and still going"
+            delay={6}
+          />
+          <StatCard
+            icon={Hand}
+            color="#f472b6"
+            value={Math.round(hypes).toLocaleString()}
+            label="Hypes sent"
+            sublabel="double-taps of pure support"
+            delay={7}
+          />
+          <StatCard
+            icon={Bell}
+            color="#fbbf24"
             value={Math.round(nudges).toLocaleString()}
             label="Nudges delivered"
             sublabel="friendly kicks off the couch"
-            delay={4}
+            delay={8}
           />
         </div>
       </div>
