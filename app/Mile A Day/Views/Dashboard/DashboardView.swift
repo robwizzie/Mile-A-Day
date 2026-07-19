@@ -286,13 +286,21 @@ struct DashboardView: View {
 
             // Finale: BeReal-style "add a photo of your run" prompt for the mile
             // that just completed. Skipping still shares the run (route/stats).
-            if let uuid = healthManager.workoutIndex?.latestWorkoutUUID {
+            // Prefer the freshly-finished workout from `todaysWorkouts` (the same
+            // source the extra-mile triggers and workout count read) over
+            // WorkoutIndex.latestWorkoutUUID, whose incremental rebuild lags a
+            // just-synced Watch run by a beat. Reading the stale index uuid here
+            // reopened the SAME fresh window (no-op) and the per-uuid prompt
+            // dedup swallowed the new walk's photo prompt — the "it never
+            // re-prompted me at the end of this other walk" bug.
+            let latestHK = healthManager.todaysWorkouts.first
+            if let uuid = latestHK?.uuid.uuidString ?? healthManager.workoutIndex?.latestWorkoutUUID {
                 // Open the 10-min fresh-post window on the goal-completing run
                 // regardless of the auto-share prompt, so the feed countdown /
                 // ring and "Fresh" reward work even when auto-share is off.
                 FreshPostWindowManager.shared.open(workoutId: uuid)
                 if autoShareRunsToFeed {
-                    let hk = healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
+                    let hk = latestHK ?? healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
                     let wtype = hk?.workoutActivityType == .walking ? "walking" : "running"
                     celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: uuid, workoutType: wtype))
                 }
@@ -322,12 +330,17 @@ struct DashboardView: View {
         // Every walk/run gets its own photo moment, not just the goal-crossing
         // one — same finale as the goal path. The celebration id is keyed by
         // workout uuid, so each new workout prompts exactly once.
-        if let uuid = healthManager.workoutIndex?.latestWorkoutUUID {
+        // Same fix as the goal-completion path: key the window + prompt off the
+        // freshly-finished workout from `todaysWorkouts`, not the possibly-stale
+        // WorkoutIndex uuid, so each extra walk/run actually earns its own
+        // window + photo prompt instead of being deduped against the last one.
+        let latestHK = healthManager.todaysWorkouts.first
+        if let uuid = latestHK?.uuid.uuidString ?? healthManager.workoutIndex?.latestWorkoutUUID {
             // Each extra qualifying walk/run reopens a fresh 10-min window (a
             // new uuid resets it), regardless of the auto-share prompt.
             FreshPostWindowManager.shared.open(workoutId: uuid)
             if autoShareRunsToFeed {
-                let hk = healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
+                let hk = latestHK ?? healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
                 let wtype = hk?.workoutActivityType == .walking ? "walking" : "running"
                 celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: uuid, workoutType: wtype))
             }
