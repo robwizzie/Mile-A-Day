@@ -233,7 +233,7 @@ struct CurrentStreakFastestPaceDetailView: View {
 
     private func loadStreakWorkouts() async {
         isLoading = true
-        let allStreakWorkouts = healthManager.getWorkoutsForCurrentStreak()
+        let allStreakWorkouts = healthManager.getWorkoutsForCurrentStreak(streakDays: currentStreakStats.streakDays)
         let fastestMileWorkouts = healthManager.currentStreakFastestMileWorkouts
 
         var dayWorkouts: [HKWorkout] = []
@@ -421,7 +421,7 @@ struct CurrentStreakMostMilesDetailView: View {
 
     private func loadStreakWorkouts() async {
         isLoading = true
-        let allStreakWorkouts = healthManager.getWorkoutsForCurrentStreak()
+        let allStreakWorkouts = healthManager.getWorkoutsForCurrentStreak(streakDays: currentStreakStats.streakDays)
         let workoutsByDay = Dictionary(grouping: allStreakWorkouts) { workout in
             Calendar.current.startOfDay(for: workout.endDate)
         }

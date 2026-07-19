@@ -247,6 +247,13 @@ struct UnifiedStatsGrid: View {
                 calculateCurrentStreakStats()
             }
         }
+        .onChange(of: user.streak) { _, _ in
+            // The displayed streak drives the stats window (max with retroactiveStreak);
+            // recompute when the backend/vetted value changes so the two stay in sync.
+            if statsType == .currentStreak {
+                calculateCurrentStreakStats()
+            }
+        }
         .onChange(of: statsType) { _, newType in
             if newType == .currentStreak {
                 calculateCurrentStreakStats()
@@ -353,8 +360,12 @@ struct UnifiedStatsGrid: View {
         guard !recomputeInFlight else { return }
         recomputeInFlight = true
 
+        // Pass the vetted, user-facing streak (the value the main streak card shows)
+        // so the stats window matches it instead of the raw retroactiveStreak, which
+        // collapses to a tiny value on a WorkoutIndex hole (see ios.md).
+        let displayedStreak = user.streak
         DispatchQueue.global(qos: .userInitiated).async {
-            let stats = healthManager.calculateCurrentStreakStats()
+            let stats = healthManager.calculateCurrentStreakStats(displayedStreak: displayedStreak)
 
             DispatchQueue.main.async {
                 self.statsData = stats
