@@ -41,6 +41,32 @@ enum MidRunPhotoStash {
 
     static var count: Int { fileURLs().count }
 
+    /// Whether the current device-local day owns the snap. Mid-run snaps belong
+    /// to the mile they were captured on; the 24h prune alone lets one taken
+    /// yesterday evening survive into this morning.
+    private static func isFromToday(_ url: URL) -> Bool {
+        let stamp = Double(url.deletingPathExtension().lastPathComponent) ?? 0
+        return Calendar.current.isDateInToday(Date(timeIntervalSince1970: stamp))
+    }
+
+    /// True only when a snap taken TODAY is stashed. Drives the "photo waiting"
+    /// nudge — a leftover from yesterday (a finished workout whose prompt never
+    /// resolved, then the app reopened next day) must not nag against a brand
+    /// new, untouched day's mile.
+    static func hasEntriesToday() -> Bool {
+        fileURLs().contains(where: isFromToday)
+    }
+
+    /// Drop snaps not taken today. Called when a fresh workout begins so a new
+    /// day's effort never inherits (or re-shares) yesterday's leftover snaps,
+    /// while same-day snaps from an earlier sub-goal effort are kept.
+    static func dropBeforeToday() {
+        let fm = FileManager.default
+        for url in fileURLs() where !isFromToday(url) {
+            try? fm.removeItem(at: url)
+        }
+    }
+
     /// Save a snap. Downscaled to a sane pixel size before writing — the
     /// composer flattens to 1080 wide anyway, and full 48MP camera output
     /// would burn sandbox space for nothing. Returns the created `Entry`

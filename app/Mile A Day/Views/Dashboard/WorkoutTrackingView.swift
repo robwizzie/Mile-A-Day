@@ -1027,6 +1027,11 @@ struct WorkoutTrackingView: View {
             MidRunPhotoStash.clear()
             midRunSnapCount = 0
         } else {
+            // Keep SAME-DAY leftover snaps (a photo from an earlier sub-goal
+            // effort should survive into the workout that finishes the mile),
+            // but drop any from a previous day so a fresh day's mile never
+            // inherits — or re-shares — yesterday's snaps.
+            MidRunPhotoStash.dropBeforeToday()
             midRunSnapCount = MidRunPhotoStash.count
         }
 

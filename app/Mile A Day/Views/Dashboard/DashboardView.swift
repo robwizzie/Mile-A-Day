@@ -985,7 +985,10 @@ struct DashboardView: View {
     /// is still unmet, so `photoWaitingBanner` never enumerates the sandbox dir
     /// from within `body`.
     private func refreshMidRunPhotoWaiting() {
-        midRunPhotoWaiting = !currentState.isCompleted && MidRunPhotoStash.count > 0
+        // Scope to snaps taken TODAY: a leftover from yesterday's workout (its
+        // prompt never resolved, app reopened next day) must not nag "finish
+        // today's mile to share it" against a fresh, untouched day.
+        midRunPhotoWaiting = !currentState.isCompleted && MidRunPhotoStash.hasEntriesToday()
     }
 
     // MARK: - HealthKit Permission Banner
