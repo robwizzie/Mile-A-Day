@@ -50,8 +50,14 @@ struct WorkoutTrackingView: View {
     /// system started deferring updates (frozen activity on the lock screen).
     @State private var lastActivityPushDate: Date = .distantPast
     @State private var lastPushedDistance: Double = -1
-    @State private var showEndWorkoutError = false // Show error alert when end fails
-    @State private var endWorkoutErrorMessage = "" // Error message for end workout failure
+    @State private var showEndWorkoutError = false // Show error alert when starting fails (workout lock)
+    @State private var endWorkoutErrorMessage = "" // Error message for the start-failure alert
+    /// Health WRITE access is off — the save fails every time until re-enabled,
+    /// so we offer an actionable path to Settings instead of a dead-end error.
+    @State private var showHealthAccessAlert = false
+    /// Quiet, non-blocking confirmation for a transient save failure where the
+    /// mile still counts (Health access is fine) — no scary blocking alert.
+    @State private var showSaveFallbackToast = false
     @State private var endWorkoutTimeoutTask: DispatchWorkItem? // Timeout for end workout flow
     @State private var trackingMetricsHeight: CGFloat = 0 // Measured height of the scrollable metrics area
     @State private var workoutSession: HKWorkoutSession?
@@ -328,6 +334,7 @@ struct WorkoutTrackingView: View {
         .overlay(goalCompletionOverlay)
         .overlay(alignment: .top) { snapSavedToast }
         .overlay(alignment: .top) { importToastView }
+        .overlay(alignment: .top) { saveFallbackToast }
     }
 
     // MARK: - Mid-Run Photo Capture
@@ -572,6 +579,42 @@ struct WorkoutTrackingView: View {
             .transition(.move(edge: .top).combined(with: .opacity))
             .allowsHitTesting(false)
         }
+    }
+
+    /// Shown when the workout couldn't be written to Apple Health for a reason
+    /// OTHER than denied access — the mile still counts via sync, so this is a
+    /// calm reassurance rather than a blocking error.
+    @ViewBuilder
+    private var saveFallbackToast: some View {
+        if showSaveFallbackToast {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.green)
+                Text("Your mile still counts — it'll sync on your next update.")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.78))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+            )
+            .padding(.top, 72)
+            .padding(.horizontal, MADTheme.Spacing.lg)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Deep-link to this app's Settings page, where the user can reach the
+    /// Health access toggles for Mile A Day.
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     /// Vertical spacing between the metric blocks, tightened on shorter screens.
@@ -894,13 +937,24 @@ struct WorkoutTrackingView: View {
         } message: {
             Text("Are you sure you want to end this workout? Your progress will be saved to HealthKit.")
         }
-        .alert("Couldn't Save Workout", isPresented: $showEndWorkoutError) {
+        .alert("Couldn't Start Workout", isPresented: $showEndWorkoutError) {
             Button("OK") {
                 // Dismiss back to dashboard since the workout state is already cleared
                 dismiss()
             }
         } message: {
             Text(endWorkoutErrorMessage)
+        }
+        .alert("Save Workouts to Apple Health?", isPresented: $showHealthAccessAlert) {
+            Button("Open Settings") {
+                openAppSettings()
+                dismiss()
+            }
+            Button("Not Now", role: .cancel) {
+                dismiss()
+            }
+        } message: {
+            Text("Your mile still counts toward your streak. To also save your workouts to Apple Health, turn on Workouts access for Mile A Day in Settings.")
         }
         .onAppear {
             // Workout recovery: if there's a persisted in-progress workout, restore it.
@@ -1240,12 +1294,22 @@ struct WorkoutTrackingView: View {
         isStopping = false
         isTracking = false
 
-        // Show result to user
+        // Show result to user. The mile counts via GPS/pedometer sync whether
+        // or not the HealthKit write succeeded, so a failed save is never a lost
+        // workout — tailor the messaging to the cause instead of alarming.
         if workoutSaved {
             withAnimation { showRecap = true }
+        } else if healthManager.isWorkoutSharingDenied() {
+            // Health write access is turned off — this fails on EVERY workout
+            // until the user re-enables it, so give them a way to fix it.
+            showHealthAccessAlert = true
         } else {
-            endWorkoutErrorMessage = "Your workout couldn't be saved to HealthKit. The distance you covered will still count from GPS/pedometer data on your next sync."
-            showEndWorkoutError = true
+            // Transient save failure with Health access intact. Don't block —
+            // show a quiet toast and slip back to the dashboard.
+            withAnimation { showSaveFallbackToast = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
+                dismiss()
+            }
         }
     }
 
