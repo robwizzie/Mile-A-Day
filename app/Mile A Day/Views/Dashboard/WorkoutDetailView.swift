@@ -20,6 +20,9 @@ struct WorkoutDetailView: View {
     @State private var isLoadingSplits = false
     @State private var showEditSheet = false
     @State private var routeCoordinates: [CLLocationCoordinate2D]?
+    /// Retained map snapshot so the route map's pinch-zoom can compose its
+    /// floating copy on demand (same mechanism as the feed cards).
+    @State private var routeSnapshot: UIImage?
     @State private var isLoadingRoute = false
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
@@ -83,6 +86,22 @@ struct WorkoutDetailView: View {
     // language for a workout everywhere it appears.
     private var workoutColor: Color {
         MADTheme.workoutColor(workout.workoutActivityType.madTypeKey)
+    }
+
+    /// Floating zoom copy for the route map, composed on demand at pinch-begin
+    /// from the retained snapshot (a bare route — no stats band, unlike the feed
+    /// card). Returns nil until the snapshot has landed.
+    private func routeZoomComposite() -> UIImage? {
+        guard let snapshot = routeSnapshot,
+              let coords = routeCoordinates, coords.count >= 2 else { return nil }
+        return WorkoutRouteMapView.zoomComposite(
+            snapshot: snapshot,
+            coordinates: coords,
+            routeColor: workoutColor,
+            size: CGSize(width: 900, height: 600)
+        ) {
+            EmptyView()
+        }
     }
 
     private var distanceMiles: Double {
@@ -534,7 +553,8 @@ struct WorkoutDetailView: View {
 
                 WorkoutRouteMapView(
                     coordinates: routeCoordinates,
-                    routeColor: workoutColor
+                    routeColor: workoutColor,
+                    onSnapshot: { routeSnapshot = $0 }
                 )
                 .frame(height: 260)
                 .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
@@ -542,6 +562,10 @@ struct WorkoutDetailView: View {
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
                 )
+                // Pinch to zoom the route, same as the feed cards. The floating
+                // copy is composed on demand from the retained snapshot — nothing
+                // heavy is baked up front.
+                .instagramZoomable(imageProvider: { routeZoomComposite() })
             }
             .padding(MADTheme.Spacing.md)
             .madLiquidGlass()

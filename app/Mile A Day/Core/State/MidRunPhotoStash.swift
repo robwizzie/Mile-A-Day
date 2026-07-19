@@ -39,7 +39,44 @@ enum MidRunPhotoStash {
         return live
     }
 
-    static var count: Int { fileURLs().count }
+    /// Consumer-facing count: snaps taken TODAY only (the tray badge, the
+    /// "photo waiting" nudge, and the post-run prompt all read the today-scoped
+    /// views), so a leftover from yesterday is never counted.
+    static var count: Int { todayURLs().count }
+
+    /// Whether the current device-local day owns the snap. Mile A Day photos are
+    /// strictly today's; the 24h prune alone would let one taken yesterday
+    /// evening survive into this morning.
+    private static func isFromToday(_ url: URL) -> Bool {
+        let stamp = Double(url.deletingPathExtension().lastPathComponent) ?? 0
+        return Calendar.current.isDateInToday(Date(timeIntervalSince1970: stamp))
+    }
+
+    /// Physical snaps taken TODAY, oldest first. EVERY consumer-facing read
+    /// funnels through this so a snap left over from yesterday is never shown or
+    /// offered — even before the 24h prune or a workout-start cleanup runs, and
+    /// regardless of which surface (tray / nudge / prompt) asks first.
+    private static func todayURLs() -> [URL] {
+        fileURLs().filter(isFromToday)
+    }
+
+    /// True only when a snap taken TODAY is stashed. Drives the "photo waiting"
+    /// nudge so a leftover from yesterday (a finished workout whose prompt never
+    /// resolved, then the app reopened next day) can't nag against a brand new,
+    /// untouched day's mile.
+    static func hasEntriesToday() -> Bool {
+        !todayURLs().isEmpty
+    }
+
+    /// Drop snaps not taken today. Called when a fresh workout begins so a new
+    /// day's effort never inherits (or re-shares) yesterday's leftover snaps,
+    /// while same-day snaps from an earlier sub-goal effort are kept.
+    static func dropBeforeToday() {
+        let fm = FileManager.default
+        for url in fileURLs() where !isFromToday(url) {
+            try? fm.removeItem(at: url)
+        }
+    }
 
     /// Save a snap. Downscaled to a sane pixel size before writing — the
     /// composer flattens to 1080 wide anyway, and full 48MP camera output
@@ -82,9 +119,10 @@ enum MidRunPhotoStash {
         static func == (lhs: Entry, rhs: Entry) -> Bool { lhs.url == rhs.url }
     }
 
-    /// All stashed snaps with identities, oldest first.
+    /// Today's stashed snaps with identities, oldest first. Scoped to today so
+    /// the post-run prompt never offers a photo from a previous day's mile.
     static func entries() -> [Entry] {
-        fileURLs().compactMap { url in
+        todayURLs().compactMap { url in
             guard let data = try? Data(contentsOf: url), let img = UIImage(data: data) else {
                 return nil
             }
@@ -101,7 +139,7 @@ enum MidRunPhotoStash {
     /// tray button — downsampled at decode so a 1Hz-updating screen never
     /// holds full-size bitmaps for a 40pt chip.
     static func latestThumbnail(maxPixel: CGFloat = 160) -> UIImage? {
-        guard let url = fileURLs().last else { return nil }
+        guard let url = todayURLs().last else { return nil }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,

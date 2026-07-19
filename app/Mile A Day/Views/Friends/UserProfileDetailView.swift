@@ -1114,6 +1114,9 @@ struct FriendWorkoutDetailSheet: View {
     /// The run's GPS trace from the server — the owner's own detail gets this
     /// from HealthKit, which never holds someone else's runs.
     @State private var routeCoordinates: [CLLocationCoordinate2D]?
+    /// Retained map snapshot so the route map's pinch-zoom can compose its
+    /// floating copy on demand (same mechanism as the feed cards).
+    @State private var routeSnapshot: UIImage?
     @State private var isLoadingRoute = false
 
     /// The same rule your own detail uses, sanity guard included.
@@ -1144,7 +1147,8 @@ struct FriendWorkoutDetailSheet: View {
                 WorkoutDetailSectionHeader(icon: "map.fill", title: "Route")
                 WorkoutRouteMapView(
                     coordinates: routeCoordinates,
-                    routeColor: workoutColor
+                    routeColor: workoutColor,
+                    onSnapshot: { routeSnapshot = $0 }
                 )
                 .frame(height: 260)
                 .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
@@ -1152,9 +1156,26 @@ struct FriendWorkoutDetailSheet: View {
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
                         .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
                 )
+                // Pinch to zoom, same as the feed cards and your own workout detail.
+                .instagramZoomable(imageProvider: { routeZoomComposite() })
             }
             .padding(MADTheme.Spacing.md)
             .madLiquidGlass()
+        }
+    }
+
+    /// Floating zoom copy for the route map, composed on demand from the
+    /// retained snapshot (bare route — no stats band).
+    private func routeZoomComposite() -> UIImage? {
+        guard let snapshot = routeSnapshot,
+              let coords = routeCoordinates, coords.count >= 2 else { return nil }
+        return WorkoutRouteMapView.zoomComposite(
+            snapshot: snapshot,
+            coordinates: coords,
+            routeColor: workoutColor,
+            size: CGSize(width: 900, height: 600)
+        ) {
+            EmptyView()
         }
     }
 

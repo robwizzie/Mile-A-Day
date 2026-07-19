@@ -394,6 +394,11 @@ struct PostComposerView: View {
 
     @StateObject private var vm: PostComposerViewModel
     @State private var showCamera = false
+    // Library import of a photo captured DURING this walk/run (window-filtered
+    // for authenticity, same as the post-run prompt). Its cover rides the
+    // `canvasSection` node — a third cover on the ScrollView or the ZStack
+    // (which already own the terms + camera covers) would silently drop one.
+    @State private var showLibraryImport = false
     /// Seeded from the local cache so a returning poster never waits on (or
     /// races) the network check in `resolveTermsIfNeeded`.
     @State private var termsState: TermsState =
@@ -441,6 +446,28 @@ struct PostComposerView: View {
                 ScrollView {
                     VStack(spacing: MADTheme.Spacing.lg) {
                         canvasSection
+                            // Distinct node from the ScrollView (terms gate) and
+                            // the ZStack (camera) — see showLibraryImport.
+                            .fullScreenCover(isPresented: $showLibraryImport) {
+                                WorkoutPhotoImportPicker(window: importWindow) { result in
+                                    showLibraryImport = false
+                                    switch result {
+                                    case .accepted(let image):
+                                        vm.pickedImage = image
+                                    case .failed:
+                                        vm.errorMessage = "Couldn't load that photo. Try another one."
+                                    case .cancelled:
+                                        break
+                                    }
+                                }
+                            }
+                        // A photo snapped DURING this walk/run is a valid post,
+                        // not just a fresh camera shot — mirrors the post-run
+                        // prompt's "Choose from this walk". Only offered when the
+                        // post is tied to a workout (empty state only).
+                        if vm.pickedImage == nil, vm.stats.workoutId != nil {
+                            chooseFromLibraryButton
+                        }
                         if vm.pickedImage != nil {
                             overlayEditor
                             if vm.hasRoute { routeToggle }
@@ -782,6 +809,45 @@ struct PostComposerView: View {
         }
         .buttonStyle(.plain)
         .disabled(!MADCameraView.isAvailable)
+    }
+
+    /// Secondary CTA in the empty state: pick a photo the user already took on
+    /// this walk/run (the window-filtered library importer). Styled to sit
+    /// below the camera placeholder without competing with it.
+    private var chooseFromLibraryButton: some View {
+        Button { showLibraryImport = true } label: {
+            HStack(spacing: 7) {
+                Image(systemName: "photo.badge.plus")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("Choose a photo from this walk or run")
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+            }
+            .foregroundColor(.white.opacity(0.9))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                Capsule().fill(Color.white.opacity(0.1))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Accepted capture-time window for the library importer, from the linked
+    /// workout's own start/end (HealthKit) with grace on both ends. Mirrors the
+    /// post-run prompt: when the workout hasn't synced into `todaysWorkouts` yet
+    /// we bound to a generous recent window rather than the whole day, so an
+    /// unrelated earlier photo still can't slip in.
+    private var importWindow: ClosedRange<Date> {
+        let now = Date()
+        guard let wid = vm.stats.workoutId,
+              let workout = HealthKitManager.shared.todaysWorkouts
+                .first(where: { $0.uuid.uuidString == wid }) else {
+            return now.addingTimeInterval(-3 * 60 * 60)...now.addingTimeInterval(2 * 60)
+        }
+        let start = workout.startDate.addingTimeInterval(-5 * 60)
+        let end = workout.endDate.addingTimeInterval(30 * 60)
+        return start...max(start, end)
     }
 
     // MARK: - Overlay editor

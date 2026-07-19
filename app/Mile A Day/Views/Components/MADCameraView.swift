@@ -36,6 +36,9 @@ struct MADCameraView: View {
     @State private var captureFlash = false
     /// Accumulated flip-icon rotation (each flip adds a half turn).
     @State private var flipRotation: Double = 0
+    /// Display zoom captured at the start of a pinch, so the gesture scales from
+    /// where the user was (not always from 1×). nil when no pinch is active.
+    @State private var pinchBaseline: CGFloat?
 
     /// Whether the device has a camera the controller can actually drive
     /// (false on Simulator). Asks AVFoundation — the same stack that
@@ -54,6 +57,9 @@ struct MADCameraView: View {
                 .ignoresSafeArea()
                 .opacity(camera.isSessionRunning ? 1 : 0)
                 .animation(.easeIn(duration: 0.35), value: camera.isSessionRunning)
+                // Pinch anywhere on the preview to zoom (two fingers — never
+                // conflicts with the one-finger chrome taps layered above).
+                .gesture(zoomGesture)
 
             if !camera.isSessionRunning && !camera.authorizationDenied {
                 ProgressView()
@@ -99,6 +105,11 @@ struct MADCameraView: View {
                     .opacity(controlsAppeared ? 1 : 0)
                     .offset(y: controlsAppeared ? 0 : -14)
                 Spacer()
+                if camera.zoomOptions.count > 1 {
+                    zoomSelector
+                        .padding(.bottom, 14)
+                        .opacity(controlsAppeared ? 1 : 0)
+                }
                 bottomBar
                     .opacity(controlsAppeared ? 1 : 0)
                     .offset(y: controlsAppeared ? 0 : 16)
@@ -220,6 +231,59 @@ struct MADCameraView: View {
             .padding(.trailing, MADTheme.Spacing.lg)
         }
         .padding(.bottom, 36)
+    }
+
+    // MARK: - Zoom
+
+    /// Native-style lens/zoom selector. Each stop is a pill; the one nearest the
+    /// current zoom is highlighted and shows the live factor (e.g. "1.7×").
+    private var zoomSelector: some View {
+        HStack(spacing: 6) {
+            ForEach(camera.zoomOptions, id: \.self) { factor in
+                let selected = isSelectedZoom(factor)
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    pinchBaseline = nil
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        camera.setDisplayZoom(factor)
+                    }
+                } label: {
+                    Text(selected ? "\(fmtZoom(camera.displayZoom))×" : fmtZoom(factor))
+                        .font(.system(size: selected ? 15 : 13, weight: .bold, design: .rounded))
+                        .foregroundColor(selected ? .yellow : .white)
+                        .frame(minWidth: selected ? 46 : 34, minHeight: 34)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+                }
+                .buttonStyle(CameraControlButtonStyle())
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: camera.displayZoom)
+    }
+
+    /// Two-finger pinch → continuous zoom, scaled from wherever the user was.
+    private var zoomGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let base = pinchBaseline ?? camera.displayZoom
+                if pinchBaseline == nil { pinchBaseline = base }
+                camera.setDisplayZoom(base * value.magnification)
+            }
+            .onEnded { _ in pinchBaseline = nil }
+    }
+
+    /// True for the stop nearest the current zoom, so exactly one pill lights up.
+    private func isSelectedZoom(_ factor: CGFloat) -> Bool {
+        guard let nearest = camera.zoomOptions.min(by: {
+            abs($0 - camera.displayZoom) < abs($1 - camera.displayZoom)
+        }) else { return false }
+        return nearest == factor
+    }
+
+    /// "0.5" / "1" / "1.7" — one decimal only when it isn't a whole number.
+    private func fmtZoom(_ z: CGFloat) -> String {
+        let r = (z * 10).rounded() / 10
+        return r == r.rounded() ? String(Int(r)) : String(format: "%.1f", Double(r))
     }
 
     private var shutterButton: some View {
@@ -400,11 +464,24 @@ final class MADCameraController {
     /// Self-timer length in seconds; 0 = off. Deliberately NOT persisted — a
     /// remembered timer silently delaying tomorrow's quick snap is a surprise.
     var timerSeconds = 0
+    /// Zoom as the user reads it (native-camera convention: 0.5× is the
+    /// ultra-wide lens, 1× the main wide lens). Distinct from the device's raw
+    /// `videoZoomFactor`, which is 1.0 at whichever lens is widest.
+    var displayZoom: CGFloat = 1.0
+    /// Discrete zoom/lens stops to show as buttons for the current camera —
+    /// e.g. [0.5, 1, 2] on a phone with an ultra-wide, [1, 2] without one.
+    var zoomOptions: [CGFloat] = [1.0]
 
     @ObservationIgnored private let sessionQueue = DispatchQueue(label: "mad.camera.session")
     @ObservationIgnored private let photoOutput = AVCapturePhotoOutput()
     /// Session-queue-owned; also the source of truth for the active position.
     @ObservationIgnored private var videoInput: AVCaptureDeviceInput?
+    /// `videoZoomFactor` that reads as display 1.0× (the wide lens). On a camera
+    /// whose widest lens is ultra-wide this is the UW→W switch-over factor; on a
+    /// wide-only camera it's 1.0. Recomputed each time a device is attached.
+    @ObservationIgnored private var referenceZoom: CGFloat = 1.0
+    @ObservationIgnored private var minDisplayZoom: CGFloat = 1.0
+    @ObservationIgnored private var maxDisplayZoom: CGFloat = 1.0
     @ObservationIgnored private var configured = false
     /// True between stop() and the next start() — blocks lifecycle-observer
     /// restarts from reviving a session the user already closed.
@@ -582,7 +659,7 @@ final class MADCameraController {
             session.removeInput(previous)
             videoInput = nil
         }
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position),
+        guard let device = Self.bestCamera(for: position),
               let input = try? AVCaptureDeviceInput(device: device),
               session.canAddInput(input)
         else {
@@ -596,6 +673,83 @@ final class MADCameraController {
         }
         session.addInput(input)
         videoInput = input
+        configureZoom(for: device)
+    }
+
+    /// The richest camera for a position: prefer a virtual (fused-lens) device
+    /// so zoom is continuous across lenses and 0.5× (ultra-wide) is reachable,
+    /// then fall back through to the plain wide lens. Front cameras have no
+    /// ultra-wide, so they get the wide lens directly.
+    private static func bestCamera(for position: AVCaptureDevice.Position) -> AVCaptureDevice? {
+        guard position == .back else {
+            return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
+        }
+        let preferred: [AVCaptureDevice.DeviceType] = [
+            .builtInTripleCamera,    // ultra-wide + wide + tele  → 0.5×, 1×, 2×/3×
+            .builtInDualWideCamera,  // ultra-wide + wide         → 0.5×, 1×
+            .builtInDualCamera,      // wide + tele               → 1×, 2×
+            .builtInWideAngleCamera, // wide only                 → 1× + digital
+        ]
+        for type in preferred {
+            if let device = AVCaptureDevice.default(type, for: .video, position: .back) {
+                return device
+            }
+        }
+        return nil
+    }
+
+    /// Establish the display↔raw zoom mapping and the available stops for the
+    /// just-attached `device`, then open at 1×. Session-queue only. When the
+    /// widest lens is the ultra-wide, its raw `videoZoomFactor` of 1.0 reads as
+    /// 0.5×, and the wide lens (display 1×) sits at the UW→W switch-over factor.
+    private func configureZoom(for device: AVCaptureDevice) {
+        let hasUltraWide = device.constituentDevices
+            .contains { $0.deviceType == .builtInUltraWideCamera }
+        if hasUltraWide, let firstSwitch = device.virtualDeviceSwitchOverVideoZoomFactors.first {
+            referenceZoom = CGFloat(firstSwitch.doubleValue)
+        } else {
+            referenceZoom = 1.0
+        }
+
+        let minRaw = device.minAvailableVideoZoomFactor
+        // Cap zoom-in at 8× (display) so a huge digital range can't produce a
+        // useless, mushy crop.
+        let maxRaw = min(device.maxAvailableVideoZoomFactor, referenceZoom * 8)
+        minDisplayZoom = minRaw / referenceZoom
+        maxDisplayZoom = maxRaw / referenceZoom
+
+        var options: [CGFloat] = []
+        if hasUltraWide { options.append(0.5) }
+        options.append(1.0)
+        if maxDisplayZoom >= 2 { options.append(2.0) }
+
+        // Open at 1× (the wide lens), like the stock camera.
+        if (try? device.lockForConfiguration()) != nil {
+            device.videoZoomFactor = max(minRaw, min(referenceZoom, maxRaw))
+            device.unlockForConfiguration()
+        }
+
+        let opts = options
+        DispatchQueue.main.async {
+            self.zoomOptions = opts
+            self.displayZoom = 1.0
+        }
+    }
+
+    /// Set the zoom to `factor` in DISPLAY terms (0.5, 1, 2, …), clamped to what
+    /// the current lens supports. Drives both the lens buttons and pinch.
+    func setDisplayZoom(_ factor: CGFloat) {
+        sessionQueue.async { [weak self] in
+            guard let self, let device = self.videoInput?.device else { return }
+            let clamped = max(self.minDisplayZoom, min(factor, self.maxDisplayZoom))
+            let raw = max(device.minAvailableVideoZoomFactor,
+                          min(clamped * self.referenceZoom, device.maxAvailableVideoZoomFactor))
+            if (try? device.lockForConfiguration()) != nil {
+                device.videoZoomFactor = raw
+                device.unlockForConfiguration()
+            }
+            DispatchQueue.main.async { self.displayZoom = clamped }
+        }
     }
 
     private func publishFlashAvailability() {
