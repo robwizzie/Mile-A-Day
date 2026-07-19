@@ -832,6 +832,20 @@ export const hypeLog = pgTable(
       table.senderId.asc().nullsLast(),
       table.createdAt.desc().nullsFirst(),
     ),
+    // Feed hype tallies count a target's hypes with NO sender filter
+    // (COUNT(DISTINCT sender_id) per post/workout), so the sender-leading
+    // indexes above can't serve them and every feed row fell back to a
+    // hype_log scan. Lead with target_id + context, and carry sender_id as a
+    // trailing covering column so the DISTINCT count stays index-only.
+    index("idx_hype_log_target_context")
+      .using(
+        "btree",
+        table.targetId.asc().nullsLast(),
+        table.contextType.asc().nullsLast(),
+        table.contextId.asc().nullsLast(),
+        table.senderId.asc().nullsLast(),
+      )
+      .where(sql`(context_id IS NOT NULL)`),
   ],
 );
 

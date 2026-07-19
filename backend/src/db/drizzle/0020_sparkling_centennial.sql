@@ -1,0 +1,1 @@
+CREATE INDEX "idx_hype_log_target_context" ON "hype_log" USING btree ("target_id","context_type","context_id","sender_id") WHERE (context_id IS NOT NULL);

@@ -141,6 +141,13 @@
       "when": 1784229100218,
       "tag": "0019_white_odin",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1784426667260,
+      "tag": "0020_sparkling_centennial",
+      "breakpoints": true
     }
   ]
 }
