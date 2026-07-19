@@ -15,6 +15,60 @@ import { CtaSection } from "@/components/cta-section";
 import { Footer } from "@/components/footer";
 import { ScrollReveal } from "@/components/scroll-reveal";
 
+const SITE_URL = "https://mileaday.run";
+const APP_STORE_URL = "https://apps.apple.com/us/app/mile-a-day/id6746970905";
+
+// Structured data (schema.org) so Google can render a rich result and
+// understand that mileaday.run is the home of a free iOS/Apple Watch app.
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": `${SITE_URL}/#organization`,
+      name: "Mile A Day",
+      url: SITE_URL,
+      logo: `${SITE_URL}/images/mad-circle-icon.png`,
+      founder: [
+        { "@type": "Person", name: "Rob Wiscount" },
+        { "@type": "Person", name: "David Simmerman" },
+      ],
+      sameAs: [
+        "https://www.instagram.com/mileadayapp",
+        "https://www.tiktok.com/@mileadayapp",
+        "https://x.com/mileadayapp",
+      ],
+    },
+    {
+      "@type": "WebSite",
+      "@id": `${SITE_URL}/#website`,
+      url: SITE_URL,
+      name: "Mile A Day",
+      description:
+        "Mile A Day is the free iOS & Apple Watch app that turns one mile a day into an unbreakable habit.",
+      publisher: { "@id": `${SITE_URL}/#organization` },
+    },
+    {
+      "@type": "MobileApplication",
+      "@id": `${SITE_URL}/#app`,
+      name: "Mile A Day",
+      operatingSystem: "iOS, watchOS",
+      applicationCategory: "HealthApplication",
+      description:
+        "Run or walk a mile every day, build streaks, earn badges, and compete with friends. Free on iPhone and Apple Watch.",
+      url: SITE_URL,
+      downloadUrl: APP_STORE_URL,
+      installUrl: APP_STORE_URL,
+      publisher: { "@id": `${SITE_URL}/#organization` },
+      offers: {
+        "@type": "Offer",
+        price: "0",
+        priceCurrency: "USD",
+      },
+    },
+  ],
+};
+
 // Section order tells the story top to bottom: hook (hero) → live proof the
 // community is real (stats band) → what the app does (features) → the new
 // social experience (feed, then friends/nudges) → the competitive layer
@@ -23,6 +77,10 @@ import { ScrollReveal } from "@/components/scroll-reveal";
 export default function Home() {
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a]">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
       <ScrollReveal />
       <Navbar />
       <HeroSection />
