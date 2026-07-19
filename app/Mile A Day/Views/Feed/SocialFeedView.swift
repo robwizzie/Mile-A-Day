@@ -55,6 +55,11 @@ struct SocialFeedView: View {
     /// retry row — the stalled last card never re-fires onAppear on its own.
     @State private var loadMoreFailed = false
     @State private var loadedOnce = false
+    /// When the full feed was last fetched. Used to throttle the heavy
+    /// tab-switch refetch on rapid tab bounces — cards are already on screen, so
+    /// re-pulling the whole feed on every return just adds latency and server
+    /// load. A manual pull or a longer gap still does the full refresh.
+    @State private var lastFeedRefreshAt: Date?
 
     @State private var hypingIds: Set<String> = []
     @State private var termsAccepted: Bool?
@@ -369,6 +374,18 @@ struct SocialFeedView: View {
         // in (it only shows a spinner when the feed is empty).
         .onChange(of: isActiveTab) { _, active in
             guard active, loadedOnce else { return }
+            // Rapid tab bounce (< 20s since the last full fetch): the cards are
+            // already current, so skip the heavy full refetch and just refresh
+            // the cheap rail (viewed rings / expiries) + hype counts. Anything
+            // longer, or a manual pull, still does the full refresh so a mile
+            // just completed still shows up on return.
+            if let last = lastFeedRefreshAt, Date().timeIntervalSince(last) < 20 {
+                Task {
+                    await refreshRail()
+                    await loadHypeStatus()
+                }
+                return
+            }
             Task {
                 await refresh()
                 await loadHypeStatus()
@@ -812,6 +829,7 @@ struct SocialFeedView: View {
                 feed = feedResponse.items
                 nextBefore = feedResponse.next_before
                 loadMoreFailed = false
+                lastFeedRefreshAt = Date()
             }
             if let storyGroups {
                 stories = storyGroups
