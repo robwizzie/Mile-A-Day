@@ -728,7 +728,19 @@ class HealthKitManager: ObservableObject {
             }
         }
     }
-    
+
+    /// Whether the user has explicitly turned OFF *write* access to Workouts for
+    /// this app. Unlike reads (which Apple hides — a denied read just returns no
+    /// samples), share-authorization status is reliable, so an in-app workout
+    /// that fails to save can distinguish "user denied Health access"
+    /// (actionable — send them to Settings) from a transient save failure.
+    /// `.notDetermined` and `.sharingAuthorized` both return false: the former
+    /// will prompt on the next save attempt, the latter is already fine.
+    func isWorkoutSharingDenied() -> Bool {
+        guard HKHealthStore.isHealthDataAvailable() else { return false }
+        return healthStore.authorizationStatus(for: HKObjectType.workoutType()) == .sharingDenied
+    }
+
     // Enable background delivery for HealthKit data
     private func enableBackgroundDelivery() {
         let workoutType = HKObjectType.workoutType()
