@@ -1060,14 +1060,20 @@ class HealthKitManager: ObservableObject {
         return workoutsByDay
     }
     
-    /// Filters workouts for today using device timezone (legacy behavior)
+    /// Filters workouts to those that belong to "today" in the device timezone.
+    /// A workout is attributed to the day it STARTED — matching groupWorkoutsByDeviceDay,
+    /// the timezone-aware streak grouping, the backend's `local_date` (= start date),
+    /// and Apple Health's own daily totals. Keying off endDate instead pulled a workout
+    /// that started before midnight but ended after it into today, adding that whole run
+    /// to Today's Progress (a walk left "on as it crossed 12am") and falsely completing
+    /// the daily goal — while the streak, backend, and Apple Health all counted it
+    /// yesterday.
     func filterWorkoutsByDeviceToday(workouts: [HKWorkout]) -> [HKWorkout] {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let _ = calendar.date(byAdding: .day, value: 1, to: today)!
-        
+
         return workouts.filter { workout in
-            let workoutDate = calendar.startOfDay(for: workout.endDate)
+            let workoutDate = calendar.startOfDay(for: workout.startDate)
             return workoutDate == today
         }
     }
