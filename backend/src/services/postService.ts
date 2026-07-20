@@ -829,62 +829,32 @@ export async function getUnifiedFeed(
   limit: number,
   before?: string | null,
 ): Promise<FeedEntryRow[]> {
+  // PERF: the expensive per-row columns (route JSONB, is_hyped, hype_count,
+  // story_photo_url) are computed ONLY for the page's rows, not for the whole
+  // circle's history. The old shape put them in the SELECT list of a UNION ALL
+  // that was then ORDER BY sort_ts DESC LIMIT $3 — so Postgres had to evaluate
+  // them for every post AND every workout in the viewer's circle across all
+  // time before the outer LIMIT could apply, and got linearly slower as the
+  // workouts table grew. Now `candidates` unions only the cheap keys, `page`
+  // sorts+limits them (the LIMIT is a hard barrier), and the outer SELECT
+  // projects the heavy columns onto just those <= $3 rows. Output shape and
+  // every value are identical to the old query; results are keyed by column
+  // name so column order is irrelevant. All lookups here are already indexed
+  // (idx_posts_user_created, idx_workouts_user_device_end for the candidate
+  // ordering; hype_log_context_dedupe_idx / idx_hype_log_target_context for the
+  // hype checks).
   const rows = await db.query<FeedEntryRow>(
     `
-		${CIRCLE_CTE}
-		SELECT feed.*, ${URL_SAFE_CURSOR("feed.sort_ts")} AS cursor FROM (
+		${CIRCLE_CTE},
+		candidates AS (
 			SELECT
-				'post' AS kind,
+				'post'::text AS kind,
 				p.post_id::text AS id,
 				p.created_at AS sort_ts,
-				p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
-				p.media_url, p.caption, p.stats_snapshot,
-				p.local_date::text AS local_date,
-				-- Owner's decision: the 24h expiry only ends the STORY (rail/viewer).
-				-- A photo riding on the run's feed card stays permanently — only
-				-- deleting the story removes it.
-				(
-					SELECT p3.media_url FROM posts p3
-					WHERE p.workout_id IS NOT NULL
-						AND p3.workout_id = p.workout_id
-						AND p3.user_id = p.user_id
-						AND p3.post_id <> p.post_id
-						AND p3.deleted_at IS NULL
-						AND p3.share_to_story AND NOT p3.share_to_feed
-					ORDER BY p3.created_at DESC
-					LIMIT 1
-				) AS story_photo_url,
-				p.is_auto,
-				p.workout_id,
-				(SELECT w2.workout_type FROM workouts w2 WHERE w2.workout_id = p.workout_id) AS workout_type,
-				NULL::double precision AS distance,
-				NULL::double precision AS total_duration,
-				NULL::double precision AS calories,
-				NULL::integer AS steps,
-				-- Auto posts' media already IS the rendered route card, so shipping
-				-- the polyline too would only duplicate pixels and bloat the page.
-				-- Gated on the author's global "Share route maps" consent setting
-				-- on top of the per-post include_route choice.
-				(SELECT wr.route FROM workout_routes wr
-					WHERE p.include_route AND NOT p.is_auto
-						AND (COALESCE(nsp.share_route_maps, true) OR p.user_id = $1)
-						AND wr.workout_id = p.workout_id) AS route,
-				(p.user_id = $1) AS is_self,
-				-- Unified RUN rule: a post linked to a workout also counts the
-				-- run's 'mile' hypes (inbox / friends list) — same number on
-				-- every surface for the same run.
-				EXISTS (
-					SELECT 1 FROM hype_log h
-					WHERE h.sender_id = $1 AND h.target_id = p.user_id
-						AND ${postHypedByViewerMatchSql("h", "p")}
-				) AS is_hyped,
-				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
-					WHERE hc.target_id = p.user_id
-						AND ${postHypeMatchSql("hc", "p")}) AS hype_count
+				p.user_id AS owner_id,
+				p.workout_id AS workout_id
 			FROM posts p
 			JOIN circle c ON c.uid = p.user_id
-			JOIN users u ON u.user_id = p.user_id
-			LEFT JOIN notification_settings nsp ON nsp.user_id = p.user_id
 			WHERE p.share_to_feed AND p.deleted_at IS NULL
 				AND p.user_id NOT IN (SELECT uid FROM blocked)
 				AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
@@ -892,40 +862,13 @@ export async function getUnifiedFeed(
 			UNION ALL
 
 			SELECT
-				'workout' AS kind,
+				'workout'::text AS kind,
 				w.workout_id AS id,
 				w.device_end_date AS sort_ts,
-				w.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
-				NULL::text AS media_url, NULL::text AS caption, NULL::jsonb AS stats_snapshot,
-				NULL::text AS local_date,
-				NULL::text AS story_photo_url,
-				NULL::boolean AS is_auto,
-				w.workout_id,
-				w.workout_type,
-				w.distance::double precision,
-				w.total_duration::double precision,
-				w.calories::double precision,
-				w.steps,
-				-- Raw workout routes respect the owner's "Share route maps" setting
-				-- (the owner always sees their own).
-				(SELECT wr.route FROM workout_routes wr
-					WHERE (COALESCE(ns.share_route_maps, true) OR w.user_id = $1)
-						AND wr.workout_id = w.workout_id) AS route,
-				(w.user_id = $1) AS is_self,
-				-- Unified RUN rule: the run's 'mile' hypes plus 'post' hypes on
-				-- any post linked to this workout (e.g. a story-only photo that
-				-- was hyped from a profile) — same number on every surface.
-				EXISTS (
-					SELECT 1 FROM hype_log h
-					WHERE h.sender_id = $1 AND h.target_id = w.user_id
-						AND ${runHypedByViewerMatchSql("h", "w")}
-				) AS is_hyped,
-				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
-					WHERE hc.target_id = w.user_id
-						AND ${runHypeMatchSql("hc", "w")}) AS hype_count
+				w.user_id AS owner_id,
+				w.workout_id AS workout_id
 			FROM workouts w
 			JOIN circle c ON c.uid = w.user_id
-			JOIN users u ON u.user_id = w.user_id
 			LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
 			WHERE w.user_id NOT IN (SELECT uid FROM blocked)
 				AND COALESCE(ns.share_workouts_to_feed, true) = true
@@ -937,10 +880,99 @@ export async function getUnifiedFeed(
 					SELECT 1 FROM posts p2
 					WHERE p2.workout_id = w.workout_id AND p2.deleted_at IS NULL AND p2.share_to_feed
 				)
-		) feed
-		WHERE ($2::timestamptz IS NULL OR sort_ts < $2::timestamptz)
-		ORDER BY sort_ts DESC
-		LIMIT $3
+		),
+		page AS (
+			SELECT kind, id, sort_ts, owner_id, workout_id
+			FROM candidates
+			WHERE ($2::timestamptz IS NULL OR sort_ts < $2::timestamptz)
+			ORDER BY sort_ts DESC
+			LIMIT $3
+		)
+		SELECT
+			page.kind,
+			page.id,
+			page.sort_ts,
+			page.owner_id AS user_id,
+			u.username, u.first_name, u.last_name, u.profile_image_url,
+			p.media_url, p.caption, p.stats_snapshot,
+			p.local_date::text AS local_date,
+			-- Owner's decision: the 24h expiry only ends the STORY (rail/viewer).
+			-- A photo riding on the run's feed card stays permanently — only
+			-- deleting the story removes it.
+			(
+				SELECT p3.media_url FROM posts p3
+				WHERE page.kind = 'post'
+					AND p.workout_id IS NOT NULL
+					AND p3.workout_id = p.workout_id
+					AND p3.user_id = p.user_id
+					AND p3.post_id <> p.post_id
+					AND p3.deleted_at IS NULL
+					AND p3.share_to_story AND NOT p3.share_to_feed
+				ORDER BY p3.created_at DESC
+				LIMIT 1
+			) AS story_photo_url,
+			p.is_auto,
+			page.workout_id,
+			-- Populated for posts (via their linked workout) and workouts alike.
+			wt.workout_type,
+			CASE WHEN page.kind = 'workout' THEN wt.distance::double precision END AS distance,
+			CASE WHEN page.kind = 'workout' THEN wt.total_duration::double precision END AS total_duration,
+			CASE WHEN page.kind = 'workout' THEN wt.calories::double precision END AS calories,
+			CASE WHEN page.kind = 'workout' THEN wt.steps END AS steps,
+			-- Auto posts' media already IS the rendered route card, so shipping
+			-- the polyline too would only duplicate pixels and bloat the page.
+			-- Gated on the author's global "Share route maps" consent setting;
+			-- posts additionally honor the per-post include_route choice. Raw
+			-- workout routes respect the same setting (the owner always sees
+			-- their own).
+			CASE
+				WHEN page.kind = 'post' THEN (
+					SELECT wr.route FROM workout_routes wr
+					WHERE p.include_route AND NOT p.is_auto
+						AND (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
+						AND wr.workout_id = p.workout_id
+				)
+				ELSE (
+					SELECT wr.route FROM workout_routes wr
+					WHERE (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
+						AND wr.workout_id = wt.workout_id
+				)
+			END AS route,
+			(page.owner_id = $1) AS is_self,
+			-- Unified RUN rule: a post/workout linked to a run counts the run's
+			-- 'mile' hypes (inbox / friends list) AND 'post' hypes on any linked
+			-- post — same number on every surface for the same run.
+			CASE
+				WHEN page.kind = 'post' THEN EXISTS (
+					SELECT 1 FROM hype_log h
+					WHERE h.sender_id = $1 AND h.target_id = page.owner_id
+						AND ${postHypedByViewerMatchSql("h", "p")}
+				)
+				ELSE EXISTS (
+					SELECT 1 FROM hype_log h
+					WHERE h.sender_id = $1 AND h.target_id = page.owner_id
+						AND ${runHypedByViewerMatchSql("h", "wt")}
+				)
+			END AS is_hyped,
+			CASE
+				WHEN page.kind = 'post' THEN (
+					SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
+					WHERE hc.target_id = page.owner_id
+						AND ${postHypeMatchSql("hc", "p")}
+				)
+				ELSE (
+					SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
+					WHERE hc.target_id = page.owner_id
+						AND ${runHypeMatchSql("hc", "wt")}
+				)
+			END AS hype_count,
+			${URL_SAFE_CURSOR("page.sort_ts")} AS cursor
+		FROM page
+		JOIN users u ON u.user_id = page.owner_id
+		LEFT JOIN posts p ON page.kind = 'post' AND p.post_id::text = page.id
+		LEFT JOIN workouts wt ON wt.workout_id = page.workout_id
+		LEFT JOIN notification_settings nsp ON nsp.user_id = page.owner_id
+		ORDER BY page.sort_ts DESC
 		`,
     [viewerId, before ?? null, limit],
   );
