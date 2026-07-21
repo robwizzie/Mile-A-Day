@@ -4,6 +4,8 @@ struct ProfileView: View {
     @Environment(\.appStateManager) var appStateManager
     @ObservedObject var userManager: UserManager
     @ObservedObject var healthManager: HealthKitManager
+    /// Streak-token state — drives the Pure Flame (natural streak) seal.
+    @ObservedObject private var tokensState = StreakTokensState.shared
 
     @State private var activeSheet: ProfileSheetType?
     @State private var showingEditProfile = false
@@ -486,11 +488,20 @@ struct ProfileView: View {
 
                     // User Info
                     VStack(spacing: MADTheme.Spacing.sm) {
-                        // Username (primary, large)
+                        // Username (primary, large) — with the Pure Flame seal
+                        // when the current streak is 100% natural (no token
+                        // rescues). Server-gated: hidden until streak features
+                        // are live for this user.
                         if let username = userManager.currentUser.username {
-                            Text("@\(username)")
-                                .font(MADTheme.Typography.title1)
-                                .foregroundColor(MADTheme.Colors.primaryText)
+                            HStack(spacing: 6) {
+                                Text("@\(username)")
+                                    .font(MADTheme.Typography.title1)
+                                    .foregroundColor(MADTheme.Colors.primaryText)
+                                if tokensState.payload?.natural_streak == true,
+                                   userManager.currentUser.streak > 0 {
+                                    PureFlameBadge(size: 22)
+                                }
+                            }
                         }
 
                         // Display name
