@@ -25,7 +25,7 @@ enum StreakTokenKind {
 
     var icon: String {
         switch self {
-        case .doubleDown: return "flame.fill"
+        case .doubleDown: return "bolt.fill"
         case .save: return "snowflake"
         case .assist: return "lifepreserver"
         }
@@ -95,7 +95,6 @@ struct TokenMedallion: View {
 
     var body: some View {
         ZStack {
-            // Coin face
             Circle()
                 .fill(
                     LinearGradient(
@@ -105,7 +104,6 @@ struct TokenMedallion: View {
                     )
                 )
 
-            // Top-light sheen — what makes it read as minted metal, not a dot.
             Circle()
                 .fill(
                     RadialGradient(
@@ -116,16 +114,15 @@ struct TokenMedallion: View {
                     )
                 )
 
-            // Inner ring (the coin's lip)
+            Circle()
+                .fill(Color.black.opacity(0.10))
+                .padding(size * 0.22)
+
             Circle()
                 .strokeBorder(Color.white.opacity(0.35), lineWidth: max(1, size * 0.035))
                 .padding(size * 0.10)
 
-            // Engraved icon
-            Image(systemName: kind.icon)
-                .font(.system(size: size * 0.42, weight: .bold))
-                .foregroundColor(.white)
-                .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
+            tokenGlyph
         }
         .frame(width: size, height: size)
         .saturation(held ? 1 : 0.45)
@@ -134,8 +131,21 @@ struct TokenMedallion: View {
             // Rim: solid gold when earned; progress arc while earning.
             Group {
                 if held {
-                    Circle().strokeBorder(gold, lineWidth: max(1.5, size * 0.05))
+                    Circle()
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [gold, kind.tint.opacity(0.95)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: max(1.5, size * 0.06)
+                        )
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.45), lineWidth: max(0.8, size * 0.018))
+                        .padding(size * 0.08)
                 } else {
+                    Circle()
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: max(1.5, size * 0.05))
                     Circle()
                         .trim(from: 0, to: max(0.02, min(progress, 1)))
                         .stroke(
@@ -148,7 +158,24 @@ struct TokenMedallion: View {
             }
         )
         .shadow(color: held ? kind.tint.opacity(0.55) : .clear, radius: size * 0.18)
-        .accessibilityLabel("\(kind.title)\(held ? ", ready" : "")")
+        .accessibilityLabel("\(kind.title)\(held ? ", available" : "")")
+    }
+
+    @ViewBuilder
+    private var tokenGlyph: some View {
+        switch kind {
+        case .doubleDown:
+            Text("2x")
+                .font(.system(size: size * 0.42, weight: .black, design: .rounded))
+                .foregroundColor(.white)
+                .minimumScaleFactor(0.7)
+                .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
+        case .save, .assist:
+            Image(systemName: kind.icon)
+                .font(.system(size: size * 0.42, weight: .bold))
+                .foregroundColor(.white)
+                .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
+        }
     }
 }
 
@@ -156,30 +183,47 @@ struct TokenMedallion: View {
 
 /// The "never needed a rescue" seal — shown beside the username when the
 /// current streak is 100% natural (no Save, Double Down, or received Assist
-/// inside it). Mile A Day's answer to a verified check: a gold-ringed flame.
+/// inside it). Mile A Day's answer to a verified check: a gold diamond seal.
 struct PureFlameBadge: View {
     var size: CGFloat = 22
 
     var body: some View {
+        let diamondSize = size * 0.76
         ZStack {
-            Circle()
+            RoundedRectangle(cornerRadius: size * 0.18, style: .continuous)
                 .fill(
                     LinearGradient(
-                        colors: [Color(red: 1.0, green: 0.84, blue: 0.3),
-                                 Color(red: 0.95, green: 0.55, blue: 0.1)],
+                        colors: [
+                            Color(red: 1.0, green: 0.90, blue: 0.45),
+                            Color(red: 0.92, green: 0.58, blue: 0.12)
+                        ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                 )
+                .frame(width: diamondSize, height: diamondSize)
+                .rotationEffect(.degrees(45))
+            RoundedRectangle(cornerRadius: size * 0.18, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.85), lineWidth: max(1, size * 0.05))
+                .frame(width: diamondSize, height: diamondSize)
+                .rotationEffect(.degrees(45))
             Image(systemName: "flame.fill")
-                .font(.system(size: size * 0.5, weight: .bold))
-                .foregroundColor(.white)
+                .font(.system(size: size * 0.42, weight: .black))
+                .foregroundColor(Color(red: 0.52, green: 0.22, blue: 0.02))
+                .shadow(color: .white.opacity(0.35), radius: 1)
+            if size >= 34 {
+                Image(systemName: "sparkle")
+                    .font(.system(size: size * 0.18, weight: .bold))
+                    .foregroundColor(.white)
+                    .offset(x: size * 0.26, y: -size * 0.26)
+            }
         }
         .frame(width: size, height: size)
-        .overlay(Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: 1.2))
-        .shadow(color: Color.orange.opacity(0.45), radius: 3)
+        .shadow(color: gold.opacity(0.55), radius: size * 0.16)
         .accessibilityLabel("Natural streak — every day earned")
     }
+
+    private var gold: Color { Color(red: 1.0, green: 0.84, blue: 0.35) }
 }
 
 // MARK: - Dashboard card
@@ -201,36 +245,33 @@ struct StreakTokensCard: View {
                 MADHaptics.tap()
                 showDetail = true
             } label: {
-                VStack(spacing: 12) {
-                    // Eyebrow header — matches the streak/today cards' quiet
-                    // caption grammar; the medallions are the headline here.
+                VStack(spacing: 15) {
+                    // Quiet section header; the medallions carry the color.
                     HStack(spacing: 6) {
-                        Text("STREAK TOKENS")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .tracking(1.2)
-                            .foregroundColor(.white.opacity(0.7))
+                        Text("Streak Tokens")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.72))
                         Spacer()
                         let ready = [
                             payload.double_down.held,
                             payload.streak_save.held,
                             payload.streak_assist.held,
                         ].filter { $0 }.count
-                        Text(ready > 0 ? "\(ready) ready" : "How they work")
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .foregroundColor(ready > 0 ? .green : .white.opacity(0.55))
+                        Text(ready > 0 ? "\(ready) available" : "How they work")
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(ready > 0 ? 0.72 : 0.55))
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.system(size: 13, weight: .bold))
                             .foregroundColor(.white.opacity(0.4))
                     }
 
-                    HStack(spacing: 0) {
+                    HStack(alignment: .top, spacing: 0) {
                         medallionCell(
                             kind: .doubleDown,
                             held: payload.double_down.held,
                             progress: payload.double_down.fraction,
                             caption: payload.double_down.held
-                                ? "Ready"
+                                ? "Available"
                                 : "\(Int(payload.double_down.progress))/\(Int(payload.double_down.target))"
                         )
                         medallionCell(
@@ -238,7 +279,7 @@ struct StreakTokensCard: View {
                             held: payload.streak_save.held,
                             progress: payload.streak_save.fraction,
                             caption: payload.streak_save.held
-                                ? "Ready"
+                                ? "Available"
                                 : "\(Int(payload.streak_save.progress))/\(Int(payload.streak_save.target))"
                         )
                         medallionCell(
@@ -246,7 +287,7 @@ struct StreakTokensCard: View {
                             held: payload.streak_assist.held,
                             progress: payload.streak_assist.fraction,
                             caption: payload.streak_assist.held
-                                ? "Ready"
+                                ? "Available"
                                 : String(format: "%.1f/%.0f mi", payload.streak_assist.progress, payload.streak_assist.target)
                         )
                     }
@@ -264,8 +305,9 @@ struct StreakTokensCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .padding(MADTheme.Spacing.md)
-                .madLiquidGlass()
+                .padding(.horizontal, 18)
+                .padding(.vertical, 18)
+                .background(tokenCardBackground(readyCount: readyCount(for: payload)))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -275,13 +317,56 @@ struct StreakTokensCard: View {
         }
     }
 
+    private func readyCount(for payload: StreakFeaturesPayload) -> Int {
+        [
+            payload.double_down.held,
+            payload.streak_save.held,
+            payload.streak_assist.held,
+        ].filter { $0 }.count
+    }
+
+    private func tokenCardBackground(readyCount: Int) -> some View {
+        RoundedRectangle(cornerRadius: 24, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.05),
+                                Color(red: 1.0, green: 0.56, blue: 0.20).opacity(0.06),
+                                MADTheme.Colors.madRed.opacity(0.04)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.22),
+                                readyCount > 0 ? Color.white.opacity(0.14) : Color.white.opacity(0.08),
+                                Color.white.opacity(0.06)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            )
+            .shadow(color: Color.black.opacity(0.16), radius: 14, x: 0, y: 7)
+    }
+
     private func medallionCell(
         kind: StreakTokenKind, held: Bool, progress: Double, caption: String
     ) -> some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 7) {
             TokenMedallion(kind: kind, held: held, progress: progress, size: 46)
                 // Earned tokens breathe gently — alive, not static.
-                .scaleEffect(held && pulse ? 1.05 : 1.0)
+                .scaleEffect(held && pulse ? 1.025 : 1.0)
                 .animation(
                     held
                         ? .easeInOut(duration: 1.5).repeatForever(autoreverses: true)
@@ -311,14 +396,14 @@ struct StreakTokensCard: View {
                     value: tokensState.meterGains
                 )
             Text(kind.title)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
                 .foregroundColor(.white.opacity(held ? 0.95 : 0.6))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Text(caption)
-                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
                 .monospacedDigit()
-                .foregroundColor(held ? .green : .white.opacity(0.45))
+                .foregroundColor(held ? .white.opacity(0.72) : .white.opacity(0.45))
         }
         .frame(maxWidth: .infinity)
     }
@@ -431,19 +516,18 @@ struct StreakTokensDetailView: View {
                 }
                 Spacer(minLength: 0)
                 if meter.held {
-                    Text("READY")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white)
+                    Text("Available")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundColor(.primary.opacity(0.82))
                         .padding(.horizontal, 9)
                         .padding(.vertical, 4)
-                        .background(Capsule().fill(Color.green.opacity(0.85)))
+                        .background(Capsule().fill(Color.primary.opacity(0.08)))
                 }
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("HOW TO EARN")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                    .tracking(1.1)
+                Text("How to earn")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundColor(kind.tint)
                 Text(kind.howToEarn)
                     .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -473,16 +557,15 @@ struct StreakTokensDetailView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        Text("ABOUT THE PURE FLAME")
-                            .font(.system(size: 10, weight: .heavy, design: .rounded))
-                            .tracking(1.1)
+                        Text("About Pure Flame")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(pureFlameGold)
                         if natural {
                             PureFlameBadge(size: 15)
                         }
                     }
                     Text(natural
-                         ? "Your streak is 100% natural — every day earned on the day. The gold flame shows beside your name."
+                         ? "Your streak is 100% natural — every day earned on the day. The gold seal shows beside your name."
                          : "A token kept this streak alive, so the badge is resting. It returns with your next untouched streak.")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundColor(.secondary)
@@ -554,39 +637,44 @@ private struct TokenMeterBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             GeometryReader { geo in
-                let fillWidth = max(6, geo.size.width * fraction * (grown ? 1 : 0))
+                let rawFillWidth = geo.size.width * fraction * (grown ? 1 : 0)
+                let fillWidth = min(geo.size.width, max(fraction > 0 ? 6 : 0, rawFillWidth))
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.white.opacity(0.08))
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: kind.gradient,
-                                startPoint: .leading,
-                                endPoint: .trailing
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: kind.gradient,
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
                             )
-                        )
-                        .frame(width: fillWidth)
-                        .overlay(
+                        if fraction > 0.1 {
                             // Shimmer sweep across the filled portion.
-                            Capsule()
+                            Rectangle()
                                 .fill(
                                     LinearGradient(
-                                        colors: [.clear, .white.opacity(0.45), .clear],
+                                        colors: [.clear, .white.opacity(0.42), .clear],
                                         startPoint: .leading,
                                         endPoint: .trailing
                                     )
                                 )
-                                .frame(width: 46)
-                                .offset(x: shimmer ? fillWidth : -46)
+                                .frame(width: 42)
+                                .rotationEffect(.degrees(12))
+                                .offset(x: shimmer ? fillWidth + 16 : -58)
                                 .animation(
-                                    .linear(duration: 1.8)
+                                    .linear(duration: 2.2)
                                         .repeatForever(autoreverses: false)
                                         .delay(0.8),
                                     value: shimmer
                                 )
-                                .mask(Capsule().frame(width: fillWidth))
-                        , alignment: .leading)
+                        }
+                    }
+                    .frame(width: fillWidth)
+                    .clipShape(Capsule())
                 }
+                .clipShape(Capsule())
             }
             .frame(height: 8)
 
@@ -628,7 +716,7 @@ private struct TokenMeterBar: View {
 
 // MARK: - Pure Flame info sheet
 
-/// "What's the gold flame?" — presented when anyone taps a Pure Flame badge
+/// "What's the gold seal?" — presented when anyone taps a Pure Flame badge
 /// next to a name (own profile, friend profiles, the explainer's info panel).
 /// One badge, one sentence, three quick rules. Medium detent.
 struct PureFlameInfoSheet: View {
@@ -659,7 +747,7 @@ struct PureFlameInfoSheet: View {
                     ruleRow(
                         icon: "figure.run",
                         tint: .green,
-                        text: "Keep completing your mile every day and the gold flame stays lit."
+                        text: "Keep completing your mile every day and the Pure Flame seal stays lit."
                     )
                     ruleRow(
                         icon: "snowflake",

@@ -527,35 +527,8 @@ struct ProfileView: View {
                         // Token shelf — your minted set, right on the profile.
                         // Hidden until streak features are active.
                         if let tokens = tokensState.payload {
-                            Button {
-                                showTokenSheet = true
-                            } label: {
-                                HStack(spacing: 14) {
-                                    TokenMedallion(
-                                        kind: .doubleDown,
-                                        held: tokens.double_down.held,
-                                        progress: tokens.double_down.fraction,
-                                        size: 34
-                                    )
-                                    TokenMedallion(
-                                        kind: .save,
-                                        held: tokens.streak_save.held,
-                                        progress: tokens.streak_save.fraction,
-                                        size: 34
-                                    )
-                                    TokenMedallion(
-                                        kind: .assist,
-                                        held: tokens.streak_assist.held,
-                                        progress: tokens.streak_assist.fraction,
-                                        size: 34
-                                    )
-                                }
-                                .padding(.top, MADTheme.Spacing.xs)
-                            }
-                            .buttonStyle(ScaleButtonStyle())
-                            .sheet(isPresented: $showTokenSheet) {
-                                StreakTokensDetailView()
-                            }
+                            profileTokenShelf(tokens)
+                                .padding(.top, 2)
                         }
 
                         // Bio with quote-style accent
@@ -619,6 +592,69 @@ struct ProfileView: View {
         .madLiquidGlass()
         .onAppear {
             loadProfileImage()
+        }
+    }
+
+    private func profileTokenShelf(_ tokens: StreakFeaturesPayload) -> some View {
+        let ready = [
+            tokens.double_down.held,
+            tokens.streak_save.held,
+            tokens.streak_assist.held,
+        ].filter { $0 }.count
+
+        return Button {
+            showTokenSheet = true
+        } label: {
+            HStack(spacing: 10) {
+                HStack(spacing: -5) {
+                    TokenMedallion(
+                        kind: .doubleDown,
+                        held: tokens.double_down.held,
+                        progress: tokens.double_down.fraction,
+                        size: 30
+                    )
+                    TokenMedallion(
+                        kind: .save,
+                        held: tokens.streak_save.held,
+                        progress: tokens.streak_save.fraction,
+                        size: 30
+                    )
+                    TokenMedallion(
+                        kind: .assist,
+                        held: tokens.streak_assist.held,
+                        progress: tokens.streak_assist.fraction,
+                        size: 30
+                    )
+                }
+                .padding(.trailing, 2)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Streak Tokens")
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                    Text(ready > 0 ? "\(ready) available" : "Building your safety net")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(ready > 0 ? 0.68 : 0.55))
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white.opacity(0.35))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.07))
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .sheet(isPresented: $showTokenSheet) {
+            StreakTokensDetailView()
         }
     }
 

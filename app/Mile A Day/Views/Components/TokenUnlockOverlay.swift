@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Full-screen "Token Earned!" moment. Fires when a meter completes (or when
 /// enrollment backfill hands a long streaker their starting set): dimmed
-/// backdrop, slow-spinning gold rays, the medallion(s) spring in oversized
-/// with a glow, then title + names + a single CTA. Deliberately self-contained
+/// backdrop, contained glass panel, the medallion(s) spring in oversized with
+/// a soft glow, then title + names + a single CTA. Deliberately self-contained
 /// — no coupling to the goal-celebration state machine.
 struct TokenUnlockOverlay: View {
     let kinds: [StreakTokenKind]
@@ -11,7 +11,7 @@ struct TokenUnlockOverlay: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
-    @State private var raysAngle: Angle = .degrees(0)
+    @State private var haloScale: CGFloat = 0.92
 
     private var title: String {
         kinds.count == 1 ? "Token Earned!" : "\(kinds.count) Tokens Earned!"
@@ -19,85 +19,121 @@ struct TokenUnlockOverlay: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.82).ignoresSafeArea()
+            Color.black.opacity(0.72).ignoresSafeArea()
                 .onTapGesture { dismiss() }
 
-            // Gold rays radiating behind the medallions — the "reward" light.
-            RaysShape(count: 12)
-                .fill(
-                    LinearGradient(
-                        colors: [Color(red: 1.0, green: 0.84, blue: 0.35).opacity(0.35), .clear],
-                        startPoint: .center,
-                        endPoint: .top
-                    )
-                )
-                .frame(width: 420, height: 420)
-                .rotationEffect(raysAngle)
-                .opacity(appeared ? 1 : 0)
-                .allowsHitTesting(false)
-
-            VStack(spacing: MADTheme.Spacing.lg) {
-                HStack(spacing: kinds.count > 1 ? 18 : 0) {
-                    ForEach(Array(kinds.enumerated()), id: \.element.title) { index, kind in
-                        TokenMedallion(
-                            kind: kind,
-                            held: true,
-                            size: kinds.count == 1 ? 132 : 84
+            VStack(spacing: 18) {
+                ZStack {
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 1.0, green: 0.84, blue: 0.35).opacity(0.22),
+                                    MADTheme.Colors.madRed.opacity(0.14),
+                                    Color.clear
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
                         )
-                        .scaleEffect(appeared ? 1 : 0.2)
+                        .frame(width: kinds.count == 1 ? 190 : 320, height: 92)
+                        .blur(radius: 18)
+                        .scaleEffect(haloScale)
                         .opacity(appeared ? 1 : 0)
-                        .animation(
-                            .spring(response: 0.5, dampingFraction: 0.62)
-                                .delay(0.12 + Double(index) * 0.14),
-                            value: appeared
-                        )
+
+                    HStack(spacing: kinds.count > 1 ? 18 : 0) {
+                        ForEach(Array(kinds.enumerated()), id: \.element.title) { index, kind in
+                            TokenMedallion(
+                                kind: kind,
+                                held: true,
+                                size: kinds.count == 1 ? 128 : 82
+                            )
+                            .scaleEffect(appeared ? 1 : 0.2)
+                            .opacity(appeared ? 1 : 0)
+                            .animation(
+                                .spring(response: 0.5, dampingFraction: 0.62)
+                                    .delay(0.08 + Double(index) * 0.12),
+                                value: appeared
+                            )
+                        }
                     }
                 }
 
-                VStack(spacing: 6) {
+                VStack(spacing: 8) {
                     Text(title)
-                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .font(.system(size: 31, weight: .black, design: .rounded))
                         .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
 
-                    Text(kinds.map { $0.title }.joined(separator: " · "))
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                    Text(kinds.map { $0.title }.joined(separator: " + "))
+                        .font(.system(size: 15, weight: .heavy, design: .rounded))
                         .foregroundColor(Color(red: 1.0, green: 0.84, blue: 0.35))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
 
                     Text(subtitle)
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.7))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.72))
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, MADTheme.Spacing.xl)
+                        .lineSpacing(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .opacity(appeared ? 1 : 0)
                 .offset(y: appeared ? 0 : 12)
-                .animation(.easeOut(duration: 0.4).delay(0.35), value: appeared)
+                .animation(.easeOut(duration: 0.4).delay(0.3), value: appeared)
 
                 Button {
                     dismiss()
                 } label: {
                     Text("Let's Go")
-                        .font(.system(size: 16, weight: .heavy, design: .rounded))
+                        .font(.system(size: 17, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)
-                        .padding(.horizontal, 44)
+                        .frame(minWidth: 170)
                         .padding(.vertical, 14)
                         .background(Capsule().fill(MADTheme.Colors.redGradient))
-                        .shadow(color: MADTheme.Colors.madRed.opacity(0.5), radius: 10)
+                        .shadow(color: MADTheme.Colors.madRed.opacity(0.34), radius: 12)
                 }
                 .buttonStyle(ScaleButtonStyle())
                 .opacity(appeared ? 1 : 0)
-                .animation(.easeOut(duration: 0.4).delay(0.5), value: appeared)
+                .animation(.easeOut(duration: 0.4).delay(0.45), value: appeared)
             }
-            .padding(MADTheme.Spacing.lg)
+            .padding(.horizontal, 26)
+            .padding(.vertical, 28)
+            .frame(maxWidth: 360)
+            .background(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(0.10),
+                                        MADTheme.Colors.madRed.opacity(0.08),
+                                        Color.clear
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 28, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(0.35), radius: 26, x: 0, y: 18)
+            )
+            .scaleEffect(appeared ? 1 : 0.94)
+            .opacity(appeared ? 1 : 0)
+            .padding(.horizontal, 22)
+            .animation(.spring(response: 0.46, dampingFraction: 0.78), value: appeared)
         }
         .onAppear {
             appeared = true
             MADHaptics.success()
-            // Reduce Motion: rays stay as a static glow instead of spinning.
             if !reduceMotion {
-                withAnimation(.linear(duration: 24).repeatForever(autoreverses: false)) {
-                    raysAngle = .degrees(360)
+                withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                    haloScale = 1.04
                 }
             }
         }
@@ -105,7 +141,7 @@ struct TokenUnlockOverlay: View {
 
     private var subtitle: String {
         if kinds.count > 1 {
-            return "Your streak history earned these. They're on your dashboard — tap them anytime to see what they do."
+            return "Your streak history earned these. They are ready on your dashboard whenever you need them."
         }
         switch kinds[0] {
         case .doubleDown:
@@ -119,32 +155,6 @@ struct TokenUnlockOverlay: View {
 
     private func dismiss() {
         withAnimation(.easeOut(duration: 0.25)) { onDismiss() }
-    }
-}
-
-/// Simple radial burst of tapered rays.
-private struct RaysShape: Shape {
-    let count: Int
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let radius = min(rect.width, rect.height) / 2
-        let halfWidth = CGFloat.pi / CGFloat(count) * 0.35
-        for i in 0..<count {
-            let angle = CGFloat(i) / CGFloat(count) * 2 * .pi
-            path.move(to: center)
-            path.addLine(to: CGPoint(
-                x: center.x + radius * cos(angle - halfWidth),
-                y: center.y + radius * sin(angle - halfWidth)
-            ))
-            path.addLine(to: CGPoint(
-                x: center.x + radius * cos(angle + halfWidth),
-                y: center.y + radius * sin(angle + halfWidth)
-            ))
-            path.closeSubpath()
-        }
-        return path
     }
 }
 

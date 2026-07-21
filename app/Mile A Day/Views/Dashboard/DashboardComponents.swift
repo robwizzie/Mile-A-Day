@@ -623,15 +623,14 @@ struct DailyChallengeCard: View {
             ZStack {
                 Circle()
                     .fill(Color.white.opacity(0.08))
-                    .frame(width: 56, height: 56)
+                    .frame(width: 54, height: 54)
                 Image(systemName: "trophy.fill")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 21, weight: .semibold))
                     .foregroundColor(MADTheme.Colors.madRed.opacity(0.7))
             }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("DAILY CHALLENGE")
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .tracking(1.0)
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Daily Challenge")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(MADTheme.Colors.madRed)
                 Text("Loading today's challenge…")
                     .font(.system(size: 16, weight: .bold, design: .rounded))
@@ -647,7 +646,7 @@ struct DailyChallengeCard: View {
         }
         .padding(16)
         .background(cardBackground)
-        .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 3)
+        .shadow(color: .black.opacity(0.12), radius: 12, x: 0, y: 6)
     }
 
     @ViewBuilder
@@ -657,11 +656,10 @@ struct DailyChallengeCard: View {
             HStack(spacing: 14) {
                 challengeIcon(challenge)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
-                        Text("DAILY CHALLENGE")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .tracking(1.0)
+                        Text("Daily Challenge")
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
                             .foregroundColor(accentColor)
 
                         if challengeStreak >= 2 {
@@ -669,7 +667,7 @@ struct DailyChallengeCard: View {
                                 Image(systemName: "flame.fill")
                                     .font(.system(size: 8, weight: .bold))
                                 Text("\(challengeStreak)")
-                                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                                    .font(.system(size: 11, weight: .heavy, design: .rounded))
                             }
                             .foregroundColor(.orange)
                             .padding(.horizontal, 5)
@@ -684,14 +682,14 @@ struct DailyChallengeCard: View {
                         if isCompleted {
                             HStack(spacing: 3) {
                                 Image(systemName: "checkmark.seal.fill")
-                                    .font(.system(size: 10))
+                                    .font(.system(size: 12, weight: .bold))
                                 Text("\(challengesCompletedCount)")
-                                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                                    .font(.system(size: 12, weight: .heavy, design: .rounded))
                             }
                             .foregroundColor(.green)
                         } else {
                             Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .bold))
+                                .font(.system(size: 17, weight: .bold))
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -703,7 +701,7 @@ struct DailyChallengeCard: View {
                         .minimumScaleFactor(0.85)
 
                     Text(challenge.description)
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundColor(.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -723,7 +721,7 @@ struct DailyChallengeCard: View {
         }
         .padding(16)
         .background(cardBackground)
-        .shadow(color: accentColor.opacity(0.18), radius: 10, x: 0, y: 4)
+        .shadow(color: accentColor.opacity(0.16), radius: 14, x: 0, y: 7)
     }
 
     @ViewBuilder
@@ -738,7 +736,7 @@ struct DailyChallengeCard: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .frame(width: 68, height: 68)
+                .frame(width: 58, height: 58)
                 .scaleEffect(iconPulse && !isCompleted ? 1.05 : 1.0)
                 .animation(
                     isCompleted ? .default :
@@ -754,13 +752,13 @@ struct DailyChallengeCard: View {
                         endPoint: .bottomTrailing
                     )
                 )
-                .frame(width: 54, height: 54)
+                .frame(width: 46, height: 46)
                 .overlay(
                     Circle().stroke(Color.white.opacity(0.25), lineWidth: 1)
                 )
 
             Image(systemName: isCompleted ? "checkmark" : challenge.icon)
-                .font(.system(size: 24, weight: .bold))
+                .font(.system(size: 19, weight: .bold))
                 .foregroundColor(.white)
         }
     }
@@ -768,7 +766,7 @@ struct DailyChallengeCard: View {
     @ViewBuilder
     private func progressRow(_ challenge: DailyChallenge) -> some View {
         let progress = challengeProgressValue
-        VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 4)
@@ -789,11 +787,11 @@ struct DailyChallengeCard: View {
             .frame(height: 8)
             HStack {
                 Text(isCompleted ? "Locked in" : progressLabel(progress))
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
                     .foregroundColor(accentColor)
                 Spacer()
                 Text("\(Int(round(min(progress, 1.0) * 100)))%")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
                     .foregroundColor(.primary.opacity(0.7))
                     .contentTransition(.numericText())
             }
@@ -807,16 +805,16 @@ struct DailyChallengeCard: View {
         if let tomorrow = tomorrowsChallenge {
             HStack(spacing: 8) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundColor(.secondary)
                 Text("Tomorrow:")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.secondary)
                 HStack(spacing: 5) {
                     Image(systemName: tomorrow.icon)
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 11, weight: .bold))
                     Text(tomorrow.title)
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
                         .lineLimit(1)
                 }
                 .foregroundColor(tomorrow.gradient.first ?? .primary)
@@ -852,15 +850,15 @@ struct DailyChallengeCard: View {
 
     private var cardBackground: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 18)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(.ultraThinMaterial)
 
-            RoundedRectangle(cornerRadius: 18)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(
                     LinearGradient(
                         colors: [
-                            accentColor.opacity(0.16),
-                            accentColor.opacity(0.04),
+                            accentColor.opacity(0.10),
+                            accentColor.opacity(0.035),
                             Color.clear
                         ],
                         startPoint: .topLeading,
@@ -868,13 +866,13 @@ struct DailyChallengeCard: View {
                     )
                 )
 
-            RoundedRectangle(cornerRadius: 18)
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .stroke(
                     LinearGradient(
                         colors: [
-                            accentColor.opacity(0.45),
+                            accentColor.opacity(0.32),
                             accentColor.opacity(0.10),
-                            Color.white.opacity(0.05)
+                            Color.white.opacity(0.07)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing

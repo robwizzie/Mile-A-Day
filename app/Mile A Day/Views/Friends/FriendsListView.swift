@@ -249,7 +249,7 @@ struct FriendsListView: View {
                 await MainActor.run {
                     assistingFriendId = nil
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                        savedFriendIds.insert(rescue.user_id)
+                        _ = savedFriendIds.insert(rescue.user_id)
                     }
                     MADHaptics.success()
                     print("[Assist] restored streak: \(result.restored_streak ?? -1)")

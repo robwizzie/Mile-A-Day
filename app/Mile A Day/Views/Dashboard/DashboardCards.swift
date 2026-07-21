@@ -66,86 +66,32 @@ struct DashboardHeroCard: View {
     private var trustedDone: Bool { isGoalCompleted && distanceIsFresh }
 
     var body: some View {
-        VStack(spacing: 16) {
-            // Eyebrow — one state word for the whole card.
-            HStack(spacing: 6) {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Text(eyebrowText)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .tracking(1.2)
-                    .foregroundColor(statusColor)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(statusColor.opacity(0.20))
+                            .overlay(Capsule().strokeBorder(statusColor.opacity(0.24), lineWidth: 1))
+                    )
                 if trustedDone {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.caption)
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundColor(.green)
                 }
                 Spacer()
                 // Quiet share affordance; the whole card taps to share.
                 Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white.opacity(0.35))
             }
 
             // The two halves: today's ring + the streak.
-            HStack(spacing: 20) {
-                todayRing
-
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(streak)")
-                            .font(.system(size: 42, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .contentTransition(.numericText())
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundColor(statusColor)
-                    }
-
-                    Text("DAY STREAK")
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
-                        .tracking(1.1)
-                        .foregroundColor(.white.opacity(0.5))
-
-                    // One status line — distance-to-go and time-left merged.
-                    HStack(spacing: 5) {
-                        Image(systemName: statusIconName)
-                            .font(.system(size: 11, weight: .bold))
-                        Text(statusLineText)
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                    }
-                    .foregroundColor(statusColor)
-
-                    // Slim milestone row.
-                    if let milestone = nextMilestone {
-                        HStack(spacing: 8) {
-                            GeometryReader { geometry in
-                                ZStack(alignment: .leading) {
-                                    Capsule()
-                                        .fill(Color.white.opacity(0.12))
-                                    Capsule()
-                                        .fill(
-                                            LinearGradient(
-                                                colors: [.yellow, .orange, .red],
-                                                startPoint: .leading,
-                                                endPoint: .trailing
-                                            )
-                                        )
-                                        .frame(width: max(4, milestone.progress * geometry.size.width))
-                                }
-                            }
-                            .frame(height: 4)
-
-                            Text("Day \(milestone.value) in \(milestone.daysToGo)")
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                .foregroundColor(.white.opacity(0.5))
-                                .layoutPriority(1)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+            heroMainContent
 
             // Week at a glance.
             weekDotsRow
@@ -156,34 +102,10 @@ struct DashboardHeroCard: View {
                 startButton
             }
         }
-        .padding(20)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.ultraThinMaterial)
-
-                LinearGradient(
-                    colors: [statusColor.opacity(0.05), Color.clear],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(
-                        LinearGradient(
-                            colors: [
-                                Color.white.opacity(colorScheme == .dark ? 0.2 : 0.3),
-                                Color.clear
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            }
-        )
-        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+        .padding(16)
+        .background(heroBackground)
+        .shadow(color: statusColor.opacity(0.14), radius: 18, x: 0, y: 10)
+        .shadow(color: .black.opacity(0.18), radius: 14, x: 0, y: 7)
         .contentShape(Rectangle())
         .onTapGesture {
             MADHaptics.action()
@@ -225,7 +147,7 @@ struct DashboardHeroCard: View {
     private var todayRing: some View {
         ZStack {
             Circle()
-                .stroke(Color.white.opacity(0.10), lineWidth: 9)
+                .stroke(Color.white.opacity(0.10), lineWidth: 11)
 
             Circle()
                 .trim(from: 0, to: animateRing ? min(max(progress, trustedDone ? 1 : 0.015), 1) : 0)
@@ -239,23 +161,149 @@ struct DashboardHeroCard: View {
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    style: StrokeStyle(lineWidth: 9, lineCap: .round)
+                    style: StrokeStyle(lineWidth: 11, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
+                .shadow(color: statusColor.opacity(0.35), radius: 7)
 
             VStack(spacing: 1) {
                 Text(String(format: "%.2f", currentDistance))
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .font(.system(size: 25, weight: .black, design: .rounded))
                     .monospacedDigit()
                     // Dimmed while the value is still last-known, not fresh.
                     .foregroundColor(.white.opacity(distanceIsFresh ? 1 : 0.45))
                     .contentTransition(.numericText())
                 Text(String(format: "of %.1f mi", goalDistance))
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
             }
         }
-        .frame(width: 104, height: 104)
+        .frame(width: 86, height: 86)
+    }
+
+    private var heroMainContent: some View {
+        HStack(alignment: .center, spacing: 14) {
+            todayRing
+                .layoutPriority(1)
+            streakBlock
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var streakBlock: some View {
+        VStack(alignment: .center, spacing: 8) {
+            streakNumber
+
+            statusChips
+
+            if let milestone = nextMilestone {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Text("Next milestone")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.48))
+                        Spacer(minLength: 0)
+                        Text(milestone.daysToGo == 1
+                             ? "1 day to Day \(milestone.value)"
+                             : "\(milestone.daysToGo) days to Day \(milestone.value)")
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundColor(.white.opacity(0.64))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                    }
+
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.white.opacity(0.12))
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.yellow, .orange, .red],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: max(4, milestone.progress * geometry.size.width))
+                        }
+                    }
+                    .frame(height: 4)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var streakNumber: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 9) {
+            Text("\(streak)")
+                .font(.system(size: 56, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .contentTransition(.numericText())
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+
+            Image(systemName: "flame.fill")
+                .font(.system(size: 40, weight: .bold))
+                .foregroundStyle(
+                    LinearGradient(colors: [.orange, statusColor], startPoint: .top, endPoint: .bottom)
+                )
+                .baselineOffset(-4)
+        }
+    }
+
+    @ViewBuilder
+    private var statusChips: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                ForEach(statusChipItems.indices, id: \.self) { index in
+                    let item = statusChipItems[index]
+                    metricChip(icon: item.icon, text: item.text, tint: item.tint)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(statusChipItems.indices, id: \.self) { index in
+                    let item = statusChipItems[index]
+                    metricChip(icon: item.icon, text: item.text, tint: item.tint)
+                }
+            }
+        }
+    }
+
+    private func metricChip(icon: String, text: String, tint: Color) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .bold))
+            Text(text)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .foregroundColor(tint)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(tint.opacity(0.13)))
+    }
+
+    private var statusChipItems: [(icon: String, text: String, tint: Color)] {
+        if trustedDone {
+            return [("checkmark.circle.fill", "Safe today", .green)]
+        }
+        if !distanceIsFresh {
+            return [("arrow.triangle.2.circlepath", "Syncing today", .orange)]
+        }
+
+        let toGo = String(format: "%.2f mi", max(goalDistance - currentDistance, 0))
+        let time = formattedTimeOnly
+        if time.isEmpty {
+            return [("figure.run", "\(toGo) to go", statusColor)]
+        }
+        return [
+            ("figure.run", "\(toGo) to go", statusColor),
+            ("clock.fill", "\(time) left", statusColor)
+        ]
     }
 
     // MARK: - Week dots
@@ -270,11 +318,33 @@ struct DashboardHeroCard: View {
         return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: startOfWeek) }
     }
 
+    private var completedMileDaysThisWeek: Int {
+        let calendar = Calendar.current
+        return weekDays.filter { date in
+            let dateKey = calendar.startOfDay(for: date)
+            return healthManager.dailyMileGoals[dateKey] ?? false
+        }.count
+    }
+
     private var weekDotsRow: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             Rectangle()
                 .fill(Color.white.opacity(0.1))
                 .frame(height: 1)
+
+            HStack(spacing: 6) {
+                Text("Mile days")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.46))
+                    .lineLimit(1)
+                Spacer()
+                Text("\(completedMileDaysThisWeek) of 7 mile days")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.white.opacity(0.48))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
 
             HStack(spacing: 0) {
                 ForEach(weekDays, id: \.self) { date in
@@ -286,28 +356,32 @@ struct DashboardHeroCard: View {
 
                     VStack(spacing: 4) {
                         Text(Self.narrowDayFormatter.string(from: date))
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: 12, weight: .semibold, design: .rounded))
                             .foregroundColor(.white.opacity(0.5))
 
                         ZStack {
                             Circle()
                                 .fill(
-                                    completed ? Color.green.opacity(0.8) :
+                                    completed ? completedMileDayColor :
                                     isFuture ? Color.white.opacity(0.08) :
-                                    Color.white.opacity(0.15)
+                                    Color.white.opacity(0.13)
                                 )
-                                .frame(width: 26, height: 26)
+                                .frame(width: 29, height: 29)
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.white.opacity(completed ? 0.16 : 0.05), lineWidth: 1)
+                                )
 
                             if completed {
                                 Image(systemName: "figure.run")
-                                    .font(.system(size: 10, weight: .bold))
+                                    .font(.system(size: 12, weight: .bold))
                                     .foregroundColor(.white)
                             }
 
                             if isToday {
                                 Circle()
                                     .stroke(statusColor, lineWidth: 2)
-                                    .frame(width: 30, height: 30)
+                                    .frame(width: 33, height: 33)
                             }
                         }
                     }
@@ -315,6 +389,7 @@ struct DashboardHeroCard: View {
                 }
             }
         }
+        .padding(.top, 2)
     }
 
     // MARK: - Start / Resume button
@@ -323,32 +398,85 @@ struct DashboardHeroCard: View {
         Button {
             showWorkoutView = true
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: hasActiveWorkout ? "play.circle.fill" : "play.fill")
-                    .font(.title3)
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.16))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: hasActiveWorkout ? "play.circle.fill" : "play.fill")
+                        .font(.system(size: 15, weight: .black))
+                        .offset(x: hasActiveWorkout ? 0 : 1)
+                }
+
                 Text(hasActiveWorkout ? "Resume Workout" : "Start Mile")
-                    .font(.headline)
-                    .fontWeight(.semibold)
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.white.opacity(0.72))
             }
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 15)
+            .padding(.leading, 16)
+            .padding(.trailing, 18)
+            .padding(.vertical, 12)
             .background(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .fill(
                         LinearGradient(
                             colors: [
-                                Color(red: 217/255, green: 64/255, blue: 63/255),
-                                Color(red: 180/255, green: 50/255, blue: 50/255)
+                                Color(red: 235/255, green: 68/255, blue: 72/255),
+                                Color(red: 198/255, green: 47/255, blue: 53/255)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+                    )
+            )
+            .shadow(color: Color(red: 217/255, green: 64/255, blue: 63/255).opacity(0.28), radius: 12, x: 0, y: 7)
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private var heroBackground: some View {
+        RoundedRectangle(cornerRadius: 28, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                statusColor.opacity(0.11),
+                                Color(red: 1.0, green: 0.60, blue: 0.20).opacity(trustedDone ? 0.03 : 0.06),
+                                Color.white.opacity(0.03)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
             )
-            .shadow(color: Color(red: 217/255, green: 64/255, blue: 63/255).opacity(0.4), radius: 8, x: 0, y: 4)
-        }
-        .buttonStyle(PlainButtonStyle())
+            .overlay(
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(colorScheme == .dark ? 0.24 : 0.32),
+                                statusColor.opacity(0.16),
+                                Color.white.opacity(0.07)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            )
     }
 
     // MARK: - Status
@@ -359,10 +487,14 @@ struct DashboardHeroCard: View {
         return .orange
     }
 
+    private var completedMileDayColor: Color {
+        Color(red: 0.22, green: 0.74, blue: 0.36)
+    }
+
     private var eyebrowText: String {
-        if trustedDone { return "DONE FOR TODAY" }
-        if isAtRisk { return "STREAK AT RISK" }
-        return "TODAY'S MILE"
+        if trustedDone { return "Done today" }
+        if isAtRisk { return "Streak at risk" }
+        return "Today's mile"
     }
 
     private var statusIconName: String {

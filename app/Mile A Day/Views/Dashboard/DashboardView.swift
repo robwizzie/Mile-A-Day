@@ -411,7 +411,7 @@ struct DashboardView: View {
                     heroSection
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
-                        .padding(.bottom, 8)
+                        .padding(.bottom, 16)
 
                     // Streak Tokens — its own card, ALWAYS on the dashboard
                     // when the feature is active (it must never depend on
@@ -419,7 +419,7 @@ struct DashboardView: View {
                     // the server gate is off.
                     StreakTokensCard()
                         .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
+                        .padding(.bottom, 22)
 
                     dashboardContent
                         .frame(maxWidth: .infinity)
@@ -1233,7 +1233,7 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var dashboardContent: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 22) {
             gettingStartedSection
             dailyChallengeSection
             friendActivitySection
@@ -1242,7 +1242,7 @@ struct DashboardView: View {
             statsAndHistorySection
         }
         .padding(.horizontal, 16)
-        .padding(.top, 8)
+        .padding(.top, 0)
         .padding(.bottom, 100) // Extra padding for tab bar
         .clipped() // Prevent content overflow from causing horizontal jitter
     }
