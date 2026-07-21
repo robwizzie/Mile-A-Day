@@ -1697,6 +1697,10 @@ struct GettingStartedChecklistCard: View {
 struct DashboardCollapsibleSection<Content: View>: View {
     let title: String
     let icon: String
+    /// Optional trailing signal ("2 need you today") so a collapsed section
+    /// can still surface urgency without being expanded.
+    var accessoryText: String? = nil
+    var accessoryColor: Color = .orange
     @Binding var isCollapsed: Bool
     var unified: Bool = false
     @ViewBuilder let content: () -> Content
@@ -1719,8 +1723,20 @@ struct DashboardCollapsibleSection<Content: View>: View {
             Text(title)
                 .font(.system(size: 15, weight: .semibold, design: .rounded))
                 .foregroundColor(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
 
             Spacer()
+
+            if let accessoryText {
+                Text(accessoryText)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(accessoryColor)
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(accessoryColor.opacity(0.14)))
+            }
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))

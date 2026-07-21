@@ -60,10 +60,12 @@ struct DashboardView: View {
     /// Competition opened directly from a Dashboard rivalry-hint row. Sheet
     /// presentation, not a tab switch — keeps the user on Dashboard in the
     /// back stack so dismiss returns them to where they tapped.
-    @AppStorage("competitionsCollapsed") private var competitionsCollapsed: Bool = false
+    /// Collapsed by default (like stats/workouts) — the smart header still
+    /// surfaces "N need you today" so nothing urgent hides.
+    @AppStorage("competitionsCollapsed") private var competitionsCollapsed: Bool = true
 
-    /// User preference: "chart" (line chart) or "streak" (streak card)
-    @AppStorage("weekViewStyle") private var weekViewStyle: String = "streak"
+    // (The old week-view style picker is gone — the chart and trends views
+    // now live in the Workouts hub, and the hero card is always the lead.)
 
     /// Collapsible section state
     @AppStorage("statsCollapsed") private var statsCollapsed: Bool = true
@@ -90,7 +92,8 @@ struct DashboardView: View {
     /// Master switch for the post-run photo prompt + auto-sharing the mile to the
     /// feed. On by default; users can turn the whole flow off in settings.
     @AppStorage("autoShareRunsToFeed") private var autoShareRunsToFeed = true
-    /// Shared with InstructionsBanner — completing the tour hides the banner.
+    /// Legacy flag (the old welcome banner read it) — still written on tour
+    /// completion so any historical readers stay consistent.
     @AppStorage("hasSeenInstructions") private var hasSeenInstructions = false
     @State private var showWelcomeTour = false
 
@@ -373,6 +376,7 @@ struct DashboardView: View {
         VStack(spacing: 0) {
             MADTabHeader(
                 title: "Mile A Day",
+                subtitle: headerSubtitle,
                 actions: dashboardHeaderActions
             )
 
@@ -386,28 +390,17 @@ struct DashboardView: View {
                             .padding(.top, MADTheme.Spacing.md)
                     }
 
-                    // Replay celebration card — only when today's mile is
-                    // done and the celebration isn't currently on screen.
-                    if currentState.isCompleted
-                        && celebrationManager.hasShownGoalCelebrationToday
-                        && !celebrationManager.isShowingCelebration {
-                        replayTodaysCelebrationCard
-                            .padding(.horizontal, MADTheme.Spacing.md)
-                            .padding(.top, MADTheme.Spacing.sm)
-                    }
+                    // ONE "needs your attention" slot — active workout,
+                    // invites, waiting photo, replay — max two items, one
+                    // visual grammar, strict priority. Replaces the old pile
+                    // of independently-styled banners.
+                    attentionSection
 
-                    // "Photo waiting" nudge — a mid-run snap is held but the
-                    // goal isn't done yet. It does NOT unlock posting (the goal
-                    // gate stands); it reassures the user the shot is kept and
-                    // will be offered once they finish the mile.
-                    if midRunPhotoWaiting {
-                        photoWaitingBanner
-                            .padding(.horizontal, MADTheme.Spacing.md)
-                            .padding(.top, MADTheme.Spacing.sm)
-                    }
-
-                    // Week view: user can toggle between chart and dots
-                    weekViewSection
+                    // THE hero: today's ring + streak + Start Mile, state-
+                    // aware (action-first before the goal, celebration-first
+                    // after). Always the first card.
+                    heroSection
+                        .padding(.horizontal, 16)
                         .padding(.top, 8)
                         .padding(.bottom, 8)
 
@@ -1128,98 +1121,155 @@ struct DashboardView: View {
         )
     }
 
-    // MARK: - Week View (Chart or Dots toggle)
-
-    @ViewBuilder
-    private var weekViewSection: some View {
-        VStack(spacing: 10) {
-            // Segmented tab picker
-            weekViewPicker
-
-            // Content for selected tab
-            if weekViewStyle == "chart" {
-                WeeklyMileChartView(
-                    healthManager: healthManager,
-                    userManager: userManager
-                )
-                .padding(.horizontal, 16)
-            } else if weekViewStyle == "trends" {
-                WeeklyTrendCard(healthManager: healthManager, userManager: userManager)
-                    .padding(.horizontal, 16)
-            } else {
-                streakSection
-                    .padding(.horizontal, 16)
-            }
-        }
-    }
-
-    private var weekViewPicker: some View {
-        let tabs: [(id: String, label: String, icon: String)] = [
-            ("streak", "Streak", "flame.fill"),
-            ("chart", "This Week", "chart.xyaxis.line"),
-            ("trends", "Trends", "chart.line.uptrend.xyaxis"),
-        ]
-
-        return HStack(spacing: 4) {
-            ForEach(tabs, id: \.id) { tab in
-                let isSelected = weekViewStyle == tab.id
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        weekViewStyle = tab.id
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 11, weight: .semibold))
-                        Text(tab.label)
-                            .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    }
-                    .foregroundColor(isSelected ? .white : .secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(
-                        Capsule()
-                            .fill(isSelected ? Color.white.opacity(0.15) : Color.clear)
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(3)
-        .background(
-            Capsule()
-                .fill(.ultraThinMaterial)
-                .shadow(color: .black.opacity(0.1), radius: 4, y: 2)
-        )
-        .padding(.horizontal, 16)
-    }
-
     // MARK: - Extracted dashboard sections to help Swift type‑check
 
     @ViewBuilder
     private var dashboardContent: some View {
         VStack(spacing: 16) {
-            inProgressBannerSection
-            competitionInvitesSection
-            instructionsSection
             gettingStartedSection
-            todayProgressSection
-            // Cross-comp rivalries — surface "you're X behind Y in [comp]"
-            // hints from every active competition so users see all their
-            // The competitions dropdown (activeCompetitionSection) replaces
-            // the standalone "Close to Passing" tile — each comp card now
-            // surfaces its own focus signal, so a separate rivalries section
-            // would just duplicate information.
             dailyChallengeSection
             friendActivitySection
             activeCompetitionSection
-            stepsAndBadgesSection
+            badgesSection
             statsAndHistorySection
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 100) // Extra padding for tab bar
         .clipped() // Prevent content overflow from causing horizontal jitter
+    }
+
+    // MARK: - Hero
+
+    private var heroSection: some View {
+        DashboardHeroCard(
+            streak: userManager.currentUser.streak,
+            isAtRisk: userManager.currentUser.isStreakAtRisk,
+            user: userManager.currentUser,
+            currentDistance: currentState.distance,
+            goalDistance: currentState.goal,
+            progress: currentState.progress,
+            isGoalCompleted: currentState.isCompleted,
+            hasActiveWorkout: hasActiveWorkout,
+            fastestPace: userManager.currentUser.fastestMilePace,
+            mostMiles: healthManager.cachedCurrentStreakStats.mostMiles > 0
+                ? healthManager.cachedCurrentStreakStats.mostMiles
+                : healthManager.mostMilesInOneDay,
+            totalMiles: healthManager.totalLifetimeMiles,
+            healthManager: healthManager,
+            showWorkoutView: $showWorkoutView
+        )
+    }
+
+    // MARK: - Attention slot
+
+    private enum AttentionItem: Hashable {
+        case activeWorkout, invites, photoWaiting, replay
+    }
+
+    /// The two most important things needing the user, in strict priority:
+    /// a live workout beats everything; a replay card comes last.
+    private var attentionItems: [AttentionItem] {
+        var items: [AttentionItem] = []
+        if showInProgressBanner, inProgressState?.isActive == true {
+            items.append(.activeWorkout)
+        }
+        if !competitionService.invites.isEmpty {
+            items.append(.invites)
+        }
+        if midRunPhotoWaiting {
+            items.append(.photoWaiting)
+        }
+        if currentState.isCompleted
+            && celebrationManager.hasShownGoalCelebrationToday
+            && !celebrationManager.isShowingCelebration {
+            items.append(.replay)
+        }
+        return Array(items.prefix(2))
+    }
+
+    @ViewBuilder
+    private var attentionSection: some View {
+        let items = attentionItems
+        if !items.isEmpty {
+            VStack(spacing: MADTheme.Spacing.sm) {
+                ForEach(items, id: \.self) { item in
+                    attentionRow(item)
+                }
+            }
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.top, MADTheme.Spacing.sm)
+        }
+    }
+
+    @ViewBuilder
+    private func attentionRow(_ item: AttentionItem) -> some View {
+        switch item {
+        case .activeWorkout: inProgressBannerSection
+        case .invites: invitesAttentionRow
+        case .photoWaiting: photoWaitingBanner
+        case .replay: replayTodaysCelebrationCard
+        }
+    }
+
+    /// Competition invites in the attention slot's shared grammar (the old
+    /// CompetitionInviteBanner had its own heavier style).
+    private var invitesAttentionRow: some View {
+        Button {
+            NotificationCenter.default.post(
+                name: NSNotification.Name("MAD_SwitchTab"),
+                object: nil,
+                userInfo: ["tab": 1]
+            )
+        } label: {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "trophy.fill")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.yellow, MADTheme.Colors.madRed], startPoint: .top, endPoint: .bottom)
+                    )
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(competitionService.invites.count == 1
+                         ? "Competition invite"
+                         : "\(competitionService.invites.count) competition invites")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("A friend wants to race you — tap to respond")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .strokeBorder(MADTheme.Colors.madRed.opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Header subtitle
+
+    private static let headerDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE, MMMM d"
+        return f
+    }()
+
+    /// "Tuesday, July 21 · Day 412" — makes the screen read as YOUR day,
+    /// not the app's.
+    private var headerSubtitle: String {
+        let date = Self.headerDateFormatter.string(from: Date())
+        let streak = userManager.currentUser.streak
+        return streak > 0 ? "\(date) · Day \(streak)" : date
     }
 
 
@@ -1255,14 +1305,18 @@ struct DashboardView: View {
         }
     }
 
-    private var instructionsSection: some View {
-        InstructionsBanner(onTakeTour: { showWelcomeTour = true })
-    }
-
     // MARK: - Getting Started Checklist
 
     private var gettingStartedItems: [GettingStartedChecklistCard.Item] {
         [
+            GettingStartedChecklistCard.Item(
+                id: "tour",
+                icon: "sparkles",
+                title: "Take the welcome tour",
+                subtitle: "Two minutes — see everything the app can do",
+                isDone: hasSeenWelcomeTour,
+                action: { showWelcomeTour = true }
+            ),
             GettingStartedChecklistCard.Item(
                 id: "first-mile",
                 icon: "figure.run",
@@ -1329,43 +1383,6 @@ struct DashboardView: View {
         }
     }
 
-    private var streakSection: some View {
-        StreakCard(
-            streak: userManager.currentUser.streak,
-            isActiveToday: userManager.currentUser.isStreakActiveToday,
-            isAtRisk: userManager.currentUser.isStreakAtRisk,
-            user: userManager.currentUser,
-            progress: currentState.progress,
-            isGoalCompleted: currentState.isCompleted,
-            isRefreshing: isRefreshing,
-            currentDistance: currentState.distance,
-            fastestPace: userManager.currentUser.fastestMilePace,
-            mostMiles: healthManager.cachedCurrentStreakStats.mostMiles > 0 ? healthManager.cachedCurrentStreakStats.mostMiles : healthManager.mostMilesInOneDay,
-            totalMiles: healthManager.totalLifetimeMiles,
-            healthManager: healthManager,
-            userManager: userManager
-        )
-    }
-
-    private var todayProgressSection: some View {
-        TodayProgressCard(
-            currentDistance: currentState.distance,
-            goalDistance: currentState.goal,
-            progress: currentState.progress,
-            didComplete: currentState.isCompleted,
-            onRefresh: refreshData,
-            isRefreshing: isRefreshing,
-            user: userManager.currentUser,
-            fastestPace: userManager.currentUser.fastestMilePace,
-            mostMiles: healthManager.mostMilesInOneDay,
-            totalMiles: healthManager.totalLifetimeMiles,
-            hasActiveWorkout: hasActiveWorkout,
-            healthManager: healthManager,
-            userManager: userManager,
-            showWorkoutView: $showWorkoutView
-        )
-    }
-
     // MARK: - Daily Challenge Section
 
     private var dailyChallengeSection: some View {
@@ -1381,15 +1398,6 @@ struct DashboardView: View {
 
     private var friendActivitySection: some View {
         FriendActivityStripView(friendService: friendService)
-    }
-
-    // MARK: - Competition Invites Section
-
-    @ViewBuilder
-    private var competitionInvitesSection: some View {
-        if !competitionService.invites.isEmpty {
-            CompetitionInviteBanner(inviteCount: competitionService.invites.count)
-        }
     }
 
     // MARK: - Active Competition Section
@@ -1408,30 +1416,39 @@ struct DashboardView: View {
         let active = competitionService.competitions.filter { $0.status == .active }
         if !active.isEmpty {
             let backendUserId = UserDefaults.standard.string(forKey: "backendUserId")
-            let sorted = active.sorted { a, b in
-                let fa = TodayFocus.compute(for: a, currentUserId: backendUserId)
-                let fb = TodayFocus.compute(for: b, currentUserId: backendUserId)
-                if fa.level.sortKey != fb.level.sortKey {
-                    return fa.level.sortKey < fb.level.sortKey
+            // Compute each comp's focus ONCE (the old code recomputed inside
+            // the sort comparator) — it also feeds the smart header.
+            let focused = active.map { ($0, TodayFocus.compute(for: $0, currentUserId: backendUserId)) }
+            let sorted = focused.sorted { a, b in
+                if a.1.level.sortKey != b.1.level.sortKey {
+                    return a.1.level.sortKey < b.1.level.sortKey
                 }
                 // Tie-break: earlier-ending competition first (more time
                 // pressure makes it more relevant today).
-                let endA = a.endDateFormatted ?? .distantFuture
-                let endB = b.endDateFormatted ?? .distantFuture
+                let endA = a.0.endDateFormatted ?? .distantFuture
+                let endB = b.0.endDateFormatted ?? .distantFuture
                 return endA < endB
             }
+            // Collapsed by default now, so the header must carry the signal:
+            // how many comps still need miles today.
+            let needsYou = focused.filter { $0.1.level == .urgent || $0.1.level == .behind }.count
+            let hasUrgent = focused.contains { $0.1.level == .urgent }
 
             DashboardCollapsibleSection(
                 title: sorted.count == 1
                     ? "Your Competitions"
                     : "Your Competitions (\(sorted.count))",
                 icon: "trophy.fill",
+                accessoryText: needsYou > 0
+                    ? "\(needsYou) need\(needsYou == 1 ? "s" : "") you today"
+                    : nil,
+                accessoryColor: hasUrgent ? UrgencyLevel.urgent.color : .orange,
                 isCollapsed: $competitionsCollapsed,
                 unified: true
             ) {
                 VStack(spacing: 0) {
-                    ForEach(Array(sorted.enumerated()), id: \.element.competition_id) { index, comp in
-                        ActiveCompetitionBannerCard(competition: comp, embedded: true)
+                    ForEach(Array(sorted.enumerated()), id: \.element.0.competition_id) { index, pair in
+                        ActiveCompetitionBannerCard(competition: pair.0, embedded: true)
                         if index < sorted.count - 1 {
                             Rectangle()
                                 .fill(Color.white.opacity(0.06))
@@ -1444,18 +1461,13 @@ struct DashboardView: View {
         }
     }
 
-    private var stepsAndBadgesSection: some View {
-        VStack(spacing: 12) {
-            CalendarPreviewCard(
-                healthManager: healthManager,
-                userManager: userManager
-            )
-
-            BadgesPreviewCard(
-                userManager: userManager,
-                healthManager: healthManager
-            )
-        }
+    /// Badges only — the calendar preview was redundant with the Workouts
+    /// hub (whose card sits right below and owns the full calendar).
+    private var badgesSection: some View {
+        BadgesPreviewCard(
+            userManager: userManager,
+            healthManager: healthManager
+        )
     }
 
     private var statsAndHistorySection: some View {

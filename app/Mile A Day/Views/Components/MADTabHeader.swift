@@ -39,10 +39,15 @@ struct MADHeaderAction: Identifiable {
 /// extracted so Compete / Profile all share the same visual language.
 struct MADTabHeader: View {
     let title: String
+    /// Optional one-line context under the title ("Tuesday, July 21 · Day
+    /// 412"). Only Dashboard uses it today; other tabs pass nothing and
+    /// render exactly as before.
+    let subtitle: String?
     let actions: [MADHeaderAction]
 
-    init(title: String, actions: [MADHeaderAction] = []) {
+    init(title: String, subtitle: String? = nil, actions: [MADHeaderAction] = []) {
         self.title = title
+        self.subtitle = subtitle
         self.actions = actions
     }
 
@@ -51,11 +56,21 @@ struct MADTabHeader: View {
         // big title pushed the buttons below the title's visual line. Centering
         // keeps title and buttons level at any text size.
         HStack(alignment: .center) {
-            Text(title)
-                .font(.system(size: 26, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.system(size: 26, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+            }
 
             Spacer(minLength: MADTheme.Spacing.sm)
 
