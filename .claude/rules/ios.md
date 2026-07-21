@@ -45,7 +45,7 @@ globs: app/**
 ## Do NOT
 - Modify the Xcode project file (`project.pbxproj`) - it's excluded via .claudeignore.
 - Change the API base URL without coordinating both client and server.
-- Worry about pbxproj when CREATING .swift files — the project uses synchronized folders; files added on disk are picked up automatically (verified via git history).
+- Worry about pbxproj when CREATING .swift files in the MAIN app (incl. `Widgets/`, `Shared/`) — synchronized folders pick up files on disk automatically. EXCEPTION: the Watch target ("Mile A Day Watch Watch App/") is NOT synchronized (its files were pbxproj-registered) — modify existing watch files only, never create new ones from CLI.
 
 ## App Store Review Compliance
 Every change must pass App Review. Check BEFORE proposing and AFTER implementing. Flag any borderline item explicitly.

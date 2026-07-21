@@ -106,7 +106,7 @@ struct BadgeSummaryCelebrationView: View {
         withAnimation(.easeOut(duration: 0.3)) { showOverlay = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             withAnimation(.spring(response: 0.6, dampingFraction: 0.6)) { showStack = true }
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            MADHaptics.success()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) { showContent = true }

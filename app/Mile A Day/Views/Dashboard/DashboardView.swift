@@ -554,13 +554,15 @@ struct DashboardView: View {
 
                 // What's New: auto-present once per release. Same stand-down
                 // rules as the tour — never stack on a celebration, the
-                // tracker, or the first-run tour itself.
+                // tracker, the first-run tour, or the pending-notifications
+                // sheet (two sheets presented together = one silently drops).
                 if WhatsNewManager.shouldAutoPresent {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
                         if WhatsNewManager.shouldAutoPresent,
                            !celebrationManager.isShowingCelebration,
                            !showWorkoutView,
-                           !showWelcomeTour {
+                           !showWelcomeTour,
+                           !showPendingSheet {
                             showWhatsNew = true
                         }
                     }
@@ -800,6 +802,9 @@ struct DashboardView: View {
         guard !pendingService.pending.isEmpty else { return }
         guard !celebrationManager.isShowingCelebration else { return }
         guard !showPendingSheet else { return }
+        // Mutual stand-down with the What's New sheet — whichever presented
+        // first wins; the other retries on its next trigger.
+        guard !showWhatsNew else { return }
 
         let onlyMile = pendingService.pending.allSatisfy {
             $0.eventType == AudienceEventType.mileCompleted.rawValue

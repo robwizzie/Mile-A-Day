@@ -346,7 +346,7 @@ struct WorkoutTrackingView: View {
     /// for the end-of-run prompt.
     private var midRunTrayButton: some View {
         Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            MADHaptics.tap()
             showSnapTray = true
         } label: {
             Group {
@@ -415,7 +415,7 @@ struct WorkoutTrackingView: View {
 
     private var midRunLibraryButton: some View {
         Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            MADHaptics.tap()
             showLibraryImport = true
         } label: {
             midRunCircleIcon("photo.badge.plus")
@@ -473,7 +473,7 @@ struct WorkoutTrackingView: View {
     }
 
     private func showImportToast(_ text: String, ok: Bool) {
-        if ok { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+        if ok { MADHaptics.success() }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
             importToast = ImportToast(text: text, ok: ok)
         }
@@ -484,7 +484,7 @@ struct WorkoutTrackingView: View {
 
     private var midRunCameraButton: some View {
         Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            MADHaptics.tap()
             showMidRunCamera = true
         } label: {
             midRunCircleIcon("camera.fill")
@@ -517,7 +517,7 @@ struct WorkoutTrackingView: View {
                     guard entry != nil else { return }
                     midRunSnapCount = count
                     lastSnapThumb = thumb
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    MADHaptics.success()
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                         showSnapSavedToast = true
                     }
@@ -880,8 +880,7 @@ struct WorkoutTrackingView: View {
                 }
 
                 // Haptic feedback
-                let notification = UINotificationFeedbackGenerator()
-                notification.notificationOccurred(.success)
+                MADHaptics.success()
 
                 // Hide notification after 2 seconds
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
@@ -905,8 +904,7 @@ struct WorkoutTrackingView: View {
                 }
 
                 // Haptic feedback
-                let notification = UINotificationFeedbackGenerator()
-                notification.notificationOccurred(.success)
+                MADHaptics.success()
 
                 // Hide completion after 3 seconds
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
@@ -1016,8 +1014,7 @@ struct WorkoutTrackingView: View {
         selectedActivityType = activityType
 
         // Haptic feedback
-        let impact = UIImpactFeedbackGenerator(style: .medium)
-        impact.impactOccurred()
+        MADHaptics.action()
 
         // Hide activity selection and show location type selection
         withAnimation {
@@ -1030,8 +1027,7 @@ struct WorkoutTrackingView: View {
         selectedLocationType = locationType
 
         // Haptic feedback
-        let impact = UIImpactFeedbackGenerator(style: .medium)
-        impact.impactOccurred()
+        MADHaptics.action()
 
         // Hide location type selection and show countdown
         withAnimation {

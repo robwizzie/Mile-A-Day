@@ -275,7 +275,7 @@ struct BadgesView: View {
         ) {
             ForEach(filteredBadges, id: \.id) { badge in
                 Button {
-                    UIImpactFeedbackGenerator(style: badge.isLocked ? .light : .medium).impactOccurred()
+                    badge.isLocked ? MADHaptics.tap() : MADHaptics.action()
                     selectedBadge = badge
                     isShowingDetail = true
                 } label: {

@@ -212,7 +212,7 @@ struct PostCardView: View {
     /// feels identical to double-tapping the photo.
     private func celebrateAndHype() {
         hypeBurst += 1
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        MADHaptics.action()
         if !post.is_hyped {
             onHype()
         }

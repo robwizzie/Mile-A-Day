@@ -295,7 +295,7 @@ struct PostRunPhotoPromptView: View {
 
     private func snapCard(index: Int, entry: MidRunPhotoStash.Entry) -> some View {
         Button {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            MADHaptics.action()
             composerLaunch = ComposerLaunch(image: entry.image)
         } label: {
             Image(uiImage: entry.image)
@@ -332,7 +332,7 @@ struct PostRunPhotoPromptView: View {
         // taps can never double-fire the use-photo action.
         .overlay(alignment: .topTrailing) {
             Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                MADHaptics.tap()
                 galleryStartIndex = index
                 showGallery = true
             } label: {

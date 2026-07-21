@@ -295,7 +295,7 @@ struct NotificationSettingsView: View {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             prefs = .default
                         }
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        MADHaptics.action()
                     } label: {
                         HStack(spacing: MADTheme.Spacing.sm) {
                             Image(systemName: "arrow.counterclockwise")
@@ -427,7 +427,7 @@ struct NotificationSettingsView: View {
         let tint = visibilityTint(option)
         return Button {
             guard !selected else { return }
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            MADHaptics.tap()
             withAnimation(.easeInOut(duration: 0.15)) {
                 prefs.workoutVisibility = option
             }
@@ -483,7 +483,7 @@ struct NotificationSettingsView: View {
     // MARK: - Actions
 
     private func saveAndApply() {
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        MADHaptics.action()
         prefs.save()
         // Daily reminder is now backend-driven (server cron + APNs push). Clear
         // any legacy local-notification still pending from older app versions —

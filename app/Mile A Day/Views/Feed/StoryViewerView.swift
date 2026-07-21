@@ -512,7 +512,7 @@ struct StoryViewerView: View {
         // Optimistic — the server keeps one reaction per story and swapping is
         // idempotent, so a failed call just means no push went out.
         myReactions[post.post_id] = emoji
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        MADHaptics.action()
         Task {
             try? await PostService.reactToStory(postId: post.post_id, emoji: emoji)
             // Reconcile the bubble row with the server (adds/updates my bubble).
@@ -542,7 +542,7 @@ struct StoryViewerView: View {
             await MainActor.run {
                 promotedIds.insert(post.post_id)
                 changed = true
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                MADHaptics.success()
             }
         } catch APIError.conflict {
             await MainActor.run {

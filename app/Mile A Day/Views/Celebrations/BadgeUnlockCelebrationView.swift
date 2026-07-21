@@ -452,8 +452,7 @@ struct BadgeUnlockCelebrationView: View {
     }
     
     private func triggerHaptic() {
-        let impact = UIImpactFeedbackGenerator(style: .medium)
-        impact.impactOccurred()
+        MADHaptics.action()
     }
 }
 

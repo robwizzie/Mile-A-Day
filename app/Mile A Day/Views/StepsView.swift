@@ -310,7 +310,7 @@ struct CalendarDayView: View {
 
     var body: some View {
         Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            MADHaptics.tap()
             onTap()
         } label: {
             VStack(spacing: 2) {
@@ -483,7 +483,7 @@ struct DateDetailView: View {
                             // Date navigation
                             HStack {
                                 Button {
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    MADHaptics.tap()
                                     navigateToPreviousDay()
                                 } label: {
                                     Image(systemName: "chevron.left")
@@ -505,7 +505,7 @@ struct DateDetailView: View {
                                 Spacer()
 
                                 Button {
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    MADHaptics.tap()
                                     navigateToNextDay()
                                 } label: {
                                     Image(systemName: "chevron.right")

@@ -344,7 +344,7 @@ struct LeaderboardSection: View {
 
             if let onAddFriends = onAddFriends {
                 Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    MADHaptics.tap()
                     onAddFriends()
                 } label: {
                     HStack(spacing: 6) {
@@ -466,7 +466,7 @@ struct LeaderboardSection: View {
                 VStack(spacing: 4) {
                     ForEach(rest) { entry in
                         Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            MADHaptics.tap()
                             selectedUser = makeBackendUser(entry)
                         } label: {
                             listRow(entry: entry)
@@ -532,7 +532,7 @@ struct LeaderboardSection: View {
 
     private func podiumSlot(entry: LeaderboardEntry, height: CGFloat, avatarSize: CGFloat, accent: Color, isFirst: Bool = false) -> some View {
         Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            MADHaptics.tap()
             selectedUser = makeBackendUser(entry)
         } label: {
             podiumSlotContent(entry: entry, height: height, avatarSize: avatarSize, accent: accent, isFirst: isFirst)

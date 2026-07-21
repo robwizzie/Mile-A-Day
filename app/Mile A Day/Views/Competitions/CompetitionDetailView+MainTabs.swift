@@ -224,7 +224,7 @@ extension CompetitionDetailView {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         selectedMainTab = tab
                     }
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    MADHaptics.tap()
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: tab.icon)

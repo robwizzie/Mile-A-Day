@@ -277,8 +277,7 @@ struct EnhancedShareView: View {
                                 if let image = generatedImage {
                                     UIPasteboard.general.image = image
                                     showingCopiedFeedback = true
-                                    let impact = UIImpactFeedbackGenerator(style: .medium)
-                                    impact.impactOccurred()
+                                    MADHaptics.action()
                                 }
                             } label: {
                                 HStack {

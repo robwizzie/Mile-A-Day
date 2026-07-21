@@ -317,7 +317,7 @@ struct FriendActivitySettingsView: View {
 	// MARK: - Mutation
 
 	private func set(eventType: AudienceEventType, activity: AudienceActivity, audience aud: Audience?) {
-		UIImpactFeedbackGenerator(style: .light).impactOccurred()
+		MADHaptics.tap()
 		Task {
 			do {
 				try await audience.set(direction: direction, eventType: eventType, activity: activity, audience: aud)

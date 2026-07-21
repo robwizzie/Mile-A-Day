@@ -329,6 +329,18 @@ struct ContentView: View {
             Text(currentStreak == 1 ? "day streak" : "day streak")
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundColor(WatchTheme.textSecondary)
+
+            // Held streak tokens, mirrored from the iPhone — a tiny gold
+            // shield count. Hidden at 0 (feature off or none earned).
+            if healthManager.heldStreakTokens > 0 {
+                HStack(spacing: 3) {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .font(.system(size: 10, weight: .bold))
+                    Text("\(healthManager.heldStreakTokens)")
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                }
+                .foregroundColor(Color(red: 1.0, green: 0.84, blue: 0.35))
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 5)

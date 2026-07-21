@@ -251,7 +251,7 @@ struct FriendsListView: View {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
                         savedFriendIds.insert(rescue.user_id)
                     }
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    MADHaptics.success()
                     print("[Assist] restored streak: \(result.restored_streak ?? -1)")
                 }
                 // Refresh meters/rescues + row statuses so the friend's flame
@@ -263,7 +263,7 @@ struct FriendsListView: View {
                     assistingFriendId = nil
                     // Someone else may have saved them first, or the window
                     // closed — refresh so the slot reflects reality.
-                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                    MADHaptics.warning()
                 }
                 await tokensState.refreshStatus()
             }
@@ -446,7 +446,7 @@ struct FriendsListView: View {
 
                 // Tapping the body expands the row to reveal workout details.
                 Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    MADHaptics.tap()
                     withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
                         if expanded { expandedWorkoutIds.remove(item.workout_id) }
                         else { expandedWorkoutIds.insert(item.workout_id) }
@@ -503,7 +503,7 @@ struct FriendsListView: View {
                             // button and the gesture feel identical (and match
                             // the feed cards' behavior).
                             rowHypeBursts[item.workout_id, default: 0] += 1
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            MADHaptics.action()
                             Task { await sendHype(for: item) }
                         }
                     }
@@ -672,7 +672,7 @@ struct FriendsListView: View {
         lastDoubleTapAt = now
 
         rowHypeBursts[item.workout_id, default: 0] += 1
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        MADHaptics.action()
         if !item.is_hyped {
             Task { await sendHype(for: item) }
         }
@@ -693,7 +693,7 @@ struct FriendsListView: View {
             let response = try await HypeService.sendHype(targetUserId: item.user_id, context: context)
             hypesRemaining = response.hypes_remaining
             hypesUnlimited = response.unlimited ?? hypesUnlimited
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            MADHaptics.success()
         } catch let error as APIError {
             switch error {
             case .conflict:
@@ -704,7 +704,7 @@ struct FriendsListView: View {
             case .rateLimited:
                 setHyped(item.workout_id, hyped: false, countDelta: -1)
                 hypesRemaining = 0
-                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                MADHaptics.warning()
             default:
                 setHyped(item.workout_id, hyped: false, countDelta: -1)
                 print("[FriendsListView] hype failed: \(error)")
@@ -753,7 +753,7 @@ struct FriendsListView: View {
         let streakInDanger = streak > 0 && !isComplete && hour >= 21
 
         return Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            MADHaptics.tap()
             withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
                 topMode = .leaderboard
             }
@@ -1410,7 +1410,7 @@ struct FriendsListView: View {
                         has_nudged_today: true,
                         unlimited_nudges: existing?.unlimited_nudges
                     )
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    MADHaptics.success()
                     showNudgeFeedback(NudgeFeedback(
                         icon: "bell.badge.fill",
                         message: "Nudge sent to \(friend.displayName)!",

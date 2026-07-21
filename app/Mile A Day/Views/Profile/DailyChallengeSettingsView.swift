@@ -120,7 +120,7 @@ struct DailyChallengeSettingsView: View {
 
     private func savePreference(_ newValue: Bool, revertTo oldValue: Bool) {
         saveError = nil
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        MADHaptics.tap()
         Task {
             do {
                 _ = try await friendService.updateNotificationSettings([
