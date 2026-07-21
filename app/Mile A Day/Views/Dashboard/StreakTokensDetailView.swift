@@ -190,6 +190,7 @@ struct PureFlameBadge: View {
 /// off. Tapping opens the explainer.
 struct StreakTokensCard: View {
     @ObservedObject var tokensState = StreakTokensState.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showDetail = false
     /// Drives the slow breathing pulse on earned medallions.
     @State private var pulse = false
@@ -197,7 +198,7 @@ struct StreakTokensCard: View {
     var body: some View {
         if let payload = tokensState.payload {
             Button {
-                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                MADHaptics.tap()
                 showDetail = true
             } label: {
                 VStack(spacing: 12) {
@@ -287,7 +288,7 @@ struct StreakTokensCard: View {
                         : .default,
                     value: pulse
                 )
-                .onAppear { pulse = true }
+                .onAppear { if !reduceMotion { pulse = true } }
                 // Transient "+1 run day" chip when a fresh payload moved
                 // this meter forward — the bar visibly ticks, not just sits.
                 .overlay(alignment: .top) {
@@ -544,6 +545,7 @@ private struct TokenMeterBar: View {
     let meter: StreakTokenMeter
     let unit: String
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var grown = false
     @State private var shimmer = false
 
@@ -594,6 +596,11 @@ private struct TokenMeterBar: View {
                 .foregroundColor(meter.held ? .green : .secondary)
         }
         .onAppear {
+            // Reduce Motion: show the final fill immediately, no shimmer loop.
+            if reduceMotion {
+                grown = true
+                return
+            }
             withAnimation(.spring(response: 0.7, dampingFraction: 0.85).delay(0.15)) {
                 grown = true
             }

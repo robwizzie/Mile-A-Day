@@ -296,10 +296,10 @@ struct LeaderboardMoveUpView: View {
             withAnimation(.easeOut(duration: 0.3)) { showBoard = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                 withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) { animateMe = true }
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                MADHaptics.success()
                 // Extra thump when you land the top spot.
                 if myRank == 1 {
-                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                    MADHaptics.emphasis()
                 }
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {

@@ -47,6 +47,12 @@ struct GoalCompletedCelebrationView: View {
     // Share - use Identifiable wrapper so .sheet(item:) works on first tap
     @State private var shareItem: ShareableImage? = nil
 
+    // Streak tokens — the recap strip's data. Gains are captured once on
+    // appear: the dashboard's live chips auto-clear after a few seconds, and
+    // the recap must not vanish mid-celebration.
+    @ObservedObject private var tokensState = StreakTokensState.shared
+    @State private var recapGains: [String: String] = [:]
+
     private var isMajorMilestone: Bool {
         stats.streakMilestone?.isMajor == true
     }
@@ -129,6 +135,14 @@ struct GoalCompletedCelebrationView: View {
                                     .transition(.opacity.combined(with: .offset(y: 20)))
                             }
 
+                            // The token payoff, in the same screen as the
+                            // streak payoff — where each meter stands after
+                            // today's mile, with any progress just earned.
+                            if showMotivation, tokensState.payload != nil {
+                                tokenRecapSection
+                                    .transition(.opacity.combined(with: .offset(y: 20)))
+                            }
+
                             if showButtons, let pending = pendingService.mileCompletedPending {
                                 notifyFriendsCard(pending)
                                     .transition(.scale(scale: 0.9).combined(with: .opacity))
@@ -152,6 +166,11 @@ struct GoalCompletedCelebrationView: View {
             .ignoresSafeArea()
             .opacity(overlayOpacity)
             .onAppear {
+                // Snapshot any live meter-gain chips before their auto-clear
+                // fires — the recap strip shows them for the whole celebration.
+                if recapGains.isEmpty {
+                    recapGains = tokensState.meterGains
+                }
                 startAnimationIfActive()
             }
             .onChange(of: scenePhase) { _, newPhase in
@@ -562,6 +581,90 @@ struct GoalCompletedCelebrationView: View {
 
     private var nextMajorMilestone: StreakMilestone? {
         StreakMilestone.allCases.first { $0.days > stats.currentStreak && $0.isMajor }
+    }
+
+    // MARK: - Token Recap Section
+
+    /// Compact strip showing all three token meters right in the payoff
+    /// moment. A gold "+1 run day" tag marks any meter today's mile just
+    /// moved. Renders only while the token feature is active.
+    private var tokenRecapSection: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Text("STREAK TOKENS")
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.6))
+                Spacer()
+                if let payload = tokensState.payload {
+                    let ready = [
+                        payload.double_down.held,
+                        payload.streak_save.held,
+                        payload.streak_assist.held,
+                    ].filter { $0 }.count
+                    if ready > 0 {
+                        Text("\(ready) ready")
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .foregroundColor(.green)
+                    }
+                }
+            }
+
+            if let payload = tokensState.payload {
+                HStack(spacing: 0) {
+                    recapCell(
+                        kind: .doubleDown,
+                        held: payload.double_down.held,
+                        progress: payload.double_down.fraction,
+                        caption: payload.double_down.held
+                            ? "Ready"
+                            : "\(Int(payload.double_down.progress))/\(Int(payload.double_down.target))"
+                    )
+                    recapCell(
+                        kind: .save,
+                        held: payload.streak_save.held,
+                        progress: payload.streak_save.fraction,
+                        caption: payload.streak_save.held
+                            ? "Ready"
+                            : "\(Int(payload.streak_save.progress))/\(Int(payload.streak_save.target))"
+                    )
+                    recapCell(
+                        kind: .assist,
+                        held: payload.streak_assist.held,
+                        progress: payload.streak_assist.fraction,
+                        caption: payload.streak_assist.held
+                            ? "Ready"
+                            : String(format: "%.1f/%.0f mi", payload.streak_assist.progress, payload.streak_assist.target)
+                    )
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+        )
+    }
+
+    private func recapCell(
+        kind: StreakTokenKind, held: Bool, progress: Double, caption: String
+    ) -> some View {
+        VStack(spacing: 5) {
+            TokenMedallion(kind: kind, held: held, progress: progress, size: 34)
+            if let gain = recapGains[kind.raw] {
+                Text(gain)
+                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    .foregroundColor(Color(red: 1.0, green: 0.84, blue: 0.35))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            } else {
+                Text(caption)
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(held ? .green : .white.opacity(0.5))
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Notify Friends (ask-mode embed)

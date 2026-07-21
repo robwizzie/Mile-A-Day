@@ -78,7 +78,7 @@ struct WorkoutRecapView: View {
             doneButton
         }
         .onAppear {
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            MADHaptics.success()
             withAnimation(.spring(response: 0.55, dampingFraction: 0.7)) { showHero = true }
             withAnimation(.easeOut(duration: 0.35).delay(0.2)) { showDistance = true }
             withAnimation(.easeOut(duration: 0.35).delay(0.35)) { showStats = true }

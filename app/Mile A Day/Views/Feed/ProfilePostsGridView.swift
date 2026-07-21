@@ -496,7 +496,7 @@ struct ProfilePostsFeedSheet: View {
                 )
             )
             await MainActor.run {
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                MADHaptics.success()
             }
         } catch APIError.conflict {
             // Already hyped server-side — keep the optimistic state.

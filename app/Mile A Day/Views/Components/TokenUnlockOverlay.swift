@@ -9,6 +9,7 @@ struct TokenUnlockOverlay: View {
     let kinds: [StreakTokenKind]
     let onDismiss: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var appeared = false
     @State private var raysAngle: Angle = .degrees(0)
 
@@ -92,9 +93,12 @@ struct TokenUnlockOverlay: View {
         }
         .onAppear {
             appeared = true
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
-            withAnimation(.linear(duration: 24).repeatForever(autoreverses: false)) {
-                raysAngle = .degrees(360)
+            MADHaptics.success()
+            // Reduce Motion: rays stay as a static glow instead of spinning.
+            if !reduceMotion {
+                withAnimation(.linear(duration: 24).repeatForever(autoreverses: false)) {
+                    raysAngle = .degrees(360)
+                }
             }
         }
     }

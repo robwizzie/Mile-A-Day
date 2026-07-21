@@ -175,7 +175,7 @@ struct MADCameraView: View {
         rotation: Double = 0, action: @escaping () -> Void
     ) -> some View {
         Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            MADHaptics.tap()
             action()
         } label: {
             Image(systemName: icon)
@@ -193,7 +193,7 @@ struct MADCameraView: View {
         icon: String, label: String, active: Bool, action: @escaping () -> Void
     ) -> some View {
         Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            MADHaptics.tap()
             action()
         } label: {
             HStack(spacing: 5) {
@@ -242,7 +242,7 @@ struct MADCameraView: View {
             ForEach(camera.zoomOptions, id: \.self) { factor in
                 let selected = isSelectedZoom(factor)
                 Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    MADHaptics.tap()
                     pinchBaseline = nil
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                         camera.setDisplayZoom(factor)
@@ -365,7 +365,7 @@ struct MADCameraView: View {
             return
         }
 
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        MADHaptics.action()
         guard camera.timerSeconds > 0 else {
             capture()
             return
@@ -377,7 +377,7 @@ struct MADCameraView: View {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                     countdown = remaining
                 }
-                UIImpactFeedbackGenerator(style: remaining <= 3 ? .medium : .light).impactOccurred()
+                remaining <= 3 ? MADHaptics.action() : MADHaptics.tap()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard !Task.isCancelled else { return }
             }

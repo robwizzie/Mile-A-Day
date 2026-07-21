@@ -338,6 +338,10 @@ class HealthKitManager: ObservableObject {
     @Published var todaysSteps: Int = 0
     @Published var dailyStepsData: [Date: Int] = [:]
     @Published var dailyMileGoals: [Date: Bool] = [:]
+    /// Streak tokens currently held (0–3), mirrored from the iPhone via
+    /// WatchConnectivity. Display-only on the watch — the phone owns all
+    /// token logic; 0 (feature off) hides the watch's token pill.
+    @Published var heldStreakTokens: Int = 0
     
     // Caching properties.
     // Only the ones actually read from views remain @Published — internal-cache
@@ -1619,10 +1623,19 @@ final class MADWatchBridge: NSObject {
         if let authToken { payload["authToken"] = authToken }
         if let backendUserId { payload["backendUserId"] = backendUserId }
 
+        // Held streak tokens ride along so the watch can show the shield
+        // count next to the streak. Reads the last-applied payload only —
+        // no fetch; 0 (feature off) simply hides the watch pill.
+        let tokensReady = StreakTokensState.shared.payload.map {
+            [$0.double_down.held, $0.streak_save.held, $0.streak_assist.held]
+                .filter { $0 }.count
+        } ?? 0
+        payload["tokensReady"] = tokensReady
+
         // Hash on the value-bearing fields only (not the timestamp) so we don't
         // re-send identical state. Token + id are included so a token change
         // forces a re-push.
-        let stableHash = "\(payload["streak"] ?? 0)|\(payload["todayMiles"] ?? 0)|\(payload["goalMiles"] ?? 0)|\(payload["firstName"] ?? "")|\(payload["name"] ?? "")|\(authToken ?? "")|\(backendUserId ?? "")".hashValue
+        let stableHash = "\(payload["streak"] ?? 0)|\(payload["todayMiles"] ?? 0)|\(payload["goalMiles"] ?? 0)|\(payload["firstName"] ?? "")|\(payload["name"] ?? "")|\(authToken ?? "")|\(backendUserId ?? "")|\(tokensReady)".hashValue
         if stableHash == lastPushedHash { return }
         lastPushedHash = stableHash
 
@@ -1677,6 +1690,9 @@ final class MADWatchBridge: NSObject {
             }
             if let backendUserId = context["backendUserId"] as? String, !backendUserId.isEmpty {
                 UserDefaults.standard.set(backendUserId, forKey: "backendUserId")
+            }
+            if let tokens = context["tokensReady"] as? Int {
+                hk.heldStreakTokens = tokens
             }
             userManager.saveUserData()
         }

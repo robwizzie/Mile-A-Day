@@ -54,7 +54,7 @@ struct ReviewPromptView: View {
 
                 VStack(spacing: MADTheme.Spacing.sm) {
                     Button {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        MADHaptics.action()
                         manager.userTappedRate()
                     } label: {
                         HStack(spacing: 8) {

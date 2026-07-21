@@ -132,7 +132,7 @@ struct SnapGalleryView: View {
                 guard let current, !saved else { return }
                 PhotoRollSaver.save(current.image, ledgerKey: current.id) { ok in
                     guard ok else { return }
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    MADHaptics.success()
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                         showSavedToast = true
                     }
@@ -146,7 +146,7 @@ struct SnapGalleryView: View {
             if let onUse {
                 Button {
                     guard let current else { return }
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    MADHaptics.action()
                     dismiss()
                     onUse(current)
                 } label: {

@@ -770,7 +770,7 @@ struct YearlyMilestoneSharePreviewSheet: View {
                     HStack(spacing: 12) {
                         Button {
                             UIPasteboard.general.image = image
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            MADHaptics.action()
                             showingCopiedFeedback = true
                         } label: {
                             HStack(spacing: 8) {
@@ -793,7 +793,7 @@ struct YearlyMilestoneSharePreviewSheet: View {
                         }
 
                         Button {
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            MADHaptics.action()
                             shareSheetItem = ShareableImage(image: image)
                         } label: {
                             HStack(spacing: 8) {

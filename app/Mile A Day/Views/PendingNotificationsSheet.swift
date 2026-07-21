@@ -190,14 +190,14 @@ struct PendingNotificationsSheet: View {
 	private func notify(_ item: PendingFriendNotification) {
 		guard !busyIds.contains(item.id) else { return }
 		busyIds.insert(item.id)
-		UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+		MADHaptics.action()
 		Task {
 			do {
 				try await service.send(item)
-				UINotificationFeedbackGenerator().notificationOccurred(.success)
+				MADHaptics.success()
 			} catch {
 				print("[PendingSheet] notify failed: \(error)")
-				UINotificationFeedbackGenerator().notificationOccurred(.error)
+				MADHaptics.error()
 			}
 			await MainActor.run { _ = busyIds.remove(item.id) }
 		}

@@ -12,6 +12,8 @@ struct StreakCountEntry: TimelineEntry {
     var weekCompletions: [Bool] = []
     /// Total miles this week, for the medium widget's status line (0 = unknown).
     var weekMiles: Double = 0
+    /// Streak tokens currently held (0 = none or feature off → indicator hidden).
+    var tokensReady: Int = 0
 }
 
 struct StreakCountProvider: TimelineProvider {
@@ -42,12 +44,13 @@ struct StreakCountProvider: TimelineProvider {
         let timeUntilReset = calculateTimeUntilReset(isCompleted: isGoalCompleted)
                 
         completion(StreakCountEntry(
-            date: Date(), 
-            streak: streak, 
-            liveProgress: progress, 
+            date: Date(),
+            streak: streak,
+            liveProgress: progress,
             isGoalCompleted: isGoalCompleted,
             isAtRisk: isAtRisk,
-            timeUntilReset: timeUntilReset
+            timeUntilReset: timeUntilReset,
+            tokensReady: WidgetDataStore.loadTokensReady()
         ))
     }
 
@@ -74,7 +77,8 @@ struct StreakCountProvider: TimelineProvider {
             isAtRisk: isAtRisk,
             timeUntilReset: timeUntilReset,
             weekCompletions: WidgetDataStore.loadWeekCompletions(),
-            weekMiles: WidgetDataStore.loadWeekMiles()
+            weekMiles: WidgetDataStore.loadWeekMiles(),
+            tokensReady: WidgetDataStore.loadTokensReady()
         )
 
         // Refresh more frequently if streak is at risk
@@ -180,6 +184,18 @@ struct MediumStreakView: View {
                     .font(.system(size: 7.5, weight: .semibold, design: .rounded))
                     .tracking(1.0)
                     .foregroundColor(MADWidgetStyle.secondaryText)
+
+                // Held streak tokens — tiny gold shield count; hidden at 0
+                // so pre-token installs render exactly as before.
+                if entry.tokensReady > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.system(size: 8, weight: .bold))
+                        Text("\(entry.tokensReady)")
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    }
+                    .foregroundColor(Color(red: 1.0, green: 0.84, blue: 0.35))
+                }
             }
 
             // Right column: section label, the week dots (focal element),
@@ -474,6 +490,19 @@ struct HomeScreenStreakView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Held streak tokens — a quiet gold shield count in the corner.
+        // Hidden at 0 so pre-token installs render exactly as before.
+        .overlay(alignment: .topTrailing) {
+            if entry.tokensReady > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .font(.system(size: 8, weight: .bold))
+                    Text("\(entry.tokensReady)")
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                }
+                .foregroundColor(Color(red: 1.0, green: 0.84, blue: 0.35))
+            }
+        }
     }
 
     @ViewBuilder

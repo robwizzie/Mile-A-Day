@@ -110,6 +110,29 @@ struct WidgetDataStore {
         return defaults.integer(forKey: streakKey)
     }
 
+    // MARK: - Streak tokens (streak widget accessory)
+
+    private static let tokensReadyKey = "tokens_ready"
+
+    /// Count of streak tokens currently HELD (0–3), mirrored from the gated
+    /// token payload. Not day-stamped — held tokens persist until spent.
+    /// Absent/zero simply hides the widget's token pill, so installs without
+    /// the feature render exactly as before.
+    static func save(tokensReady: Int) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        // Skip no-op writes — see save(todayMiles:goal:).
+        if defaults.integer(forKey: tokensReadyKey) == tokensReady { return }
+        defaults.set(tokensReady, forKey: tokensReadyKey)
+        DispatchQueue.main.async {
+            WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+        }
+    }
+
+    static func loadTokensReady() -> Int {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return 0 }
+        return defaults.integer(forKey: tokensReadyKey)
+    }
+
     // MARK: - Week completions (medium streak widget)
 
     private static let weekCompletionsKey = "week_completions"

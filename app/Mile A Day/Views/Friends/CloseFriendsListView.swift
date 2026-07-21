@@ -196,13 +196,13 @@ struct CloseFriendsListView: View {
 	private func toggle(_ friend: BackendUser) {
 		guard !busyIds.contains(friend.user_id) else { return }
 		busyIds.insert(friend.user_id)
-		UIImpactFeedbackGenerator(style: .light).impactOccurred()
+		MADHaptics.tap()
 		Task {
 			do {
 				try await closeFriends.toggle(friend)
 			} catch {
 				print("[CloseFriendsList] toggle failed: \(error)")
-				UINotificationFeedbackGenerator().notificationOccurred(.error)
+				MADHaptics.error()
 			}
 			await MainActor.run { _ = busyIds.remove(friend.user_id) }
 		}

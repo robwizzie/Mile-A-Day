@@ -117,7 +117,7 @@ struct CompetitionMyDailyRings: View {
                     ForEach(ds, id: \.self) { date in
                         Button {
                             selectedDate = date
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            MADHaptics.tap()
                         } label: {
                             dayCell(for: date)
                                 .frame(maxWidth: .infinity)

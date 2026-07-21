@@ -733,7 +733,7 @@ struct PostComposerView: View {
                         Button {
                             guard let flat = vm.flatten() else { return }
                             PhotoRollSaver.save(flat)
-                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                            MADHaptics.success()
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                                 showSavedToPhotos = true
                             }
@@ -1139,7 +1139,7 @@ struct PostComposerView: View {
 
     private func destinationCard(_ dest: PostDestination, selected: Bool) -> some View {
         Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            MADHaptics.tap()
             withAnimation(.easeInOut(duration: 0.15)) { vm.destination = dest }
         } label: {
             VStack(spacing: 4) {

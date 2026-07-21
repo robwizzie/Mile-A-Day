@@ -543,7 +543,7 @@ struct StreakActiveView: View {
                 isSendingAction = false
                 if successes > 0 {
                     FlexNudgeTracker.markFlexSent(competitionId: competition.competition_id)
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    MADHaptics.success()
                     let msg = successes == 1 ? "Flex sent!" : "Flex sent to \(successes)!"
                     showFeedback(ActionFeedback(icon: "hand.raised.fill", message: msg, isError: false))
                 } else {

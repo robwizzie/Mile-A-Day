@@ -18,6 +18,7 @@ struct StreakCard: View {
     @ObservedObject var healthManager: HealthKitManager
     @ObservedObject var userManager: UserManager
     @Environment(\.colorScheme) var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animateStreak = false
     @State private var animateFire = false
     @State private var animateUrgency = false
@@ -251,8 +252,9 @@ struct StreakCard: View {
         .onAppear {
             updateTimeRemaining()
             startTimer()
-            // Start fire animation only if goal is completed
-            if isGoalCompleted {
+            // Start fire animation only if goal is completed (and the user
+            // hasn't asked the system for reduced motion).
+            if isGoalCompleted && !reduceMotion {
                 animateFire = true
             } else {
                 animateFire = false
@@ -262,7 +264,7 @@ struct StreakCard: View {
             // `timeRemainingText` above has rendered first — otherwise the
             // `.animation(_:value:)` on the flame Image catches the position
             // change and oscillates the flame diagonally forever.
-            if isAtRisk && !isGoalCompleted {
+            if isAtRisk && !isGoalCompleted && !reduceMotion {
                 DispatchQueue.main.async {
                     animateUrgency = true
                 }
@@ -270,7 +272,7 @@ struct StreakCard: View {
         }
         .onChange(of: isGoalCompleted) { oldValue, newValue in
             updateTimeRemaining()
-            if newValue && !oldValue {
+            if newValue && !oldValue && !reduceMotion {
                 // Start fire animation when goal completed
                 animateFire = true
             } else if !newValue {
@@ -287,8 +289,7 @@ struct StreakCard: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            let impact = UIImpactFeedbackGenerator(style: .medium)
-            impact.impactOccurred()
+            MADHaptics.action()
             showingShareSheet = true
         }
         .sheet(isPresented: $showingShareSheet) {

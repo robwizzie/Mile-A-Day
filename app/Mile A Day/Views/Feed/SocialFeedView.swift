@@ -950,7 +950,7 @@ struct SocialFeedView: View {
             await MainActor.run {
                 hypesRemaining = response.hypes_remaining
                 hypesUnlimited = response.unlimited ?? hypesUnlimited
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                MADHaptics.success()
             }
         } catch APIError.rateLimited {
             // Out of hypes for today — walk the optimistic state back and say
@@ -958,7 +958,7 @@ struct SocialFeedView: View {
             await MainActor.run {
                 revert()
                 hypesRemaining = 0
-                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                MADHaptics.warning()
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     showHypeLimitBanner = true
                 }

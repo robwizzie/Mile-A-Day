@@ -233,13 +233,13 @@ struct UserProfileDetailView: View {
         guard !closeFriendActionInProgress else { return }
         closeFriendActionInProgress = true
         hasSeenCloseFriendHint = true
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        MADHaptics.tap()
         Task {
             do {
                 try await closeFriends.toggle(user)
             } catch {
                 print("[UserProfile] close-friend toggle failed: \(error)")
-                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                MADHaptics.error()
             }
             await MainActor.run { closeFriendActionInProgress = false }
         }
@@ -537,7 +537,7 @@ struct UserProfileDetailView: View {
         // attention. Smaller text + tighter padding keeps it discoverable
         // without overwhelming the profile header.
         Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            MADHaptics.tap()
             showCompeteSheet = true
         } label: {
             HStack(spacing: 5) {
@@ -820,7 +820,7 @@ struct UserProfileDetailView: View {
                         has_nudged_today: true,
                         unlimited_nudges: nudgeStatus?.unlimited_nudges
                     )
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    MADHaptics.success()
                     showProfileNudgeFeedback(NudgeFeedback(
                         icon: "bell.badge.fill",
                         message: "Nudge sent to \(user.displayName)!",
@@ -830,7 +830,7 @@ struct UserProfileDetailView: View {
             } catch {
                 await MainActor.run {
                     isNudging = false
-                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    MADHaptics.error()
                     showProfileNudgeFeedback(NudgeFeedback(
                         icon: "xmark.circle.fill",
                         message: "Couldn't send nudge",
@@ -1638,7 +1638,7 @@ struct Last7DaysChart: View {
             : (didHit ? .green : .orange)
 
         return Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            MADHaptics.tap()
             // Second tap on the same bar closes the detail panel.
             if isSelected {
                 selectedDay = nil

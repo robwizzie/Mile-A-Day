@@ -45,6 +45,15 @@ final class StreakTokensState: ObservableObject {
         if let new {
             registerHeldStates(from: new)
         }
+        // Mirror the held count to the streak widget and the watch. Both
+        // sinks dedupe (no-op write skip / stable-hash), so calling on every
+        // payload is free.
+        let ready = new.map {
+            [$0.double_down.held, $0.streak_save.held, $0.streak_assist.held]
+                .filter { $0 }.count
+        } ?? 0
+        WidgetDataStore.save(tokensReady: ready)
+        MADWatchBridge.shared.pushSnapshotIfReady()
     }
 
     /// Meter deltas → short gain chips ("+1 day", "+0.8 mi"). Held meters are

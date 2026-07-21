@@ -194,7 +194,7 @@ struct ChallengeCompletedCelebrationView: View {
         withAnimation(.easeInOut(duration: 0.8).delay(0.2)) { ringTrim = 1 }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.5)) { checkScale = 1 }
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            MADHaptics.success()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { showBurst = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { showStars = true }

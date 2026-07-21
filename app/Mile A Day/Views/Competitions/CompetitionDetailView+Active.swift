@@ -435,7 +435,7 @@ extension CompetitionDetailView {
                 await MainActor.run {
                     isSendingAction = false
                     FlexNudgeTracker.markFlexSent(targetUserId: user.user_id)
-                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    MADHaptics.success()
                     showActionFeedback(ActionFeedback(icon: "hand.raised.fill", message: "Flexed on \(user.displayName)!", isError: false))
                     completion?(true)
                 }

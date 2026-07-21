@@ -85,7 +85,7 @@ struct ActivityCardView: View {
     /// the same clap burst the double-tap does.
     private func celebrateAndHype() {
         hypeBurst += 1
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        MADHaptics.action()
         if !entry.is_hyped {
             onHype()
         }
