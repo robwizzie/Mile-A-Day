@@ -204,7 +204,14 @@ struct ProfilePostsFeedSheet: View {
                 HypersListSheet(context: context)
             }
             .sheet(item: $commentsPost) { post in
-                CommentsSheet(post: post, canModerate: post.is_self) { newCount in
+                // Coauthors moderate too: on their own profile the collab post
+                // has is_self == false but the server allows their deletes.
+                CommentsSheet(
+                    post: post,
+                    canModerate: post.is_self ||
+                        (post.coauthor_status == "accepted"
+                         && post.coauthor_user_id == UserDefaults.standard.string(forKey: "backendUserId"))
+                ) { newCount in
                     if let index = posts.firstIndex(where: { $0.post_id == post.post_id }) {
                         posts[index].comment_count = newCount
                     }

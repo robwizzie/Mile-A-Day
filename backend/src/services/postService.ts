@@ -978,6 +978,12 @@ export async function visiblePostAuthor(
 				 SELECT 1 FROM user_blocks b
 				 WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
 						OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
+						-- Accepted collabs are hidden from feeds when EITHER author is
+						-- blocked; deny direct access (comments/mentions) the same way.
+						OR (p.coauthor_status = 'accepted' AND (
+							(b.blocker_id = $1 AND b.blocked_id = p.coauthor_user_id)
+							OR (b.blocker_id = p.coauthor_user_id AND b.blocked_id = $1)
+						))
 			 )`,
     [viewerId, postId],
   );

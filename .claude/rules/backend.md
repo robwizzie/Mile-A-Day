@@ -50,6 +50,8 @@ globs: backend/**
 - `express.json` limit is 2mb because workout-sync bodies carry GPS routes. Don't shrink it.
 - `posts.is_auto` is tri-state at the API (`is_auto` absent = legacy client → upsert-in-place + auto-signature heuristic). A flagged user post may only replace an auto post; second user post → 409 `workout_already_posted`.
 - `/uploads/posts` requires signed urls (`mediaSigningService`). Any endpoint RETURNING `media_url`/`story_photo_url` must wrap the payload in `signMediaUrlsDeep(...)`; any endpoint ACCEPTING a media_url must `stripMediaQuery(...)` first. The DB stores bare paths only.
+- Direct post access (comments/mentions/coauthor respond) authorizes via `visiblePostAuthor` (postService). It must mirror the feed queries' circle+block rules — including accepted-coauthor reach and blocks vs EITHER author.
+- Social pushes (comments, mentions, story reactions, coauthor) all gate on `shouldSendNotification(..., "hype")`. Per recipient per comment: mention push replaces the comment/reply push (see `notifyForComment`).
 
 ## ESM Reminder
 All imports MUST end with `.js` extension:

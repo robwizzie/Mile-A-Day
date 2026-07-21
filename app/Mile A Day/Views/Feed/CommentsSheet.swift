@@ -22,6 +22,7 @@ struct CommentsSheet: View {
     @State private var isSending = false
     @State private var reportingComment: PostComment?
     @State private var showTermsGate = false
+    @State private var termsJustAccepted = false
     @State private var errorMessage: String?
     @StateObject private var friendService = FriendService()
     @FocusState private var inputFocused: Bool
@@ -71,10 +72,14 @@ struct CommentsSheet: View {
             ReportCommentSheet(commentId: comment.comment_id) { reportingComment = nil }
         }
         .sheet(isPresented: $showTermsGate, onDismiss: {
-            // Re-send the kept draft once terms are accepted.
-            if !draft.isEmpty { Task { await send() } }
+            // Re-send the kept draft ONLY when the gate was actually accepted —
+            // a "Not now" dismissal must not loop back into the gate.
+            if termsJustAccepted {
+                termsJustAccepted = false
+                if !draft.isEmpty { Task { await send() } }
+            }
         }) {
-            PostTermsGateView {}
+            PostTermsGateView { termsJustAccepted = true }
         }
         .alert("Couldn't post comment", isPresented: .init(
             get: { errorMessage != nil },
