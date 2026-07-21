@@ -18,6 +18,11 @@ const db = PostgresService.getInstance();
  */
 
 export function streakFeaturesGloballyEnabled(): boolean {
+  // Always ON in local dev (`npm run dev` sets NODE_ENV=development, same
+  // fail-closed pattern as /dev/* — a prod deploy can never have it) so the
+  // feature is testable without env plumbing. Prod stays dark until
+  // STREAK_FEATURES_ENABLED=true is set deliberately.
+  if (process.env.NODE_ENV === "development") return true;
   return process.env.STREAK_FEATURES_ENABLED === "true";
 }
 

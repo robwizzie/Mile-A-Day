@@ -3,9 +3,23 @@ import Foundation
 /// App-wide configuration constants. Centralized so things like the backend
 /// URL don't drift across service files.
 enum AppConfig {
-    /// Production REST API base URL. All services should build URLs against
-    /// this rather than hardcoding the host.
-    static let baseURL = "https://mad.mindgoblin.tech"
+    /// REST API base URL. All services should build URLs against this rather
+    /// than hardcoding the host.
+    ///
+    /// DEBUG builds only: set the "devBaseURLOverride" UserDefaults string
+    /// (e.g. from a debugger pause or a dev menu) to point the app at a local
+    /// `npm run dev` backend — where streak features are always enabled — and
+    /// delete it to return to production. The override is compiled OUT of
+    /// Release builds: TestFlight/App Store always talk to production.
+    static let baseURL: String = {
+        #if DEBUG
+        if let override = UserDefaults.standard.string(forKey: "devBaseURLOverride"),
+           !override.isEmpty {
+            return override
+        }
+        #endif
+        return "https://mad.mindgoblin.tech"
+    }()
 }
 
 /// Identifies which environment the app is running in.

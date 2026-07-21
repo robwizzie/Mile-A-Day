@@ -482,8 +482,10 @@ struct PostComposerView: View {
                             overlayEditor
                             if vm.hasRoute { routeToggle }
                             captionField
-                            // Collabs are a feed concept — hidden for story-only.
-                            if vm.destination.toFeed { coauthorRow }
+                            // Collabs are a feed concept — shown once the user
+                            // picks a destination that includes the feed
+                            // (destination starts nil until they choose).
+                            if vm.destination?.toFeed == true { coauthorRow }
                             destinationToggles
                         }
                         if let error = vm.errorMessage {
