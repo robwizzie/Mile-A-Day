@@ -28,4 +28,13 @@ enum AppEnvironment {
     static var isDevelopment: Bool {
         current == .development
     }
+
+    static var apnsEnvironment: String {
+        switch current {
+        case .development:
+            return "sandbox"
+        case .production:
+            return "production"
+        }
+    }
 }

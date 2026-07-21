@@ -1,16 +1,49 @@
 import SwiftUI
 
+/// One-shot handoff from the notification inbox (or any other surface) to the
+/// feed: which workout's entry to reveal. Parked statically because the Feed
+/// tab may not be mounted when the tap happens — the feed consumes it on
+/// appear, or immediately via the `poke` notification when already mounted.
+enum FeedDeepLink {
+    struct Target {
+        /// Exact match against FeedEntry.workout_id (workout + linked posts).
+        var workoutId: String?
+        /// mile_completed notifications carry no workout id — fall back to
+        /// the friend's newest entry on that local day.
+        var userId: String?
+        var localDate: String?
+        /// friend_post notifications: exact post entry to land on.
+        var postId: String?
+        /// Story notifications: open this user's story viewer instead of
+        /// scrolling the feed (respects the day-scoped viewing gate).
+        var storyUserId: String?
+    }
+
+    static var pending: Target?
+    static let poke = NSNotification.Name("MAD_OpenFeedWorkout")
+}
+
 /// The single social surface inside the Friends tab: a stories rail, an optional
 /// "On this day" memories card, then one unified, infinitely-scrollable feed of
 /// photo posts AND raw walk/run activity. Posting and viewing friends' stories
 /// are both gated on completing today's mile (the server re-verifies posting).
 struct SocialFeedView: View {
+    /// True while the Feed tab is the selected one. TabView keeps tab views
+    /// alive, so `.onAppear`/`.task` don't re-fire on tab switches — this lets
+    /// the feed silently refresh when the user returns to it (e.g. after
+    /// completing a mile) instead of showing stale posts until a manual pull.
+    var isActiveTab: Bool = false
+
     @StateObject private var healthManager = HealthKitManager.shared
     @StateObject private var userManager = UserManager.shared
     /// One stable service for profiles opened from the feed. Creating a fresh
     /// FriendService inside the sheet closure re-instantiated it on every feed
     /// state change, wiping the loaded friends list mid-view.
     @StateObject private var profileFriendService = FriendService()
+    /// Fresh-post window: drives the compose FAB / rail countdown ring and the
+    /// "Fresh" badge on the viewer's own in-window posts. Never gates posting.
+    /// The rings self-tick via `TimelineView`, so no feed-level timer is needed.
+    @StateObject private var freshWindow = FreshPostWindowManager.shared
 
     @State private var feed: [FeedEntry] = []
     @State private var stories: [StoryGroup] = []
@@ -22,6 +55,11 @@ struct SocialFeedView: View {
     /// retry row — the stalled last card never re-fires onAppear on its own.
     @State private var loadMoreFailed = false
     @State private var loadedOnce = false
+    /// When the full feed was last fetched. Used to throttle the heavy
+    /// tab-switch refetch on rapid tab bounces — cards are already on screen, so
+    /// re-pulling the whole feed on every return just adds latency and server
+    /// load. A manual pull or a longer gap still does the full refresh.
+    @State private var lastFeedRefreshAt: Date?
 
     @State private var hypingIds: Set<String> = []
     @State private var termsAccepted: Bool?
@@ -37,6 +75,10 @@ struct SocialFeedView: View {
     @State private var presentingComposer = false
     @State private var viewerGroup: StoryGroup?
     @State private var reportingPost: PostItem?
+    /// Own post being caption-edited (presents EditCaptionSheet).
+    @State private var editingPost: PostItem?
+    /// Own post pending delete confirmation.
+    @State private var deletingEntry: FeedEntry?
     @State private var showTermsGate = false
     /// Compose was requested but blocked on the terms gate — open the composer
     /// AFTER the gate sheet dismisses (presenting both at once is a SwiftUI
@@ -46,6 +88,9 @@ struct SocialFeedView: View {
     @State private var showAlreadySharedHint = false
     @State private var showMemories = false
     @State private var showWeeklyRecap = false
+    /// Entry briefly ringed after a notification deep-link lands on it, so
+    /// the user can tell exactly which workout they were brought to.
+    @State private var highlightedEntryId: String?
     @State private var profileUser: BackendUser?
     /// Tapped hype tally — presents the "who hyped this" sheet.
     @State private var hypersContext: HypersListContext?
@@ -63,9 +108,76 @@ struct SocialFeedView: View {
         )
     }
 
+    /// Server-day formatter: Postgres emits Gregorian "yyyy-MM-dd" — pin the
+    /// locale/calendar so a device on Buddhist/Japanese calendars can't emit
+    /// keys (e.g. "2569-07-15") that never match.
+    private static let serverDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// Story viewing is earned PER DAY, not reset at midnight: a story from
+    /// day D stays viewable for a viewer who completed day D. So yesterday's
+    /// stories don't lock when a new day starts (if the viewer completed
+    /// yesterday) — only a poster's NEW today-story hides until today's mile
+    /// is done. Keys are local "yyyy-MM-dd" matching the server's local_date.
+    /// Today's completion also unlocks the viewer-local TOMORROW string: an
+    /// author far ahead in timezones stamps "their today" a calendar day
+    /// past ours, and their story shouldn't wait out most of its 24h window.
+    private var viewableStoryDays: Set<String> {
+        var days = Set<String>()
+        let fmt = Self.serverDayFormatter
+        if mileDone {
+            days.insert(fmt.string(from: Date()))
+            if let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: Date()) {
+                days.insert(fmt.string(from: tomorrow))
+            }
+        }
+        if let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()),
+           healthManager.workoutIndex?.hasQualifyingWorkout(on: yesterday) == true {
+            days.insert(fmt.string(from: yesterday))
+        }
+        return days
+    }
+
+    /// Whether the viewer has earned at least one of this group's story days.
+    /// Own stories are always viewable. Groups from a server that predates
+    /// `story_local_dates` fall back to the legacy all-or-nothing gate.
+    private func canViewStories(of group: StoryGroup) -> Bool {
+        if group.user_id == currentUserId { return true }
+        guard let days = group.story_local_dates, !days.isEmpty else { return mileDone }
+        return !viewableStoryDays.isDisjoint(with: days)
+    }
+
+    /// The story days the viewer may watch for a group (nil = no filtering,
+    /// used for own stories).
+    private func allowedStoryDays(for group: StoryGroup) -> Set<String>? {
+        group.user_id == currentUserId ? nil : viewableStoryDays
+    }
+
+    /// Ring "unviewed" state: only when there's an unseen story on a day the
+    /// viewer can actually open. Own stories and pre-field servers fall back
+    /// to the server's has_unviewed aggregate. This stops an unearned
+    /// today-story from lighting a ring the viewer can never clear.
+    private func isGroupUnviewed(of group: StoryGroup) -> Bool {
+        if group.user_id == currentUserId { return group.has_unviewed }
+        guard let unseen = group.unviewed_local_dates else { return group.has_unviewed }
+        return !viewableStoryDays.isDisjoint(with: unseen)
+    }
+
     /// Workout ids of the user's own stories (fetched when the rail shows an
     /// own-story group) — a story share counts as that workout's one share.
     @State private var myStoryWorkoutIds: Set<String> = []
+
+    /// Workout ids just shared via the composer, held only until the next
+    /// refresh reflects them. Closes the window where the async refresh() hasn't
+    /// yet updated `feed`/`myStoryWorkoutIds`, which previously let the composer
+    /// re-open for a workout the user had just posted. Reconciled in refresh()
+    /// (cleared once the server state is authoritative) and on delete.
+    @State private var optimisticSharedWorkoutIds: Set<String> = []
 
     /// Workout ids of today's walks/runs that already carry the user's
     /// DELIBERATE share — a photo post on the feed or a story. The auto
@@ -76,6 +188,7 @@ struct SocialFeedView: View {
             return entry.workout_id
         })
         ids.formUnion(myStoryWorkoutIds)
+        ids.formUnion(optimisticSharedWorkoutIds)
         return ids
     }
 
@@ -152,6 +265,7 @@ struct SocialFeedView: View {
                     }
                 }
 
+            ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: MADTheme.Spacing.md) {
                     StoriesRailView(
@@ -161,7 +275,10 @@ struct SocialFeedView: View {
                         myImageURL: userManager.currentUser.profileImageUrl,
                         canPost: mileDone,
                         hasSharedWorkout: alreadySharedWorkout,
-                        canViewStories: mileDone,
+                        windowOpen: freshWindow.isOpen,
+                        windowOpenedAt: freshWindow.windowOpenedAt,
+                        isGroupViewable: { canViewStories(of: $0) },
+                        isGroupUnviewed: { isGroupUnviewed(of: $0) },
                         onTapAdd: handleCompose,
                         onTapGroup: { viewerGroup = $0 },
                         onLockedStoryTap: { showMileHint = true }
@@ -188,6 +305,16 @@ struct SocialFeedView: View {
                     } else {
                         ForEach(feed) { entry in
                             feedCard(entry)
+                                // Deep-link landing ring — fades once seen.
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                                        .strokeBorder(
+                                            Color.orange.opacity(highlightedEntryId == entry.id ? 0.75 : 0),
+                                            lineWidth: 2
+                                        )
+                                        .allowsHitTesting(false)
+                                )
+                                .animation(.easeInOut(duration: 0.35), value: highlightedEntryId)
                                 // Prefetch a few cards early (not just on the
                                 // very last row) so the next page is usually
                                 // there before the user reaches the bottom.
@@ -197,6 +324,7 @@ struct SocialFeedView: View {
                                     }
                                 }
                                 .padding(.horizontal, MADTheme.Spacing.md)
+                                .id(entry.id)
                         }
                         if isLoadingMore {
                             ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
@@ -212,6 +340,14 @@ struct SocialFeedView: View {
             .refreshable {
                 await refresh()
                 await loadHypeStatus()
+            }
+            // Deep-link consumption: the poke covers "feed already mounted";
+            // the task covers "feed first mounted because of the deep link"
+            // (the poke fires before this view exists and is missed).
+            .onReceive(NotificationCenter.default.publisher(for: FeedDeepLink.poke)) { _ in
+                revealDeepLink(using: proxy)
+            }
+            .task { revealDeepLink(using: proxy) }
             }
         }
         .background(MADTheme.Colors.appBackgroundGradient)
@@ -231,8 +367,37 @@ struct SocialFeedView: View {
                 await loadHypeStatus()
             }
         }
+        // Returning to the Feed tab silently pulls fresh posts so a mile just
+        // completed (or a friend's new post) shows up without a manual pull —
+        // no more "the feed looks locked" after finishing a run. Guarded by
+        // `loadedOnce` so it never races the initial `.task` into a double
+        // fetch; `refresh()` keeps the current cards on screen while data swaps
+        // in (it only shows a spinner when the feed is empty).
+        .onChange(of: isActiveTab) { _, active in
+            guard active, loadedOnce else { return }
+            // Rapid tab bounce (< 20s since the last full fetch): the cards are
+            // already current, so skip the heavy full refetch and just refresh
+            // the cheap rail (viewed rings / expiries) + hype counts. Anything
+            // longer, or a manual pull, still does the full refresh so a mile
+            // just completed still shows up on return.
+            if let last = lastFeedRefreshAt, Date().timeIntervalSince(last) < 20 {
+                Task {
+                    await refreshRail()
+                    await loadHypeStatus()
+                }
+                return
+            }
+            Task {
+                await refresh()
+                await loadHypeStatus()
+            }
+        }
         .fullScreenCover(item: $viewerGroup) { group in
-            StoryViewerView(group: group, currentUserId: currentUserId) { changed in
+            StoryViewerView(
+                group: group,
+                currentUserId: currentUserId,
+                allowedDays: allowedStoryDays(for: group)
+            ) { changed in
                 viewerGroup = nil
                 if changed {
                     Task { await refresh() }
@@ -244,8 +409,16 @@ struct SocialFeedView: View {
             }
         }
         .sheet(isPresented: $presentingComposer) {
-            PostComposerView(stats: statsInput, destination: .feed) { outcome in
-                if case .published = outcome { Task { await refresh() } }
+            PostComposerView(stats: statsInput) { outcome in
+                if case .published = outcome {
+                    // Lock this run's share slot immediately — refresh() is async
+                    // and its window previously let the composer re-open for the
+                    // same workout. (The backend also 409s a second share now.)
+                    if let wid = statsInput.workoutId {
+                        optimisticSharedWorkoutIds.insert(wid)
+                    }
+                    Task { await refresh() }
+                }
             }
         }
         .sheet(item: $reportingPost) { post in
@@ -262,6 +435,28 @@ struct SocialFeedView: View {
                     feed[index].comment_count = newCount
                 }
             }
+        }
+        .sheet(item: $editingPost) { post in
+            EditCaptionSheet(post: post) { newCaption in
+                if let idx = feed.firstIndex(where: { $0.isPost && $0.entryId == post.post_id }) {
+                    feed[idx].caption = newCaption
+                }
+            }
+        }
+        .alert(
+            "Delete this post?",
+            isPresented: Binding(
+                get: { deletingEntry != nil },
+                set: { if !$0 { deletingEntry = nil } }
+            ),
+            presenting: deletingEntry
+        ) { entry in
+            Button("Delete", role: .destructive) {
+                Task { await deletePost(entry) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This removes it from your feed and profile for good.")
         }
         .sheet(isPresented: $showTermsGate, onDismiss: {
             // Present the composer only after the gate sheet is fully gone.
@@ -307,10 +502,10 @@ struct SocialFeedView: View {
                 )
             }
         }
-        .alert("Finish today's mile first", isPresented: $showMileHint) {
+        .alert("Finish your mile first", isPresented: $showMileHint) {
             Button("Got it", role: .cancel) {}
         } message: {
-            Text("Complete your daily mile to post and to see your friends' stories today. Keep going — you've got this! 🏃")
+            Text("Each day's stories unlock for the days you complete: finish today's mile to post and to watch today's stories — yesterday's stay open if you completed yesterday. Keep going — you've got this! 🏃")
         }
         .alert("You've already shared this one", isPresented: $showAlreadySharedHint) {
             Button("Got it", role: .cancel) {}
@@ -396,12 +591,15 @@ struct SocialFeedView: View {
             PostCardView(
                 post: post,
                 storyPhotoURL: entry.storyPhotoURL,
+                isFresh: entry.is_self
+                    && freshWindow.wasPostedLive(postId: post.post_id, workoutId: post.workout_id),
                 isHyping: hypingIds.contains(entry.id),
                 isOutOfHypes: isOutOfHypes,
                 onHype: { Task { await hype(entry) } },
                 onReport: { reportingPost = post },
                 onBlock: { Task { await block(entry) } },
-                onDelete: { Task { await deletePost(entry) } },
+                onDelete: { deletingEntry = entry },
+                onEditCaption: post.is_self ? { editingPost = post } : nil,
                 onTapAuthor: openProfile,
                 onTapHypeCount: openHypers,
                 onOpenComments: { commentsPost = post },
@@ -435,6 +633,13 @@ struct SocialFeedView: View {
                     .background(
                         Circle().fill(mileDone ? AnyShapeStyle(MADTheme.Colors.redGradient) : AnyShapeStyle(Color.gray.opacity(0.6)))
                     )
+                    // Fresh-window countdown ring around the FAB while open.
+                    .overlay {
+                        if mileDone && freshWindow.isOpen, let openedAt = freshWindow.windowOpenedAt {
+                            FreshWindowRing(openedAt: openedAt, color: .white, lineWidth: 3)
+                                .padding(-5)
+                        }
+                    }
                     .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
             }
             .padding(.trailing, MADTheme.Spacing.lg)
@@ -459,6 +664,126 @@ struct SocialFeedView: View {
         .padding(.horizontal, MADTheme.Spacing.xl)
     }
 
+    // MARK: - Notification deep link
+
+    /// Scroll the feed to the workout a tapped notification pointed at.
+    /// Resolves against loaded entries, refreshing once and then paging a
+    /// few times if needed (an inbox tapped a day later usually points past
+    /// page 1). Double scrollTo — a LazyVStack lands short on deep targets
+    /// (see ProfilePostsFeedSheet).
+    private func revealDeepLink(using proxy: ScrollViewProxy) {
+        guard let target = FeedDeepLink.pending else { return }
+
+        // Story notifications open the story viewer, not a feed scroll.
+        if let storyUser = target.storyUserId {
+            FeedDeepLink.pending = nil
+            Task {
+                var waited = 0
+                while isLoading, waited < 40 {
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                    waited += 1
+                }
+                if !stories.contains(where: { $0.user_id == storyUser }) {
+                    await refresh()
+                }
+                guard let group = stories.first(where: { $0.user_id == storyUser }) else {
+                    // Story expired/deleted since the notification — fall back
+                    // to the author's latest FEED entry instead of a silent
+                    // no-op that reads as a broken tap.
+                    FeedDeepLink.pending = FeedDeepLink.Target(userId: storyUser)
+                    revealDeepLink(using: proxy)
+                    return
+                }
+                if canViewStories(of: group) {
+                    viewerGroup = group
+                } else {
+                    // The story exists but isn't earned yet — same hint the
+                    // locked ring gives.
+                    showMileHint = true
+                }
+            }
+            return
+        }
+
+        Task {
+            // Let an in-flight (initial) load settle before looking.
+            var waited = 0
+            while isLoading, waited < 40 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                waited += 1
+            }
+            if resolvedDeepLinkEntry() == nil {
+                await refresh()
+            }
+            // Older target: page deeper, bounded so a pruned/ancient target
+            // can't fetch the whole feed history.
+            var pagesLoaded = 0
+            while resolvedDeepLinkEntry() == nil, nextBefore != nil, pagesLoaded < 3 {
+                await loadMore()
+                pagesLoaded += 1
+            }
+            guard let entry = resolvedDeepLinkEntry() else {
+                // Not in the feed (very old, or friendship changed) — land at
+                // the top rather than pretending.
+                FeedDeepLink.pending = nil
+                return
+            }
+            FeedDeepLink.pending = nil
+            withAnimation(.easeInOut(duration: 0.35)) {
+                proxy.scrollTo(entry.id, anchor: .top)
+            }
+            highlightedEntryId = entry.id
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(entry.id, anchor: .top)
+            }
+            try? await Task.sleep(nanoseconds: 1_400_000_000)
+            highlightedEntryId = nil
+        }
+    }
+
+    private func resolvedDeepLinkEntry() -> FeedEntry? {
+        guard let target = FeedDeepLink.pending else { return nil }
+        // Most precise: the exact post a friend_post notification announced
+        // (also reachable when the post has no linked workout).
+        if let pid = target.postId,
+           let hit = feed.first(where: { $0.isPost && $0.entryId == pid }) {
+            return hit
+        }
+        // Precise: workout ids match both raw workout entries and the post
+        // that replaced one (the backend surfaces exactly one of the two).
+        if let wid = target.workoutId,
+           let hit = feed.first(where: { $0.workout_id == wid }) {
+            return hit
+        }
+        // mile_completed carries no workout id — the friend's entry on that
+        // local day (±1 day: their `local_date` is stamped in THEIR timezone,
+        // our timestamps render in OURS), else their newest entry.
+        if let uid = target.userId {
+            let sameUser = feed.filter { $0.user_id == uid && !$0.is_self }
+            if let date = target.localDate,
+               let hit = sameUser.first(where: { dayDistance(of: $0, to: date).map { $0 <= 1 } ?? false }) {
+                return hit
+            }
+            return sameUser.first
+        }
+        return nil
+    }
+
+    /// Whole days between an entry's timestamp (viewer tz) and a
+    /// "yyyy-MM-dd" target day; nil when either side doesn't parse.
+    private func dayDistance(of entry: FeedEntry, to targetDay: String) -> Int? {
+        guard let entryDate = RelativeTime.date(from: entry.sort_ts) else { return nil }
+        guard let target = Self.serverDayFormatter.date(from: targetDay) else { return nil }
+        let cal = Calendar.current
+        let days = cal.dateComponents(
+            [.day],
+            from: cal.startOfDay(for: entryDate),
+            to: cal.startOfDay(for: target)
+        ).day ?? 0
+        return abs(days)
+    }
+
     // MARK: - Compose flow
 
     private func handleCompose() {
@@ -466,7 +791,9 @@ struct SocialFeedView: View {
         // Reachable from the rail's own-story cell even after the FAB hides —
         // enforce one-share-per-workout at the entry point too.
         guard !alreadySharedWorkout else { showAlreadySharedHint = true; return }
-        if termsAccepted == true {
+        // The cache also covers acceptance that happened OUTSIDE this view
+        // (post-run composer gate) after our one-shot loadTermsStatus ran.
+        if termsAccepted == true || PostService.termsAcceptedCached {
             presentingComposer = true
         } else {
             pendingCompose = true
@@ -491,7 +818,7 @@ struct SocialFeedView: View {
 
     private func loadMemories() {
         // Local HealthKit memories show instantly; past post photos (this day
-        // in past years, a week ago, a month ago) blend in when they arrive.
+        // in past years) blend in when they arrive.
         memories = MemoriesService.onThisDay(using: healthManager)
         Task {
             if let posts = try? await PostService.fetchPostMemories(), !posts.isEmpty {
@@ -521,10 +848,17 @@ struct SocialFeedView: View {
                 feed = feedResponse.items
                 nextBefore = feedResponse.next_before
                 loadMoreFailed = false
+                lastFeedRefreshAt = Date()
             }
             if let storyGroups {
                 stories = storyGroups
                 myStoryWorkoutIds = storyWorkoutIds
+            }
+            // Both fetches succeeded → feed + stories now reflect every real
+            // share, so the optimistic bridge can be dropped. Keep it on a failed
+            // fetch so a stale feed doesn't re-open an already-shared slot.
+            if feedResponse != nil, storyGroups != nil {
+                optimisticSharedWorkoutIds.removeAll()
             }
             isLoading = false
             loadedOnce = true
@@ -680,7 +1014,14 @@ struct SocialFeedView: View {
     private func deletePost(_ entry: FeedEntry) async {
         do {
             try await PostService.deletePost(postId: entry.entryId)
-            await MainActor.run { feed.removeAll { $0.id == entry.id } }
+            await MainActor.run {
+                feed.removeAll { $0.id == entry.id }
+                // Deleting a share frees that run's slot — drop any optimistic
+                // lock so the composer can re-open for it.
+                if let wid = entry.workout_id {
+                    optimisticSharedWorkoutIds.remove(wid)
+                }
+            }
         } catch {}
     }
 

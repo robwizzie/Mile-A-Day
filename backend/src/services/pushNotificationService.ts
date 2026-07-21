@@ -27,9 +27,27 @@ const APNS_KEY_ID = process.env.APNS_KEY_ID;
 const APNS_TEAM_ID = process.env.APNS_TEAM_ID;
 const APNS_BUNDLE_ID = process.env.APNS_BUNDLE_ID;
 const APNS_PRODUCTION = process.env.APNS_PRODUCTION === "true";
-const APNS_HOST = APNS_PRODUCTION
-  ? "https://api.push.apple.com"
-  : "https://api.sandbox.push.apple.com";
+type DeviceTokenEnvironment = "production" | "sandbox";
+
+function apnsHostForEnvironment(environment: DeviceTokenEnvironment): string {
+  return environment === "production"
+    ? "https://api.push.apple.com"
+    : "https://api.sandbox.push.apple.com";
+}
+
+function defaultTokenEnvironment(): DeviceTokenEnvironment {
+  return APNS_PRODUCTION ? "production" : "sandbox";
+}
+
+function normalizeTokenEnvironment(
+  environment?: string | null,
+): DeviceTokenEnvironment {
+  if (environment === "production") return "production";
+  if (environment === "sandbox" || environment === "development") {
+    return "sandbox";
+  }
+  return defaultTokenEnvironment();
+}
 
 let apnsKey: string | null = null;
 let apnsToken: string | null = null;
@@ -107,6 +125,7 @@ export type NotificationType =
   | "badge_earned"
   | "friend_badge_earned"
   | "friend_challenge_completed"
+  | "challenge_won"
   | "hype_received"
   | "friend_post"
   | "story_reaction"
@@ -130,6 +149,7 @@ function sendToDevice(
   deviceToken: string,
   payload: PushPayload,
   userId?: string,
+  environment: DeviceTokenEnvironment = defaultTokenEnvironment(),
 ): Promise<boolean> {
   const tokenTail = deviceToken.slice(-8);
   return new Promise((resolve) => {
@@ -153,7 +173,7 @@ function sendToDevice(
       data: payload.data ?? {},
     });
 
-    const client = http2.connect(APNS_HOST);
+    const client = http2.connect(apnsHostForEnvironment(environment));
 
     client.on("error", (err) => {
       console.error("[Push] HTTP/2 connection error:", err.message);
@@ -197,6 +217,7 @@ function sendToDevice(
           context: {
             type: payload.type,
             tokenTail,
+            environment,
             statusCode,
             response: responseData?.slice(0, 500),
           },
@@ -357,10 +378,12 @@ export async function sendPush(
     }
   }
 
-  const tokens = await db.query<{ device_token: string }>(
-    "SELECT device_token FROM device_tokens WHERE user_id = $1",
-    [userId],
-  );
+  const tokens = await db.query<{
+    device_token: string;
+    environment: string | null;
+  }>("SELECT device_token, environment FROM device_tokens WHERE user_id = $1", [
+    userId,
+  ]);
 
   if (tokens.length === 0) {
     console.log(`[Push] No device tokens found for user ${userId}`);
@@ -372,8 +395,13 @@ export async function sendPush(
   }
 
   const results = await Promise.all(
-    tokens.map(({ device_token }) =>
-      sendToDevice(device_token, payload, userId),
+    tokens.map(({ device_token, environment }) =>
+      sendToDevice(
+        device_token,
+        payload,
+        userId,
+        normalizeTokenEnvironment(environment),
+      ),
     ),
   );
 
@@ -411,13 +439,15 @@ async function storeInAppNotification(
 export async function registerDeviceToken(
   userId: string,
   deviceToken: string,
+  environment?: string | null,
 ): Promise<void> {
+  const tokenEnvironment = normalizeTokenEnvironment(environment);
   await db.query(
-    `INSERT INTO device_tokens (user_id, device_token)
-		VALUES ($1, $2)
+    `INSERT INTO device_tokens (user_id, device_token, environment)
+		VALUES ($1, $2, $3)
 		ON CONFLICT (user_id, device_token)
-		DO UPDATE SET updated_at = NOW()`,
-    [userId, deviceToken],
+		DO UPDATE SET environment = EXCLUDED.environment, updated_at = NOW()`,
+    [userId, deviceToken, tokenEnvironment],
   );
 }
 
@@ -441,6 +471,7 @@ function sendSilentPushToDevice(
   deviceToken: string,
   type: string,
   data: Record<string, string> = {},
+  environment: DeviceTokenEnvironment = defaultTokenEnvironment(),
 ): Promise<boolean> {
   return new Promise((resolve) => {
     const token = getApnsToken();
@@ -456,7 +487,7 @@ function sendSilentPushToDevice(
       data,
     });
 
-    const client = http2.connect(APNS_HOST);
+    const client = http2.connect(apnsHostForEnvironment(environment));
 
     client.on("error", (err) => {
       console.error("[Push] Silent HTTP/2 connection error:", err.message);
@@ -523,15 +554,22 @@ export async function sendSilentPushToUser(
   type: string,
   data: Record<string, string> = {},
 ): Promise<number> {
-  const tokens = await db.query<{ device_token: string }>(
-    "SELECT device_token FROM device_tokens WHERE user_id = $1",
-    [userId],
-  );
+  const tokens = await db.query<{
+    device_token: string;
+    environment: string | null;
+  }>("SELECT device_token, environment FROM device_tokens WHERE user_id = $1", [
+    userId,
+  ]);
   if (tokens.length === 0) return 0;
 
   const results = await Promise.all(
-    tokens.map(({ device_token }) =>
-      sendSilentPushToDevice(device_token, type, data),
+    tokens.map(({ device_token, environment }) =>
+      sendSilentPushToDevice(
+        device_token,
+        type,
+        data,
+        normalizeTokenEnvironment(environment),
+      ),
     ),
   );
   return results.filter(Boolean).length;

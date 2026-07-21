@@ -9,34 +9,47 @@ struct ProfilePostsGridView: View {
     var isSelf: Bool = false
 
     @State private var posts: [PostItem] = []
+    /// Own story posts whose run never made the feed (self view only) — shown
+    /// in their own strip so the owner can add one to the feed or let it be.
+    @State private var storyPosts: [PostItem] = []
     @State private var nextBefore: String?
     @State private var isLoading = false
     @State private var isLoadingMore = false
     @State private var loaded = false
     @State private var selectedPost: PostItem?
+    @State private var selectedStoryPost: PostItem?
+    @State private var addingToFeedIds: Set<String> = []
+    @State private var addToFeedError: String?
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 3)
 
     var body: some View {
         Group {
-            if isLoading && posts.isEmpty {
+            if isLoading && posts.isEmpty && storyPosts.isEmpty {
                 ProgressView()
                     .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
                     .padding(.top, MADTheme.Spacing.xl)
-            } else if posts.isEmpty {
+            } else if posts.isEmpty && storyPosts.isEmpty {
                 emptyState
             } else {
-                LazyVGrid(columns: columns, spacing: 4) {
-                    ForEach(posts) { post in
-                        Button { selectedPost = post } label: { thumbnail(post) }
-                            .buttonStyle(.plain)
-                            .onAppear {
-                                if post.id == posts.last?.id { Task { await loadMore() } }
-                            }
+                VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                    if isSelf && !storyPosts.isEmpty {
+                        storySection
                     }
-                }
-                if isLoadingMore {
-                    ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
+                    if !posts.isEmpty {
+                        LazyVGrid(columns: columns, spacing: 4) {
+                            ForEach(posts) { post in
+                                Button { selectedPost = post } label: { thumbnail(post) }
+                                    .buttonStyle(.plain)
+                                    .onAppear {
+                                        if post.id == posts.last?.id { Task { await loadMore() } }
+                                    }
+                            }
+                        }
+                    }
+                    if isLoadingMore {
+                        ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
+                    }
                 }
             }
         }
@@ -49,21 +62,169 @@ struct ProfilePostsGridView: View {
                 onNeedMore: { Task { await loadMore() } }
             )
         }
+        .sheet(item: $selectedStoryPost) { post in
+            ProfilePostsFeedSheet(
+                title: "Your Stories",
+                posts: $storyPosts,
+                initialPostId: post.post_id,
+                onNeedMore: {}
+            )
+        }
+        .alert("Couldn't add to feed", isPresented: Binding(
+            get: { addToFeedError != nil },
+            set: { if !$0 { addToFeedError = nil } }
+        )) {
+            Button("OK", role: .cancel) { addToFeedError = nil }
+        } message: {
+            Text(addToFeedError ?? "")
+        }
     }
 
-    private func thumbnail(_ post: PostItem) -> some View {
-        Color.clear
-            .aspectRatio(1, contentMode: .fit)
-            .overlay(
-                // The real picture leads when the run has one; the workout
-                // card is only the face of the post when no photo exists.
-                AsyncImage(url: post.storyPhotoURL ?? post.mediaURL) { phase in
+    // MARK: - Story-only strip (own profile)
+
+    /// Horizontal strip of story photos that never made the feed, each with a
+    /// one-tap "Add to feed" — promoted posts keep their original date and
+    /// stats and slide straight into the grid below.
+    private var storySection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            HStack(spacing: 6) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(0.6))
+                Text("STORIES NOT ON YOUR FEED")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .tracking(1.2)
+                    .foregroundColor(.white.opacity(0.6))
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    ForEach(storyPosts) { post in
+                        storyCard(post)
+                    }
+                }
+            }
+        }
+    }
+
+    private func storyCard(_ post: PostItem) -> some View {
+        VStack(spacing: 6) {
+            Button { selectedStoryPost = post } label: {
+                AsyncImage(url: post.mediaURL) { phase in
                     switch phase {
                     case .success(let image): image.resizable().scaledToFill()
                     case .failure:
                         ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) }
                     default:
                         ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
+                    }
+                }
+                .frame(width: 108, height: 135)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+                .overlay(alignment: .bottomLeading) {
+                    if let date = storyDateText(post) {
+                        Text(date)
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.black.opacity(0.55)))
+                            .padding(6)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button { addToFeed(post) } label: {
+                HStack(spacing: 4) {
+                    if addingToFeedIds.contains(post.post_id) {
+                        ProgressView().tint(.white).scaleEffect(0.6)
+                    } else {
+                        Image(systemName: "plus")
+                            .font(.system(size: 10, weight: .heavy))
+                    }
+                    Text("Add to feed")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                }
+                .foregroundColor(.white)
+                .frame(width: 108)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(MADTheme.Colors.redGradient))
+            }
+            .buttonStyle(.plain)
+            .disabled(addingToFeedIds.contains(post.post_id))
+        }
+    }
+
+    private static let storyDateParser: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+    private static let storyDateDisplay: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
+
+    private func storyDateText(_ post: PostItem) -> String? {
+        guard let localDate = post.local_date,
+              let date = Self.storyDateParser.date(from: localDate) else { return nil }
+        return Self.storyDateDisplay.string(from: date)
+    }
+
+    private func addToFeed(_ post: PostItem) {
+        guard !addingToFeedIds.contains(post.post_id) else { return }
+        addingToFeedIds.insert(post.post_id)
+        Task {
+            do {
+                try await PostService.addPostToFeed(postId: post.post_id)
+                // Reload so the promoted post re-splits into the grid.
+                await load()
+            } catch {
+                await MainActor.run {
+                    addToFeedError = "This run may already have a feed post. Pull to refresh and try again."
+                }
+            }
+            _ = await MainActor.run { addingToFeedIds.remove(post.post_id) }
+        }
+    }
+
+    private func thumbnail(_ post: PostItem) -> some View {
+        // The real picture leads when the run has one; the workout card is only
+        // the face of the post when no photo exists.
+        let url = post.storyPhotoURL ?? post.mediaURL
+        return Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay(
+                // The lock tile is for when the withheld photo WAS the tile —
+                // an auto route/stats card that survived the gate still shows
+                // its face, since only the picture is locked.
+                Group {
+                    if url == nil, post.isPhotoLocked {
+                        ZStack {
+                            LinearGradient(
+                                colors: [MADTheme.Colors.madRed.opacity(0.30), Color.black.opacity(0.6)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            )
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                    } else {
+                        AsyncImage(url: url) { phase in
+                            switch phase {
+                            case .success(let image): image.resizable().scaledToFill()
+                            case .failure:
+                                ZStack { Color.white.opacity(0.05); Image(systemName: "photo").foregroundColor(.white.opacity(0.3)) }
+                            default:
+                                ZStack { Color.white.opacity(0.05); ProgressView().tint(.white) }
+                            }
+                        }
                     }
                 }
             )
@@ -114,11 +275,14 @@ struct ProfilePostsGridView: View {
     }
 
     private func load() async {
-        await MainActor.run { isLoading = posts.isEmpty }
-        let response = try? await PostService.fetchUserPosts(userId: userId, before: nil)
+        await MainActor.run { isLoading = posts.isEmpty && storyPosts.isEmpty }
+        let response = try? await PostService.fetchUserPosts(
+            userId: userId, before: nil, includeStories: isSelf
+        )
         await MainActor.run {
             if let response {
-                posts = response.items
+                posts = response.items.filter { $0.share_to_feed != false }
+                storyPosts = response.items.filter { $0.share_to_feed == false }
                 nextBefore = response.next_before
             }
             isLoading = false
@@ -129,11 +293,15 @@ struct ProfilePostsGridView: View {
     private func loadMore() async {
         guard let before = nextBefore, !isLoadingMore else { return }
         await MainActor.run { isLoadingMore = true }
-        let response = try? await PostService.fetchUserPosts(userId: userId, before: before)
+        let response = try? await PostService.fetchUserPosts(
+            userId: userId, before: before, includeStories: isSelf
+        )
         await MainActor.run {
             if let response {
-                let existing = Set(posts.map(\.post_id))
-                posts.append(contentsOf: response.items.filter { !existing.contains($0.post_id) })
+                let existing = Set(posts.map(\.post_id) + storyPosts.map(\.post_id))
+                let fresh = response.items.filter { !existing.contains($0.post_id) }
+                posts.append(contentsOf: fresh.filter { $0.share_to_feed != false })
+                storyPosts.append(contentsOf: fresh.filter { $0.share_to_feed == false })
                 nextBefore = response.next_before
             }
             isLoadingMore = false
@@ -156,6 +324,20 @@ struct ProfilePostsFeedSheet: View {
     @State private var hypersContext: HypersListContext?
     /// Tapped comment bubble — presents the comments sheet.
     @State private var commentsPost: PostItem?
+    /// Own post being caption-edited / pending delete confirmation.
+    @State private var editingPost: PostItem?
+    @State private var deletingPost: PostItem?
+    @State private var reportingPost: PostItem?
+    @State private var hypingIds: Set<String> = []
+    /// The list starts at the TOP and only then scrolls to the tapped post, so
+    /// the first frames show whoever is newest — reading as a flash of someone
+    /// else's card (a lock card, when today's photo is still unearned) before
+    /// settling. Stay invisible until we're parked on the right post.
+    @State private var didPosition = false
+
+    /// Tapping the newest post needs no scroll at all — show it immediately
+    /// rather than fading in after a settle delay it doesn't need.
+    private var needsScroll: Bool { posts.first?.post_id != initialPostId }
 
     var body: some View {
         NavigationStack {
@@ -176,14 +358,24 @@ struct ProfilePostsFeedSheet: View {
                         .padding(MADTheme.Spacing.md)
                         .padding(.bottom, MADTheme.Spacing.xl)
                     }
+                    // Held invisible (not unbuilt — opacity doesn't affect
+                    // layout, so the LazyVStack still lays out and scrollTo
+                    // still lands) until we're parked on the tapped post.
+                    .opacity(didPosition ? 1 : 0)
                     .onAppear {
+                        guard needsScroll else {
+                            didPosition = true
+                            return
+                        }
                         // LazyVStack hasn't laid out far-down cards yet when
                         // onAppear fires, so a single scrollTo can land short
                         // for deep taps — jump, then correct once layout has
-                        // caught up.
+                        // caught up. Reveal only after the correction, which
+                        // lands while the sheet is still animating in.
                         proxy.scrollTo(initialPostId, anchor: .top)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             proxy.scrollTo(initialPostId, anchor: .top)
+                            withAnimation(.easeOut(duration: 0.12)) { didPosition = true }
                         }
                     }
                 }
@@ -233,81 +425,111 @@ struct ProfilePostsFeedSheet: View {
                     url: post.mediaURL,
                     badge: post.is_auto == true ? ("Stats", "chart.bar.fill") : nil
                 )
+            .sheet(item: $reportingPost) { post in
+                ReportPostSheet(postId: post.post_id) {
+                    reportingPost = nil
+                }
             }
-            .tabViewStyle(.page(indexDisplayMode: .always))
-            .indexViewStyle(.page(backgroundDisplayMode: .interactive))
-            .frame(maxWidth: .infinity)
-            .aspectRatio(4.0 / 5.0, contentMode: .fit)
-        } else {
-            ZoomablePhotoSlide(url: post.mediaURL)
+            .sheet(item: $editingPost) { post in
+                EditCaptionSheet(post: post) { newCaption in
+                    if let idx = posts.firstIndex(where: { $0.post_id == post.post_id }) {
+                        posts[idx].caption = newCaption
+                    }
+                }
+            }
+            .alert(
+                "Delete this post?",
+                isPresented: Binding(
+                    get: { deletingPost != nil },
+                    set: { if !$0 { deletingPost = nil } }
+                ),
+                presenting: deletingPost
+            ) { post in
+                Button("Delete", role: .destructive) {
+                    Task {
+                        try? await PostService.deletePost(postId: post.post_id)
+                        await MainActor.run {
+                            posts.removeAll { $0.post_id == post.post_id }
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("This removes it from your feed and profile for good.")
+            }
         }
     }
 
     private func card(_ post: PostItem) -> some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            HStack(spacing: 10) {
-                AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(post.displayName)
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                    Text(post.relativeTime)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.5))
-                }
-                Spacer()
-                if let type = post.workout_type {
-                    Image(systemName: ActivityCardView.icon(type))
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(ActivityCardView.color(type))
-                }
-            }
-
-            media(post)
-
-            if let stats = post.stats_snapshot {
-                PostStatStrip(stats: stats).padding(.horizontal, 2)
-            }
-            if let caption = post.caption, !caption.isEmpty {
-                Text(MentionText.attributed(caption))
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.9))
-                    .padding(.horizontal, 2)
-            }
-            HStack(spacing: 12) {
-                if let count = post.hype_count, count > 0 {
-                    Button {
-                        hypersContext = HypersListContext(
-                            contextType: "post",
-                            contextId: post.post_id,
-                            targetUserId: post.user_id
-                        )
-                    } label: {
-                        HypeTally(count: count, showsLabel: true).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                Button { commentsPost = post } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "bubble.right")
-                            .font(.system(size: 15, weight: .semibold))
-                        if let count = post.comment_count, count > 0 {
-                            Text("\(count)")
-                                .font(.system(size: 13, weight: .bold, design: .rounded))
-                        }
-                    }
-                    .foregroundColor(.white.opacity(0.7))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 2)
-        }
-        .padding(MADTheme.Spacing.sm)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+        PostCardView(
+            post: post,
+            storyPhotoURL: post.storyPhotoURL,
+            isHyping: hypingIds.contains(post.post_id),
+            onHype: { Task { await hype(post) } },
+            onReport: { reportingPost = post },
+            onBlock: { Task { await block(post) } },
+            onDelete: { deletingPost = post },
+            onEditCaption: post.is_self ? { editingPost = post } : nil,
+            onTapAuthor: nil,
+            onTapHypeCount: {
+                hypersContext = HypersListContext(
+                    contextType: "post",
+                    contextId: post.post_id,
+                    targetUserId: post.user_id
+                )
+            },
+            onOpenComments: { commentsPost = post }
         )
+    }
+
+    private func hype(_ post: PostItem) async {
+        guard !post.is_self, !post.is_hyped, !hypingIds.contains(post.post_id) else { return }
+        await MainActor.run {
+            _ = hypingIds.insert(post.post_id)
+            updatePost(post.post_id) { item in
+                guard !item.is_hyped else { return }
+                item.is_hyped = true
+                item.hype_count = (item.hype_count ?? 0) + 1
+            }
+        }
+        defer { Task { @MainActor in hypingIds.remove(post.post_id) } }
+
+        let revert: @MainActor () -> Void = {
+            updatePost(post.post_id) { item in
+                guard item.is_hyped else { return }
+                item.is_hyped = false
+                item.hype_count = max(0, (item.hype_count ?? 1) - 1)
+            }
+        }
+
+        do {
+            _ = try await HypeService.sendHype(
+                targetUserId: post.user_id,
+                context: HypeContext(
+                    contextType: "post",
+                    contextId: post.post_id,
+                    contextLabel: post.caption ?? post.displayName
+                )
+            )
+            await MainActor.run {
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+        } catch APIError.conflict {
+            // Already hyped server-side — keep the optimistic state.
+        } catch {
+            await MainActor.run { revert() }
+        }
+    }
+
+    private func block(_ post: PostItem) async {
+        do {
+            try await BlockService.block(userId: post.user_id)
+            await MainActor.run { posts.removeAll { $0.user_id == post.user_id } }
+        } catch {}
+    }
+
+    private func updatePost(_ postId: String, _ mutate: (inout PostItem) -> Void) {
+        guard let idx = posts.firstIndex(where: { $0.post_id == postId }) else { return }
+        mutate(&posts[idx])
     }
 }

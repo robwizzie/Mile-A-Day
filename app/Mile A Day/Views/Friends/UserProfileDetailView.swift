@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreLocation
 
 /// Detailed view for displaying a user's profile information
 struct UserProfileDetailView: View {
@@ -123,7 +124,7 @@ struct UserProfileDetailView: View {
             }
         }
         .sheet(item: $selectedWorkout) { workout in
-            FriendWorkoutDetailSheet(workout: workout)
+            FriendWorkoutDetailSheet(workout: workout, friendService: friendService)
         }
         .sheet(isPresented: $showCompeteSheet) {
             CreateCompetitionView(
@@ -428,7 +429,11 @@ struct UserProfileDetailView: View {
                 Last7DaysChart(workouts: friendWorkouts)
             }
             if let today = friendTodayChallenge {
-                FriendTodayChallengeRow(today: today)
+                FriendTodayChallengeRow(
+                    today: today,
+                    ownerName: user.displayName,
+                    ownerImageURL: user.profile_image_url
+                )
             }
             if !friendWorkouts.isEmpty {
                 VStack(spacing: MADTheme.Spacing.md) {
@@ -1097,24 +1102,110 @@ struct UserProfileDetailView: View {
 
 struct FriendWorkoutDetailSheet: View {
     let workout: FriendWorkout
+    /// Passed down rather than constructed here — FriendService has no shared
+    /// instance, and a View struct is rebuilt constantly.
+    @ObservedObject var friendService: FriendService
     @Environment(\.dismiss) private var dismiss
 
+    /// The run's post, so this shows the actual photo — not just a chip saying
+    /// one exists. Same card the feed draws (and the same lock when today's
+    /// photo hasn't been earned yet).
+    @State private var linkedPost: PostItem?
+    /// The run's GPS trace from the server — the owner's own detail gets this
+    /// from HealthKit, which never holds someone else's runs.
+    @State private var routeCoordinates: [CLLocationCoordinate2D]?
+    /// Retained map snapshot so the route map's pinch-zoom can compose its
+    /// floating copy on demand (same mechanism as the feed cards).
+    @State private var routeSnapshot: UIImage?
+    @State private var isLoadingRoute = false
+
+    /// The same rule your own detail uses, sanity guard included.
     private var pace: String {
-        guard workout.distance > 0, workout.totalDuration > 0 else { return "N/A" }
-        let minutesPerMile = (workout.totalDuration / 60.0) / workout.distance
-        let minutes = Int(minutesPerMile)
-        let seconds = Int((minutesPerMile - Double(minutes)) * 60)
-        return String(format: "%d:%02d /mi", minutes, seconds)
+        workoutPaceText(distanceMiles: workout.distance, durationSeconds: workout.totalDuration)
+    }
+
+    /// The run's post, headed like your own detail's "On the Feed" section but
+    /// without the owner's edit/delete/add-to-feed controls.
+    private func linkedPostSection(_ post: PostItem) -> some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            WorkoutDetailSectionHeader(icon: "photo.on.rectangle.angled", title: "On the Feed")
+            PostCardView(
+                post: post,
+                storyPhotoURL: post.storyPhotoURL,
+                onHype: {},
+                onReport: {},
+                onBlock: {},
+                onDelete: {}
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var routeMapSection: some View {
+        if let routeCoordinates, !routeCoordinates.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                WorkoutDetailSectionHeader(icon: "map.fill", title: "Route")
+                WorkoutRouteMapView(
+                    coordinates: routeCoordinates,
+                    routeColor: workoutColor,
+                    onSnapshot: { routeSnapshot = $0 }
+                )
+                .frame(height: 260)
+                .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+                // Pinch to zoom, same as the feed cards and your own workout detail.
+                .instagramZoomable(imageProvider: { routeZoomComposite() })
+            }
+            .padding(MADTheme.Spacing.md)
+            .madLiquidGlass()
+        }
+    }
+
+    /// Floating zoom copy for the route map, composed on demand from the
+    /// retained snapshot (bare route — no stats band).
+    private func routeZoomComposite() -> UIImage? {
+        guard let snapshot = routeSnapshot,
+              let coords = routeCoordinates, coords.count >= 2 else { return nil }
+        return WorkoutRouteMapView.zoomComposite(
+            snapshot: snapshot,
+            coordinates: coords,
+            routeColor: workoutColor,
+            size: CGSize(width: 900, height: 600)
+        ) {
+            EmptyView()
+        }
+    }
+
+    /// The run's post, found by workout id among the author's posts — the same
+    /// lookup your own detail does, just for someone else's id. The server
+    /// scopes it to your circle and applies the photo gate.
+    private func loadLinkedPost() async {
+        guard linkedPost == nil else { return }
+        let post = try? await PostService.fetchOwnPostForWorkout(
+            workoutId: workout.id, userId: workout.userId
+        )
+        await MainActor.run { linkedPost = post }
+    }
+
+    /// Only when the server said there's a route to draw — no point asking
+    /// otherwise, and `has_route` is already consent-gated.
+    private func loadRoute() async {
+        guard workout.hasRoute == true, routeCoordinates == nil, !isLoadingRoute else { return }
+        await MainActor.run { isLoadingRoute = true }
+        let raw = try? await friendService.fetchWorkoutRoute(
+            for: workout.userId, workoutId: workout.id
+        )
+        await MainActor.run {
+            routeCoordinates = decodeRouteCoordinates(raw)
+            isLoadingRoute = false
+        }
     }
 
     private var workoutColor: Color {
-        switch workout.workoutType.lowercased() {
-        case "running": return MADTheme.Colors.madRed
-        case "walking": return .blue
-        case "cycling": return .green
-        case "hiking": return .orange
-        default: return MADTheme.Colors.madRed
-        }
+        MADTheme.workoutColor(workout.workoutType)
     }
 
     private var workoutIcon: String {
@@ -1127,77 +1218,75 @@ struct FriendWorkoutDetailSheet: View {
         }
     }
 
+    /// End − duration, the same way FriendWorkoutRow derives it. Nil when the
+    /// server has no device timestamp, which is the only reason the timeline
+    /// card is ever missing here.
+    private var startDate: Date? {
+        guard let end = workout.deviceEndDate, let d = RelativeTime.date(from: end) else { return nil }
+        return d.addingTimeInterval(-workout.totalDuration)
+    }
+
+    private var endDate: Date? {
+        guard let end = workout.deviceEndDate else { return nil }
+        return RelativeTime.date(from: end)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
                 MADTheme.Colors.appBackgroundGradient
                     .ignoresSafeArea()
 
+                // Same sections, same order, same components as your own
+                // WorkoutDetailView — a friend's run reads exactly like yours.
+                // Splits, the route map and the post card are the only things
+                // missing, because the server doesn't hand those over for
+                // someone else's workout.
                 ScrollView {
                     VStack(spacing: MADTheme.Spacing.lg) {
-                        // Hero card
-                        VStack(spacing: MADTheme.Spacing.md) {
-                            // Manual/edited warning banner
-                            if workout.isManualOrEdited {
-                                ManualWorkoutBanner(source: workout.source)
-                            }
+                        WorkoutHeroCard(
+                            icon: workoutIcon,
+                            typeLabel: workout.workoutType.capitalized,
+                            color: workoutColor,
+                            distanceText: workout.formattedDistance,
+                            dateText: workout.formattedDate,
+                            source: WorkoutSource(rawValue: workout.source ?? "") ?? .healthkit,
+                            hasRoute: workout.hasRoute == true,
+                            hasPhoto: workout.hasPhoto == true
+                        )
 
-                            // Workout type badge
-                            HStack(spacing: MADTheme.Spacing.sm) {
-                                Image(systemName: workoutIcon)
-                                    .font(.system(size: 14, weight: .semibold))
-                                Text(workout.workoutType.capitalized)
-                                    .font(MADTheme.Typography.smallBold)
-                            }
-                            .foregroundColor(workoutColor)
-                            .padding(.horizontal, MADTheme.Spacing.md)
-                            .padding(.vertical, MADTheme.Spacing.xs + 2)
-                            .background(
-                                Capsule()
-                                    .fill(workoutColor.opacity(0.15))
-                            )
-
-                            // Distance
-                            Text(workout.formattedDistance)
-                                .font(.system(size: 52, weight: .bold, design: .rounded))
-                                .foregroundColor(.primary)
-
-                            // Date
-                            Text(workout.formattedDate)
-                                .font(MADTheme.Typography.body)
-                                .foregroundColor(.secondary)
+                        // The run's post — the real photo, exactly as the feed
+                        // renders it. Read-only: hyping and reporting live on
+                        // the feed, and none of the owner actions apply here.
+                        if let post = linkedPost {
+                            linkedPostSection(post)
                         }
-                        .padding(MADTheme.Spacing.lg)
-                        .frame(maxWidth: .infinity)
-                        .madLiquidGlass()
 
-                        // Stats row
-                        HStack(spacing: MADTheme.Spacing.sm) {
-                            DashboardStatBox(
-                                title: "Duration",
-                                value: workout.formattedDuration,
-                                icon: "clock.fill",
-                                color: .orange
+                        // The map, on the same rule as your own detail: hidden
+                        // when the post card above already carries the run's
+                        // visuals, so there's never a double map.
+                        if linkedPost == nil {
+                            routeMapSection
+                        }
+
+                        WorkoutStatsCard(
+                            duration: workout.formattedDuration,
+                            pace: pace,
+                            calories: workout.calories.flatMap { $0 > 0 ? Int($0) : nil }
+                        )
+
+                        if let start = startDate, let end = endDate {
+                            WorkoutTimelineCard(
+                                startText: start.formattedTime,
+                                endText: end.formattedTime
                             )
-
-                            DashboardStatBox(
-                                title: "Pace",
-                                value: pace,
-                                icon: "speedometer",
-                                color: .green
-                            )
-
-                            if let calories = workout.calories, calories > 0 {
-                                DashboardStatBox(
-                                    title: "Calories",
-                                    value: "\(Int(calories))",
-                                    icon: "flame.fill",
-                                    color: MADTheme.Colors.madRed
-                                )
-                            }
                         }
                     }
                     .padding(MADTheme.Spacing.md)
+                }
+                .task {
+                    await loadLinkedPost()
+                    await loadRoute()
                 }
             }
             .navigationTitle("")
@@ -1222,6 +1311,8 @@ struct FriendWorkoutDetailSheet: View {
 /// Uses the server-side completion status from `/users/:userId/challenges/today`.
 struct FriendTodayChallengeRow: View {
     let today: RemoteChallengeService.FriendTodayDTO
+    let ownerName: String
+    let ownerImageURL: String?
 
     /// Local-catalog fallback when the server didn't enrich the row (older builds).
     private var challenge: DailyChallenge? {
@@ -1237,57 +1328,68 @@ struct FriendTodayChallengeRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: iconGradient,
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 44, height: 44)
-                Image(systemName: iconName)
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.white)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("TODAY'S CHALLENGE")
-                    .font(.system(size: 10, weight: .heavy, design: .rounded))
-                    .tracking(1.0)
-                    .foregroundColor(.white.opacity(0.5))
-                Text(displayTitle ?? "Today's challenge")
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            // Status pill on the right — clear "Completed" / "In progress"
-            // signal that doesn't compete with the challenge name.
-            HStack(spacing: 4) {
-                Image(systemName: today.completed ? "checkmark.circle.fill" : "hourglass")
-                    .font(.system(size: 11, weight: .bold))
-                Text(today.completed ? "Done" : "Not yet")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
-            }
-            .foregroundColor(today.completed ? .green : .white.opacity(0.55))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(
-                Capsule()
-                    .fill(today.completed ? Color.green.opacity(0.12) : Color.white.opacity(0.06))
-                    .overlay(
-                        Capsule()
-                            .strokeBorder(
-                                today.completed ? Color.green.opacity(0.3) : Color.white.opacity(0.12),
-                                lineWidth: 1
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: iconGradient,
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
                             )
-                    )
-            )
+                        )
+                        .frame(width: 44, height: 44)
+                    Image(systemName: iconName)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundColor(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("TODAY'S CHALLENGE")
+                        .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        .tracking(1.0)
+                        .foregroundColor(.white.opacity(0.5))
+                    Text(displayTitle ?? "Today's challenge")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                // Status pill on the right — clear "Completed" / "In progress"
+                // signal that doesn't compete with the challenge name.
+                HStack(spacing: 4) {
+                    Image(systemName: today.completed ? "checkmark.circle.fill" : "hourglass")
+                        .font(.system(size: 11, weight: .bold))
+                    Text(today.completed ? "Done" : "Not yet")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                }
+                .foregroundColor(today.completed ? .green : .white.opacity(0.55))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(today.completed ? Color.green.opacity(0.12) : Color.white.opacity(0.06))
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(
+                                    today.completed ? Color.green.opacity(0.3) : Color.white.opacity(0.12),
+                                    lineWidth: 1
+                                )
+                        )
+                )
+            }
+
+            if today.challengeKey == "head_to_head", let opponent = today.opponent {
+                FriendHeadToHeadStrip(
+                    ownerName: ownerName,
+                    ownerImageURL: ownerImageURL,
+                    opponent: opponent,
+                    accent: iconGradient.first ?? .orange
+                )
+            }
         }
         .padding(14)
         .background(
@@ -1317,6 +1419,105 @@ struct FriendTodayChallengeRow: View {
         return today.completed
             ? [.green, .green.opacity(0.8)]
             : [.white.opacity(0.2), .white.opacity(0.1)]
+    }
+}
+
+private struct FriendHeadToHeadStrip: View {
+    let ownerName: String
+    let ownerImageURL: String?
+    let opponent: RemoteChallengeService.OpponentDTO
+    let accent: Color
+
+    private var rivalName: String { opponent.username ?? "Opponent" }
+    private var tied: Bool { abs(opponent.myMiles - opponent.miles) < 0.01 }
+    private var ownerLeading: Bool { opponent.myMiles > opponent.miles && !tied }
+    private var statusColor: Color { tied ? .yellow : (ownerLeading ? .green : .orange) }
+
+    private var statusText: String {
+        if tied { return "Even at \(formatMiles(opponent.myMiles)) mi" }
+        let diff = abs(opponent.myMiles - opponent.miles)
+        if ownerLeading {
+            return "\(ownerName) leads by \(formatMiles(diff)) mi"
+        }
+        return "\(rivalName) leads by \(formatMiles(diff)) mi"
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                side(
+                    name: ownerName,
+                    image: ownerImageURL,
+                    miles: opponent.myMiles,
+                    highlight: ownerLeading,
+                    color: accent
+                )
+
+                VStack(spacing: 3) {
+                    Text("VS")
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .foregroundColor(.white.opacity(0.45))
+                    Image(systemName: tied ? "equal.circle.fill" : "arrowtriangle.up.circle.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(statusColor)
+                }
+                .frame(width: 44)
+
+                side(
+                    name: rivalName,
+                    image: opponent.profileImageUrl,
+                    miles: opponent.miles,
+                    highlight: !ownerLeading && !tied,
+                    color: .orange
+                )
+            }
+
+            Text(statusText)
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .foregroundColor(statusColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+
+            // Live standings, not a verdict — the duel is a whole-day total
+            // the server scores after midnight.
+            Text("Winner decided at day's end")
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+                .lineLimit(1)
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.black.opacity(0.16))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(statusColor.opacity(0.28), lineWidth: 1)
+                )
+        )
+    }
+
+    private func side(name: String, image: String?, miles: Double, highlight: Bool, color: Color) -> some View {
+        HStack(spacing: 8) {
+            AvatarView(name: name, imageURL: image, size: 34)
+                .overlay(Circle().strokeBorder(highlight ? color : .clear, lineWidth: 2))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Text("\(formatMiles(miles)) mi")
+                    .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    .foregroundColor(highlight ? color : .white.opacity(0.72))
+                    .monospacedDigit()
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func formatMiles(_ miles: Double) -> String {
+        String(format: "%.2f", miles)
     }
 }
 
@@ -1547,13 +1748,7 @@ struct Last7DaysChart: View {
     }
 
     private func workoutTypeColor(_ type: String) -> Color {
-        switch type.lowercased() {
-        case "running": return .red
-        case "walking": return .blue
-        case "cycling": return .green
-        case "hiking": return .brown
-        default: return .gray
-        }
+        MADTheme.workoutColor(type)
     }
 
     /// Three-letter localized weekday ("Sun", "Mon", "Tue"…). Unambiguous

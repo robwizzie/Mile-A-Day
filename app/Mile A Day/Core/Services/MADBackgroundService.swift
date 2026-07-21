@@ -132,7 +132,8 @@ final class MADBackgroundService: NSObject, ObservableObject {
 
     @MainActor
     private func handleNewWorkoutData() async {
-        guard await requestHealthKitAuthorizationIfNeeded() else { return }
+        // performBackgroundSync establishes authorization for every reason now,
+        // so this path no longer needs its own check.
         await performBackgroundSync(reason: .healthKitObserver)
     }
     
@@ -166,6 +167,16 @@ final class MADBackgroundService: NSObject, ObservableObject {
         // Only run if user has authenticated.
         guard UserDefaults.standard.bool(forKey: "MAD_IsAuthenticated") else {
             print("[MADBackgroundService] Skipping sync — user not authenticated")
+            return false
+        }
+
+        // Establish HealthKit authorization BEFORE any read. Only the observer
+        // path (handleNewWorkoutData) used to do this, so a background launch,
+        // BGTask, or silent push ran the entire sync with `isAuthorized` still
+        // false — every query returned instantly having done nothing, which is
+        // the "❌ Not authorized to access HealthKit" a background launch logs.
+        guard await requestHealthKitAuthorizationIfNeeded() else {
+            print("[MADBackgroundService] Skipping sync — HealthKit not authorized")
             return false
         }
 
@@ -214,20 +225,22 @@ final class MADBackgroundService: NSObject, ObservableObject {
     }
     
     private func requestHealthKitAuthorizationIfNeeded() async -> Bool {
-        return await withCheckedContinuation { [weak self] continuation in
-            guard let self = self else {
-                continuation.resume(returning: false)
-                return
-            }
-            
-            if self.healthManager.isAuthorized {
-                continuation.resume(returning: true)
-                return
-            }
-            
-            self.healthManager.requestAuthorization { success in
-                continuation.resume(returning: success)
-            }
+        if healthManager.isAuthorized { return true }
+
+        // Resolve WITHOUT prompting first. This service holds its own
+        // HealthKitManager, so its flag starts false in every process no matter
+        // what the UI's instance already knows — and in a background launch
+        // there's no UI to prompt with anyway. A user who granted access long
+        // ago needs no prompt, just a fresh process asking the right question.
+        let resolved = await withCheckedContinuation { continuation in
+            healthManager.refreshAuthorizationStatus { continuation.resume(returning: $0) }
+        }
+        if resolved { return true }
+
+        // Genuinely undetermined (first run) — fall back to the real request,
+        // which prompts if there's UI to prompt with.
+        return await withCheckedContinuation { continuation in
+            healthManager.requestAuthorization { continuation.resume(returning: $0) }
         }
     }
     
@@ -244,14 +257,26 @@ final class MADBackgroundService: NSObject, ObservableObject {
     @MainActor
     private static func fetchLatestWorkoutDataStatic() async -> Bool {
         let service = shared
-        
+
         // Fetch all workout data
         service.healthManager.fetchAllWorkoutData()
-        
-        // Give HealthKit queries more time to complete (increased from 2.0 to 3.0 seconds)
-        // This ensures the retroactiveStreak calculation finishes before we read it
-        try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
-        
+
+        // Wait (bounded) for HealthKit to actually finish loading instead of a
+        // blind sleep. On a locked phone the queries error out (protected
+        // data) and retroactiveStreak can still be 0 when read — writing that
+        // through UserManager persisted streak=0 and pushed it into the
+        // widget store, so widgets showed a 0 streak while the app (which
+        // recomputes after unlock) was correct.
+        var waited = 0
+        while !service.healthManager.hasLoadedInitialData && waited < 10 {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            waited += 1
+        }
+        guard service.healthManager.hasLoadedInitialData else {
+            service.log("[Background] HealthKit data not ready (device likely locked) — skipping user/widget update")
+            return false
+        }
+
         service.log("[Background] Updating user with HealthKit data - Streak: \(service.healthManager.retroactiveStreak), Miles: \(service.healthManager.todaysDistance)")
         
         // Update user data with new HealthKit data

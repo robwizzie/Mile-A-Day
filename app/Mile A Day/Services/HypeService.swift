@@ -18,7 +18,7 @@ struct HypeStatusResponse: Decodable {
 /// it to produce a contextual hype-back notification ("X hyped you earning 'Y'")
 /// and dedupes by (sender, target, type, id) so the same event can't be re-hyped.
 struct HypeContext {
-    let contextType: String   // "mile" | "badge" | "pr" | "challenge"
+    let contextType: String   // "mile" | "badge" | "pr" | "challenge" | "post"
     let contextId: String
     let contextLabel: String
 }

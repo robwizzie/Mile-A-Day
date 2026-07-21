@@ -7,12 +7,14 @@ import {
   getUserStoriesController,
   markStoryViewedController,
   getStoryViewersController,
+  getStoryReactorsController,
   reactToStoryController,
   getPostMemoriesController,
   getFeedController,
   getUnifiedFeedController,
   getUserPostsController,
   deletePostController,
+  updatePostController,
   reportPostController,
   getTermsStatusController,
   acceptTermsController,
@@ -53,6 +55,7 @@ router.get("/stories", getStoriesRailController);
 router.get("/stories/:userId", getUserStoriesController);
 router.post("/stories/:postId/view", markStoryViewedController);
 router.get("/stories/:postId/viewers", getStoryViewersController);
+router.get("/stories/:postId/reactions", getStoryReactorsController);
 router.post("/stories/:postId/react", reactToStoryController);
 
 // "On this day" — the caller's own past post photos.
@@ -74,6 +77,7 @@ router.post("/comments/:commentId/report", reportCommentController);
 // Per-post actions.
 router.post("/:postId/coauthor", respondToCoauthorController);
 router.post("/:postId/report", reportPostController);
+router.patch("/:postId", updatePostController);
 router.delete("/:postId", deletePostController);
 
 export default router;

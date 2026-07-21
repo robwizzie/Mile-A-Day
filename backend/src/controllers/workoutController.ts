@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { AuthenticatedRequest } from "../middleware/auth.js";
 import { PostgresService } from "../services/DbService.js";
 import hasRequiredKeys from "../utils/hasRequiredKeys.js";
 import { getUser } from "../services/userService.js";
@@ -20,6 +21,7 @@ import {
   type RaceDistanceKey,
   getUserLocalToday,
   getUserRoutes,
+  getWorkoutRoute as getWorkoutRouteDb,
 } from "../services/workoutService.js";
 import { checkRaceCompletions } from "../services/competitionService.js";
 import { softDeleteWorkout } from "../services/workoutDeletionService.js";
@@ -372,7 +374,9 @@ export async function getRaceHistoryController(req: Request, res: Response) {
 
   const distance = req.params.distance;
   if (!RACE_DISTANCES.some((d) => d.key === distance)) {
-    return res.status(400).json({ error: `Unknown race distance: ${distance}` });
+    return res
+      .status(400)
+      .json({ error: `Unknown race distance: ${distance}` });
   }
 
   try {
@@ -444,7 +448,10 @@ export async function deleteWorkout(req: Request, res: Response) {
 
 export async function getWorkoutRange() {}
 
-export async function getRecentWorkouts(req: Request, res: Response) {
+export async function getRecentWorkouts(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
   if (!hasRequiredKeys(["userId"], req, res)) return;
 
   const limitParam = typeof req.query.limit === "string" ? req.query.limit : "";
@@ -461,7 +468,9 @@ export async function getRecentWorkouts(req: Request, res: Response) {
       return res.status(400).send({ error: `No user found with ID ${userId}` });
     }
 
-    const results = await getRecentWorkoutsDb(userId, resultLimit);
+    // The viewer decides whether `has_route` may be reported: the author's
+    // "Share route maps" setting hides it from everyone but themselves.
+    const results = await getRecentWorkoutsDb(userId, resultLimit, req.userId);
 
     return res.status(200).json(results);
   } catch (error: any) {
@@ -469,6 +478,31 @@ export async function getRecentWorkouts(req: Request, res: Response) {
     res
       .status(500)
       .json({ error: "Error getting recent workouts: " + error.message });
+  }
+}
+
+/**
+ * GET /workouts/:userId/workout/:workoutId/route — one workout's GPS trace, so
+ * a friend's workout detail can draw the same map the owner sees. Honors the
+ * author's `share_route_maps` consent; returns `{ route: null }` (never a 403)
+ * when it's off, so the client simply draws no map.
+ */
+export async function getWorkoutRouteController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!hasRequiredKeys(["userId", "workoutId"], req, res)) return;
+
+  try {
+    const route = await getWorkoutRouteDb(
+      req.params.userId,
+      req.params.workoutId,
+      req.userId!,
+    );
+    return res.status(200).json({ route });
+  } catch (error: any) {
+    console.error("Error getting workout route:", error.message);
+    res.status(500).json({ error: "Error getting workout route" });
   }
 }
 
@@ -485,7 +519,7 @@ export async function getUserRoutesController(req: Request, res: Response) {
   }
 }
 
-export async function getUserStats(req: Request, res: Response) {
+export async function getUserStats(req: AuthenticatedRequest, res: Response) {
   if (!hasRequiredKeys(["userId"], req, res)) return;
 
   try {
@@ -510,7 +544,10 @@ export async function getUserStats(req: Request, res: Response) {
       getTotalMiles(userId, startDateParam),
       getBestMilesDay(userId, startDateParam),
       getBestSplit(userId, startDateParam),
-      getRecentWorkoutsDb(userId, 10),
+      // Viewer matters here too: this payload's recent_workouts carry
+      // has_route/has_photo, and without it they'd report nothing to anyone —
+      // including the owner looking at their own stats.
+      getRecentWorkoutsDb(userId, 10, req.userId),
       getTodayMiles(userId),
     ]);
 

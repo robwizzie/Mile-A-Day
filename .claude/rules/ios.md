@@ -26,12 +26,17 @@ globs: app/**
 - HealthKit queries ERROR when the device is locked (protected data). Never treat a query error as "0 miles" — only a successful empty result is a real zero. Writing 0 on error randomly reset widgets.
 - Feed route maps are read from HKWorkoutRoute at sync time. In-app tracked workouts must write their GPS trace via `HKWorkoutRouteBuilder.finishRoute` after `finishWorkout` (and `HKSeriesType.workoutRoute()` must be in the SHARE auth set) — points buffered in InProgressWorkoutStore alone never reach the backend.
 - WidgetKit renders statically: `.onAppear`-driven `@State` animations never play in widget views — render entry values directly. `WidgetDataStore` data is day-stamped; `load()` returns zeros for a stale day, and saves skip no-op writes (widget reloads are budgeted per day).
+- Widget timeline policies are fallbacks (the app reloads on every data write). Never request sub-15-min refreshes: a 60s policy drained the ~40-70/day budget by morning and iOS then silently dropped ALL reloads — widgets froze on stale data while the app was correct.
+- Background HealthKit reads must gate on `hasLoadedInitialData`, not a fixed sleep — on a locked device queries error, `retroactiveStreak` reads 0, and `updateFromHealthKit` persists it unconditionally (streak 0 stuck in widgets).
+- WorkoutIndex incremental updates need the 48h lookback + record-id dedup: querying strictly from `lastUpdated` permanently drops workouts that reached HealthKit late (Watch sync), leaving a `qualifyingDays` hole — `activeStreak()` stops there and the dashboard flashes a tiny streak until the backend rescue lands. Backend-streak ≫ local triggers a debounced rebuild (`repairWorkoutIndexIfStale`).
+- The displayed streak (`currentUser.streak`) is quarantine-gated: `UserManager.vettedHealthKitStreak` refuses 2+ day drops from local recomputes unless the backend (48h-fresh, recomputed server-side every `getUserStats`) agrees or a same-day full index rebuild confirms. Never write `hk.retroactiveStreak` raw to UI/widgets/watch — it flaps on index holes; route through `updateUserWithHealthKitData` / push `max(hk, user.streak)`.
 
 ## Key Patterns
 - Use `@Observable` (iOS 17+ Observation framework) for new view models.
 - Feature views live in `Views/<FeatureName>/` subdirectories.
 - Shared UI components in `Views/Components/`.
 - Watch app is a separate target at `Mile A Day Watch App/`.
+- fullScreenCover gotchas (post composer): pass tap-selected content via `.fullScreenCover(item:)` (isPresented + separate @State races to a stale nil), guard onAppear side effects with a one-shot flag (onAppear RE-FIRES when a cover dismisses — an auto-opened camera re-traps the user), and attach two covers to two different nodes or one drops.
 - iOS 26 auto-wraps custom `ToolbarItem` views in a shared glass capsule. For a custom-styled pill, apply `.sharedBackgroundVisibility(.hidden)` to the `ToolbarItem` itself (it's on `CustomizableToolbarContent`, NOT a `View` modifier; gate with `#available(iOS 26)`) or it renders pill-inside-a-pill. Also `.fixedSize()` toolbar HStacks — leading items truncate `Text` to zero width otherwise.
 
 ## Entitlements

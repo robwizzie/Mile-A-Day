@@ -109,6 +109,11 @@ extension HealthKitManager {
             print("  - Current streak: \(finalStreak) days")
             print("  - Most miles in one day: \(finalIndex.mostMilesInOneDay)")
 
+            // Full-history rebuild completed: from now until midnight,
+            // UserManager.vettedHealthKitStreak may accept a 2+ day streak drop
+            // as verified (unless a fresh backend value contradicts it).
+            UserDefaults.standard.set(Date(), forKey: "lastFullIndexRebuildCompletedAt")
+
             // CRITICAL: Post notification that index is ready
             NotificationCenter.default.post(name: NSNotification.Name("WorkoutIndexReady"), object: nil)
 
@@ -135,7 +140,15 @@ extension HealthKitManager {
         guard isAuthorized else { return }
 
         let lastUpdate = currentIndex.lastUpdated
-        print("[WorkoutIndex] 🔄 Checking for workouts since \(lastUpdate)...")
+        // Look back 48h behind the last update stamp: a workout that ENDED
+        // before the stamp but reached HealthKit after it (Watch sync latency,
+        // an in-app save finishing late) was otherwise missed FOREVER. The
+        // resulting hole in qualifyingDays made activeStreak() stop at that
+        // day — the dashboard flashed a tiny local streak on every refresh
+        // until the backend value rescued it. Re-fetched known workouts are
+        // deduped by record id below.
+        let queryStart = Calendar.current.date(byAdding: .hour, value: -48, to: lastUpdate) ?? lastUpdate
+        print("[WorkoutIndex] 🔄 Checking for workouts since \(queryStart) (48h lookback)...")
 
         // Query for workouts after last update
         let newWorkouts = await withCheckedContinuation { (continuation: CheckedContinuation<[HKWorkout], Never>) in
@@ -143,7 +156,7 @@ extension HealthKitManager {
             let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
             let workoutTypePredicate = NSCompoundPredicate(orPredicateWithSubpredicates: [runningPredicate, walkingPredicate])
 
-            let datePredicate = HKQuery.predicateForSamples(withStart: lastUpdate, end: Date(), options: .strictEndDate)
+            let datePredicate = HKQuery.predicateForSamples(withStart: queryStart, end: Date(), options: .strictEndDate)
             let compoundPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [workoutTypePredicate, datePredicate])
 
             let query = HKSampleQuery(
@@ -184,10 +197,34 @@ extension HealthKitManager {
             return
         }
 
-        print("[WorkoutIndex] 🆕 Found \(newWorkouts.count) new workouts, updating index...")
+        // The 48h lookback re-fetches workouts that may already be indexed —
+        // drop those so a day's distance isn't double-counted.
+        let existingIds = Set(currentIndex.workoutsByDate.values.flatMap { $0 }.map { $0.id })
+        let trulyNewWorkouts = newWorkouts.filter { !existingIds.contains($0.uuid.uuidString) }
+
+        guard !trulyNewWorkouts.isEmpty else {
+            print("[WorkoutIndex] ✅ No new workouts after lookback dedup")
+            // Same bookkeeping as the empty-fetch branch above: dailyMileGoals
+            // isn't persisted and the displayed streak must be derived as of NOW.
+            await MainActor.run {
+                var goals: [Date: Bool] = [:]
+                for (dateKey, records) in currentIndex.workoutsByDate {
+                    if let date = dateFromKey(dateKey) {
+                        let totalMiles = records.reduce(0) { $0 + $1.distance }
+                        goals[date] = totalMiles >= 0.95
+                    }
+                }
+                self.dailyMileGoals = goals
+                self.retroactiveStreak = currentIndex.activeStreak()
+                self.saveCachedData()
+            }
+            return
+        }
+
+        print("[WorkoutIndex] 🆕 Found \(trulyNewWorkouts.count) new workouts, updating index...")
 
         // Process new workouts
-        let newRecords = workoutProcessor.processWorkouts(newWorkouts)
+        let newRecords = workoutProcessor.processWorkouts(trulyNewWorkouts)
 
         // Update index
         var updatedIndex = currentIndex

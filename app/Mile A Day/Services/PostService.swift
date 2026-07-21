@@ -27,7 +27,7 @@ struct PostItem: Codable, Identifiable {
     let last_name: String?
     let profile_image_url: String?
     let media_url: String
-    let caption: String?
+    var caption: String?
     let workout_id: String?
     let stats_snapshot: PostStats?
     let local_date: String?
@@ -52,6 +52,18 @@ struct PostItem: Codable, Identifiable {
     /// Story rows only: does this run already have a live feed post? Hides the
     /// story viewer's "Add to feed" when the workout is already on the feed.
     var workout_on_feed: Bool?
+    /// Server withheld this post's photo because it's from the viewer's local
+    /// today and they haven't finished their own mile yet — the client draws a
+    /// lock instead of a broken image. Absent/false = unlocked.
+    var photo_locked: Bool? = nil
+    /// The viewer's own emoji reaction to this story, hydrated on load so a
+    /// re-view shows the reaction they already left. nil = not reacted.
+    var viewer_reaction: String? = nil
+
+    var id: String { post_id }
+
+    /// Whether the server locked this post's photo (viewer hasn't run today).
+    var isPhotoLocked: Bool { photo_locked == true }
     /// Collab post: the invited/accepted coauthor. Pending invites are only
     /// visible to the two authors; everyone else decodes nil.
     var coauthor_user_id: String?
@@ -114,6 +126,13 @@ struct StoryGroup: Codable, Identifiable {
     let story_count: Int
     let has_unviewed: Bool
     let latest_at: String
+    /// Distinct author-local days ("yyyy-MM-dd") this group's stories span —
+    /// drives the per-day viewing gate. Optional: absent from older servers.
+    let story_local_dates: [String]?
+    /// Author-local days with an unseen story — the ring lights only when one
+    /// of these is a day the viewer can actually watch. Optional (older
+    /// servers omit it → fall back to has_unviewed).
+    let unviewed_local_dates: [String]?
 
     var id: String { user_id }
 
@@ -143,7 +162,7 @@ struct FeedEntry: Codable, Identifiable {
     let profile_image_url: String?
     // post-only
     let media_url: String?
-    let caption: String?
+    var caption: String?
     let stats_snapshot: PostStats?
     /// The run's story-only photo, when one exists — powers the photo/route
     /// flip on the feed card without duplicating the run in the feed.
@@ -165,6 +184,9 @@ struct FeedEntry: Codable, Identifiable {
     let is_self: Bool
     var is_hyped: Bool
     var hype_count: Int?
+    /// Server withheld this post's photo (viewer hasn't run today) — carried
+    /// into the rendered PostItem so the card draws a lock.
+    let photo_locked: Bool?
     var comment_count: Int?
     // Collab post fields (post entries only; nil while pending unless viewer
     // is one of the two authors).
@@ -181,7 +203,7 @@ struct FeedEntry: Codable, Identifiable {
         case sort_ts, user_id, username, first_name, last_name, profile_image_url
         case media_url, caption, stats_snapshot, story_photo_url, is_auto
         case workout_id, workout_type, distance, total_duration, calories, steps, route
-        case is_self, is_hyped, hype_count, comment_count
+        case is_self, is_hyped, hype_count, comment_count, photo_locked
         case coauthor_user_id, coauthor_status, coauthor_username
         case coauthor_first_name, coauthor_last_name, coauthor_profile_image_url
     }
@@ -219,6 +241,7 @@ struct FeedEntry: Codable, Identifiable {
             is_self: is_self, is_hyped: is_hyped,
             hype_count: hype_count, comment_count: comment_count,
             is_viewed: nil, workout_on_feed: nil,
+            photo_locked: photo_locked,
             coauthor_user_id: coauthor_user_id, coauthor_status: coauthor_status,
             coauthor_username: coauthor_username,
             coauthor_first_name: coauthor_first_name,
@@ -256,6 +279,30 @@ struct StoryViewer: Codable, Identifiable {
 
 struct StoryViewersResponse: Decodable {
     let viewers: [StoryViewer]
+    let count: Int
+}
+
+/// One person who reacted to a story, for the bubble row shown to all viewers.
+struct StoryReactor: Codable, Identifiable {
+    let user_id: String
+    let username: String?
+    let first_name: String?
+    let last_name: String?
+    let profile_image_url: String?
+    let emoji: String
+    let created_at: String
+
+    var id: String { user_id }
+
+    var displayName: String {
+        if let username, !username.isEmpty { return username }
+        if let first_name, !first_name.isEmpty { return first_name }
+        return "Someone"
+    }
+}
+
+struct StoryReactorsResponse: Decodable {
+    let reactors: [StoryReactor]
     let count: Int
 }
 
@@ -419,6 +466,15 @@ enum PostService {
         )
     }
 
+    /// Everyone who reacted to a story — visible to any circle viewer, for the
+    /// reaction-bubble row (not just the author's private viewers list).
+    static func storyReactors(postId: String) async throws -> StoryReactorsResponse {
+        try await APIClient.fancyFetch(
+            endpoint: "/posts/stories/\(postId)/reactions",
+            responseType: StoryReactorsResponse.self
+        )
+    }
+
     /// Emoji-react to a friend's story. Re-reacting swaps the emoji.
     static func reactToStory(postId: String, emoji: String) async throws {
         struct Body: Encodable { let emoji: String }
@@ -431,8 +487,8 @@ enum PostService {
         )
     }
 
-    /// The caller's own post photos from this day in past years / a week ago /
-    /// a month ago — fuel for the "On this day" memories surface.
+    /// The caller's own post photos from this day in past years — fuel for
+    /// the "On this day" memories surface.
     static func fetchPostMemories() async throws -> [PostItem] {
         struct MemoriesResponse: Decodable { let items: [PostItem] }
         return try await APIClient.fancyFetch(
@@ -454,8 +510,16 @@ enum PostService {
     }
 
     /// A user's permanent posts for the Instagram-style profile grid.
-    static func fetchUserPosts(userId: String, before: String? = nil) async throws -> FeedResponse {
-        let endpoint = "/posts/user/\(userId)?limit=24" + beforeSuffix(before)
+    /// `includeStories` (own profile only — the server enforces it) also
+    /// returns story-only posts whose run isn't on the feed, so the owner can
+    /// review and promote them.
+    static func fetchUserPosts(
+        userId: String,
+        before: String? = nil,
+        includeStories: Bool = false
+    ) async throws -> FeedResponse {
+        var endpoint = "/posts/user/\(userId)?limit=24" + beforeSuffix(before)
+        if includeStories { endpoint += "&include_stories=true" }
         return try await APIClient.fancyFetch(endpoint: endpoint, responseType: FeedResponse.self)
     }
 
@@ -466,6 +530,43 @@ enum PostService {
         _ = try await APIClient.fancyFetch(
             endpoint: "/posts/\(postId)/coauthor",
             method: .POST,
+    /// The caller's own post (feed or story-only) linked to a workout, if any.
+    /// Scans the first few pages of own posts — Recent Workouts surfaces
+    /// recent runs, so the match is nearly always on page one.
+    static func fetchOwnPostForWorkout(workoutId: String, userId: String) async throws -> PostItem? {
+        var before: String? = nil
+        for _ in 0..<3 {
+            let page = try await fetchUserPosts(userId: userId, before: before, includeStories: true)
+            if let match = page.items.first(where: { $0.workout_id == workoutId }) { return match }
+            guard let next = page.next_before else { return nil }
+            before = next
+        }
+        return nil
+    }
+
+    /// Edit a post's caption. Pass nil (or whitespace) to clear it.
+    static func updateCaption(postId: String, caption: String?) async throws {
+        struct Body: Encodable { let caption: String }
+        // The server trims and stores "" as NULL, so an empty string clears.
+        let bodyData = try JSONEncoder().encode(Body(caption: caption ?? ""))
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/\(postId)",
+            method: .PATCH,
+            body: bodyData,
+            responseType: OKResponse.self
+        )
+    }
+
+    /// Promote a story-only post onto the feed in place (keeps its original
+    /// date, media, and stats). Throws APIError.conflict
+    /// ("workout_already_posted") when the run already has a deliberate feed
+    /// post.
+    static func addPostToFeed(postId: String) async throws {
+        struct Body: Encodable { let add_to_feed: Bool }
+        let bodyData = try JSONEncoder().encode(Body(add_to_feed: true))
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/\(postId)",
+            method: .PATCH,
             body: bodyData,
             responseType: OKResponse.self
         )
@@ -494,16 +595,54 @@ enum PostService {
     }
 
     static func termsStatus() async throws -> TermsStatus {
-        try await APIClient.fancyFetch(endpoint: "/posts/terms", responseType: TermsStatus.self)
+        // Pin the cache key BEFORE the await: if the account switches while
+        // the request is in flight, the response must land under the user
+        // who made it, not whoever is signed in when it returns.
+        let cacheKey = termsCacheKey(userId: currentUserId)
+        let status: TermsStatus = try await APIClient.fancyFetch(
+            endpoint: "/posts/terms",
+            responseType: TermsStatus.self
+        )
+        UserDefaults.standard.set(status.accepted, forKey: cacheKey)
+        return status
     }
 
     @discardableResult
     static func acceptTerms() async throws -> TermsStatus {
-        try await APIClient.fancyFetch(
+        let cacheKey = termsCacheKey(userId: currentUserId)
+        let status: TermsStatus = try await APIClient.fancyFetch(
             endpoint: "/posts/terms/accept",
             method: .POST,
             responseType: TermsStatus.self
         )
+        UserDefaults.standard.set(status.accepted, forKey: cacheKey)
+        return status
+    }
+
+    // MARK: Community-guidelines acceptance cache
+
+    /// Same accessor the sibling services (WorkoutService, FriendService…)
+    /// keep for the logged-in backend user id.
+    private static var currentUserId: String? {
+        UserDefaults.standard.string(forKey: "backendUserId")
+    }
+
+    /// Local memo of the server-side guidelines acceptance so composer gates
+    /// can decide instantly (and offline) instead of blocking on a round-trip.
+    /// The server stays the source of truth: every termsStatus/acceptTerms
+    /// response refreshes it, and a `terms_not_accepted` publish rejection
+    /// clears it. Keyed per backend user so account switches can't leak an
+    /// acceptance across users.
+    private static func termsCacheKey(userId: String?) -> String {
+        "post.terms.accepted.\(userId ?? "anon")"
+    }
+
+    static var termsAcceptedCached: Bool {
+        UserDefaults.standard.bool(forKey: termsCacheKey(userId: currentUserId))
+    }
+
+    static func cacheTermsAccepted(_ accepted: Bool) {
+        UserDefaults.standard.set(accepted, forKey: termsCacheKey(userId: currentUserId))
     }
 }
 

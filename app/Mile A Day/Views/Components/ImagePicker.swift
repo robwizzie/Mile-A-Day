@@ -54,74 +54,43 @@ struct ImagePicker: UIViewControllerRepresentable {
 /// camera roll. Best-effort: a denied permission or save failure never
 /// interrupts the capture flow.
 enum PhotoRollSaver {
-    static func save(_ image: UIImage) {
+    /// Saves `image` to the photo library (add-only). `completion` reports —
+    /// on the main queue — whether the asset actually landed in the library, so
+    /// callers can reflect a real "Saved" state (a denied permission or write
+    /// failure reports `false`, never `true`).
+    static func save(_ image: UIImage, completion: ((Bool) -> Void)? = nil) {
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-            guard status == .authorized || status == .limited else { return }
+            guard status == .authorized || status == .limited else {
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
             PHPhotoLibrary.shared().performChanges {
                 PHAssetChangeRequest.creationRequestForAsset(from: image)
-            } completionHandler: { _, error in
+            } completionHandler: { ok, error in
                 if let error {
                     print("[PhotoRollSaver] Save failed: \(error.localizedDescription)")
                 }
+                DispatchQueue.main.async { completion?(ok && error == nil) }
             }
+        }
+    }
+
+    /// As `save`, but records `ledgerKey` in `SavedPhotoLibraryLedger` on a
+    /// confirmed save so a review gallery can show "Saved" and refuse a
+    /// duplicate. `ledgerKey` is a `MidRunPhotoStash.Entry.id`.
+    static func save(_ image: UIImage, ledgerKey: String, completion: ((Bool) -> Void)? = nil) {
+        save(image) { ok in
+            if ok { SavedPhotoLibraryLedger.shared.markSaved(ledgerKey) }
+            completion?(ok)
         }
     }
 }
 
 // MARK: - Camera Capture
 
-/// Camera-only capture (no photo library picking). Used by the post composer
-/// and the mid-run snap button so shared walks/runs are captured in the
-/// moment rather than uploaded from the roll. Every capture is ALSO saved to
-/// the camera roll (see PhotoRollSaver) — the user's own copy, independent of
-/// what happens to the post.
-struct CameraPicker: UIViewControllerRepresentable {
-    @Binding var image: UIImage?
-    @Environment(\.presentationMode) var presentationMode
-
-    /// Whether the device actually has a camera (false on Simulator).
-    static var isAvailable: Bool {
-        UIImagePickerController.isSourceTypeAvailable(.camera)
-    }
-
-    func makeUIViewController(context: Context) -> UIViewController {
-        // Guard against unavailable cameras (e.g. Simulator) — presenting a
-        // `.camera` source there would crash. Callers gate on `isAvailable`.
-        guard Self.isAvailable else { return UIViewController() }
-
-        let picker = UIImagePickerController()
-        picker.sourceType = .camera
-        picker.cameraCaptureMode = .photo
-        picker.allowsEditing = false
-        picker.delegate = context.coordinator
-        return picker
-    }
-
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
-        let parent: CameraPicker
-        init(_ parent: CameraPicker) { self.parent = parent }
-
-        func imagePickerController(
-            _ picker: UIImagePickerController,
-            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
-        ) {
-            if let img = info[.originalImage] as? UIImage {
-                parent.image = img
-                // Every in-app capture also lands in the camera roll.
-                PhotoRollSaver.save(img)
-            }
-            parent.presentationMode.wrappedValue.dismiss()
-        }
-
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-            parent.presentationMode.wrappedValue.dismiss()
-        }
-    }
-}
+// In-app camera capture lives in MADCameraView (Views/Components/MADCameraView.swift) —
+// an AVFoundation camera with full flash control and a self-timer, which
+// replaced the UIImagePickerController-based CameraPicker that used to be here.
 
 // MARK: - Profile Image Cropper
 

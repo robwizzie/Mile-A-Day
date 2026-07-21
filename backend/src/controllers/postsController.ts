@@ -16,14 +16,18 @@ import {
   getPostAuthor,
   softDeletePost,
   moderatorDeletePost,
+  updateOwnPost,
   hasAcceptedTerms,
   acceptTerms,
   getStoryViewers,
+  getStoryReactors,
   reactToStory,
   getOwnPostMemories,
   userOwnsWorkout,
+  lockUnearnedPhotos,
   ALLOWED_STORY_REACTIONS,
   PostStatsSnapshot,
+  type ViewerGoalGate,
 } from "../services/postService.js";
 import {
   reportPost,
@@ -46,12 +50,10 @@ import {
   stripMediaQuery,
 } from "../services/mediaSigningService.js";
 
-// Friend "new post" push notifications stay OFF until the Feed/Stories feature
-// ships in the App Store build. The backend is already live, but the feed UI is
-// dev-only right now — notifying live users about posts they can't open (the
-// image isn't reachable on their build) is just noise. Flip to true when the
-// iOS feed is released to the App Store.
-const FRIEND_POST_NOTIFICATIONS_ENABLED = false;
+// Friend "new post" push notifications: LIVE as of the App Store build that
+// ships the Feed/Stories UI (July 2026 update). Recipients are additionally
+// filtered to builds that can actually open the feed (see notifyFriendsOfPost).
+const FRIEND_POST_NOTIFICATIONS_ENABLED = true;
 
 const POSTS_MEDIA_PREFIX = "/uploads/posts/";
 const MAX_CAPTION = 280;
@@ -219,10 +221,19 @@ export async function createPostController(
       );
     }
 
-    // Fire-and-forget: tell friends about a new feed post (respects their
-    // friend_posts_enabled setting). Never blocks the response.
-    if (shareToFeed && FRIEND_POST_NOTIFICATIONS_ENABLED) {
-      notifyFriendsOfPost(userId, post.caption).catch(() => {});
+    // Fire-and-forget: tell friends about a new DELIBERATE post — the photo
+    // (or story) the user chose to share. Auto route/stats cards stay silent,
+    // and one createPost call produces exactly ONE notification even when it
+    // goes to both the story and the feed. Never blocks the response.
+    if (FRIEND_POST_NOTIFICATIONS_ENABLED && post.is_auto !== true) {
+      notifyFriendsOfPost({
+        authorId: userId,
+        postId: post.post_id,
+        caption: post.caption,
+        toFeed: shareToFeed,
+        toStory: shareToStory,
+        localDate: goal.localDate,
+      }).catch(() => {});
     }
     // Caption @mentions ("ran with @rob") — personal, so not behind the
     // friend-post flag. ponytail: a legacy-client caption re-upsert can
@@ -272,13 +283,17 @@ export async function getUserStoriesController(
   res: Response,
 ) {
   try {
-    res
-      .status(200)
-      .json(
-        signMediaUrlsDeep(
-          await getUserActiveStories(req.userId!, req.params.userId),
-        ),
-      );
+    const stories = await getUserActiveStories(req.userId!, req.params.userId);
+    // Gate today's story photos the same way the feed/profile do — a viewer who
+    // hasn't finished their own mile can't pull a friend's today photo. (The
+    // client already hides today's stories pre-completion; this closes the
+    // server-side bypass so the photo bytes are never handed over.)
+    lockUnearnedPhotos(
+      stories,
+      req.userId!,
+      await viewerPhotoGate(req.userId!),
+    );
+    res.status(200).json(signMediaUrlsDeep(stories));
   } catch (error: any) {
     console.error("Error fetching user stories:", error.message);
     res.status(500).json({ error: "Error fetching stories" });
@@ -318,6 +333,29 @@ export async function getStoryViewersController(
   } catch (error: any) {
     console.error("Error getting story viewers:", error.message);
     res.status(500).json({ error: "Error getting story viewers" });
+  }
+}
+
+/**
+ * Who reacted to a story, for the reaction-bubble row shown to ALL circle
+ * viewers (not just the author). 404 when the caller can't see the story.
+ */
+export async function getStoryReactorsController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    if (!isUuid(req.params.postId)) {
+      return res.status(404).json({ error: "story_not_found" });
+    }
+    const reactors = await getStoryReactors(req.userId!, req.params.postId);
+    if (reactors === null) {
+      return res.status(404).json({ error: "story_not_found" });
+    }
+    res.json({ reactors, count: reactors.length });
+  } catch (error: any) {
+    console.error("Error getting story reactors:", error.message);
+    res.status(500).json({ error: "Error getting story reactors" });
   }
 }
 
@@ -383,6 +421,21 @@ function repairBeforeCursor(req: AuthenticatedRequest): string | null {
   return raw.replace(/ (\d{2}(:?\d{2})?)$/, "+$1");
 }
 
+/**
+ * The viewer's mile status, used to gate today's photos. Fail-OPEN: a stats
+ * hiccup returns `completed:true` so a glitch never blanks the whole feed
+ * (better to briefly over-show than to break the surface).
+ */
+async function viewerPhotoGate(userId: string): Promise<ViewerGoalGate> {
+  try {
+    const goal = await getDailyGoalStatus(userId);
+    return { completed: goal.completed, localDate: goal.localDate };
+  } catch (e: any) {
+    console.error("[viewerPhotoGate] goal status failed:", e?.message ?? e);
+    return { completed: true, localDate: "" };
+  }
+}
+
 export async function getFeedController(
   req: AuthenticatedRequest,
   res: Response,
@@ -394,6 +447,7 @@ export async function getFeedController(
       : DEFAULT_FEED_LIMIT;
     const before = repairBeforeCursor(req);
     const items = await getFeed(req.userId!, limit, before);
+    lockUnearnedPhotos(items, req.userId!, await viewerPhotoGate(req.userId!));
     // `cursor` is the microsecond-precise URL-safe timestamp; created_at
     // (a ms-truncated JS Date) would skip same-millisecond rows at boundaries.
     const last = items[items.length - 1];
@@ -420,6 +474,7 @@ export async function getUnifiedFeedController(
       : DEFAULT_FEED_LIMIT;
     const before = repairBeforeCursor(req);
     const items = await getUnifiedFeed(req.userId!, limit, before);
+    lockUnearnedPhotos(items, req.userId!, await viewerPhotoGate(req.userId!));
     const last = items[items.length - 1];
     const nextBefore =
       items.length === limit ? (last.cursor ?? last.sort_ts) : null;
@@ -449,12 +504,18 @@ export async function getUserPostsController(
       ? Math.min(Math.max(rawLimit, 1), MAX_FEED_LIMIT)
       : DEFAULT_FEED_LIMIT;
     const before = repairBeforeCursor(req);
+    // Story-only posts are private drafts of a sort — only the author may
+    // see them, no matter what the query string claims.
+    const includeStoryOnly =
+      req.query.include_stories === "true" && req.params.userId === req.userId;
     const items = await getUserPosts(
       req.userId!,
       req.params.userId,
       limit,
       before,
+      includeStoryOnly,
     );
+    lockUnearnedPhotos(items, req.userId!, await viewerPhotoGate(req.userId!));
     const last = items[items.length - 1];
     const nextBefore =
       items.length === limit ? (last.cursor ?? last.created_at) : null;
@@ -491,6 +552,62 @@ export async function deletePostController(
   } catch (error: any) {
     console.error("Error deleting post:", error.message);
     res.status(500).json({ error: "Error deleting post" });
+  }
+}
+
+/**
+ * PATCH /posts/:postId — edit a post the caller authored.
+ * Body: { caption?: string|null, add_to_feed?: true }.
+ * add_to_feed promotes a story-only post onto the feed in place (keeping its
+ * original date/media/stats); 409 workout_already_posted when the run already
+ * has a deliberate feed post.
+ */
+export async function updatePostController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  const userId = req.userId!;
+  const postId = req.params.postId;
+  const { caption, add_to_feed } = req.body ?? {};
+  try {
+    if (!isUuid(postId)) {
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    const hasCaption = caption !== undefined;
+    if (
+      hasCaption &&
+      caption !== null &&
+      (typeof caption !== "string" || caption.length > MAX_CAPTION)
+    ) {
+      return res.status(400).json({
+        error: `caption must be a string of at most ${MAX_CAPTION} characters`,
+      });
+    }
+    const addToFeed = add_to_feed === true;
+    if (!hasCaption && !addToFeed) {
+      return res.status(400).json({ error: "Nothing to update" });
+    }
+
+    const result = await updateOwnPost(userId, postId, {
+      ...(hasCaption
+        ? {
+            caption:
+              typeof caption === "string" ? caption.trim() || null : null,
+          }
+        : {}),
+      ...(addToFeed ? { addToFeed: true } : {}),
+    });
+    if (result === "not_found") {
+      return res.status(404).json({ error: "Post not found" });
+    }
+    if (result === "feed_conflict") {
+      return res.status(409).json({ error: "workout_already_posted" });
+    }
+    res.json({ ok: true });
+  } catch (error: any) {
+    console.error("Error updating post:", error.message);
+    res.status(500).json({ error: "Error updating post" });
   }
 }
 

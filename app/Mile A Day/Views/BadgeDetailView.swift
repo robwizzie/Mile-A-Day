@@ -16,6 +16,8 @@ struct BadgeDetailView: View {
     @State private var shimmerOffset: CGFloat = -300
     @State private var glowPulse = false
     @State private var ribbonDrop = false
+    /// Rendered badge card presented in the system share sheet.
+    @State private var shareItem: ShareableImage?
 
     private var trackedBadgeIds: Set<String> {
         Set(trackedBadgeIdsRaw.split(separator: ",").map(String.init))
@@ -321,6 +323,30 @@ struct BadgeDetailView: View {
                     Capsule()
                         .stroke(Color.cyan.opacity(0.3), lineWidth: isTracked ? 0 : 1)
                 )
+            }
+
+            // Share button — only for earned medals.
+            if !badge.isLocked {
+                Button {
+                    if let image = renderAchievementShareImage(BadgeShareCardView(badge: badge)) {
+                        shareItem = ShareableImage(image: image)
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("Share")
+                            .font(.system(size: 14, weight: .bold, design: .rounded))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(Capsule().fill(Color.white.opacity(0.14)))
+                    .overlay(Capsule().stroke(Color.white.opacity(0.25), lineWidth: 1))
+                }
+                .sheet(item: $shareItem) { item in
+                    ShareSheet(items: [item.image])
+                }
             }
 
             // Your progress (when we have user stats)

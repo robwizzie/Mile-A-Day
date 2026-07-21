@@ -1,5 +1,6 @@
 import { Workout } from "../types/workouts.js";
 import { PostgresService } from "./DbService.js";
+import { VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL } from "./visibilityService.js";
 
 const db = PostgresService.getInstance();
 
@@ -368,19 +369,121 @@ export async function getBestSplit(userId: string, startDate?: string) {
   return { best_split_time, workout };
 }
 
+/**
+ * A user's recent workouts, newest first, each tagged with whether it carries a
+ * GPS route and whether it has a real photo — so a friend's workout row can
+ * show the same "Route"/"Photo" chips the owner sees on their own rows. Both
+ * flags are ADDITIVE: older clients simply ignore them.
+ *
+ * Both flags obey `workout_visibility` (who may see this user's content at all)
+ * AND, for routes, the author's "Share route maps" consent — an author who
+ * turned either off must not even have the EXISTENCE of a route advertised to
+ * others, only to themselves. `viewerId` is what makes "the owner always sees
+ * their own" work; omit it and everyone is treated as a stranger (fail-closed).
+ *
+ * `has_photo` means a DELIBERATE photo (`is_auto = false`), never a generated
+ * route/stats card — the same "real photo" test the feed uses. It reports mere
+ * existence, never a url, so it reveals nothing `lockUnearnedPhotos` protects:
+ * a gated viewer already sees a lock card on today's photo posts in the feed.
+ *
+ * The photo lookup is a per-user CTE rather than a correlated EXISTS per row:
+ * `posts` has no plain `workout_id` index (only partial uniques that a
+ * `is_auto = false` predicate can't use), so a subquery per row would seq-scan
+ * `posts` once per workout. Keyed on user_id it rides `idx_posts_user_created`.
+ *
+ * Routes themselves are NOT shipped here — 50 polylines per page is a lot of
+ * jsonb for a list that draws none of them. The detail screen pulls the one it
+ * needs from `getWorkoutRoute`.
+ */
 export async function getRecentWorkouts(
   userId: string,
   limit: number | null = 10,
+  viewerId?: string | null,
 ) {
   const recentWorkoutsQuery = `
-	SELECT * FROM workouts
-	WHERE user_id = $1
-	AND deleted_at IS NULL
-	ORDER BY device_end_date DESC
-	LIMIT $2
+	WITH recent AS (
+		SELECT * FROM workouts
+		WHERE user_id = $1
+		AND deleted_at IS NULL
+		ORDER BY device_end_date DESC
+		LIMIT $2
+	),
+	photo_workouts AS (
+		SELECT DISTINCT workout_id
+		FROM posts
+		WHERE user_id = $1
+		AND deleted_at IS NULL
+		AND workout_id IN (SELECT workout_id FROM recent)
+		AND is_auto = FALSE
+		AND media_url <> ''
+	),
+	route_consent AS (
+		SELECT (COALESCE(ns.share_route_maps, true) OR $1 = $3) AS allowed
+		FROM users u
+		LEFT JOIN notification_settings ns ON ns.user_id = u.user_id
+		WHERE u.user_id = $1
+	)
+	SELECT r.*,
+		-- COALESCE the WHOLE expression, not just its parts: with no viewer,
+		-- '$1 = $3' is NULL and the visibility predicate evaluates to NULL
+		-- rather than false, so 'true AND NULL' made these columns come back
+		-- JSON null instead of a boolean. NULL is fail-closed in a WHERE but
+		-- meaningless as a value — these must always be a real true/false.
+		COALESCE(
+			wr.workout_id IS NOT NULL
+			AND COALESCE((SELECT allowed FROM route_consent), false)
+			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$1", "$3")},
+			false
+		) AS has_route,
+		COALESCE(
+			pw.workout_id IS NOT NULL
+			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$1", "$3")},
+			false
+		) AS has_photo
+	FROM recent r
+	LEFT JOIN workout_routes wr ON wr.workout_id = r.workout_id
+	LEFT JOIN photo_workouts pw ON pw.workout_id = r.workout_id
+	ORDER BY r.device_end_date DESC
 	`;
 
-  return await db.query(recentWorkoutsQuery, [userId, limit]);
+  return await db.query(recentWorkoutsQuery, [userId, limit, viewerId ?? null]);
+}
+
+/**
+ * ONE workout's stored GPS trace, or null — what a workout DETAIL screen needs
+ * to draw its map.
+ *
+ * The owner's own detail reads its route from HealthKit, which only ever holds
+ * their own runs, so a friend's detail had no way to draw the map it was being
+ * told existed. Two independent gates, BOTH required:
+ *   1. `workout_visibility` — who may see this user's content at all.
+ *      Authentication alone is NOT access: without this, any account
+ *      (including one the owner blocked) could pull a stranger's polyline by
+ *      guessing an id. Routes are the most sensitive thing here; they start at
+ *      people's homes.
+ *   2. `share_route_maps` — whether routes are part of what those people get.
+ *      Owner exempt.
+ * Deliberately per-workout — never the full-history dump `/routes` keeps
+ * self-only.
+ */
+export async function getWorkoutRoute(
+  userId: string,
+  workoutId: string,
+  viewerId: string,
+): Promise<[number, number][] | null> {
+  const rows = await db.query<{ route: [number, number][] | null }>(
+    `SELECT wr.route
+		 FROM workouts w
+		 LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
+		 JOIN workout_routes wr ON wr.workout_id = w.workout_id
+		 WHERE w.workout_id = $2
+			 AND w.user_id = $1
+			 AND w.deleted_at IS NULL
+			 AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("w.user_id", "$3")}
+			 AND (COALESCE(ns.share_route_maps, true) OR w.user_id = $3)`,
+    [userId, workoutId, viewerId],
+  );
+  return rows[0]?.route ?? null;
 }
 
 /**

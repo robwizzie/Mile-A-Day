@@ -1,0 +1,2 @@
+ALTER TABLE "notification_settings" ADD COLUMN "workout_visibility" text DEFAULT 'friends' NOT NULL;--> statement-breakpoint
+ALTER TABLE "notification_settings" ADD CONSTRAINT "notification_settings_workout_visibility_check" CHECK (workout_visibility = ANY (ARRAY['public'::text, 'friends'::text, 'private'::text]));

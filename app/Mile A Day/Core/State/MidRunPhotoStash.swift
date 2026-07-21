@@ -1,3 +1,4 @@
+import ImageIO
 import UIKit
 
 /// Transient holding pen for photos snapped DURING a tracked walk/run. The
@@ -38,42 +39,116 @@ enum MidRunPhotoStash {
         return live
     }
 
-    static var count: Int { fileURLs().count }
+    /// Consumer-facing count: snaps taken TODAY only (the tray badge, the
+    /// "photo waiting" nudge, and the post-run prompt all read the today-scoped
+    /// views), so a leftover from yesterday is never counted.
+    static var count: Int { todayURLs().count }
+
+    /// Whether the current device-local day owns the snap. Mile A Day photos are
+    /// strictly today's; the 24h prune alone would let one taken yesterday
+    /// evening survive into this morning.
+    private static func isFromToday(_ url: URL) -> Bool {
+        let stamp = Double(url.deletingPathExtension().lastPathComponent) ?? 0
+        return Calendar.current.isDateInToday(Date(timeIntervalSince1970: stamp))
+    }
+
+    /// Physical snaps taken TODAY, oldest first. EVERY consumer-facing read
+    /// funnels through this so a snap left over from yesterday is never shown or
+    /// offered — even before the 24h prune or a workout-start cleanup runs, and
+    /// regardless of which surface (tray / nudge / prompt) asks first.
+    private static func todayURLs() -> [URL] {
+        fileURLs().filter(isFromToday)
+    }
+
+    /// True only when a snap taken TODAY is stashed. Drives the "photo waiting"
+    /// nudge so a leftover from yesterday (a finished workout whose prompt never
+    /// resolved, then the app reopened next day) can't nag against a brand new,
+    /// untouched day's mile.
+    static func hasEntriesToday() -> Bool {
+        !todayURLs().isEmpty
+    }
+
+    /// Drop snaps not taken today. Called when a fresh workout begins so a new
+    /// day's effort never inherits (or re-shares) yesterday's leftover snaps,
+    /// while same-day snaps from an earlier sub-goal effort are kept.
+    static func dropBeforeToday() {
+        let fm = FileManager.default
+        for url in fileURLs() where !isFromToday(url) {
+            try? fm.removeItem(at: url)
+        }
+    }
 
     /// Save a snap. Downscaled to a sane pixel size before writing — the
     /// composer flattens to 1080 wide anyway, and full 48MP camera output
-    /// would burn sandbox space for nothing.
+    /// would burn sandbox space for nothing. Returns the created `Entry`
+    /// (nil on failure) so callers can correlate a camera-roll save with this
+    /// snap's stable id.
     @discardableResult
-    static func add(_ image: UIImage) -> Bool {
+    static func add(_ image: UIImage) -> Entry? {
         let fm = FileManager.default
         try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let sized = downscaled(image, maxDimension: 2160)
-        guard let data = sized.jpegData(compressionQuality: 0.85) else { return false }
+        guard let data = sized.jpegData(compressionQuality: 0.85) else { return nil }
 
         let name = String(format: "%.3f", Date().timeIntervalSince1970)
+        let url = directory.appendingPathComponent("\(name).jpg")
         do {
-            try data.write(to: directory.appendingPathComponent("\(name).jpg"))
+            try data.write(to: url)
         } catch {
-            return false
+            return nil
         }
 
         // Enforce the cap: drop the oldest beyond maxPhotos.
         let files = fileURLs()
         if files.count > maxPhotos {
-            for url in files.prefix(files.count - maxPhotos) {
-                try? fm.removeItem(at: url)
+            for old in files.prefix(files.count - maxPhotos) {
+                try? fm.removeItem(at: old)
             }
         }
-        return true
+        return Entry(url: url, image: sized)
     }
 
-    /// All stashed snaps, oldest first (the order they were taken on the run).
-    static func loadAll() -> [UIImage] {
-        fileURLs().compactMap { url in
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            return UIImage(data: data)
+    /// A stashed snap with a stable identity, so galleries can page and
+    /// DELETE individual shots (mid-run review) instead of all-or-nothing.
+    struct Entry: Identifiable, Equatable {
+        let url: URL
+        let image: UIImage
+        var id: String { url.lastPathComponent }
+
+        static func == (lhs: Entry, rhs: Entry) -> Bool { lhs.url == rhs.url }
+    }
+
+    /// Today's stashed snaps with identities, oldest first. Scoped to today so
+    /// the post-run prompt never offers a photo from a previous day's mile.
+    static func entries() -> [Entry] {
+        todayURLs().compactMap { url in
+            guard let data = try? Data(contentsOf: url), let img = UIImage(data: data) else {
+                return nil
+            }
+            return Entry(url: url, image: img)
         }
+    }
+
+    /// Drop one snap (mid-run "actually, not that one").
+    static func remove(_ entry: Entry) {
+        try? FileManager.default.removeItem(at: entry.url)
+    }
+
+    /// Cheap small thumbnail of the NEWEST snap for the tracking screen's
+    /// tray button — downsampled at decode so a 1Hz-updating screen never
+    /// holds full-size bitmaps for a 40pt chip.
+    static func latestThumbnail(maxPixel: CGFloat = 160) -> UIImage? {
+        guard let url = todayURLs().last else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+        ]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else { return nil }
+        return UIImage(cgImage: cg)
     }
 
     static func clear() {

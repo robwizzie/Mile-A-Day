@@ -29,9 +29,12 @@ struct ChallengeCompletedCelebrationView: View {
 
     var body: some View {
         ZStack {
-            // Dark base so the challenge gradient pops.
+            // Opaque black base FIRST — the accent band alone is translucent
+            // (opacity 0.28), and without this the screen underneath bled
+            // through the middle of the celebration.
+            Color.black.ignoresSafeArea()
             LinearGradient(
-                colors: [Color.black, accent.opacity(0.28), Color.black],
+                colors: [.clear, accent.opacity(0.28), .clear],
                 startPoint: .top, endPoint: .bottom
             )
             .ignoresSafeArea()

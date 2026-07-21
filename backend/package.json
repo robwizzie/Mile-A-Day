@@ -4,7 +4,7 @@
 	"description": "",
 	"main": "index.js",
 	"scripts": {
-		"dev": "tsx watch src/server.ts",
+		"dev": "NODE_ENV=development tsx watch src/server.ts",
 		"build": "tsc",
 		"start": "node dist/server.js",
 		"db:pull": "drizzle-kit pull",

@@ -24,6 +24,8 @@ struct BadgeUnlockCelebrationView: View {
     @State private var showContent = false
     @State private var showButtons = false
     @State private var hasStartedAnimation: Bool = false
+    /// Rendered badge card presented in the system share sheet.
+    @State private var shareItem: ShareableImage?
     
     // Haptic generators
     private let impactGenerator = UIImpactFeedbackGenerator(style: .heavy)
@@ -259,6 +261,34 @@ struct BadgeUnlockCelebrationView: View {
                                             )
                                     )
                                     .shadow(color: rarityColor.opacity(0.4), radius: 15, x: 0, y: 8)
+                                }
+
+                                Button {
+                                    triggerHaptic()
+                                    if let image = renderAchievementShareImage(BadgeShareCardView(badge: badge)) {
+                                        shareItem = ShareableImage(image: image)
+                                    }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "square.and.arrow.up")
+                                            .font(.system(size: 17, weight: .semibold))
+                                        Text("Share")
+                                            .font(.system(size: 17, weight: .semibold, design: .rounded))
+                                    }
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 52)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 14)
+                                            .fill(.white.opacity(0.12))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 14)
+                                                    .stroke(.white.opacity(0.2), lineWidth: 1)
+                                            )
+                                    )
+                                }
+                                .sheet(item: $shareItem) { item in
+                                    ShareSheet(items: [item.image])
                                 }
 
                                 Button {

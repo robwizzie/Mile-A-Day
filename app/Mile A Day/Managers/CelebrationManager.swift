@@ -353,6 +353,25 @@ class CelebrationManager: ObservableObject {
     /// Tracks whether goal completion has been shown today (to prevent duplicates)
     @AppStorage("lastGoalCelebrationDate") private var lastGoalCelebrationDateString: String = ""
 
+    /// Workout ids that have already been offered the post-run photo prompt.
+    /// Persisted (newline-joined) so a cold relaunch — which starts with an empty
+    /// in-memory queue and can't dedup against it — never re-prompts for a mile
+    /// already handled. Bounded to the most recent `maxPromptedPhotoIds`.
+    @AppStorage("promptedPhotoWorkoutIdsV1") private var promptedPhotoWorkoutIdsRaw: String = ""
+    private let maxPromptedPhotoIds = 200
+
+    private func hasPromptedPhoto(for workoutId: String) -> Bool {
+        promptedPhotoWorkoutIdsRaw.split(separator: "\n").contains(where: { String($0) == workoutId })
+    }
+
+    private func markPromptedPhoto(for workoutId: String) {
+        var ids = promptedPhotoWorkoutIdsRaw.split(separator: "\n").map(String.init)
+        guard !ids.contains(workoutId) else { return }
+        ids.append(workoutId)
+        if ids.count > maxPromptedPhotoIds { ids = Array(ids.suffix(maxPromptedPhotoIds)) }
+        promptedPhotoWorkoutIdsRaw = ids.joined(separator: "\n")
+    }
+
     /// Backing store for the extra-mile workout-count baseline. Scoped to a single
     /// day via `lastPostGoalDateString` — see `lastPostGoalWorkoutCount`.
     @AppStorage("lastPostGoalWorkoutCount") private var storedPostGoalWorkoutCount: Int = 0
@@ -415,6 +434,16 @@ class CelebrationManager: ObservableObject {
             print("[CelebrationManager] ✅ Goal celebration queued (last shown: \(lastGoalCelebrationDateString.isEmpty ? "never" : lastGoalCelebrationDateString), today: \(formatDate(Date())))")
             // Note: markGoalCelebrationShown() is called in showNextCelebration() when it's actually displayed,
             // not here, to prevent marking as "shown" while the app is in the background.
+        }
+
+        // One photo prompt per workout, ever — persisted so a relaunch can't
+        // re-offer it for a mile already handled (the id is marked as shown in
+        // showNextCelebration(), same as the goal celebration).
+        if case .postRunPhotoPrompt(let workoutId, _) = celebration {
+            guard !hasPromptedPhoto(for: workoutId) else {
+                print("[CelebrationManager] ⏭️  Photo prompt already shown for workout \(workoutId), skipping")
+                return
+            }
         }
 
         // Avoid duplicates in queue
@@ -513,6 +542,11 @@ class CelebrationManager: ObservableObject {
         // Mark goal celebration as shown now that the user will actually see it
         if case .goalCompleted = next {
             markGoalCelebrationShown()
+        }
+        // Same for the photo prompt — record the workout so it's never re-offered,
+        // even across a relaunch.
+        if case .postRunPhotoPrompt(let workoutId, _) = next {
+            markPromptedPhoto(for: workoutId)
         }
 
         currentCelebration = next

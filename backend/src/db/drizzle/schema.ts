@@ -117,6 +117,23 @@ export const users = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // Onboarding personalization captured at signup (all optional — collected on
+    // a skippable step). `referralSource` is one of a fixed catalog (app_store,
+    // friend, instagram, tiktok, …); `referralDetail` is free text for the
+    // "friend's username" / "other" follow-up. `signupGoal` and
+    // `experienceLevel` segment users for future personalization + analytics.
+    // Nullable with no default so the additive migration is safe for the live
+    // table and existing rows read null.
+    referralSource: varchar("referral_source", { length: 40 }),
+    referralDetail: varchar("referral_detail", { length: 120 }),
+    signupGoal: varchar("signup_goal", { length: 40 }),
+    experienceLevel: varchar("experience_level", { length: 40 }),
+    // Stamped the first time the user submits (or skips) the personalization
+    // step, so we never re-show it and can measure onboarding completion.
+    onboardingCompletedAt: timestamp("onboarding_completed_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
     // Signup time. Backfilled for existing users from their earliest workout's
     // upload timestamp (MIN(workouts.created_at)) — see migration 0013. New
     // rows default to now() on insert.
@@ -227,50 +244,74 @@ export const workoutRoutes = pgTable(
   ],
 );
 
-export const notificationSettings = pgTable("notification_settings", {
-  userId: text("user_id").primaryKey().notNull(),
-  nudgesEnabled: boolean("nudges_enabled").default(true),
-  flexesEnabled: boolean("flexes_enabled").default(true),
-  friendActivityEnabled: boolean("friend_activity_enabled").default(true),
-  competitionInvitesEnabled: boolean("competition_invites_enabled").default(
-    true,
-  ),
-  competitionUpdatesEnabled: boolean("competition_updates_enabled").default(
-    true,
-  ),
-  competitionMilestonesEnabled: boolean(
-    "competition_milestones_enabled",
-  ).default(true),
-  quietHoursStart: integer("quiet_hours_start"),
-  quietHoursEnd: integer("quiet_hours_end"),
-  createdAt: timestamp("created_at", {
-    withTimezone: true,
-    mode: "string",
-  }).defaultNow(),
-  updatedAt: timestamp("updated_at", {
-    withTimezone: true,
-    mode: "string",
-  }).defaultNow(),
-  hypesEnabled: boolean("hypes_enabled").default(true).notNull(),
-  stepGoalEnabled: boolean("step_goal_enabled").default(true).notNull(),
-  friendPersonalBestEnabled: boolean("friend_personal_best_enabled").default(
-    true,
-  ),
-  dailyReminderEnabled: boolean("daily_reminder_enabled").default(true),
-  dailyReminderHour: integer("daily_reminder_hour").default(18),
-  timezoneOffsetMinutes: integer("timezone_offset_minutes"),
-  // Social feed settings (added v2). share_workouts_to_feed: include my raw
-  // walks/runs as activity cards in friends' unified feed. friend_posts_enabled:
-  // notify me when a friend shares a new photo post.
-  shareWorkoutsToFeed: boolean("share_workouts_to_feed").default(true),
-  friendPostsEnabled: boolean("friend_posts_enabled").default(true),
-  // share_route_maps: expose my GPS route maps (workout_routes traces) on my
-  // feed entries/posts. Explicit consent surface — when off, friends see the
-  // cards without the route slide/map.
-  shareRouteMaps: boolean("share_route_maps").default(true),
-  // weekly_recap_enabled: Sunday-evening "Your week" recap push + story card.
-  weeklyRecapEnabled: boolean("weekly_recap_enabled").default(true),
-});
+export const notificationSettings = pgTable(
+  "notification_settings",
+  {
+    userId: text("user_id").primaryKey().notNull(),
+    nudgesEnabled: boolean("nudges_enabled").default(true),
+    flexesEnabled: boolean("flexes_enabled").default(true),
+    friendActivityEnabled: boolean("friend_activity_enabled").default(true),
+    competitionInvitesEnabled: boolean("competition_invites_enabled").default(
+      true,
+    ),
+    competitionUpdatesEnabled: boolean("competition_updates_enabled").default(
+      true,
+    ),
+    competitionMilestonesEnabled: boolean(
+      "competition_milestones_enabled",
+    ).default(true),
+    quietHoursStart: integer("quiet_hours_start"),
+    quietHoursEnd: integer("quiet_hours_end"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "string",
+    }).defaultNow(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "string",
+    }).defaultNow(),
+    hypesEnabled: boolean("hypes_enabled").default(true).notNull(),
+    stepGoalEnabled: boolean("step_goal_enabled").default(true).notNull(),
+    friendPersonalBestEnabled: boolean("friend_personal_best_enabled").default(
+      true,
+    ),
+    dailyReminderEnabled: boolean("daily_reminder_enabled").default(true),
+    dailyReminderHour: integer("daily_reminder_hour").default(18),
+    // Head-to-Head rivals drawn only from the user's close-friends list.
+    // Not a notification pref, but this table is the de-facto per-user
+    // preferences row (see share_workouts_to_feed / share_route_maps).
+    h2hCloseFriendsOnly: boolean("h2h_close_friends_only")
+      .default(false)
+      .notNull(),
+    timezoneOffsetMinutes: integer("timezone_offset_minutes"),
+    // Social feed settings (added v2). share_workouts_to_feed: include my raw
+    // walks/runs as activity cards in friends' unified feed. friend_posts_enabled:
+    // notify me when a friend shares a new photo post.
+    shareWorkoutsToFeed: boolean("share_workouts_to_feed").default(true),
+    friendPostsEnabled: boolean("friend_posts_enabled").default(true),
+    // share_route_maps: expose my GPS route maps (workout_routes traces) on my
+    // feed entries/posts. Explicit consent surface — when off, friends see the
+    // cards without the route slide/map.
+    shareRouteMaps: boolean("share_route_maps").default(true),
+    // weekly_recap_enabled: Sunday-evening "Your week" recap push + story card.
+    weeklyRecapEnabled: boolean("weekly_recap_enabled").default(true),
+    // workout_visibility: who may see my workout CONTENT — routes and photos.
+    // 'friends' (the default, and what every user effectively has today) =
+    // accepted friends only, the same circle the feed uses. 'public' = any
+    // signed-in user. 'private' = nobody but me.
+    //
+    // This is a coarser, content-level gate that sits ABOVE share_route_maps:
+    // visibility decides WHO, share_route_maps decides WHETHER routes are part
+    // of what they get. Both must pass.
+    workoutVisibility: text("workout_visibility").default("friends").notNull(),
+  },
+  (table) => [
+    check(
+      "notification_settings_workout_visibility_check",
+      sql`workout_visibility = ANY (ARRAY['public'::text, 'friends'::text, 'private'::text])`,
+    ),
+  ],
+);
 
 // One row per (user, week) the recap push was sent for — the cron runs hourly
 // to catch every timezone's Sunday evening, so this is what makes it fire
@@ -391,6 +432,7 @@ export const deviceTokens = pgTable(
     id: uuid().defaultRandom().primaryKey().notNull(),
     userId: text("user_id").notNull(),
     deviceToken: text("device_token").notNull(),
+    environment: text().default("production").notNull(),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "string",
@@ -693,6 +735,49 @@ export const userChallengeCompletions = pgTable(
   ],
 );
 
+export const h2hMatchups = pgTable(
+  "h2h_matchups",
+  {
+    localDate: date("local_date").notNull(),
+    userId: text("user_id").notNull(),
+    rivalId: text("rival_id").notNull(),
+    // TRUE only when this row is half of a reciprocal pair (both users see
+    // each other). Fallback assignments (odd-one-out, mid-day joiners) are FALSE.
+    mutual: boolean().default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    // Stamped by the end-of-day cron once the duel outcome is final.
+    // `won` is TRUE only when the user won AND the completion row was inserted.
+    resolvedAt: timestamp("resolved_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    won: boolean(),
+    // Stamped when the winner push was sent (deferred to the winner's local morning).
+    notifiedAt: timestamp("notified_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "h2h_matchups_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.rivalId],
+      foreignColumns: [users.userId],
+      name: "h2h_matchups_rival_id_fkey",
+    }).onDelete("cascade"),
+    primaryKey({
+      columns: [table.localDate, table.userId],
+      name: "h2h_matchups_pkey",
+    }),
+  ],
+);
+
 export const dailyChallenges = pgTable(
   "daily_challenges",
   {
@@ -747,6 +832,20 @@ export const hypeLog = pgTable(
       table.senderId.asc().nullsLast(),
       table.createdAt.desc().nullsFirst(),
     ),
+    // Feed hype tallies count a target's hypes with NO sender filter
+    // (COUNT(DISTINCT sender_id) per post/workout), so the sender-leading
+    // indexes above can't serve them and every feed row fell back to a
+    // hype_log scan. Lead with target_id + context, and carry sender_id as a
+    // trailing covering column so the DISTINCT count stays index-only.
+    index("idx_hype_log_target_context")
+      .using(
+        "btree",
+        table.targetId.asc().nullsLast(),
+        table.contextType.asc().nullsLast(),
+        table.contextId.asc().nullsLast(),
+        table.senderId.asc().nullsLast(),
+      )
+      .where(sql`(context_id IS NOT NULL)`),
   ],
 );
 
@@ -1355,4 +1454,21 @@ export const errorLog = pgTable(
       table.createdAt.desc().nullsFirst(),
     ),
   ],
+);
+
+export const androidWaitlist = pgTable(
+  "android_waitlist",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    // Stored normalized (trimmed + lowercased by waitlistService); the UNIQUE
+    // constraint makes signups idempotent so the endpoint can't be used to
+    // probe whether an address is already on the list.
+    email: text().notNull(),
+    source: text().default("website").notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "string",
+    }).defaultNow(),
+  },
+  (table) => [unique("android_waitlist_email_unique").on(table.email)],
 );

@@ -32,15 +32,7 @@ struct StreakShareView: View {
     var body: some View {
         VStack(spacing: 20) {
             // App branding
-            HStack {
-                Image(systemName: "figure.run")
-                    .font(.title)
-                    .foregroundColor(.orange)
-                Text("Mile A Day")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.primary)
-            }
+            MADLogoMark(size: 46, shadow: false)
 
             // Streak display
             VStack(spacing: 16) {
@@ -131,15 +123,7 @@ struct TodayProgressShareView: View {
     var body: some View {
         VStack(spacing: 20) {
             // App branding
-            HStack {
-                Image(systemName: "figure.run")
-                    .font(.title)
-                    .foregroundColor(.orange)
-                Text("Mile A Day")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.primary)
-            }
+            MADLogoMark(size: 46, shadow: false)
 
             // Progress display
             VStack(spacing: 16) {
@@ -259,21 +243,7 @@ struct StreakCardShareView: View {
         VStack(spacing: 0) {
             // MAD Branding Header
             HStack(spacing: 8) {
-                Image("mad-logo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 24, height: 24)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("MILE A DAY")
-                        .font(.system(size: 14, weight: .bold))
-                        .tracking(0.5)
-
-                    Text("Stay Active. Stay Motivated.")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.secondary)
-                }
-
+                MADLogoMark(size: 34, shadow: false)
                 Spacer()
             }
             .padding(.horizontal, 16)
@@ -387,21 +357,7 @@ struct TodayProgressCardShareView: View {
         VStack(spacing: 0) {
             // MAD Branding Header
             HStack(spacing: 8) {
-                Image("mad-logo")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 24, height: 24)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("MILE A DAY")
-                        .font(.system(size: 14, weight: .bold))
-                        .tracking(0.5)
-
-                    Text("Stay Active. Stay Motivated.")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.secondary)
-                }
-
+                MADLogoMark(size: 34, shadow: false)
                 Spacer()
             }
             .padding(.horizontal, 16)

@@ -4,13 +4,18 @@ import MapKit
 struct WorkoutRouteMapView: View {
     let coordinates: [CLLocationCoordinate2D]
     let routeColor: Color
+    /// Fired once the map snapshot lands — lets containers build a static
+    /// composite (map + fully-drawn route) for the pinch-zoom floating copy.
+    var onSnapshot: ((UIImage) -> Void)? = nil
 
     @State private var snapshotImage: UIImage?
     @State private var trimProgress: CGFloat = 0
     @State private var showMarkers = false
     @State private var hasLoaded = false
 
-    private var region: MKCoordinateRegion {
+    /// Region math is static so the zoom composite can reproject the same
+    /// framing without an instance.
+    static func region(for coordinates: [CLLocationCoordinate2D]) -> MKCoordinateRegion {
         guard !coordinates.isEmpty else {
             return MKCoordinateRegion()
         }
@@ -38,6 +43,45 @@ struct WorkoutRouteMapView: View {
         )
 
         return MKCoordinateRegion(center: center, span: span)
+    }
+
+    private var region: MKCoordinateRegion { Self.region(for: coordinates) }
+
+    /// Static composite of the snapshot + fully-drawn route (+ an optional
+    /// caller overlay, e.g. the stats band) at `size` — what the Instagram
+    /// pinch-zoom floats. Composed ON DEMAND at pinch-begin (never eagerly
+    /// per card — a feed of routes would retain megabytes for gestures that
+    /// mostly never happen); pixel-equivalent to the live view because the
+    /// overlay projection is purely proportional to the view size.
+    static func zoomComposite<Overlay: View>(
+        snapshot: UIImage,
+        coordinates: [CLLocationCoordinate2D],
+        routeColor: Color,
+        size: CGSize,
+        @ViewBuilder overlay: () -> Overlay
+    ) -> UIImage? {
+        let content = ZStack(alignment: .topLeading) {
+            Image(uiImage: snapshot)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size.width, height: size.height)
+                .clipped()
+            RouteOverlay(
+                coordinates: coordinates,
+                region: region(for: coordinates),
+                viewSize: size,
+                routeColor: routeColor,
+                trimProgress: 1,
+                showMarkers: true
+            )
+            overlay()
+        }
+        .frame(width: size.width, height: size.height)
+
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 2
+        renderer.isOpaque = true
+        return renderer.uiImage
     }
 
     var body: some View {
@@ -98,6 +142,7 @@ struct WorkoutRouteMapView: View {
         do {
             let snapshot = try await snapshotter.start()
             snapshotImage = snapshot.image
+            onSnapshot?(snapshot.image)
         } catch {
             print("[WorkoutRouteMapView] Snapshot failed: \(error)")
         }
@@ -174,12 +219,7 @@ private struct RoutePath: Shape {
     let points: [CGPoint]
 
     func path(in rect: CGRect) -> Path {
-        var path = Path()
-        guard let first = points.first else { return path }
-        path.move(to: first)
-        for point in points.dropFirst() {
-            path.addLine(to: point)
-        }
-        return path
+        // Smoothed identically to the baked auto-post image (RunPostService).
+        Path(RouteSmoothing.smoothedPath(through: points))
     }
 }

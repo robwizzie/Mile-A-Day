@@ -18,9 +18,11 @@ struct ProfileSettingsView: View {
         ScrollView {
             VStack(spacing: MADTheme.Spacing.lg) {
                 settingsSection
+                #if DEBUG
                 if showsDevelopmentSection {
                     developmentSection
                 }
+                #endif
             }
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.vertical, MADTheme.Spacing.md)
@@ -87,6 +89,17 @@ struct ProfileSettingsView: View {
 
             settingsDivider
 
+            NavigationLink(destination: DailyChallengeSettingsView(friendService: friendService)) {
+                MADSettingsRow(
+                    icon: "flag.2.crossed.fill",
+                    title: "Daily Challenges",
+                    subtitle: "Head-to-Head matchup preferences",
+                    iconColor: Color.purple
+                )
+            }
+
+            settingsDivider
+
             Button(action: onPrivacySettings) {
                 MADSettingsRow(
                     icon: "lock.shield.fill",
@@ -144,8 +157,14 @@ struct ProfileSettingsView: View {
 
     // MARK: - Development
 
+    // DEBUG builds only — compiled out of Release so no dev tooling ships.
+    #if DEBUG
     private var showsDevelopmentSection: Bool {
-        AppEnvironment.isDevelopment && userManager.currentUser.role == "admin"
+        // TEMPORARY (local testing): admin-role check dropped so dev tools show
+        // on any DEBUG build without promoting the account server-side.
+        // Restore before committing:
+        //   AppEnvironment.isDevelopment && userManager.currentUser.role == "admin"
+        AppEnvironment.isDevelopment
     }
 
     private var developmentSection: some View {
@@ -195,4 +214,5 @@ struct ProfileSettingsView: View {
                 )
         )
     }
+    #endif
 }

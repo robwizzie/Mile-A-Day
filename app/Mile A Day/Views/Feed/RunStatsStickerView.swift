@@ -69,12 +69,56 @@ enum StickerAccent: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
 /// User-controlled overlay configuration. Persisted between sessions so the
 /// composer remembers how someone likes to show their run.
 struct StickerConfig: Equatable, Codable {
+    /// Transform bounds, owned HERE so every consumer of a persisted config
+    /// (composer gestures, decode-time sanitizing, any future render path)
+    /// enforces the same invariant.
+    static let scaleRange: ClosedRange<CGFloat> = 0.6...1.9
+    static let posXRange: ClosedRange<CGFloat> = 0.12...0.88
+    static let posYRange: ClosedRange<CGFloat> = 0.1...0.9
+
     var style: StickerStyle = .card
     var accent: StickerAccent = .orange
     var enabled: [RunStatKind] = [.distance, .streak]
+    /// Remembered overlay transform — pinch scale and normalized center — so
+    /// the sticker comes back exactly the size and spot it was last posted at
+    /// instead of resetting to a full-size default every time.
+    var scale: CGFloat = 1.0
+    var posX: CGFloat = 0.5
+    var posY: CGFloat = 0.82
+    /// Remembered rotation in degrees. Added after v1 — absent from older
+    /// configs, which decode to 0 (no tilt). Not clamped: rotation can't push
+    /// the sticker off-canvas (the position clamp handles bounds).
+    var rotation: CGFloat = 0
+
+    init() {}
+
+    /// The transform keys shipped after v1 — decode every field against the
+    /// declared defaults so configs saved by older builds keep their
+    /// style/stats choices instead of failing wholesale and resetting, and
+    /// clamp the transform so a stale/corrupt value can't render off-canvas.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = StickerConfig()
+        style = (try? c.decode(StickerStyle.self, forKey: .style)) ?? defaults.style
+        accent = (try? c.decode(StickerAccent.self, forKey: .accent)) ?? defaults.accent
+        enabled = (try? c.decode([RunStatKind].self, forKey: .enabled)) ?? defaults.enabled
+        scale = ((try? c.decode(CGFloat.self, forKey: .scale)) ?? defaults.scale)
+            .clamped(to: Self.scaleRange)
+        posX = ((try? c.decode(CGFloat.self, forKey: .posX)) ?? defaults.posX)
+            .clamped(to: Self.posXRange)
+        posY = ((try? c.decode(CGFloat.self, forKey: .posY)) ?? defaults.posY)
+            .clamped(to: Self.posYRange)
+        rotation = (try? c.decode(CGFloat.self, forKey: .rotation)) ?? defaults.rotation
+    }
 
     func isOn(_ kind: RunStatKind) -> Bool { enabled.contains(kind) }
 
@@ -116,7 +160,7 @@ struct RunStatDatum: Identifiable {
 /// Config-driven run-stats overlay. Renders only the stats the user enabled, in
 /// the chosen style + accent. Used live in the composer (draggable/scalable) and
 /// baked into the photo via ImageRenderer.
-struct RunStatsStickerView: View {
+struct RunStatsStickerView: View, Equatable {
     let input: RunStatsInput
     let config: StickerConfig
 
@@ -257,15 +301,7 @@ struct RunStatsStickerView: View {
     // MARK: Shared pieces
 
     private var brandLine: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "flame.fill")
-                .font(.system(size: 11, weight: .black))
-                .foregroundColor(accent)
-            Text("MILE A DAY")
-                .font(.system(size: 11, weight: .black, design: .rounded))
-                .tracking(1.5)
-                .foregroundColor(.white.opacity(0.85))
-        }
+        MADLogoMark(size: 26, opacity: 0.9, shadow: false)
     }
 
     private func heroValue(_ datum: RunStatDatum) -> some View {

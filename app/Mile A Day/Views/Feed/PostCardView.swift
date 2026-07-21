@@ -14,6 +14,9 @@ struct PostCardView: View {
     let post: PostItem
     /// The run's story-only photo, when different from the post media.
     var storyPhotoURL: URL? = nil
+    /// The viewer's OWN post that went out during the 10-min fresh window —
+    /// wears a "Fresh" chip. Client-derived, so it shows only to the poster.
+    var isFresh: Bool = false
     var isHyping: Bool = false
     /// Daily hype allowance spent (never true for unlimited roles) — dims the
     /// unspent Hype button, same as the friends list.
@@ -22,6 +25,8 @@ struct PostCardView: View {
     let onReport: () -> Void
     let onBlock: () -> Void
     let onDelete: () -> Void
+    /// Own posts: opens the caption editor (hidden from the menu when nil).
+    var onEditCaption: (() -> Void)? = nil
     /// Tap the author's avatar or name to open their profile.
     var onTapAuthor: (() -> Void)? = nil
     /// Tap the hype tally to see who hyped (Instagram-likes style).
@@ -37,6 +42,9 @@ struct PostCardView: View {
     /// (the card-level SwiftUI gesture AND the zoom host's UIKit one) into a
     /// single burst + hype.
     @State private var lastDoubleTapAt = Date.distantPast
+    /// The route slide's raw map snapshot (~400×300) — the only piece kept
+    /// around; the zoom's floating composite is rendered on demand from it.
+    @State private var routeSnapshot: UIImage?
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
@@ -74,6 +82,20 @@ struct PostCardView: View {
         )
     }
 
+    /// "Fresh" chip for a post shared inside the run's 10-minute window.
+    private var freshChip: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 9, weight: .black))
+            Text("FRESH")
+                .font(.system(size: 10, weight: .black, design: .rounded))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(MADTheme.Colors.madRed))
+    }
+
     private var header: some View {
         HStack(spacing: 10) {
             Button {
@@ -109,6 +131,7 @@ struct PostCardView: View {
             }
             .buttonStyle(.plain)
             .disabled(onTapAuthor == nil)
+            if isFresh { freshChip }
             Spacer()
             if let type = post.workout_type {
                 Image(systemName: ActivityCardView.icon(type))
@@ -119,8 +142,14 @@ struct PostCardView: View {
             }
             Menu {
                 if post.is_self {
+                    if let onEditCaption {
+                        Button(action: onEditCaption) {
+                            Label("Edit caption", systemImage: "pencil")
+                        }
+                    }
                     Button(role: .destructive, action: onDelete) {
-                        Label("Delete post", systemImage: "trash")
+                        Label(post.share_to_feed == false ? "Delete story" : "Delete post",
+                              systemImage: "trash")
                     }
                 } else {
                     Button(action: onReport) { Label("Report", systemImage: "flag") }
@@ -147,12 +176,14 @@ struct PostCardView: View {
 
     /// Image slides, real moment first: when the run has a story photo it
     /// leads, and the post media (photo or route/stats card) becomes the
-    /// second slide — never a cramped corner thumbnail.
-    private var photoURLs: [URL?] {
+    /// second slide — never a cramped corner thumbnail. Photos the server
+    /// withheld arrive blank and drop out here; `mediaSlides` puts a single
+    /// lock in their place, ahead of whatever survived.
+    private var photoURLs: [URL] {
         if let storyPhotoURL {
-            return [storyPhotoURL, post.mediaURL]
+            return [storyPhotoURL, post.mediaURL].compactMap { $0 }
         }
-        return [post.mediaURL]
+        return [post.mediaURL].compactMap { $0 }
     }
 
     /// Whether to append a branded workout-stats card as the run's second
@@ -169,6 +200,18 @@ struct PostCardView: View {
         return stats
     }
 
+    /// The celebration both hype paths share — the Instagram-style clap
+    /// burst + haptic, then the hype call if this post isn't hyped yet.
+    /// Double-tap AND the footer HypeButton land here so tapping the button
+    /// feels identical to double-tapping the photo.
+    private func celebrateAndHype() {
+        hypeBurst += 1
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        if !post.is_hyped {
+            onHype()
+        }
+    }
+
     /// Double-tap anywhere on the post body: clap burst + hype (friends'
     /// posts only, once — a re-double-tap replays the burst without
     /// double-counting).
@@ -177,46 +220,110 @@ struct PostCardView: View {
         let now = Date()
         guard now.timeIntervalSince(lastDoubleTapAt) > 0.35 else { return }
         lastDoubleTapAt = now
-        hypeBurst += 1
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        if !post.is_hyped {
-            onHype()
+        celebrateAndHype()
+    }
+
+    /// Shown in place of a WITHHELD PHOTO — a frosted "run to unlock" card,
+    /// matching the app's earn-to-view story gate. It's one slide among the
+    /// rest, so it clips like a photo slide rather than squaring off next to
+    /// them.
+    private var lockedMediaCard: some View {
+        ZStack {
+            LinearGradient(
+                colors: [MADTheme.Colors.madRed.opacity(0.30), Color.black.opacity(0.65)],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            VStack(spacing: 10) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundColor(.white)
+                Text("Finish your mile to unlock")
+                    .font(.system(size: 15, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white)
+                Text("Today's photos open up once you complete your own mile.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+    }
+
+    /// One page of the media carousel.
+    private enum MediaSlide {
+        /// Stands in for the photo(s) the server withheld.
+        case locked
+        case photo(url: URL, badged: Bool)
+        case route(coords: [CLLocationCoordinate2D])
+        case statsCard(stats: PostStats)
+    }
+
+    /// The carousel's pages in swipe order: the lock (standing in for ANY
+    /// withheld photo, however many were held back) → the photos that survived
+    /// the gate → the route map, or the stats card when there's no route.
+    ///
+    /// The lock only ever replaces a picture. An auto route/stats card, a route
+    /// map, and the page dots all survive it — so a viewer who hasn't run yet
+    /// can still swipe a friend's run, just not see their photo.
+    private var mediaSlides: [MediaSlide] {
+        var slides: [MediaSlide] = []
+        if post.isPhotoLocked { slides.append(.locked) }
+        for url in photoURLs {
+            // Badge an auto route/stats card that trails a photo (or its lock)
+            // so the swipe reads "photo → stats".
+            slides.append(.photo(url: url, badged: !slides.isEmpty && post.is_auto == true))
+        }
+        if let coords = routeSlideCoordinates {
+            slides.append(.route(coords: coords))
+        } else if let stats = workoutCardStats {
+            slides.append(.statsCard(stats: stats))
+        }
+        return slides
+    }
+
+    @ViewBuilder
+    private func slideView(_ slide: MediaSlide) -> some View {
+        switch slide {
+        case .locked:
+            lockedMediaCard
+        case .photo(let url, let badged):
+            ZoomablePhotoSlide(
+                url: url,
+                badge: badged ? ("Stats", "chart.bar.fill") : nil,
+                onDoubleTap: post.is_self ? nil : doubleTapHype
+            )
+        case .route(let coords):
+            routeSlide(coords)
+        case .statsCard(let stats):
+            workoutCardSlide(stats)
         }
     }
 
-    /// A single photo, or a full-size swipeable carousel:
-    /// photo → route/stats card → route map. The hype burst plays centered
-    /// over whichever slide is showing.
+    /// A single slide, or a full-size swipeable carousel. The hype burst plays
+    /// centered over whichever slide is showing.
     @ViewBuilder
     private var media: some View {
-        let slides = photoURLs
-        let coords = routeSlideCoordinates
-        let cardStats = workoutCardStats
+        let slides = mediaSlides
         Group {
-            if slides.count > 1 || coords != nil || cardStats != nil {
+            if slides.count > 1 {
                 TabView {
-                    ForEach(Array(slides.enumerated()), id: \.offset) { index, url in
-                        // When the story photo leads, badge the trailing auto
-                        // route/stats card so the swipe reads as "photo → stats".
-                        ZoomablePhotoSlide(
-                            url: url,
-                            badge: index > 0 && post.is_auto == true ? ("Stats", "chart.bar.fill") : nil,
-                            onDoubleTap: post.is_self ? nil : doubleTapHype
-                        )
-                    }
-                    if let coords {
-                        routeSlide(coords)
-                    } else if let cardStats {
-                        workoutCardSlide(cardStats)
+                    ForEach(Array(slides.enumerated()), id: \.offset) { _, slide in
+                        slideView(slide)
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .always))
                 .indexViewStyle(.page(backgroundDisplayMode: .interactive))
                 .frame(maxWidth: .infinity)
                 .aspectRatio(4.0 / 5.0, contentMode: .fit)
+            } else if let only = slides.first {
+                slideView(only)
             } else {
+                // No media at all — the empty-state placeholder.
                 ZoomablePhotoSlide(
-                    url: post.mediaURL,
+                    url: nil,
                     badge: nil,
                     onDoubleTap: post.is_self ? nil : doubleTapHype
                 )
@@ -227,22 +334,102 @@ struct PostCardView: View {
 
     /// The run itself as a branded stats card — the second slide when a photo
     /// post has no GPS route to show. The card-level double-tap covers it.
+    /// Zooms like every other slide; the card is pure SwiftUI so its zoom
+    /// copy renders on demand at pinch-begin from the same inputs.
     private func workoutCardSlide(_ stats: PostStats) -> some View {
         FeedWorkoutCard(stats: stats, workoutType: post.workout_type)
             .frame(maxWidth: .infinity)
             .aspectRatio(4.0 / 5.0, contentMode: .fit)
+            .instagramZoomable(
+                imageProvider: {
+                    let renderer = ImageRenderer(content:
+                        FeedWorkoutCard(stats: stats, workoutType: post.workout_type)
+                            .frame(width: RunStatsCardView.designSize.width,
+                                   height: RunStatsCardView.designSize.height)
+                    )
+                    renderer.scale = 2
+                    renderer.isOpaque = true
+                    return renderer.uiImage
+                },
+                onDoubleTap: post.is_self ? nil : doubleTapHype
+            )
+    }
+
+    /// Stats to overlay on the live route slide — same band the auto post
+    /// bakes into its image, so a route NEVER shows as a bare map when the
+    /// post carries numbers.
+    private var routeOverlayStats: RunStatsInput? {
+        guard let stats = post.stats_snapshot, let distance = stats.distance, distance > 0
+        else { return nil }
+        return RunStatsInput(
+            distance: distance,
+            paceSecondsPerMile: stats.pace,
+            durationSeconds: stats.duration,
+            streak: stats.streak,
+            calories: stats.calories,
+            steps: stats.steps,
+            workoutId: nil,
+            dateText: stats.date
+        )
     }
 
     private func routeSlide(_ coords: [CLLocationCoordinate2D]) -> some View {
         WorkoutRouteMapView(
             coordinates: coords,
-            routeColor: ActivityCardView.color(post.workout_type)
+            routeColor: ActivityCardView.color(post.workout_type),
+            onSnapshot: { routeSnapshot = $0 }
         )
         .frame(maxWidth: .infinity)
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        .overlay {
+            if let stats = routeOverlayStats {
+                // The overlay lays out at the baked card's 360×450 design
+                // size; the slide is the same 4:5, so scaling by width alone
+                // reproduces the auto post's look pixel-for-pixel.
+                GeometryReader { geo in
+                    RouteStatsOverlayView(stats: stats, workoutType: post.workout_type ?? "running")
+                        .scaleEffect(geo.size.width / RunStatsCardView.designSize.width,
+                                     anchor: .topLeading)
+                }
+                .allowsHitTesting(false)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
         .overlay(alignment: .topLeading) {
-            slideBadge("Route", icon: "map.fill")
+            // The stats band carries its own activity chip up top; only badge
+            // the bare-map fallback (posts without a stats snapshot).
+            if routeOverlayStats == nil {
+                slideBadge("Route", icon: "map.fill")
+            }
+        }
+        // Same pinch-zoom as the photo slides. The floating copy (map +
+        // route + stats band) is composed at pinch-begin from the small
+        // retained snapshot — nothing big is baked per card up front.
+        .instagramZoomable(
+            imageProvider: { routeZoomComposite(coords) },
+            onDoubleTap: post.is_self ? nil : doubleTapHype
+        )
+    }
+
+    /// The route slide's floating zoom copy, on demand. 720×900 keeps the
+    /// photo slides' 4:5 so the lift is pixel-identical.
+    private func routeZoomComposite(_ coords: [CLLocationCoordinate2D]) -> UIImage? {
+        guard let snapshot = routeSnapshot else { return nil }
+        let type = post.workout_type ?? "running"
+        let stats = routeOverlayStats
+        return WorkoutRouteMapView.zoomComposite(
+            snapshot: snapshot,
+            coordinates: coords,
+            routeColor: ActivityCardView.color(post.workout_type),
+            size: CGSize(width: 720, height: 900)
+        ) {
+            if let stats {
+                RouteStatsOverlayView(stats: stats, workoutType: type)
+                    .frame(width: RunStatsCardView.designSize.width,
+                           height: RunStatsCardView.designSize.height,
+                           alignment: .topLeading)
+                    .scaleEffect(720 / RunStatsCardView.designSize.width, anchor: .topLeading)
+            }
         }
     }
 
@@ -323,7 +510,7 @@ struct PostCardView: View {
                     isHyped: post.is_hyped,
                     isBusy: isHyping,
                     isOutOfHypes: isOutOfHypes && !post.is_hyped,
-                    action: onHype
+                    action: celebrateAndHype
                 )
             }
         }

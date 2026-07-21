@@ -990,13 +990,7 @@ struct CelebrationShareCardView: View {
 
                 // Branding footer pinned at bottom
                 HStack(spacing: 10) {
-                    Image("mad-logo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 28, height: 28)
-                    Text("Mile A Day")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.6))
+                    MADLogoMark(size: 30, opacity: 0.8, shadow: false)
                     Spacer()
                     Text("mileaday.run")
                         .font(.system(size: 13, weight: .medium, design: .rounded))
@@ -1108,4 +1102,3 @@ struct CelebrationShareCardView: View {
             .frame(width: 1, height: 50)
     }
 }
-

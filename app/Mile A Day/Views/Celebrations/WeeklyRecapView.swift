@@ -217,15 +217,7 @@ struct WeeklyRecapCardView: View {
                 Spacer()
 
                 // Brand row
-                HStack(spacing: 6) {
-                    Image(systemName: "flame.fill")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundColor(MADTheme.Colors.madRed)
-                    Text("MILE A DAY")
-                        .font(.system(size: 14, weight: .heavy, design: .rounded))
-                        .tracking(3)
-                        .foregroundColor(.white.opacity(0.85))
-                }
+                MADLogoMark(size: 46)
 
                 Text("YOUR WEEK")
                     .font(.system(size: 11, weight: .heavy, design: .rounded))

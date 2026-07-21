@@ -50,8 +50,14 @@ struct WorkoutTrackingView: View {
     /// system started deferring updates (frozen activity on the lock screen).
     @State private var lastActivityPushDate: Date = .distantPast
     @State private var lastPushedDistance: Double = -1
-    @State private var showEndWorkoutError = false // Show error alert when end fails
-    @State private var endWorkoutErrorMessage = "" // Error message for end workout failure
+    @State private var showEndWorkoutError = false // Show error alert when starting fails (workout lock)
+    @State private var endWorkoutErrorMessage = "" // Error message for the start-failure alert
+    /// Health WRITE access is off — the save fails every time until re-enabled,
+    /// so we offer an actionable path to Settings instead of a dead-end error.
+    @State private var showHealthAccessAlert = false
+    /// Quiet, non-blocking confirmation for a transient save failure where the
+    /// mile still counts (Health access is fine) — no scary blocking alert.
+    @State private var showSaveFallbackToast = false
     @State private var endWorkoutTimeoutTask: DispatchWorkItem? // Timeout for end workout flow
     @State private var trackingMetricsHeight: CGFloat = 0 // Measured height of the scrollable metrics area
     @State private var workoutSession: HKWorkoutSession?
@@ -63,7 +69,20 @@ struct WorkoutTrackingView: View {
     @State private var showMidRunCamera = false
     @State private var midRunImage: UIImage?
     @State private var midRunSnapCount = 0
+    /// Mid-run snap review tray (view + delete without touching tracking).
+    @State private var showSnapTray = false
+    /// Cheap downsampled thumb of the newest snap for the tray chip.
+    @State private var lastSnapThumb: UIImage?
     @State private var showSnapSavedToast = false
+    /// Import a photo taken on THIS walk from the library (time-windowed).
+    @State private var showLibraryImport = false
+    /// Transient result banner for a library import (message, success?).
+    @State private var importToast: ImportToast?
+
+    private struct ImportToast: Equatable {
+        let text: String
+        let ok: Bool
+    }
 
     // Workout distance only (starts at 0)
     private var currentDistance: Double {
@@ -259,10 +278,17 @@ struct WorkoutTrackingView: View {
                     // Mid-run snap: see something worth keeping, capture it in
                     // one tap, keep moving — the end-of-run prompt asks whether
                     // it becomes the post. Pinned in the top bar so it never
-                    // crowds the metrics or the Stop button.
-                    if CameraPicker.isAvailable && !isStopping {
-                        midRunCameraButton
-                            .padding(.trailing, 20)
+                    // crowds the metrics or the Stop button. Once snaps exist,
+                    // a camera-app-style thumbnail chip opens the review tray.
+                    if MADCameraView.isAvailable && !isStopping {
+                        HStack(spacing: 10) {
+                            if midRunSnapCount > 0 {
+                                midRunTrayButton
+                            }
+                            midRunLibraryButton
+                            midRunCameraButton
+                        }
+                        .padding(.trailing, 20)
                     }
                 }
                 .padding(.top, 16)
@@ -307,40 +333,167 @@ struct WorkoutTrackingView: View {
         .overlay(previousProgressOverlay)
         .overlay(goalCompletionOverlay)
         .overlay(alignment: .top) { snapSavedToast }
+        .overlay(alignment: .top) { importToastView }
+        .overlay(alignment: .top) { saveFallbackToast }
     }
 
     // MARK: - Mid-Run Photo Capture
+
+    /// Camera-app pattern: the newest snap as a thumbnail chip beside the
+    /// shutter. Tapping it opens the review tray — a sheet OVER the tracking
+    /// screen, so distance/time keep counting underneath — where shots can be
+    /// checked full-size, saved, or deleted on the spot instead of waiting
+    /// for the end-of-run prompt.
+    private var midRunTrayButton: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showSnapTray = true
+        } label: {
+            Group {
+                if let thumb = lastSnapThumb {
+                    Image(uiImage: thumb)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.white.opacity(0.18))
+                }
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
+            )
+            .overlay(alignment: .topTrailing) {
+                Text("\(midRunSnapCount)")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.white)
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill(Color.orange))
+                    .offset(x: 5, y: -5)
+            }
+        }
+        .buttonStyle(PlainButtonStyle())
+        .sheet(isPresented: $showSnapTray) {
+            SnapGalleryView(title: "Your snaps", onStashChanged: refreshSnapState)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        // Stop flow takes over the screen — the tray must not sit on top.
+        .onChange(of: isStopping) { _, stopping in
+            if stopping { showSnapTray = false }
+        }
+    }
+
+    private func refreshSnapState() {
+        midRunSnapCount = MidRunPhotoStash.count
+        lastSnapThumb = MidRunPhotoStash.latestThumbnail()
+    }
+
+    /// Import a photo taken DURING this walk/run from the library. Camera-only
+    /// authenticity is preserved by the time-window check in the picker — you
+    /// can use a system-camera shot from this walk, but not an old photo.
+    /// Shared look for the mid-run photo buttons so the camera and library
+    /// controls are the exact same size and weight (they used to differ — 40 vs
+    /// 44, icon 15 vs 17). Both read as one matched pair sitting in the top bar.
+    private func midRunCircleIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundColor(.white)
+            .frame(width: 44, height: 44)
+            .background(
+                Circle()
+                    .fill(Color.white.opacity(0.18))
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
+            )
+    }
+
+    private var midRunLibraryButton: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            showLibraryImport = true
+        } label: {
+            midRunCircleIcon("photo.badge.plus")
+        }
+        .buttonStyle(PlainButtonStyle())
+        .fullScreenCover(isPresented: $showLibraryImport) {
+            WorkoutPhotoImportPicker(
+                window: importWindow,
+                activityNoun: activityNoun
+            ) { result in
+                showLibraryImport = false
+                handleImportResult(result)
+            }
+        }
+        .onChange(of: isStopping) { _, stopping in
+            if stopping { showLibraryImport = false }
+        }
+    }
+
+    /// Accepted capture-time window: from just before the workout started
+    /// (a photo snapped at the trailhead counts) through now, with a small
+    /// forward buffer so a shot taken while browsing the picker still passes.
+    private var importWindow: ClosedRange<Date> {
+        let start = (workoutStartDate ?? Date()).addingTimeInterval(-5 * 60)
+        let end = Date().addingTimeInterval(2 * 60)
+        return start...max(start, end)
+    }
+
+    private func handleImportResult(_ result: WorkoutPhotoImportResult) {
+        switch result {
+        case .accepted(let image):
+            Task.detached(priority: .utility) {
+                guard let entry = MidRunPhotoStash.add(image) else { return }
+                let count = MidRunPhotoStash.count
+                let thumb = MidRunPhotoStash.latestThumbnail()
+                await MainActor.run {
+                    // Imported straight from the photo library — it already
+                    // lives there, so mark it saved and never offer to re-save.
+                    SavedPhotoLibraryLedger.shared.markSaved(entry.id)
+                    midRunSnapCount = count
+                    lastSnapThumb = thumb
+                    showImportToast("Added to your \(activityNoun)", ok: true)
+                }
+            }
+        case .failed:
+            showImportToast("Couldn't load that photo", ok: false)
+        case .cancelled:
+            break
+        }
+    }
+
+    /// "run"/"walk" for user-facing copy, matching the active workout type.
+    private var activityNoun: String {
+        selectedActivityType == .running ? "run" : "walk"
+    }
+
+    private func showImportToast(_ text: String, ok: Bool) {
+        if ok { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            importToast = ImportToast(text: text, ok: ok)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+            withAnimation(.easeOut(duration: 0.25)) { importToast = nil }
+        }
+    }
 
     private var midRunCameraButton: some View {
         Button {
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             showMidRunCamera = true
         } label: {
-            Image(systemName: "camera.fill")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(.white)
-                .frame(width: 44, height: 44)
-                .background(
-                    Circle()
-                        .fill(Color.white.opacity(0.18))
-                        .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
-                )
-                .overlay(alignment: .topTrailing) {
-                    if midRunSnapCount > 0 {
-                        Text("\(midRunSnapCount)")
-                            .font(.system(size: 11, weight: .heavy, design: .rounded))
-                            .monospacedDigit()
-                            .foregroundColor(.white)
-                            .frame(width: 18, height: 18)
-                            .background(Circle().fill(Color.orange))
-                            .offset(x: 4, y: -4)
-                    }
-                }
+            midRunCircleIcon("camera.fill")
         }
         .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showMidRunCamera) {
-            CameraPicker(image: $midRunImage)
-                .ignoresSafeArea()
+            // Camera-roll save is handled below, keyed to the stash id, so the
+            // review gallery can show "Saved" and never duplicate the shot.
+            MADCameraView(image: $midRunImage, autoSaveToPhotos: false)
         }
         .onChange(of: midRunImage) { _, newImage in
             guard let image = newImage else { return }
@@ -348,11 +501,22 @@ struct WorkoutTrackingView: View {
             // Downscale + JPEG-encode off the main thread — doing it inline
             // stutters the camera dismissal animation on big sensor images.
             Task.detached(priority: .utility) {
-                let saved = MidRunPhotoStash.add(image)
+                let entry = MidRunPhotoStash.add(image)
                 let count = MidRunPhotoStash.count
-                guard saved else { return }
+                let thumb = MidRunPhotoStash.latestThumbnail()
                 await MainActor.run {
+                    // Keep the user's own full-res copy in the camera roll no
+                    // matter what (the camera no longer auto-saves this path).
+                    // When it made it into the stash, key the save to that snap
+                    // so the gallery shows "Saved" instead of a duplicate.
+                    if let entry {
+                        PhotoRollSaver.save(image, ledgerKey: entry.id)
+                    } else {
+                        PhotoRollSaver.save(image)
+                    }
+                    guard entry != nil else { return }
                     midRunSnapCount = count
+                    lastSnapThumb = thumb
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                         showSnapSavedToast = true
@@ -389,6 +553,68 @@ struct WorkoutTrackingView: View {
             .transition(.move(edge: .top).combined(with: .opacity))
             .allowsHitTesting(false)
         }
+    }
+
+    @ViewBuilder
+    private var importToastView: some View {
+        if let toast = importToast {
+            HStack(spacing: 8) {
+                Image(systemName: toast.ok ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(toast.ok ? .green : .orange)
+                Text(toast.text)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.78))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+            )
+            .padding(.top, 72)
+            .padding(.horizontal, MADTheme.Spacing.lg)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Shown when the workout couldn't be written to Apple Health for a reason
+    /// OTHER than denied access — the mile still counts via sync, so this is a
+    /// calm reassurance rather than a blocking error.
+    @ViewBuilder
+    private var saveFallbackToast: some View {
+        if showSaveFallbackToast {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.green)
+                Text("Your mile still counts — it'll sync on your next update.")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.78))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.15), lineWidth: 1))
+            )
+            .padding(.top, 72)
+            .padding(.horizontal, MADTheme.Spacing.lg)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Deep-link to this app's Settings page, where the user can reach the
+    /// Health access toggles for Mile A Day.
+    private func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     /// Vertical spacing between the metric blocks, tightened on shorter screens.
@@ -711,13 +937,24 @@ struct WorkoutTrackingView: View {
         } message: {
             Text("Are you sure you want to end this workout? Your progress will be saved to HealthKit.")
         }
-        .alert("Couldn't Save Workout", isPresented: $showEndWorkoutError) {
+        .alert("Couldn't Start Workout", isPresented: $showEndWorkoutError) {
             Button("OK") {
                 // Dismiss back to dashboard since the workout state is already cleared
                 dismiss()
             }
         } message: {
             Text(endWorkoutErrorMessage)
+        }
+        .alert("Save Workouts to Apple Health?", isPresented: $showHealthAccessAlert) {
+            Button("Open Settings") {
+                openAppSettings()
+                dismiss()
+            }
+            Button("Not Now", role: .cancel) {
+                dismiss()
+            }
+        } message: {
+            Text("Your mile still counts toward your streak. To also save your workouts to Apple Health, turn on Workouts access for Mile A Day in Settings.")
         }
         .onAppear {
             // Workout recovery: if there's a persisted in-progress workout, restore it.
@@ -745,9 +982,9 @@ struct WorkoutTrackingView: View {
             showCountdown = false
             isTracking = true
 
-            // Restore the snap-count badge — mid-run photos survive an app
-            // relaunch alongside the workout itself.
-            midRunSnapCount = MidRunPhotoStash.count
+            // Restore the snap chip (count + thumbnail) — mid-run photos
+            // survive an app relaunch alongside the workout itself.
+            refreshSnapState()
 
             // Resume tracking with the saved distance as the starting point.
             // For pedometer: new pedometer readings will ADD to saved.currentDistance.
@@ -834,11 +1071,23 @@ struct WorkoutTrackingView: View {
 
         workoutStartDate = Date()
 
-        // Fresh session: drop any mid-run snaps left over from a previous
-        // workout (crash, force-quit) so an old photo can't hijack this run's
-        // post-run prompt.
-        MidRunPhotoStash.clear()
-        midRunSnapCount = 0
+        // Fresh session: drop mid-run snaps left over from a previous workout
+        // ONLY when today's goal was already met before this one. A workout on
+        // an already-completed day is "extra", so a stale snap shouldn't hijack
+        // its prompt. But when the goal ISN'T met yet, keep leftover snaps so a
+        // photo taken on an earlier sub-goal effort survives into the workout
+        // that finally finishes the mile (24h prune still bounds staleness).
+        if startingDistance >= goalDistance {
+            MidRunPhotoStash.clear()
+            midRunSnapCount = 0
+        } else {
+            // Keep SAME-DAY leftover snaps (a photo from an earlier sub-goal
+            // effort should survive into the workout that finishes the mile),
+            // but drop any from a previous day so a fresh day's mile never
+            // inherits — or re-shares — yesterday's snaps.
+            MidRunPhotoStash.dropBeforeToday()
+            midRunSnapCount = MidRunPhotoStash.count
+        }
 
         // Immediately persist initial workout state
         let initialState = InProgressWorkoutState(
@@ -1045,12 +1294,22 @@ struct WorkoutTrackingView: View {
         isStopping = false
         isTracking = false
 
-        // Show result to user
+        // Show result to user. The mile counts via GPS/pedometer sync whether
+        // or not the HealthKit write succeeded, so a failed save is never a lost
+        // workout — tailor the messaging to the cause instead of alarming.
         if workoutSaved {
             withAnimation { showRecap = true }
+        } else if healthManager.isWorkoutSharingDenied() {
+            // Health write access is turned off — this fails on EVERY workout
+            // until the user re-enables it, so give them a way to fix it.
+            showHealthAccessAlert = true
         } else {
-            endWorkoutErrorMessage = "Your workout couldn't be saved to HealthKit. The distance you covered will still count from GPS/pedometer data on your next sync."
-            showEndWorkoutError = true
+            // Transient save failure with Health access intact. Don't block —
+            // show a quiet toast and slip back to the dashboard.
+            withAnimation { showSaveFallbackToast = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
+                dismiss()
+            }
         }
     }
 

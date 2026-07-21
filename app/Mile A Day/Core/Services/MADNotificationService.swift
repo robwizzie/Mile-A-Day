@@ -266,8 +266,14 @@ final class MADNotificationService: NSObject, ObservableObject {
         }
 
         do {
-            struct RegisterRequest: Codable { let device_token: String }
-            let body = try JSONEncoder().encode(RegisterRequest(device_token: token))
+            struct RegisterRequest: Codable {
+                let device_token: String
+                let environment: String
+            }
+            let body = try JSONEncoder().encode(RegisterRequest(
+                device_token: token,
+                environment: AppEnvironment.apnsEnvironment
+            ))
             let _: [String: String] = try await APIClient.fancyFetch(
                 endpoint: "/devices/register",
                 method: .POST,
@@ -312,6 +318,7 @@ final class MADNotificationService: NSObject, ObservableObject {
         case "friend_request_accepted": return prefs.friendRequestAcceptedEnabled
         case "friend_nudge": return prefs.friendNudgeEnabled
         case "friend_activity": return prefs.friendCompletedEnabled
+        case "friend_post": return prefs.friendPostsEnabled
         case "competition_invite": return prefs.competitionInviteEnabled
         case "competition_accepted": return prefs.competitionAcceptedEnabled
         case "competition_started", "competition_updates": return prefs.competitionStartEnabled
@@ -460,7 +467,24 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         }
 
         do {
-            let response = try await HypeService.sendHype(targetUserId: targetUserId)
+            // Send the SAME mile-hype context the feed and notifications inbox use
+            // (target:localDate) so this hype dedupes against them. A context-less
+            // hype has no run identity and lets the same daily mile be hyped twice
+            // (once here, once in the app). friend_activity pushes carry the
+            // runner's local_date; the sympathetic "streak broken" variant isn't
+            // hypeable, so fall back to a context-less hype there.
+            let response: HypeResponse
+            if data?["kind"] != "streak_broken",
+               let localDate = data?["local_date"], !localDate.isEmpty {
+                let context = HypeContext(
+                    contextType: "mile",
+                    contextId: "\(targetUserId):\(localDate)",
+                    contextLabel: "today's mile"
+                )
+                response = try await HypeService.sendHype(targetUserId: targetUserId, context: context)
+            } else {
+                response = try await HypeService.sendHype(targetUserId: targetUserId)
+            }
             let remaining = response.hypes_remaining
             let body: String
             if response.unlimited == true {
@@ -475,6 +499,13 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             await postLocalToast(title: "🔥 Hype sent", body: body)
         } catch let error as APIError where error.isRateLimited {
             await postLocalToast(title: "Out of hypes", body: "You're out of hypes for today.")
+        } catch let error as APIError {
+            // Already hyped this run from the feed/inbox — the dedupe caught it.
+            if case .conflict = error {
+                await postLocalToast(title: "Already hyped", body: "You already hyped this one 🔥")
+            } else {
+                await postLocalToast(title: "Couldn't send hype", body: "Try opening the app.")
+            }
         } catch {
             await postLocalToast(title: "Couldn't send hype", body: "Try opening the app.")
         }

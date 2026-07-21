@@ -1,4 +1,9 @@
 import { PostgresService } from "./DbService.js";
+import {
+  DEFAULT_WORKOUT_VISIBILITY,
+  isWorkoutVisibility,
+  type WorkoutVisibility,
+} from "./visibilityService.js";
 
 const db = PostgresService.getInstance();
 
@@ -23,6 +28,11 @@ export interface NotificationPreferences {
   friend_posts_enabled: boolean; // notify me when a friend shares a new post
   share_route_maps: boolean; // show my GPS route maps on my feed entries/posts
   weekly_recap_enabled: boolean; // Sunday-evening weekly recap push + story card
+  h2h_close_friends_only: boolean; // Head-to-Head rivals only from my close friends
+  // Who may see my workout content (routes + photos): 'public' | 'friends' |
+  // 'private'. Coarser than share_route_maps — that one decides WHETHER routes
+  // are included, this decides WHO gets in at all. Both must pass.
+  workout_visibility: WorkoutVisibility;
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferences = {
@@ -44,6 +54,8 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   friend_posts_enabled: true,
   share_route_maps: true,
   weekly_recap_enabled: true,
+  h2h_close_friends_only: false,
+  workout_visibility: DEFAULT_WORKOUT_VISIBILITY,
 };
 
 export async function getNotificationPreferences(
@@ -76,6 +88,12 @@ export async function getNotificationPreferences(
     friend_posts_enabled: row.friend_posts_enabled ?? true,
     share_route_maps: row.share_route_maps ?? true,
     weekly_recap_enabled: row.weekly_recap_enabled ?? true,
+    h2h_close_friends_only: row.h2h_close_friends_only ?? false,
+    // Anything unrecognised reads as the safe default rather than being
+    // handed to the client as-is.
+    workout_visibility: isWorkoutVisibility(row.workout_visibility)
+      ? row.workout_visibility
+      : DEFAULT_WORKOUT_VISIBILITY,
   };
 }
 
@@ -120,6 +138,8 @@ export async function updateNotificationPreferences(
     { key: "friend_posts_enabled", value: prefs.friend_posts_enabled },
     { key: "share_route_maps", value: prefs.share_route_maps },
     { key: "weekly_recap_enabled", value: prefs.weekly_recap_enabled },
+    { key: "h2h_close_friends_only", value: prefs.h2h_close_friends_only },
+    { key: "workout_visibility", value: prefs.workout_visibility },
   ];
 
   for (const field of fields) {

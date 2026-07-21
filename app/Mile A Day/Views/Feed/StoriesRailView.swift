@@ -12,8 +12,18 @@ struct StoriesRailView: View {
     /// The viewer has already shared this workout — the "+" add badge hides
     /// (one post per walk/run); the ring still opens their own story.
     var hasSharedWorkout: Bool = false
-    /// Friends' stories stay locked until the viewer finishes their mile.
-    var canViewStories: Bool = true
+    /// Fresh-post window state (owned by the feed). When open, the "Your story"
+    /// cell wears a shrinking countdown ring — an in-the-moment nudge, never a
+    /// gate. `windowOpenedAt` anchors the self-ticking ring.
+    var windowOpen: Bool = false
+    var windowOpenedAt: Date? = nil
+    /// Per-group viewing gate: viewing is earned per story DAY (yesterday's
+    /// stories stay open for a viewer who completed yesterday; a new today
+    /// story locks until today's mile is done). The feed owns the rule.
+    var isGroupViewable: (StoryGroup) -> Bool = { _ in true }
+    /// Whether the ring should read "unviewed" — an unseen story on a day the
+    /// viewer can actually watch. The feed owns this (it knows earned days).
+    var isGroupUnviewed: (StoryGroup) -> Bool = { $0.has_unviewed }
     let onTapAdd: () -> Void
     let onTapGroup: (StoryGroup) -> Void
     var onLockedStoryTap: () -> Void = {}
@@ -30,14 +40,18 @@ struct StoriesRailView: View {
             HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
                 addCell
                 ForEach(friendGroups) { group in
+                    let viewable = isGroupViewable(group)
                     Button {
-                        if canViewStories { onTapGroup(group) } else { onLockedStoryTap() }
+                        if viewable { onTapGroup(group) } else { onLockedStoryTap() }
                     } label: {
                         cell(
                             name: group.displayName,
                             imageURL: group.profile_image_url,
-                            unviewed: group.has_unviewed,
-                            locked: !canViewStories
+                            // Light the ring only for unseen stories the viewer
+                            // can actually open — otherwise an unearned
+                            // today-story leaves a ring that never clears.
+                            unviewed: isGroupUnviewed(group),
+                            locked: !viewable
                         )
                     }
                     .buttonStyle(.plain)
@@ -65,6 +79,16 @@ struct StoriesRailView: View {
                 ZStack(alignment: .bottomTrailing) {
                     ring(unviewed: myGroup?.has_unviewed ?? false, dashed: myGroup == nil) {
                         AvatarView(name: myName, imageURL: myImageURL, size: 64)
+                    }
+                    // Fresh-window countdown ring, just outside the avatar —
+                    // only while there's still something to post this window.
+                    .overlay {
+                        if windowOpen && canPost && !hasSharedWorkout, let openedAt = windowOpenedAt {
+                            FreshWindowRing(openedAt: openedAt,
+                                            color: MADTheme.Colors.madRed,
+                                            lineWidth: 2.5)
+                                .padding(-3)
+                        }
                     }
                     // No add/lock badge once they've shared this workout — the
                     // ring still opens their own story, there's just nothing new

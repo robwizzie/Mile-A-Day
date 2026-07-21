@@ -209,24 +209,31 @@ extension HKWorkout {
         return "\(deviceTimeString) (\(timezoneAbbrev) - device timezone)"
     }
     
+    // For the average pace display, we use the workout's total duration and distance
+    // This gives us the average pace for the entire workout, which is appropriate for workout summaries
+    // NOTE: For fastest mile calculations, use HealthKitManager.getWorkoutSplitTimes() to get per-mile splits
     var pace: String {
-        guard let distance = totalDistance,
-              distance.doubleValue(for: HKUnit.mile()) > 0 else { return "N/A" }
-        
-        let miles = distance.doubleValue(for: HKUnit.mile())
-        
-        // For the average pace display, we use the workout's total duration and distance
-        // This gives us the average pace for the entire workout, which is appropriate for workout summaries
-        // NOTE: For fastest mile calculations, use HealthKitManager.getWorkoutSplitTimes() to get per-mile splits
-        let minutesPerMile = duration / 60.0 / miles
-        
-        guard minutesPerMile > 0 && minutesPerMile < 60 else { return "N/A" } // Sanity check
-        
-        let minutes = Int(minutesPerMile)
-        let seconds = Int((minutesPerMile - Double(minutes)) * 60)
-        
-        return String(format: "%d:%02d /mi", minutes, seconds)
+        guard let distance = totalDistance else { return "N/A" }
+        return workoutPaceText(
+            distanceMiles: distance.doubleValue(for: HKUnit.mile()),
+            durationSeconds: duration
+        )
     }
+}
+
+/// Average pace for a workout summary — "8:12 /mi", or "N/A" when the numbers
+/// can't produce a believable one.
+///
+/// ONE definition, because a friend's detail screen used to compute this itself
+/// WITHOUT the sanity guard: a 0.04 mi stroll read "884:34 /mi" on their screen
+/// and "N/A" on your own, for the same kind of run.
+func workoutPaceText(distanceMiles: Double, durationSeconds: TimeInterval) -> String {
+    guard distanceMiles > 0 else { return "N/A" }
+    let minutesPerMile = durationSeconds / 60.0 / distanceMiles
+    guard minutesPerMile > 0, minutesPerMile < 60 else { return "N/A" } // Sanity check
+    let minutes = Int(minutesPerMile)
+    let seconds = Int((minutesPerMile - Double(minutes)) * 60)
+    return String(format: "%d:%02d /mi", minutes, seconds)
 }
 
 // MARK: - Progress Calculation Utilities

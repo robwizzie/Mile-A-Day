@@ -75,6 +75,13 @@ struct Mile_A_DayApp: App {
                             object: nil,
                             userInfo: ["tab": 1]
                         )
+                    case "friends":
+                        // mileaday://friends — Daily Leaderboard widget tap
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("MAD_SwitchTab"),
+                            object: nil,
+                            userInfo: ["tab": 3]
+                        )
                     case "competition":
                         // mileaday://competition/<id> — land on that comp's detail
                         NotificationCenter.default.post(

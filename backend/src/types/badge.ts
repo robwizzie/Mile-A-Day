@@ -63,6 +63,8 @@ export interface ChallengeOpponent {
   profileImageUrl: string | null;
   miles: number;
   myMiles: number;
+  /** TRUE when the rival got the same matchup back (reciprocal pair). */
+  mutual: boolean;
 }
 
 export interface TodaysChallengeResponse {
@@ -103,6 +105,8 @@ export interface FriendTodayChallengeResponse {
   challengeIcon?: string | null;
   gradientStart?: string | null;
   gradientEnd?: string | null;
+  /** Present only when the friend's today challenge is Head-to-Head. */
+  opponent?: ChallengeOpponent | null;
 }
 
 export interface NewChallengeCompletion {

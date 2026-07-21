@@ -135,9 +135,11 @@ export async function getInAppNotifications(req: Request, res: Response) {
       }));
 
     // Mile contexts use the unified RUN rule: the composite key's own 'mile'
-    // hypes PLUS 'post' hypes on posts linked to that runner+day's workouts —
-    // the same rule the feed queries use (see hypeService.runHypeMatchSql),
-    // so the inbox tally always equals the feed tally for the same run.
+    // hypes, 'mile' hypes the feed keyed by an exact workout id for that day,
+    // PLUS 'post' hypes on posts linked to that runner+day's workouts — the same
+    // rule the feed queries use (see hypeService.runHypeMatchSql). This keeps the
+    // inbox tally AND its "already hyped" state in sync with the feed for the
+    // same run, so a mile hyped from the feed can't be hyped again from here.
     const mileKeys = ctxKeys.filter((k) => k.type === "mile");
     const otherKeys = ctxKeys.filter((k) => k.type !== "mile");
 
@@ -148,7 +150,14 @@ export async function getInAppNotifications(req: Request, res: Response) {
     const mileIds = mileKeys.map((k) => k.id);
 
     const MILE_RUN_MATCH = `
-			(h.context_type = 'mile' AND h.context_id = t.context_id)
+			(h.context_type = 'mile' AND (
+				h.context_id = t.context_id
+				OR h.context_id IN (
+					SELECT w.workout_id::text FROM workouts w
+					WHERE w.user_id = t.target_id
+						AND (w.user_id || ':' || w.local_date::text) = t.context_id
+				)
+			))
 			OR (h.context_type = 'post' AND h.context_id IN (
 				SELECT p.post_id::text
 				FROM posts p

@@ -31,15 +31,16 @@ globs: backend/**
 - Never emit raw `timestamptz::text` in URL query params (pagination cursors): its `+00` offset decodes as a SPACE in Express's query parser and the `::timestamptz` cast 500s. Emit cursors via `URL_SAFE_CURSOR` (ISO `…Z`, postService.ts); iOS must percent-encode query values with a set that excludes `+` (`PostService.queryValueAllowed`).
 
 ## Auth Pattern
-- Public routes (`/auth/*`, `/dev/*`, `/status`) are mounted BEFORE `authenticateToken` middleware in server.ts.
+- Public routes (`/auth/*`, `/dev/*`, `/status`) are mounted BEFORE `authenticateToken` middleware in server.ts. `/dev/*` endpoints are fail-closed: 403 unless `NODE_ENV=development` (`npm run dev` sets it; testing them via plain `tsx watch` won't work without it).
 - Protected routes are mounted AFTER. `req.userId` is set by auth middleware (see `AuthenticatedRequest` type).
 - Use `requireSelfAccess('paramName')` middleware when a route should only allow users to access their own resources.
 
 ## Adding a New Endpoint
-1. Add service function in `services/` (DB queries + business logic)
-2. Add controller function in `controllers/` (req/res handling)
-3. Add route in `routes/` (wire to controller)
-4. If new route file, register in `server.ts` (before or after `authenticateToken` depending on auth needs)
+Service (`services/`) → controller (`controllers/`) → route (`routes/`) → if a new route file, register in `server.ts` (before/after `authenticateToken` per auth needs).
+
+## Daily Challenges
+- `head_to_head` is scored END-OF-DAY by `h2hChallengeCron` (after BOTH users' local midnight + 6h late-sync grace), never at workout sync — `evaluatePredicate` returns false for it and live progress caps at 0.99. Winner push (`challenge_won`) is deferred to the winner's local 9 AM–10 PM.
+- Rivals are PINNED per day in `h2h_matchups` (reciprocal `mutual` pairs where the friend graph + each side's `h2h_close_friends_only` pref allow; one-sided fallbacks prefer 7-day-active friends; a restricted user with no close friends skips h2h in rotation). FRIENDLESS users get the `add_friend` substitute instead (catalog row with active=FALSE, awarded at friendship-accept via `evaluateAddFriendCompletion` — the sync path can't catch it). Selection parity between per-user reads and the matchmaker lives in `challengeRotation.ts` + `hasH2hRivalCandidates` — never fork that walk.
 
 ## Competition Resolution
 - Standings are recomputed LIVE on every read (`getUserScores` in `getCompetition`) — even for finished comps. So a competition's stored `end_date` directly bounds which days count (scoring includes `local_date <= end_date`; `local_date` = workout START date in user tz).
@@ -52,9 +53,10 @@ globs: backend/**
 - `/uploads/posts` requires signed urls (`mediaSigningService`). Any endpoint RETURNING `media_url`/`story_photo_url` must wrap the payload in `signMediaUrlsDeep(...)`; any endpoint ACCEPTING a media_url must `stripMediaQuery(...)` first. The DB stores bare paths only.
 - Direct post access (comments/mentions/coauthor respond) authorizes via `visiblePostAuthor` (postService). It must mirror the feed queries' circle+block rules — including accepted-coauthor reach and blocks vs EITHER author.
 - Social pushes (comments, mentions, story reactions, coauthor) all gate on `shouldSendNotification(..., "hype")`. Per recipient per comment: mention push replaces the comment/reply push (see `notifyForComment`).
+- The Feed UI isn't in the live App Store build and API calls carry no app-version signal. Server-side "user has the feed" = any `posts` row OR `terms_accepted_at IS NOT NULL` (`userHasFeedFeature` in dailyChallengeService) — gate feed-dependent features per-user with it (e.g. the `share_journey` daily challenge).
+
+## Push Notifications
+- `device_tokens.environment` selects the APNs host per token (`sandbox` for local DEBUG installs, `production` for App Store/TestFlight); never route pushes solely from server `APNS_PRODUCTION`.
 
 ## ESM Reminder
-All imports MUST end with `.js` extension:
-```typescript
-import { foo } from './services/fooService.js';
-```
+All imports MUST end with `.js` extension, e.g. `import { foo } from './services/fooService.js';`

@@ -1,7 +1,16 @@
 import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { shouldSendNotification } from "./notificationSettingsService.js";
-import { postHypeMatchSql, runHypeMatchSql } from "./hypeService.js";
+import {
+  VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL,
+  OWNER_NOT_PRIVATE_SQL,
+} from "./visibilityService.js";
+import {
+  postHypeMatchSql,
+  postHypedByViewerMatchSql,
+  runHypeMatchSql,
+  runHypedByViewerMatchSql,
+} from "./hypeService.js";
 
 const db = PostgresService.getInstance();
 
@@ -60,6 +69,13 @@ export interface PostRow {
   coauthor_last_name?: string | null;
   coauthor_profile_image_url?: string | null;
   is_viewed?: boolean;
+  // The viewer's own emoji reaction to this story (getUserActiveStories only),
+  // so re-opening a story they already reacted to shows the reaction. null/absent
+  // = they haven't reacted.
+  viewer_reaction?: string | null;
+  // Set by lockUnearnedPhotos: this post's photo is withheld because it's from
+  // the viewer's local today and they haven't finished their own mile yet.
+  photo_locked?: boolean;
   // Microsecond-precise created_at (Postgres text form) for keyset pagination.
   // node-pg parses timestamptz to a ms-truncated JS Date, and a truncated
   // `before` cursor silently skips same-millisecond rows at page boundaries.
@@ -84,6 +100,15 @@ export interface StoryGroup {
   story_count: number;
   has_unviewed: boolean;
   latest_at: string;
+  /** Distinct author-local days ("yyyy-MM-dd") this group's stories span —
+   *  lets the client gate viewing PER DAY (yesterday's stories stay viewable
+   *  for a viewer who completed yesterday). Additive field. */
+  story_local_dates: string[];
+  /** Author-local days with at least one story the viewer HASN'T seen —
+   *  lets the client light the "unviewed" ring only for days the viewer can
+   *  actually watch, so an unearned today-story can't leave a permanently
+   *  unclearable ring. Additive field. */
+  unviewed_local_dates: string[];
 }
 
 /**
@@ -136,16 +161,15 @@ const COAUTHOR_COLUMNS = `
 
 // SELECT list shared by feed + story-detail reads so both shapes match PostRow.
 // `$1` must be the viewer id (drives is_self / is_hyped).
-// Hype fields use the unified RUN rule (postHypeMatchSql): a post linked to a
-// workout also counts the run's 'mile' hypes (sent from the inbox / friends
-// list), so every surface shows the same number for the same run.
+// is_hyped is exact-card state so a different same-day mile doesn't disable
+// the button; hype_count still uses the broader run tally for social proof.
 const POST_SELECT = `${POST_COLUMNS},
 	(p.user_id = $1) AS is_self,
 	EXISTS (
 		SELECT 1 FROM hype_log h
 		WHERE h.sender_id = $1
 			AND h.target_id = p.user_id
-			AND ${postHypeMatchSql("h", "p")}
+			AND ${postHypedByViewerMatchSql("h", "p")}
 	) AS is_hyped,
 	(
 		SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
@@ -187,14 +211,16 @@ const CREATED_POST_SELECT = `
  * Insert a post and return it shaped as a PostRow (is_self=true, no hypes yet).
  * story_expires_at is set to now()+24h only when the post is shared to a story.
  *
- * One-post-per-workout rules (per destination — feed and story-only are
- * separate slots, enforced by partial unique indexes):
+ * One-deliberate-share-per-workout rules:
  * - Legacy clients (isAuto undefined) keep the original upsert-in-place.
  * - An AUTO post fills an empty slot or replaces an existing auto post; it
  *   never clobbers a deliberate user post (returns the existing post instead).
- * - A USER post fills an empty slot or replaces the auto post; if a live user
- *   post already exists for the workout it throws "workout_already_posted" —
- *   deleting the old post frees the slot again.
+ * - A USER post (feed OR story) is allowed once per workout, across BOTH the
+ *   feed and story-only slots: it fills an empty slot / replaces the auto post,
+ *   but if a live user share already exists for the run — in EITHER slot — it
+ *   throws "workout_already_posted". Deleting that share (or starting the next
+ *   workout) frees it again. The per-slot partial unique indexes enforce the
+ *   same-slot case; the cross-slot pre-check above closes the other-slot gap.
  */
 export async function createPost(input: CreatePostInput): Promise<PostRow> {
   // A workout can have ONE live feed post and ONE live story-only photo
@@ -232,6 +258,27 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       [input.userId, coauthorId],
     );
     if (ok.length === 0) throw new Error("invalid_coauthor");
+  }
+  // One deliberate share (a feed post OR a story) per workout — across BOTH
+  // destination slots. The per-slot unique indexes already stop a second post
+  // to the SAME slot; this closes the cross-slot gap where a feed post AND a
+  // separate story-only photo could both be created for one run ("posting
+  // again after I've posted"). Auto route/stats cards don't count as the user's
+  // share and never block (a real photo still replaces them). The slot frees
+  // when the existing share is deleted or the next workout starts.
+  if (!isAutoValue && input.workoutId) {
+    const otherSlotFilter = input.shareToFeed
+      ? `(p.share_to_story AND NOT p.share_to_feed)`
+      : `p.share_to_feed`;
+    const existingShare = await db.query<{ post_id: string }>(
+      `SELECT p.post_id FROM posts p
+			WHERE p.workout_id = $1 AND p.user_id = $2
+				AND p.deleted_at IS NULL AND NOT p.is_auto
+				AND ${otherSlotFilter}
+			LIMIT 1`,
+      [input.workoutId, input.userId],
+    );
+    if (existingShare[0]) throw new Error("workout_already_posted");
   }
   // Only the slot's AUTO post may be overwritten in place — for legacy
   // requests too. Legacy upserts used to overwrite ANYTHING the caller owned,
@@ -332,11 +379,13 @@ export async function getStoriesRail(viewerId: string): Promise<StoryGroup[]> {
     profile_image_url: string | null;
     created_at: string;
     is_viewed: boolean;
+    local_date: string | null;
   }>(
     `
 		${CIRCLE_CTE}
 		SELECT
 			p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url, p.created_at,
+			p.local_date::text AS local_date,
 			EXISTS (
 				SELECT 1 FROM story_views sv WHERE sv.post_id = p.post_id AND sv.viewer_id = $1
 			) AS is_viewed
@@ -347,6 +396,7 @@ export async function getStoriesRail(viewerId: string): Promise<StoryGroup[]> {
 			AND p.deleted_at IS NULL
 			AND p.story_expires_at > NOW()
 			AND p.user_id NOT IN (SELECT uid FROM blocked)
+			AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
 		ORDER BY p.created_at ASC
 		`,
     [viewerId],
@@ -365,11 +415,24 @@ export async function getStoriesRail(viewerId: string): Promise<StoryGroup[]> {
         story_count: 1,
         has_unviewed: !r.is_viewed,
         latest_at: r.created_at,
+        story_local_dates: r.local_date ? [r.local_date] : [],
+        unviewed_local_dates:
+          !r.is_viewed && r.local_date ? [r.local_date] : [],
       });
     } else {
       g.story_count += 1;
       g.has_unviewed = g.has_unviewed || !r.is_viewed;
       if (r.created_at > g.latest_at) g.latest_at = r.created_at;
+      if (r.local_date && !g.story_local_dates.includes(r.local_date)) {
+        g.story_local_dates.push(r.local_date);
+      }
+      if (
+        !r.is_viewed &&
+        r.local_date &&
+        !g.unviewed_local_dates.includes(r.local_date)
+      ) {
+        g.unviewed_local_dates.push(r.local_date);
+      }
     }
   }
 
@@ -397,6 +460,10 @@ export async function getUserActiveStories(
 			EXISTS (
 				SELECT 1 FROM story_views sv WHERE sv.post_id = p.post_id AND sv.viewer_id = $1
 			) AS is_viewed,
+			(
+				SELECT sr.emoji FROM story_reactions sr
+				WHERE sr.post_id = p.post_id AND sr.user_id = $1
+			) AS viewer_reaction,
 			EXISTS (
 				SELECT 1 FROM posts pf
 				WHERE pf.workout_id = p.workout_id
@@ -413,6 +480,7 @@ export async function getUserActiveStories(
 			AND p.deleted_at IS NULL
 			AND p.story_expires_at > NOW()
 			AND p.user_id NOT IN (SELECT uid FROM blocked)
+			AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
 		ORDER BY p.created_at ASC
 		`,
     [viewerId, authorId],
@@ -509,6 +577,59 @@ export async function getStoryViewers(
   );
 }
 
+export interface StoryReactorRow {
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+  emoji: string;
+  created_at: string;
+}
+
+/**
+ * Everyone who reacted to a story, for the Instagram-style bubble row shown to
+ * ALL circle viewers (not just the author, unlike getStoryViewers). Returns
+ * null when the caller can't see the story (author/accepted-friend, no block) —
+ * the controller maps that to 404. Includes the caller's own reaction.
+ */
+export async function getStoryReactors(
+  viewerId: string,
+  postId: string,
+): Promise<StoryReactorRow[] | null> {
+  const allowed = await db.query(
+    `SELECT 1 FROM posts p
+			 WHERE p.post_id = $1 AND p.share_to_story AND p.deleted_at IS NULL
+				 AND (
+					 p.user_id = $2
+					 OR EXISTS (
+						 SELECT 1 FROM friendships f
+						 WHERE f.user_id = $2 AND f.friend_id = p.user_id AND f.status = 'accepted'
+					 )
+				 )
+				 AND NOT EXISTS (
+					 SELECT 1 FROM user_blocks b
+					 WHERE (b.blocker_id = $2 AND b.blocked_id = p.user_id)
+							OR (b.blocker_id = p.user_id AND b.blocked_id = $2)
+				 )`,
+    [postId, viewerId],
+  );
+  if (allowed.length === 0) return null;
+
+  return db.query<StoryReactorRow>(
+    `
+		SELECT u.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
+			sr.emoji, sr.created_at
+		FROM story_reactions sr
+		JOIN users u ON u.user_id = sr.user_id
+		WHERE sr.post_id = $1
+		ORDER BY sr.created_at DESC
+		LIMIT 200
+		`,
+    [postId],
+  );
+}
+
 /** The ephemeral counterpart to feed hype — one emoji per (story, viewer). */
 export const ALLOWED_STORY_REACTIONS = new Set([
   "\u2764\uFE0F",
@@ -594,9 +715,9 @@ export async function reactToStory(
 
 /**
  * The caller's own past post photos for the "On this day" memories surface:
- * same calendar day in previous years, plus exactly one week and one month
- * ago. Story-only photos count — expiry hides them from the rail, not from
- * the author's memories.
+ * same calendar day in previous years only — sub-year lookbacks (a week/month
+ * ago) felt too recent to be a "memory". Story-only photos count — expiry
+ * hides them from the rail, not from the author's memories.
  */
 export async function getOwnPostMemories(
   userId: string,
@@ -610,17 +731,67 @@ export async function getOwnPostMemories(
 		WHERE p.user_id = $1
 			AND p.deleted_at IS NULL
 			AND p.local_date < $2::date
-			AND (
-				(EXTRACT(MONTH FROM p.local_date) = EXTRACT(MONTH FROM $2::date)
-					AND EXTRACT(DAY FROM p.local_date) = EXTRACT(DAY FROM $2::date))
-				OR p.local_date = ($2::date - INTERVAL '1 month')::date
-				OR p.local_date = ($2::date - INTERVAL '7 days')::date
-			)
+			AND EXTRACT(MONTH FROM p.local_date) = EXTRACT(MONTH FROM $2::date)
+			AND EXTRACT(DAY FROM p.local_date) = EXTRACT(DAY FROM $2::date)
 		ORDER BY p.local_date DESC
 		LIMIT 12
 		`,
     [userId, localDate],
   );
+}
+
+/** The viewer's mile status for a feed read — drives the photo gate. */
+export interface ViewerGoalGate {
+  completed: boolean;
+  localDate: string;
+}
+
+/**
+ * Withhold TODAY's real photos from a viewer who hasn't finished their own mile
+ * yet — "run to see your friends' pictures". Mutates and returns the rows.
+ *
+ * Rules (per the product decision):
+ *  - Only the viewer's LOCAL today is gated; older posts always show.
+ *  - Own posts are never gated (you can always see your own).
+ *  - PHOTOS ONLY: a real user photo (media_url on a non-auto post) and any
+ *    story_photo_url are withheld; auto route/stats cards stay visible.
+ *  - Once the viewer completes their mile, nothing is gated.
+ *
+ * media_url is blanked to "" rather than nulled so existing (non-optional)
+ * clients still decode; new clients read `photo_locked` to draw the lock state.
+ * `photo_locked` marks a row that LOST a photo here — not merely one that fell
+ * under the gate — so a row whose every slide survived never renders as locked.
+ */
+export function lockUnearnedPhotos<
+  T extends {
+    user_id: string;
+    local_date?: string | null;
+    is_auto?: boolean | null;
+    media_url?: string | null;
+    story_photo_url?: string | null;
+    photo_locked?: boolean;
+  },
+>(rows: T[], viewerId: string, gate: ViewerGoalGate): T[] {
+  if (gate.completed || !gate.localDate) return rows;
+  for (const r of rows) {
+    if (r.user_id === viewerId) continue;
+    if ((r.local_date ?? null) !== gate.localDate) continue;
+    let withheld = false;
+    if (r.story_photo_url) {
+      r.story_photo_url = null;
+      withheld = true;
+    }
+    // Leave auto route/stats cards visible; only real photos are locked.
+    if (r.is_auto !== true && r.media_url) {
+      r.media_url = "";
+      withheld = true;
+    }
+    // Only flag rows that actually LOST a photo. An auto route/stats card with
+    // no story photo has nothing withheld, so it must not read as locked —
+    // flagging it made clients hide a card they were meant to see.
+    if (withheld) r.photo_locked = true;
+  }
+  return rows;
 }
 
 /**
@@ -680,6 +851,11 @@ export interface FeedEntryRow {
   story_photo_url: string | null;
   // post-only: system-generated route/stats card vs deliberate user post.
   is_auto: boolean | null;
+  // post-only: the author's local date ("YYYY-MM-DD"), so the viewer's today can
+  // be gated. Null for raw workout entries (they carry no photo to gate).
+  local_date: string | null;
+  // Set by lockUnearnedPhotos when this post's photo is withheld.
+  photo_locked?: boolean;
   // The entry's workout: the linked workout for posts (null when unlinked),
   // the workout itself for workout entries. Lets the client know which of
   // today's runs already carry a deliberate post.
@@ -722,65 +898,34 @@ export async function getUnifiedFeed(
   limit: number,
   before?: string | null,
 ): Promise<FeedEntryRow[]> {
+  // PERF: the expensive per-row columns (route JSONB, is_hyped, hype_count,
+  // story_photo_url) are computed ONLY for the page's rows, not for the whole
+  // circle's history. The old shape put them in the SELECT list of a UNION ALL
+  // that was then ORDER BY sort_ts DESC LIMIT $3 — so Postgres had to evaluate
+  // them for every post AND every workout in the viewer's circle across all
+  // time before the outer LIMIT could apply, and got linearly slower as the
+  // workouts table grew. Now `candidates` unions only the cheap keys, `page`
+  // sorts+limits them (the LIMIT is a hard barrier), and the outer SELECT
+  // projects the heavy columns onto just those <= $3 rows. Output shape and
+  // every value are identical to the old query; results are keyed by column
+  // name so column order is irrelevant. All lookups here are already indexed
+  // (idx_posts_user_created, idx_workouts_user_device_end for the candidate
+  // ordering; hype_log_context_dedupe_idx / idx_hype_log_target_context for the
+  // hype checks).
   const rows = await db.query<FeedEntryRow>(
     `
-		${CIRCLE_CTE}
-		SELECT feed.*, ${URL_SAFE_CURSOR("feed.sort_ts")} AS cursor FROM (
+		${CIRCLE_CTE},
+		candidates AS (
 			SELECT
-				'post' AS kind,
+				'post'::text AS kind,
 				p.post_id::text AS id,
 				p.created_at AS sort_ts,
-				p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
-				p.media_url, p.caption, p.stats_snapshot,
-				-- Owner's decision: the 24h expiry only ends the STORY (rail/viewer).
-				-- A photo riding on the run's feed card stays permanently — only
-				-- deleting the story removes it.
-				(
-					SELECT p3.media_url FROM posts p3
-					WHERE p.workout_id IS NOT NULL
-						AND p3.workout_id = p.workout_id
-						AND p3.user_id = p.user_id
-						AND p3.post_id <> p.post_id
-						AND p3.deleted_at IS NULL
-						AND p3.share_to_story AND NOT p3.share_to_feed
-					ORDER BY p3.created_at DESC
-					LIMIT 1
-				) AS story_photo_url,
-				p.is_auto,
-				p.workout_id,
-				(SELECT w2.workout_type FROM workouts w2 WHERE w2.workout_id = p.workout_id) AS workout_type,
-				NULL::double precision AS distance,
-				NULL::double precision AS total_duration,
-				NULL::double precision AS calories,
-				NULL::integer AS steps,
-				-- Auto posts' media already IS the rendered route card, so shipping
-				-- the polyline too would only duplicate pixels and bloat the page.
-				-- Gated on the author's global "Share route maps" consent setting
-				-- on top of the per-post include_route choice.
-				(SELECT wr.route FROM workout_routes wr
-					WHERE p.include_route AND NOT p.is_auto
-						AND (COALESCE(nsp.share_route_maps, true) OR p.user_id = $1)
-						AND wr.workout_id = p.workout_id) AS route,
-				(p.user_id = $1) AS is_self,
-				-- Unified RUN rule: a post linked to a workout also counts the
-				-- run's 'mile' hypes (inbox / friends list) — same number on
-				-- every surface for the same run.
-				EXISTS (
-					SELECT 1 FROM hype_log h
-					WHERE h.sender_id = $1 AND h.target_id = p.user_id
-						AND ${postHypeMatchSql("h", "p")}
-				) AS is_hyped,
-				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
-					WHERE hc.target_id = p.user_id
-						AND ${postHypeMatchSql("hc", "p")}) AS hype_count,
-				(SELECT COUNT(*)::int FROM post_comments pc
-					WHERE pc.post_id = p.post_id AND pc.deleted_at IS NULL) AS comment_count,
-				${COAUTHOR_COLUMNS}
+				p.user_id AS owner_id,
+				p.workout_id AS workout_id
 			FROM posts p
-			JOIN users u ON u.user_id = p.user_id
-			LEFT JOIN notification_settings nsp ON nsp.user_id = p.user_id
 			WHERE p.share_to_feed AND p.deleted_at IS NULL
-				-- Accepted collab posts reach BOTH authors' circles.
+				-- Accepted collab posts reach BOTH authors' circles (semi-join, not
+				-- a JOIN, so a post whose two authors share the viewer isn't doubled).
 				AND EXISTS (
 					SELECT 1 FROM circle c
 					WHERE c.uid = p.user_id
@@ -789,53 +934,24 @@ export async function getUnifiedFeed(
 				AND p.user_id NOT IN (SELECT uid FROM blocked)
 				AND (p.coauthor_status IS DISTINCT FROM 'accepted'
 					OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
+				AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
 
 			UNION ALL
 
 			SELECT
-				'workout' AS kind,
+				'workout'::text AS kind,
 				w.workout_id AS id,
 				w.device_end_date AS sort_ts,
-				w.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
-				NULL::text AS media_url, NULL::text AS caption, NULL::jsonb AS stats_snapshot,
-				NULL::text AS story_photo_url,
-				NULL::boolean AS is_auto,
-				w.workout_id,
-				w.workout_type,
-				w.distance::double precision,
-				w.total_duration::double precision,
-				w.calories::double precision,
-				w.steps,
-				-- Raw workout routes respect the owner's "Share route maps" setting
-				-- (the owner always sees their own).
-				(SELECT wr.route FROM workout_routes wr
-					WHERE (COALESCE(ns.share_route_maps, true) OR w.user_id = $1)
-						AND wr.workout_id = w.workout_id) AS route,
-				(w.user_id = $1) AS is_self,
-				-- Unified RUN rule: the run's 'mile' hypes plus 'post' hypes on
-				-- any post linked to this workout (e.g. a story-only photo that
-				-- was hyped from a profile) — same number on every surface.
-				EXISTS (
-					SELECT 1 FROM hype_log h
-					WHERE h.sender_id = $1 AND h.target_id = w.user_id
-						AND ${runHypeMatchSql("h", "w")}
-				) AS is_hyped,
-				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
-					WHERE hc.target_id = w.user_id
-						AND ${runHypeMatchSql("hc", "w")}) AS hype_count,
-				0 AS comment_count,
-				NULL::text AS coauthor_user_id,
-				NULL::text AS coauthor_status,
-				NULL::text AS coauthor_username,
-				NULL::text AS coauthor_first_name,
-				NULL::text AS coauthor_last_name,
-				NULL::text AS coauthor_profile_image_url
+				w.user_id AS owner_id,
+				w.workout_id AS workout_id
 			FROM workouts w
 			JOIN circle c ON c.uid = w.user_id
-			JOIN users u ON u.user_id = w.user_id
 			LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
 			WHERE w.user_id NOT IN (SELECT uid FROM blocked)
 				AND COALESCE(ns.share_workouts_to_feed, true) = true
+				-- The feed is always YOUR circle, so 'public' must not pour
+				-- strangers in; only the tightening direction applies here.
+				AND ${OWNER_NOT_PRIVATE_SQL("w.user_id")}
 				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 				AND NOT EXISTS (
 					SELECT 1 FROM posts p2
@@ -843,10 +959,104 @@ export async function getUnifiedFeed(
 							OR (p2.coauthor_status = 'accepted' AND p2.coauthor_workout_id = w.workout_id))
 						AND p2.deleted_at IS NULL AND p2.share_to_feed
 				)
-		) feed
-		WHERE ($2::timestamptz IS NULL OR sort_ts < $2::timestamptz)
-		ORDER BY sort_ts DESC
-		LIMIT $3
+		),
+		page AS (
+			SELECT kind, id, sort_ts, owner_id, workout_id
+			FROM candidates
+			WHERE ($2::timestamptz IS NULL OR sort_ts < $2::timestamptz)
+			ORDER BY sort_ts DESC
+			LIMIT $3
+		)
+		SELECT
+			page.kind,
+			page.id,
+			page.sort_ts,
+			page.owner_id AS user_id,
+			u.username, u.first_name, u.last_name, u.profile_image_url,
+			p.media_url, p.caption, p.stats_snapshot,
+			p.local_date::text AS local_date,
+			-- Owner's decision: the 24h expiry only ends the STORY (rail/viewer).
+			-- A photo riding on the run's feed card stays permanently — only
+			-- deleting the story removes it.
+			(
+				SELECT p3.media_url FROM posts p3
+				WHERE page.kind = 'post'
+					AND p.workout_id IS NOT NULL
+					AND p3.workout_id = p.workout_id
+					AND p3.user_id = p.user_id
+					AND p3.post_id <> p.post_id
+					AND p3.deleted_at IS NULL
+					AND p3.share_to_story AND NOT p3.share_to_feed
+				ORDER BY p3.created_at DESC
+				LIMIT 1
+			) AS story_photo_url,
+			p.is_auto,
+			page.workout_id,
+			-- Populated for posts (via their linked workout) and workouts alike.
+			wt.workout_type,
+			CASE WHEN page.kind = 'workout' THEN wt.distance::double precision END AS distance,
+			CASE WHEN page.kind = 'workout' THEN wt.total_duration::double precision END AS total_duration,
+			CASE WHEN page.kind = 'workout' THEN wt.calories::double precision END AS calories,
+			CASE WHEN page.kind = 'workout' THEN wt.steps END AS steps,
+			-- Auto posts' media already IS the rendered route card, so shipping
+			-- the polyline too would only duplicate pixels and bloat the page.
+			-- Gated on the author's global "Share route maps" consent setting;
+			-- posts additionally honor the per-post include_route choice. Raw
+			-- workout routes respect the same setting (the owner always sees
+			-- their own).
+			CASE
+				WHEN page.kind = 'post' THEN (
+					SELECT wr.route FROM workout_routes wr
+					WHERE p.include_route AND NOT p.is_auto
+						AND (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
+						AND wr.workout_id = p.workout_id
+				)
+				ELSE (
+					SELECT wr.route FROM workout_routes wr
+					WHERE (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
+						AND wr.workout_id = wt.workout_id
+				)
+			END AS route,
+			(page.owner_id = $1) AS is_self,
+			-- Unified RUN rule: a post/workout linked to a run counts the run's
+			-- 'mile' hypes (inbox / friends list) AND 'post' hypes on any linked
+			-- post — same number on every surface for the same run.
+			CASE
+				WHEN page.kind = 'post' THEN EXISTS (
+					SELECT 1 FROM hype_log h
+					WHERE h.sender_id = $1 AND h.target_id = page.owner_id
+						AND ${postHypedByViewerMatchSql("h", "p")}
+				)
+				ELSE EXISTS (
+					SELECT 1 FROM hype_log h
+					WHERE h.sender_id = $1 AND h.target_id = page.owner_id
+						AND ${runHypedByViewerMatchSql("h", "wt")}
+				)
+			END AS is_hyped,
+			CASE
+				WHEN page.kind = 'post' THEN (
+					SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
+					WHERE hc.target_id = page.owner_id
+						AND ${postHypeMatchSql("hc", "p")}
+				)
+				ELSE (
+					SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
+					WHERE hc.target_id = page.owner_id
+						AND ${runHypeMatchSql("hc", "wt")}
+				)
+			END AS hype_count,
+			CASE WHEN page.kind = 'post' THEN (
+				SELECT COUNT(*)::int FROM post_comments pc
+				WHERE pc.post_id = p.post_id AND pc.deleted_at IS NULL
+			) ELSE 0 END AS comment_count,
+			${COAUTHOR_COLUMNS},
+			${URL_SAFE_CURSOR("page.sort_ts")} AS cursor
+		FROM page
+		JOIN users u ON u.user_id = page.owner_id
+		LEFT JOIN posts p ON page.kind = 'post' AND p.post_id::text = page.id
+		LEFT JOIN workouts wt ON wt.workout_id = page.workout_id
+		LEFT JOIN notification_settings nsp ON nsp.user_id = page.owner_id
+		ORDER BY page.sort_ts DESC
 		`,
     [viewerId, before ?? null, limit],
   );
@@ -857,16 +1067,25 @@ export async function getUnifiedFeed(
  * A user's permanent feed posts (newest first) for the Instagram-style profile
  * grid. Viewer must be the author or an accepted friend, and not blocked.
  * Returns [] when not allowed to view.
+ *
+ * `includeStoryOnly` (self-view only — the controller enforces it) also
+ * returns the author's story-only posts whose workout has NO live feed post,
+ * so the owner can review them and promote one onto the feed. Story photos
+ * whose run is already on the feed stay excluded — they already surface as
+ * that feed post's story_photo_url slide.
  */
 export async function getUserPosts(
   viewerId: string,
   authorId: string,
   limit: number,
   before?: string | null,
+  includeStoryOnly = false,
 ): Promise<PostRow[]> {
+  // No CIRCLE_CTE here: a profile read is exactly where `workout_visibility`
+  // decides who gets in, and a hardcoded circle join would have made 'public'
+  // impossible. The feed still uses the circle — that one IS friends-by-nature.
   const rows = await db.query<PostRow>(
     `
-		${CIRCLE_CTE}
 		SELECT ${POST_SELECT},
 			${URL_SAFE_CURSOR("p.created_at")} AS cursor,
 			-- The run's story photo, so the profile grid + detail cards lead
@@ -888,43 +1107,139 @@ export async function getUserPosts(
 		JOIN users u ON u.user_id = p.user_id
 		WHERE (p.user_id = $2
 				OR (p.coauthor_user_id = $2 AND p.coauthor_status = 'accepted'))
-			AND p.share_to_feed
 			AND p.deleted_at IS NULL
-			AND EXISTS (SELECT 1 FROM circle WHERE uid = $2)
-			AND p.user_id NOT IN (SELECT uid FROM blocked)
-			AND $2 NOT IN (SELECT uid FROM blocked)
+			AND (
+				p.share_to_feed
+				OR (
+					$5::boolean
+					AND p.user_id = $2
+					AND p.user_id = $1
+					AND p.share_to_story AND NOT p.share_to_feed
+					AND NOT EXISTS (
+						SELECT 1 FROM posts pf
+						WHERE p.workout_id IS NOT NULL
+							AND pf.workout_id = p.workout_id
+							AND pf.user_id = p.user_id
+							AND pf.share_to_feed
+							AND pf.deleted_at IS NULL
+					)
+				)
+			)
+			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$2", "$1")}
+			-- Collab rows surface the PRIMARY author's content on the coauthor's
+			-- profile — hide them when a block exists between viewer and author.
+			AND NOT EXISTS (
+				SELECT 1 FROM user_blocks b
+				WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
+					OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
+			)
 			AND ($3::timestamptz IS NULL OR p.created_at < $3::timestamptz)
 		ORDER BY p.created_at DESC
 		LIMIT $4
 		`,
-    [viewerId, authorId, before ?? null, limit],
+    [viewerId, authorId, before ?? null, limit, includeStoryOnly],
   );
   return rows;
 }
 
 /**
- * Best-effort push to the author's friends that they shared a new feed post.
- * Respects each friend's `friend_posts_enabled` (default on), excludes blocks
- * both ways, and is capped to avoid fan-out storms. Never throws into the
- * caller — notifications must not block post creation.
+ * Best-effort push to the author's friends that they shared a new post/story.
+ * One notification per deliberate createPost — a post going to the story AND
+ * the feed together still produces a single push. Respects each friend's
+ * `friend_posts_enabled` (default on), excludes blocks both ways, only
+ * reaches friends whose build can open the feed/stories UI (same signal as
+ * userHasFeedFeature), and is capped to avoid fan-out storms.
+ *
+ * Anti-spam via UPGRADE, not dismissal: when the deferred "got their mile
+ * in" push is still pending (the 10-min merge window, send_after_at set —
+ * audience-'ask' confirm cards have it NULL and are never touched), its
+ * payload is upgraded in place to carry the photo (body + data.post_id) and
+ * NO separate friend_post is sent. The original recipient pool — including
+ * competition co-participants and friends on pre-feed builds — still gets
+ * exactly one push on the original schedule. Only when nothing is pending
+ * (posted later, mile push already sent) does the immediate friend_post
+ * fan-out fire. Never throws into the caller.
  */
-export async function notifyFriendsOfPost(
-  authorId: string,
-  caption: string | null,
-): Promise<void> {
+export async function notifyFriendsOfPost(input: {
+  authorId: string;
+  postId: string;
+  caption: string | null;
+  toFeed: boolean;
+  toStory: boolean;
+  localDate: string;
+}): Promise<void> {
+  const { authorId, postId, caption, toFeed, toStory, localDate } = input;
   try {
+    const trimmedCaption = caption?.trim() ?? "";
+    const storyOnly = toStory && !toFeed;
+    const mergedBody =
+      trimmedCaption.length > 0
+        ? `📸 ${trimmedCaption.slice(0, 110)}`
+        : storyOnly
+          ? "and shared a story from it 📸"
+          : "and shared a photo from it 📸";
+
+    const upgraded = await db.query<{ id: string }>(
+      `UPDATE pending_friend_notifications
+			 SET payload = jsonb_set(
+				 jsonb_set(payload, '{body}', to_jsonb($3::text)),
+				 '{data,post_id}', to_jsonb($4::text)
+			 )
+			 WHERE user_id = $1 AND event_type = 'mile_completed'
+				 AND status = 'pending' AND send_after_at IS NOT NULL
+				 AND local_date = $2::date
+			 RETURNING id`,
+      [authorId, localDate, mergedBody, postId],
+    );
+    if (upgraded.length > 0) {
+      // The scheduled mile push now carries the photo — one merged
+      // notification per run, original pool, original timing.
+      return;
+    }
+
+    // Rolling-window coalesce: don't buzz friends again if this author made
+    // another deliberate post in the last few hours. A morning walk and an
+    // evening run (>window apart) both notify; three quick posts in a session
+    // don't triple-buzz. (The mile-merge above handles the just-finished
+    // case; this caps the later-post path.) The post itself still lands in
+    // the feed — only the push is suppressed.
+    //
+    // Probed against posts (not in_app_notifications): a prior deliberate
+    // post in the window is the proxy for "already notified", and this hits
+    // idx_posts_user_created (user_id, created_at) instead of full-scanning
+    // the ever-growing inbox table on data->>'user_id'.
+    const recent = await db.query<{ id: string }>(
+      `SELECT 1 AS id FROM posts
+			 WHERE user_id = $1
+				 AND post_id <> $2
+				 AND is_auto = false
+				 AND deleted_at IS NULL
+				 AND created_at > NOW() - INTERVAL '6 hours'
+			 LIMIT 1`,
+      [authorId, postId],
+    );
+    if (recent.length > 0) return;
+
     const recipients = await db.query<{ uid: string }>(
       `SELECT f.friend_id AS uid
-			 FROM friendships f
-			 LEFT JOIN notification_settings ns ON ns.user_id = f.friend_id
-			 WHERE f.user_id = $1 AND f.status = 'accepted'
-				 AND COALESCE(ns.friend_posts_enabled, true) = true
-				 AND f.friend_id NOT IN (
-					 SELECT blocked_id FROM user_blocks WHERE blocker_id = $1
-					 UNION
-					 SELECT blocker_id FROM user_blocks WHERE blocked_id = $1
-				 )
-			 LIMIT 25`,
+				 FROM friendships f
+				 LEFT JOIN notification_settings ns ON ns.user_id = f.friend_id
+				 WHERE f.user_id = $1 AND f.status = 'accepted'
+					 AND COALESCE(ns.friend_posts_enabled, true) = true
+					 AND f.friend_id NOT IN (
+						 SELECT blocked_id FROM user_blocks WHERE blocker_id = $1
+						 UNION
+						 SELECT blocker_id FROM user_blocks WHERE blocked_id = $1
+					 )
+					 AND (
+						 EXISTS (SELECT 1 FROM posts fp WHERE fp.user_id = f.friend_id)
+						 OR EXISTS (
+							 SELECT 1 FROM users fu
+							 WHERE fu.user_id = f.friend_id
+								 AND fu.terms_accepted_at IS NOT NULL
+						 )
+					 )
+				 LIMIT 25`,
       [authorId],
     );
     if (recipients.length === 0) return;
@@ -934,16 +1249,28 @@ export async function notifyFriendsOfPost(
       [authorId],
     );
     const name = authorRows[0]?.username ?? "A friend";
-    const trimmed = caption?.trim() ?? "";
+    const title = storyOnly
+      ? `${name} added to their story ✨`
+      : `${name} posted 📸`;
     const body =
-      trimmed.length > 0 ? trimmed.slice(0, 120) : "shared a new post";
+      trimmedCaption.length > 0
+        ? trimmedCaption.slice(0, 120)
+        : storyOnly
+          ? "shared a new story"
+          : "shared a new post";
 
     for (const r of recipients) {
       sendPush(r.uid, {
-        title: `${name} posted 📸`,
+        title,
         body,
         type: "friend_post",
-        data: { user_id: authorId, kind: "post" },
+        // kind routes the tap client-side ("story" opens the story viewer,
+        // "post" lands on the feed entry); post_id is additive deep-link data.
+        data: {
+          user_id: authorId,
+          kind: storyOnly ? "story" : "post",
+          post_id: postId,
+        },
       }).catch((e: any) =>
         console.error("[notifyFriendsOfPost]", e?.message ?? e),
       );
@@ -1110,6 +1437,88 @@ export async function softDeletePost(
     [postId, authorId],
   );
   return rows.length > 0;
+}
+
+export type UpdatePostResult = "ok" | "not_found" | "feed_conflict";
+
+/**
+ * Edit a post the caller authored: caption text, and/or promote a story-only
+ * post onto the feed (share_to_feed = true) IN PLACE — keeping its original
+ * local_date, media, and stats, unlike the story viewer's re-POST flow.
+ *
+ * Promotion honors the one-feed-post-per-workout slot the same way createPost
+ * does: an existing AUTO route/stats card for the run is soft-deleted and
+ * replaced; an existing deliberate user post returns "feed_conflict" (409).
+ */
+export async function updateOwnPost(
+  authorId: string,
+  postId: string,
+  updates: { caption?: string | null; addToFeed?: boolean },
+): Promise<UpdatePostResult> {
+  if (updates.caption !== undefined) {
+    const rows = await db.query<{ post_id: string }>(
+      `UPDATE posts SET caption = $3
+			 WHERE post_id = $1 AND user_id = $2 AND deleted_at IS NULL
+			 RETURNING post_id`,
+      [postId, authorId, updates.caption],
+    );
+    if (rows.length === 0) return "not_found";
+  }
+
+  if (updates.addToFeed === true) {
+    const target = await db.query<{
+      post_id: string;
+      share_to_feed: boolean;
+    }>(
+      `SELECT post_id, share_to_feed FROM posts
+			 WHERE post_id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+      [postId, authorId],
+    );
+    if (target.length === 0) return "not_found";
+    if (target[0].share_to_feed) return "ok"; // already on the feed
+
+    // Single statement so the auto card can't be deleted without the
+    // promotion landing (no half-applied state): `conflict` finds any live
+    // feed post on the same workout; the auto one is replaced, a deliberate
+    // user post blocks both CTE updates.
+    const promoted = await db.query<{ post_id: string }>(
+      `
+			WITH target AS (
+				SELECT post_id, workout_id FROM posts
+				WHERE post_id = $1 AND user_id = $2 AND deleted_at IS NULL
+			),
+			conflict AS (
+				SELECT p.post_id, p.is_auto
+				FROM posts p JOIN target t ON p.workout_id = t.workout_id
+				WHERE t.workout_id IS NOT NULL
+					AND p.user_id = $2
+					AND p.share_to_feed
+					AND p.deleted_at IS NULL
+					AND p.post_id <> t.post_id
+			),
+			replaced AS (
+				UPDATE posts SET deleted_at = NOW()
+				WHERE post_id IN (SELECT post_id FROM conflict WHERE is_auto)
+					AND NOT EXISTS (SELECT 1 FROM conflict WHERE is_auto IS NOT TRUE)
+				RETURNING post_id
+			)
+			UPDATE posts p SET share_to_feed = true
+			FROM target t
+			WHERE p.post_id = t.post_id
+				AND NOT EXISTS (SELECT 1 FROM conflict WHERE is_auto IS NOT TRUE)
+				-- Referencing 'replaced' forces it to run first: an unreferenced
+				-- data-modifying CTE has no ordering guarantee, and promoting
+				-- before the auto card's soft-delete lands would trip the
+				-- one-feed-post-per-workout unique index.
+				AND (SELECT COUNT(*) FROM replaced) IS NOT NULL
+			RETURNING p.post_id
+			`,
+      [postId, authorId],
+    );
+    if (promoted.length === 0) return "feed_conflict";
+  }
+
+  return "ok";
 }
 
 /** Moderator override delete (privileged users) — ignores authorship. */

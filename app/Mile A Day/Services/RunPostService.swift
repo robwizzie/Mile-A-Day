@@ -79,7 +79,7 @@ enum RunPostService {
             let mediaUrl = try await PostService.uploadMedia(finalImage)
             // isAuto — the server may replace this card in place with a later
             // photo post, but it never counts as the user's one post per workout.
-            _ = try await PostService.createPost(
+            let created = try await PostService.createPost(
                 mediaUrl: mediaUrl,
                 caption: nil,
                 workoutId: workoutId,
@@ -87,6 +87,12 @@ enum RunPostService {
                 shareToStory: false,
                 stats: stats.snapshot,
                 isAuto: true
+            )
+            // Skipping the photo still counts as posting this run live if it's
+            // within the fresh window (no-op otherwise).
+            FreshPostWindowManager.shared.markPostedLive(
+                postId: created.post_id,
+                workoutId: created.workout_id ?? workoutId
             )
         } catch {
             print("[RunPostService] autoPostMile failed: \(error)")
@@ -172,11 +178,11 @@ enum RunPostService {
             cg.setLineWidth(16)
             cg.setLineJoin(.round)
             cg.setLineCap(.round)
-            var first = true
-            for coord in coordinates {
-                let pt = snapshot.point(for: coord)
-                if first { cg.move(to: pt); first = false } else { cg.addLine(to: pt) }
-            }
+            // Same centripetal Catmull-Rom smoothing the live feed overlay
+            // uses, so the baked image matches what friends swipe to on the
+            // feed slide.
+            let screenPoints = coordinates.map { snapshot.point(for: $0) }
+            cg.addPath(RouteSmoothing.smoothedPath(through: screenPoints))
             cg.strokePath()
 
             drawDot(cg, at: snapshot.point(for: coordinates.first!), color: .systemGreen)

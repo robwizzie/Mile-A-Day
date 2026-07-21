@@ -5,6 +5,11 @@
 //  Developer tools for testing and debugging
 //  Includes cache clearing, sync reset, and testing utilities
 //
+//  DEBUG builds only: the entire file is compiled out of Release/App Store
+//  builds so no dev tooling (or its strings) ships in the production binary.
+//
+
+#if DEBUG
 
 import SwiftUI
 import HealthKit
@@ -79,6 +84,39 @@ struct DeveloperSettingsView: View {
                     }
                 }
                 .disabled(workoutService.isLoading)
+            }
+
+            // Review Prompt Section
+            Section(
+                header: Text("Review Prompt"),
+                footer: Text("Reset clears the recorded milestones so the prompt can fire again — it reappears on the next calm pass on the Dashboard tab (background then foreground the app). Open goes straight to the App Store review composer; this only works on a real device, not the Simulator.")
+            ) {
+                Button(action: {
+                    ReviewPromptManager.shared.resetForTesting()
+                    successMessage = "Review prompt reset. Go to the Dashboard tab, then background and foreground the app."
+                    showSuccessAlert = true
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.counterclockwise")
+                            .foregroundColor(.orange)
+                        Text("Reset Review Prompt")
+                        Spacer()
+                    }
+                }
+
+                Button(action: {
+                    guard let url = ReviewPromptManager.writeReviewURL else { return }
+                    UIApplication.shared.open(url)
+                }) {
+                    HStack {
+                        Image(systemName: "star.fill")
+                            .foregroundColor(.yellow)
+                        Text("Open App Store Review Page")
+                        Spacer()
+                        Image(systemName: "arrow.up.forward.app")
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
 
             // Test Push Notification Section
@@ -678,3 +716,5 @@ struct DeveloperSettingsView_Previews: PreviewProvider {
         }
     }
 }
+
+#endif

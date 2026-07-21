@@ -33,6 +33,7 @@ import { startSilentSyncCron } from "./cron/silentSyncCron.js";
 import { startStoriesCron } from "./cron/storiesCron.js";
 import { startPendingSendCron } from "./cron/pendingSendCron.js";
 import { startWeeklyRecapCron } from "./cron/weeklyRecapCron.js";
+import { startH2hChallengeCron } from "./cron/h2hChallengeCron.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
 import { PostgresService } from "./services/DbService.js";
@@ -130,10 +131,6 @@ app.get("/status/schema", async (req, res) => {
   });
 });
 
-app.get("/test-signin.html", (req, res) => {
-  res.sendFile(path.join(process.cwd(), "test-signin.html"));
-});
-
 // Public endpoint: get profile image URL by username
 app.get(
   "/public/profile-image/:username",
@@ -214,9 +211,12 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
     },
   });
 
+  // Generic body only: raw err.message can carry SQL fragments or file paths.
+  // The full message + stack already went to error_log above (admin dashboard).
+  // `message` field kept for response-shape compatibility with shipped clients.
   res.status(500).json({
     error: "Internal Server Error",
-    message: err.message,
+    message: "Something went wrong. Please try again.",
   });
 });
 
@@ -252,6 +252,7 @@ function startCrons() {
   startStoriesCron();
   startPendingSendCron();
   startWeeklyRecapCron();
+  startH2hChallengeCron();
   // Idempotently ensure the v2 social/app-function badges exist in the catalog.
   seedExtraBadges();
   // Idempotently ensure the v2 daily challenges (5K/10K/social) exist.

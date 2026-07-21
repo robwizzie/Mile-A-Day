@@ -96,9 +96,17 @@ extension HealthKitManager {
     // MARK: - Current Streak Stats Functions
 
     // Calculate current streak stats (total miles, most miles, fastest pace during current streak)
-    func calculateCurrentStreakStats() -> (totalMiles: Double, mostMiles: Double, fastestPace: TimeInterval, streakDays: Int) {
+    /// - Parameter displayedStreak: the vetted, user-facing streak — the value the
+    ///   dashboard's main streak card shows (`UserManager.currentUser.streak`). The
+    ///   streak window uses `max(retroactiveStreak, displayedStreak)` so these
+    ///   streak-scoped stats match the displayed streak rather than the raw local
+    ///   `retroactiveStreak`, which collapses to a tiny value when the WorkoutIndex
+    ///   has a hole (a qualifying day that reached HealthKit late / was deleted /
+    ///   never synced). See `UserManager.vettedHealthKitStreak` and the
+    ///   `max(hk, user.streak)` rule in `.claude/rules/ios.md`.
+    func calculateCurrentStreakStats(displayedStreak: Int = 0) -> (totalMiles: Double, mostMiles: Double, fastestPace: TimeInterval, streakDays: Int) {
 
-        let currentStreakDays = retroactiveStreak
+        let currentStreakDays = max(retroactiveStreak, displayedStreak)
         guard currentStreakDays > 0 else {
             return (0.0, 0.0, 0.0, 0)
         }
@@ -108,7 +116,7 @@ extension HealthKitManager {
             return cachedCurrentStreakStats
         }
 
-        let streakWorkouts = getWorkoutsForCurrentStreak()
+        let streakWorkouts = getWorkoutsForCurrentStreak(streakDays: currentStreakDays)
 
         // Calculate total miles and most miles (these are fast)
         let totalMiles = streakWorkouts.reduce(0.0) { total, workout in
@@ -134,7 +142,7 @@ extension HealthKitManager {
         }
 
         // Smart fastest pace calculation
-        let fastestPace = calculateSmartCurrentStreakFastestPace(streakWorkouts: streakWorkouts)
+        let fastestPace = calculateSmartCurrentStreakFastestPace(streakWorkouts: streakWorkouts, streakDays: currentStreakDays)
 
         let newStats = (totalMiles, mostMiles, fastestPace, currentStreakDays)
 
@@ -176,14 +184,14 @@ extension HealthKitManager {
         return true
     }
 
-    func calculateSmartCurrentStreakFastestPace(streakWorkouts: [HKWorkout]) -> TimeInterval {
+    func calculateSmartCurrentStreakFastestPace(streakWorkouts: [HKWorkout], streakDays: Int) -> TimeInterval {
         // OPTIMIZATION 1: Check if All Time fastest mile is within current streak
         if findWorkoutWithAllTimeFastestMile(in: streakWorkouts) != nil {
             return fastestMilePace
         }
 
         // OPTIMIZATION 2: Check if we have a cached value that's still valid for this streak
-        if cachedCurrentStreakFastestPace > 0 && cachedCurrentStreakStats.streakDays == retroactiveStreak {
+        if cachedCurrentStreakFastestPace > 0 && cachedCurrentStreakStats.streakDays == streakDays {
             // Check if any new qualifying workouts have been added since last calculation
             if !hasNewQualifyingWorkoutsSinceLastStreakCalculation(streakWorkouts: streakWorkouts) {
                 return cachedCurrentStreakFastestPace
@@ -304,7 +312,7 @@ extension HealthKitManager {
 
     /// Find workouts that achieved the current streak's fastest mile pace
     func findCurrentStreakFastestMileWorkouts() {
-        let streakWorkouts = getWorkoutsForCurrentStreak()
+        let streakWorkouts = getWorkoutsForCurrentStreak(streakDays: cachedCurrentStreakStats.streakDays)
         let currentStreakFastestPace = cachedCurrentStreakStats.fastestPace
 
         guard currentStreakFastestPace > 0 else {
@@ -340,12 +348,15 @@ extension HealthKitManager {
     }
 
     // Get workouts for the current streak period using timezone-aware calculation
-    func getWorkoutsForCurrentStreak() -> [HKWorkout] {
-        guard retroactiveStreak > 0 else { return [] }
+    /// - Parameter streakDays: streak length that bounds the window. Callers pass the
+    ///   vetted/effective streak (see `calculateCurrentStreakStats`), NOT raw
+    ///   `retroactiveStreak`, so the window doesn't collapse on a WorkoutIndex hole.
+    func getWorkoutsForCurrentStreak(streakDays: Int) -> [HKWorkout] {
+        guard streakDays > 0 else { return [] }
 
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let streakStartDate = calendar.date(byAdding: .day, value: -retroactiveStreak, to: today) ?? today
+        let streakStartDate = calendar.date(byAdding: .day, value: -streakDays, to: today) ?? today
 
 
         // If cachedWorkouts is empty, we need to fetch workouts directly

@@ -21,6 +21,8 @@ struct ActivityCardView: View {
     /// Collapses duplicate reports of one physical double-tap (see
     /// PostCardView.lastDoubleTapAt).
     @State private var lastDoubleTapAt = Date.distantPast
+    /// The map snapshot (~400×300) kept for the zoom's on-demand composite.
+    @State private var routeSnapshot: UIImage?
 
     private var distance: Double { entry.distance ?? 0 }
     private var completedMile: Bool { distance >= ProgressCalculator.dailyGoalTolerance }
@@ -35,7 +37,8 @@ struct ActivityCardView: View {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 heroLine
                 if let coords = entry.routeCoordinates {
-                    WorkoutRouteMapView(coordinates: coords, routeColor: accent)
+                    WorkoutRouteMapView(coordinates: coords, routeColor: accent,
+                                        onSnapshot: { routeSnapshot = $0 })
                         .frame(maxWidth: .infinity)
                         // Proportional, not a fixed 160pt: the map scales with the
                         // card on every screen size instead of shrinking to a strip.
@@ -44,6 +47,21 @@ struct ActivityCardView: View {
                         .overlay(
                             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
                                 .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                        )
+                        // Pinch-zooms like a photo; the floating copy is
+                        // composed on demand at the card's own 16:10 aspect
+                        // so the lift matches the on-screen slide exactly.
+                        .instagramZoomable(
+                            imageProvider: {
+                                guard let snapshot = routeSnapshot else { return nil }
+                                return WorkoutRouteMapView.zoomComposite(
+                                    snapshot: snapshot,
+                                    coordinates: coords,
+                                    routeColor: accent,
+                                    size: CGSize(width: 720, height: 450)
+                                ) { EmptyView() }
+                            },
+                            onDoubleTap: entry.is_self ? nil : doubleTapHype
                         )
                 }
                 statStrip
@@ -63,16 +81,22 @@ struct ActivityCardView: View {
         .overlay(HypeBurstView(trigger: hypeBurst))
     }
 
-    private func doubleTapHype() {
-        guard !entry.is_self else { return }
-        let now = Date()
-        guard now.timeIntervalSince(lastDoubleTapAt) > 0.35 else { return }
-        lastDoubleTapAt = now
+    /// Shared by double-tap and the footer HypeButton, so the button plays
+    /// the same clap burst the double-tap does.
+    private func celebrateAndHype() {
         hypeBurst += 1
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         if !entry.is_hyped {
             onHype()
         }
+    }
+
+    private func doubleTapHype() {
+        guard !entry.is_self else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastDoubleTapAt) > 0.35 else { return }
+        lastDoubleTapAt = now
+        celebrateAndHype()
     }
 
     private var header: some View {
@@ -172,7 +196,7 @@ struct ActivityCardView: View {
                     isHyped: entry.is_hyped,
                     isBusy: isHyping,
                     isOutOfHypes: isOutOfHypes && !entry.is_hyped,
-                    action: onHype
+                    action: celebrateAndHype
                 )
             }
         }
@@ -218,12 +242,8 @@ struct ActivityCardView: View {
         }
     }
     static func color(_ type: String?) -> Color {
-        switch (type ?? "").lowercased() {
-        case "running": return MADTheme.Colors.madRed
-        case "walking": return .orange
-        case "hiking": return .green
-        case "cycling": return .blue
-        default: return MADTheme.Colors.madRed
-        }
+        // Delegates to the app-wide language (walks BLUE, runs red) so the
+        // feed can never drift from the rest of the app again.
+        MADTheme.workoutColor(type)
     }
 }

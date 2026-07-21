@@ -83,15 +83,16 @@ struct NotificationInboxView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
             if let remaining = hypesRemaining {
+                // Top RIGHT, mirroring the feed's header pill placement.
                 // iOS 26 wraps toolbar items in a shared glass capsule; hiding it
                 // stops the orange pill from rendering inside a second system pill.
                 if #available(iOS 26.0, *) {
-                    ToolbarItem(placement: .navigationBarLeading) {
+                    ToolbarItem(placement: .navigationBarTrailing) {
                         HypePill(remaining: remaining, compact: true, unlimited: hypesUnlimited)
                     }
                     .sharedBackgroundVisibility(.hidden)
                 } else {
-                    ToolbarItem(placement: .navigationBarLeading) {
+                    ToolbarItem(placement: .navigationBarTrailing) {
                         HypePill(remaining: remaining, compact: true, unlimited: hypesUnlimited)
                     }
                 }
@@ -559,6 +560,52 @@ struct NotificationInboxView: View {
 
         let type = notification.type
         switch type {
+        case "friend_post":
+            // A friend's photo post or story — land on the thing itself:
+            // posts scroll the feed to the entry, stories open the viewer
+            // (which still respects the day-scoped viewing gate).
+            let kind = notification.data?["kind"]
+            FeedDeepLink.pending = FeedDeepLink.Target(
+                userId: notification.data?["user_id"],
+                postId: kind == "story" ? nil : notification.data?["post_id"],
+                storyUserId: kind == "story" ? notification.data?["user_id"] : nil
+            )
+            NotificationCenter.default.post(
+                name: NSNotification.Name("MAD_SwitchTab"),
+                object: nil,
+                userInfo: ["tab": 2]
+            )
+            NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
+        case "story_reaction":
+            // Someone reacted to MY story — replay my own story.
+            FeedDeepLink.pending = FeedDeepLink.Target(
+                storyUserId: UserDefaults.standard.string(forKey: "backendUserId")
+            )
+            NotificationCenter.default.post(
+                name: NSNotification.Name("MAD_SwitchTab"),
+                object: nil,
+                userInfo: ["tab": 2]
+            )
+            NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
+        case "friend_activity" where isWorkoutActivity(notification):
+            // A friend's completed walk/run/mile lives on the FEED — land on
+            // its entry, not the Friends list. The target is parked statically
+            // because the Feed tab may not be mounted yet; the poke wakes it
+            // when it is.
+            FeedDeepLink.pending = FeedDeepLink.Target(
+                workoutId: notification.data?["workout_id"],
+                userId: notification.data?["user_id"],
+                localDate: notification.data?["local_date"],
+                // A merged mile+photo push (upgraded in the 10-min window)
+                // carries the post id — the most precise landing target.
+                postId: notification.data?["post_id"]
+            )
+            NotificationCenter.default.post(
+                name: NSNotification.Name("MAD_SwitchTab"),
+                object: nil,
+                userInfo: ["tab": 2]
+            )
+            NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
         case "friend_request", "friend_request_accepted", "friend_nudge", "friend_activity":
             NotificationCenter.default.post(
                 name: NSNotification.Name("MAD_SwitchTab"),
@@ -587,6 +634,15 @@ struct NotificationInboxView: View {
             )
         default:
             break
+        }
+    }
+
+    /// friend_activity kinds that correspond to a concrete walk/run the feed
+    /// can show (streak_broken etc. keep the Friends-tab destination).
+    private func isWorkoutActivity(_ notification: InAppNotification) -> Bool {
+        switch notification.data?["kind"] {
+        case "mile_completed", "workout", "extra_workout": return true
+        default: return false
         }
     }
 
@@ -702,9 +758,12 @@ struct NotificationInboxView: View {
         case "friend_request_accepted": return "FRIEND"
         case "friend_nudge": return "NUDGE"
         case "friend_activity": return "FRIEND"
+        case "friend_post": return "NEW POST"
+        case "story_reaction": return "STORY"
         case "friend_badge_earned": return "FRIEND BADGE"
         case "friend_personal_best": return "FRIEND PR"
         case "friend_challenge_completed": return "FRIEND CHALLENGE"
+        case "challenge_won": return "CHALLENGE WON"
         case "competition_invite": return "COMP INVITE"
         case "competition_accepted": return "COMP JOINED"
         case "competition_started": return "COMP STARTED"
@@ -736,6 +795,8 @@ struct NotificationInboxView: View {
         case "friend_request_accepted": return ("person.2.fill", .green)
         case "friend_nudge": return ("bell.badge", .orange)
         case "friend_activity": return ("figure.run", .green)
+        case "friend_post": return ("photo.fill", .orange)
+        case "story_reaction": return ("heart.circle.fill", .pink)
         case "competition_invite": return ("envelope.fill", .purple)
         case "competition_accepted": return ("checkmark.circle", .green)
         case "competition_started": return ("flag.fill", .blue)
@@ -747,6 +808,7 @@ struct NotificationInboxView: View {
         case "personal_best": return ("medal.fill", .yellow)
         case "lead_change": return ("arrow.up.right", .green)
         case "clash_tie": return ("equal.circle.fill", .purple)
+        case "challenge_won": return ("flag.2.crossed.fill", .yellow)
         default: return ("bell.fill", .white.opacity(0.5))
         }
     }
@@ -857,7 +919,10 @@ struct NotificationInboxView: View {
             hype_context_type: n.hype_context_type,
             hype_context_id: n.hype_context_id,
             hype_context_label: n.hype_context_label,
-            is_hyped: n.is_hyped
+            is_hyped: n.is_hyped,
+            // Dropping this defaulted the tally to nil — marking an unread
+            // hypeable row read wiped its displayed count until next reload.
+            hype_count: n.hype_count
         )
     }
 

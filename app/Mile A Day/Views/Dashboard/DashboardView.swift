@@ -27,6 +27,10 @@ struct DashboardView: View {
     @State private var showConfetti = false
     @State private var showGoalSheet = false
     @State private var showDashboardSettings = false
+    /// "See All" on the Recent Workouts card. Lives here, not on the card, so
+    /// the destination is registered on the stack's root — a
+    /// navigationDestination declared inside the scroll content can miss.
+    @State private var showWorkouts = false
     @State private var newGoalMiles: Double = 1.0
     @State private var isRefreshing = false
     @State private var showWorkoutUploadAlert = false
@@ -93,6 +97,11 @@ struct DashboardView: View {
     /// competitions, badges) has loaded and we confirm items remain incomplete.
     @State private var gettingStartedReady = false
 
+    /// Cached "a mid-run photo is waiting but the goal isn't done" flag, so the
+    /// nudge renders without touching disk in `body` (MidRunPhotoStash.count
+    /// enumerates the sandbox dir). Refreshed on appear + workout changes.
+    @State private var midRunPhotoWaiting = false
+
 
     /// Build goal completion stats for the celebration
     private func buildGoalCompletionStats() -> GoalCompletionStats {
@@ -110,30 +119,6 @@ struct DashboardView: View {
             todaysWorkoutCount: healthManager.todaysWorkoutCount,
             workoutBreakdowns: buildWorkoutBreakdowns(),
             latestWorkout: buildLatestWorkout()
-        )
-    }
-
-    /// Build test stats for admin testing — uses real data if available, otherwise realistic placeholders
-    private func buildTestGoalCompletionStats() -> GoalCompletionStats {
-        let real = buildGoalCompletionStats()
-        if real.todaysDistance > 0 { return real }
-        return GoalCompletionStats(
-            todaysDistance: 1.75,
-            goalDistance: userManager.currentUser.goalMiles,
-            currentStreak: max(userManager.currentUser.streak, 7),
-            totalLifetimeMiles: max(healthManager.totalLifetimeMiles, 150),
-            bestDayMiles: max(healthManager.cachedMostMilesInOneDay, 3.2),
-            todaysAveragePace: 9.15,
-            todaysFastestPace: 8.32,
-            personalBestPace: 7.8,
-            todaysTotalDuration: 1050,
-            todaysCalories: 215,
-            todaysWorkoutCount: 2,
-            workoutBreakdowns: [
-                WorkoutBreakdown(type: "running", distance: 1.25, duration: 750, displayName: "Run", icon: "figure.run"),
-                WorkoutBreakdown(type: "walking", distance: 0.50, duration: 300, displayName: "Walk", icon: "figure.walk")
-            ],
-            latestWorkout: WorkoutBreakdown(type: "running", distance: 1.25, duration: 750, displayName: "Run", icon: "figure.run")
         )
     }
 
@@ -157,20 +142,6 @@ struct DashboardView: View {
             let stats = buildGoalCompletionStats()
             celebrationManager.replayCelebration(.goalCompleted(stats: stats))
         }
-    }
-
-    /// Build a yearly milestone test payload using realistic-ish stats from the user.
-    private func triggerYearlyTest(years: Int) {
-        celebrationManager.clearAll()
-        let totalDays = years * 365
-        let lifetimeMiles = max(userManager.currentUser.totalMiles, Double(totalDays) * 1.15)
-        let info = YearlyMilestoneInfo(
-            years: years,
-            totalMiles: lifetimeMiles,
-            totalStreakDays: max(userManager.currentUser.streak, totalDays),
-            streakStartDate: Calendar.current.date(byAdding: .day, value: -totalDays, to: Date())
-        )
-        celebrationManager.addCelebration(.yearMilestone(info: info))
     }
 
     /// Group today's workouts by activity type into breakdowns
@@ -246,6 +217,17 @@ struct DashboardView: View {
             print("[Dashboard] ⏳ Skipping celebration check - initial data not yet loaded")
             return
         }
+        // Celebrate only on a today's-distance we FRESHLY fetched this session.
+        // hasLoadedInitialData can flip true off a locked-device query that ERRORED
+        // (see fetchTodaysDistance), leaving todaysDistance at the value init cached
+        // from last night — which re-fired the "mile complete / streak safe" screen
+        // and photo prompt for yesterday's already-posted mile every morning until a
+        // second launch refreshed it. The onChange(of: hasFreshTodaysDistance) below
+        // re-runs this once the real fetch lands.
+        guard healthManager.hasFreshTodaysDistance else {
+            print("[Dashboard] ⏳ Skipping celebration check - today's distance not freshly fetched yet")
+            return
+        }
         // Defer while the workout tracker covers the dashboard — the celebration
         // overlay lives on this view, so it would play hidden behind the cover.
         // The cover's onDismiss re-runs this check once the dashboard is visible.
@@ -304,10 +286,24 @@ struct DashboardView: View {
 
             // Finale: BeReal-style "add a photo of your run" prompt for the mile
             // that just completed. Skipping still shares the run (route/stats).
-            if autoShareRunsToFeed, let uuid = healthManager.workoutIndex?.latestWorkoutUUID {
-                let hk = healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
-                let wtype = hk?.workoutActivityType == .walking ? "walking" : "running"
-                celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: uuid, workoutType: wtype))
+            // Prefer the freshly-finished workout from `todaysWorkouts` (the same
+            // source the extra-mile triggers and workout count read) over
+            // WorkoutIndex.latestWorkoutUUID, whose incremental rebuild lags a
+            // just-synced Watch run by a beat. Reading the stale index uuid here
+            // reopened the SAME fresh window (no-op) and the per-uuid prompt
+            // dedup swallowed the new walk's photo prompt — the "it never
+            // re-prompted me at the end of this other walk" bug.
+            let latestHK = healthManager.todaysWorkouts.first
+            if let uuid = latestHK?.uuid.uuidString ?? healthManager.workoutIndex?.latestWorkoutUUID {
+                // Open the 10-min fresh-post window on the goal-completing run
+                // regardless of the auto-share prompt, so the feed countdown /
+                // ring and "Fresh" reward work even when auto-share is off.
+                FreshPostWindowManager.shared.open(workoutId: uuid)
+                if autoShareRunsToFeed {
+                    let hk = latestHK ?? healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
+                    let wtype = hk?.workoutActivityType == .walking ? "walking" : "running"
+                    celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: uuid, workoutType: wtype))
+                }
             }
         }
     }
@@ -334,10 +330,20 @@ struct DashboardView: View {
         // Every walk/run gets its own photo moment, not just the goal-crossing
         // one — same finale as the goal path. The celebration id is keyed by
         // workout uuid, so each new workout prompts exactly once.
-        if autoShareRunsToFeed, let uuid = healthManager.workoutIndex?.latestWorkoutUUID {
-            let hk = healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
-            let wtype = hk?.workoutActivityType == .walking ? "walking" : "running"
-            celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: uuid, workoutType: wtype))
+        // Same fix as the goal-completion path: key the window + prompt off the
+        // freshly-finished workout from `todaysWorkouts`, not the possibly-stale
+        // WorkoutIndex uuid, so each extra walk/run actually earns its own
+        // window + photo prompt instead of being deduped against the last one.
+        let latestHK = healthManager.todaysWorkouts.first
+        if let uuid = latestHK?.uuid.uuidString ?? healthManager.workoutIndex?.latestWorkoutUUID {
+            // Each extra qualifying walk/run reopens a fresh 10-min window (a
+            // new uuid resets it), regardless of the auto-share prompt.
+            FreshPostWindowManager.shared.open(workoutId: uuid)
+            if autoShareRunsToFeed {
+                let hk = latestHK ?? healthManager.todaysWorkouts.first { $0.uuid.uuidString == uuid }
+                let wtype = hk?.workoutActivityType == .walking ? "walking" : "running"
+                celebrationManager.addCelebration(.postRunPhotoPrompt(workoutId: uuid, workoutType: wtype))
+            }
         }
     }
 
@@ -381,6 +387,16 @@ struct DashboardView: View {
                         && celebrationManager.hasShownGoalCelebrationToday
                         && !celebrationManager.isShowingCelebration {
                         replayTodaysCelebrationCard
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                            .padding(.top, MADTheme.Spacing.sm)
+                    }
+
+                    // "Photo waiting" nudge — a mid-run snap is held but the
+                    // goal isn't done yet. It does NOT unlock posting (the goal
+                    // gate stands); it reassures the user the shot is kept and
+                    // will be offered once they finish the mile.
+                    if midRunPhotoWaiting {
+                        photoWaitingBanner
                             .padding(.horizontal, MADTheme.Spacing.md)
                             .padding(.top, MADTheme.Spacing.sm)
                     }
@@ -430,6 +446,9 @@ struct DashboardView: View {
                 onSetGoal: { showGoalSheet = true }
             )
         }
+        .navigationDestination(isPresented: $showWorkouts) {
+            WorkoutsView(healthManager: healthManager)
+        }
             .sheet(isPresented: $showManualWorkoutEntry) {
                 ManualWorkoutEntryView()
             }
@@ -451,6 +470,9 @@ struct DashboardView: View {
                 }
                 // A workout just finished/synced — refresh ask-mode pendings.
                 loadPendingNotifications()
+                // A mid-run snap may have been taken (or the goal met) — refresh
+                // the "photo waiting" nudge.
+                refreshMidRunPhotoWaiting()
             }) {
                 // One WorkoutTrackingView with stable structural identity. This was
                 // an if/else between two WorkoutTrackingView initializers — when the
@@ -469,6 +491,7 @@ struct DashboardView: View {
             }
             .onAppear {
                 refreshData()
+                refreshMidRunPhotoWaiting()
                 // Sync widget data immediately
                 syncWidgetData()
                 // Load ask-mode pending notifications (cheap-guarded on settings).
@@ -546,6 +569,8 @@ struct DashboardView: View {
                     checkAndShowGoalCelebration()
                     // Pick up ask-mode pendings created while backgrounded.
                     loadPendingNotifications()
+                    // A mid-run snap may have been taken in another surface.
+                    refreshMidRunPhotoWaiting()
                 } else if newPhase == .background || newPhase == .inactive {
                     celebrationManager.onAppResignedActive()
                 }
@@ -556,6 +581,13 @@ struct DashboardView: View {
                 if wasShowing && !isShowing {
                     maybePresentPendingSheet()
                 }
+            }
+            .onChange(of: healthManager.hasFreshTodaysDistance) { _, isFresh in
+                // On a locked-device launch the initial fetch errors and the
+                // celebration check bails; when the real fetch finally lands this
+                // re-runs it against fresh data (fires a genuine completion, stays
+                // silent for yesterday's already-handled mile).
+                if isFresh { checkAndShowGoalCelebration() }
             }
             .onChange(of: healthManager.hasLoadedInitialData) { _, isLoaded in
                 if isLoaded {
@@ -581,6 +613,9 @@ struct DashboardView: View {
                     // Also check for goal celebration when completion status changes
                     checkAndShowGoalCelebration()
                 }
+                // Completing the goal clears the "photo waiting" state (the
+                // post-run prompt now offers the snap directly).
+                refreshMidRunPhotoWaiting()
             }
             .onChange(of: healthManager.todaysDistance) { oldValue, newValue in
                 // Check for extra mile when distance increases after goal already celebrated
@@ -593,6 +628,8 @@ struct DashboardView: View {
                 if newValue > oldValue && celebrationManager.hasShownGoalCelebrationToday {
                     checkAndShowPostGoalEncouragement()
                 }
+                // A workout finishing may leave a mid-run snap waiting.
+                refreshMidRunPhotoWaiting()
             }
             .confetti(isShowing: $showConfetti)
             .overlay(
@@ -613,7 +650,7 @@ struct DashboardView: View {
         let state = currentState
         WidgetDataStore.save(todayMiles: state.distance, goal: state.goal)
         WidgetDataStore.save(streak: userManager.currentUser.streak)
-        WidgetDataStore.save(weekCompletions: currentWeekCompletions())
+        WidgetDataStore.save(weekCompletions: currentWeekCompletions(), weekMiles: currentWeekMiles())
         // No blanket reloadAllTimelines() here: the store reloads the right
         // widget kinds itself and skips no-op writes, which preserves the
         // per-day widget reload budget iOS enforces.
@@ -633,6 +670,22 @@ struct DashboardView: View {
             guard let day = calendar.date(byAdding: .day, value: offset, to: startOfWeek) else { return false }
             return healthManager.dailyMileGoals[calendar.startOfDay(for: day)] ?? false
         }
+    }
+
+    /// Total miles this week (Sun–today) from the local workout index, for
+    /// the streak widget's status line.
+    private func currentWeekMiles() -> Double {
+        guard let index = healthManager.workoutIndex else { return 0 }
+        let calendar = Calendar.current
+        let today = Date()
+        let weekday = calendar.component(.weekday, from: today)
+        guard let startOfWeek = calendar.date(
+            byAdding: .day, value: -(weekday - 1), to: calendar.startOfDay(for: today)
+        ) else { return 0 }
+        return index.workoutsByDate.values
+            .flatMap { $0 }
+            .filter { $0.localDate >= startOfWeek }
+            .reduce(0) { $0 + $1.distance }
     }
 
     private func applyHealthDataToUserManager() {
@@ -713,6 +766,7 @@ struct DashboardView: View {
                     // updateStreakFromBackend only raises the value, so it can't clobber a
                     // higher HealthKit-computed streak from a later refresh.
                     userManager.updateStreakFromBackend(stats.streak)
+                    repairWorkoutIndexIfStale(backendStreak: stats.streak)
                     if let bestSplitSeconds = stats.bestSplitTimeSeconds, bestSplitSeconds > 0 {
                         let paceMinutesPerMile = bestSplitSeconds / 60.0
                         print("[Dashboard] ✅ Updating fastest pace from backend → \(paceMinutesPerMile) min/mi")
@@ -723,6 +777,24 @@ struct DashboardView: View {
                 print("[Dashboard] ⚠️ Failed to fetch stats from backend: \(error)")
             }
         }
+    }
+
+    /// A backend streak ≥2 days ahead of the local HealthKit-derived one is the
+    /// signature of a hole in the WorkoutIndex: a workout that reached HealthKit
+    /// after the index's lastUpdated stamp was never indexed, so activeStreak()
+    /// stops at that day. Every refresh then flashes the tiny local value (via
+    /// applyHealthDataToUserManager's unconditional overwrite) before the backend
+    /// rescue lands — "1 day streak" for a second, then the real number. Rebuild
+    /// the index from full history to repair the hole; debounced to once per
+    /// calendar day, and buildWorkoutIndex() itself no-ops while a build runs.
+    private func repairWorkoutIndexIfStale(backendStreak: Int) {
+        guard backendStreak > healthManager.retroactiveStreak + 1 else { return }
+        let debounceKey = "lastStreakMismatchIndexRebuild"
+        if let last = UserDefaults.standard.object(forKey: debounceKey) as? Date,
+           Calendar.current.isDateInToday(last) { return }
+        UserDefaults.standard.set(Date(), forKey: debounceKey)
+        print("[Dashboard] 🔧 Backend streak \(backendStreak) ≫ local \(healthManager.retroactiveStreak) — rebuilding workout index to repair missed workouts")
+        Task { await healthManager.buildWorkoutIndex() }
     }
 
     /// Pull the current streak from the backend (the authoritative source the manual
@@ -869,6 +941,54 @@ struct DashboardView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    /// Nudge shown when a mid-run snap is waiting but today's goal isn't met.
+    /// Tapping reopens the tracker so the user can finish their mile.
+    private var photoWaitingBanner: some View {
+        Button {
+            showWorkoutView = true
+        } label: {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "camera.badge.clock")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.white, MADTheme.Colors.walkBlue], startPoint: .top, endPoint: .bottom)
+                    )
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Photo waiting")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("Finish today's mile to share it")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .strokeBorder(MADTheme.Colors.walkBlue.opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Cache whether a mid-run photo is waiting to be shared while today's goal
+    /// is still unmet, so `photoWaitingBanner` never enumerates the sandbox dir
+    /// from within `body`.
+    private func refreshMidRunPhotoWaiting() {
+        // Scope to snaps taken TODAY: a leftover from yesterday's workout (its
+        // prompt never resolved, app reopened next day) must not nag "finish
+        // today's mile to share it" against a fresh, untouched day.
+        midRunPhotoWaiting = !currentState.isCompleted && MidRunPhotoStash.hasEntriesToday()
     }
 
     // MARK: - HealthKit Permission Banner
@@ -1278,9 +1398,9 @@ struct DashboardView: View {
                 StatsGridView(user: userManager.currentUser, healthManager: healthManager)
             }
 
-            DashboardCollapsibleSection(title: "Recent Workouts", icon: "figure.run", isCollapsed: $workoutsCollapsed) {
-                RecentWorkoutsView(workouts: healthManager.recentWorkouts)
-            }
+            // Recent Workouts now lives behind a clean preview card that opens
+            // the full Workouts screen (calendar + history + swipeable detail).
+            RecentWorkoutsPreviewCard(healthManager: healthManager, showWorkouts: $showWorkouts)
         }
     }
 }

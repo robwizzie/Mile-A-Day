@@ -56,69 +56,76 @@ struct FriendWorkoutsSection: View {
     }
 }
 
+/// A friend's workout in the EXACT row grammar of the dashboard's own
+/// WorkoutRow (accent icon chip, verb + hero distance, duration • pace,
+/// date/time trailing) — a workout reads the same no matter whose it is.
 struct FriendWorkoutRow: View {
     let workout: FriendWorkout
     var showChevron: Bool = false
 
     var body: some View {
         HStack(spacing: MADTheme.Spacing.md) {
-            // Workout Icon in colored circle
             ZStack {
                 Circle()
                     .fill(workoutColor.opacity(0.15))
-                    .frame(width: 44, height: 44)
-
+                    .frame(width: 40, height: 40)
                 Image(systemName: workoutIcon)
-                    .font(.system(size: 18, weight: .medium))
+                    .font(.system(size: 17, weight: .bold))
                     .foregroundColor(workoutColor)
             }
 
-            // Workout Details
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(workout.formattedDate)
-                        .font(MADTheme.Typography.body)
-                        .fontWeight(.medium)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Text(verb)
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(MADTheme.Colors.secondaryText)
+                        .lineLimit(1)
+                    Text(workout.distance.milesFormatted)
+                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .monospacedDigit()
                         .foregroundColor(MADTheme.Colors.primaryText)
-
-                    Text(workout.workoutType.capitalized)
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundColor(workoutColor)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule()
-                                .fill(workoutColor.opacity(0.15))
-                        )
-
-                    if workout.isManualOrEdited {
-                        ManualWorkoutBadgeFromString(source: workout.source)
-                    }
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
+                HStack(spacing: 5) {
+                    Image(systemName: "clock.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.orange)
+                    Text(paceText == nil
+                         ? workout.formattedDuration
+                         : "\(workout.formattedDuration) \u{2022} \(paceText!)")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(MADTheme.Colors.secondaryText)
+                        .lineLimit(1)
                 }
 
-                HStack(spacing: 12) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "location.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(MADTheme.Colors.secondaryText)
-                        Text(workout.formattedDistance)
-                            .font(MADTheme.Typography.caption)
-                            .fontWeight(.medium)
-                            .foregroundColor(MADTheme.Colors.primaryText)
-                    }
-
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(MADTheme.Colors.secondaryText)
-                        Text(workout.formattedDuration)
-                            .font(MADTheme.Typography.caption)
-                            .foregroundColor(MADTheme.Colors.secondaryText)
-                    }
-                }
+                // Identical chips to the owner's own WorkoutRow — a friend's run
+                // reads the same as yours. Route/photo come from the server
+                // (`has_route`/`has_photo`); older servers omit them and the
+                // chips simply don't draw.
+                WorkoutRowTags(
+                    source: WorkoutSource(rawValue: workout.source ?? "") ?? .healthkit,
+                    hasRoute: workout.hasRoute == true,
+                    hasPhoto: workout.hasPhoto == true,
+                    routeColor: workoutColor
+                )
             }
 
-            Spacer()
+            Spacer(minLength: MADTheme.Spacing.sm)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(dateLabel)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(MADTheme.Colors.primaryText)
+                if let time = startTimeLabel {
+                    Text(time)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(MADTheme.Colors.secondaryText)
+                }
+            }
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
 
             if showChevron {
                 Image(systemName: "chevron.right")
@@ -129,6 +136,49 @@ struct FriendWorkoutRow: View {
         .padding(MADTheme.Spacing.md)
         .background(Color.white.opacity(0.05))
         .cornerRadius(MADTheme.CornerRadius.medium)
+    }
+
+    /// Feed-style verb, same as WorkoutRow's headline.
+    private var verb: String {
+        switch workout.workoutType.lowercased() {
+        case "running": return "Ran"
+        case "walking": return "Walked"
+        case "hiking": return "Hiked"
+        case "cycling": return "Cycled"
+        default: return "Moved"
+        }
+    }
+
+    /// "18:27 /mi" when distance + duration allow it — same as WorkoutRow.
+    private var paceText: String? {
+        guard workout.distance > 0, workout.totalDuration > 0 else { return nil }
+        return "\(RunStatsStickerView.paceText(workout.totalDuration / workout.distance)) /mi"
+    }
+
+    /// Start time derived the same way WorkoutRow does it: end − duration.
+    private var startDate: Date? {
+        guard let end = workout.deviceEndDate, let d = RelativeTime.date(from: end) else { return nil }
+        return d.addingTimeInterval(-workout.totalDuration)
+    }
+
+    private var dateLabel: String {
+        if let d = startDate {
+            if Calendar.current.isDateInToday(d) { return "Today" }
+            if Calendar.current.isDateInYesterday(d) { return "Yesterday" }
+            return DateFormatter.workoutRowDate.string(from: d)
+        }
+        // No device timestamp — fall back to the server's local_date.
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        guard let d = f.date(from: workout.date) else { return workout.formattedDate }
+        if Calendar.current.isDateInToday(d) { return "Today" }
+        if Calendar.current.isDateInYesterday(d) { return "Yesterday" }
+        return DateFormatter.workoutRowDate.string(from: d)
+    }
+
+    private var startTimeLabel: String? {
+        guard let d = startDate else { return nil }
+        return DateFormatter.shortTime.string(from: d)
     }
 
     private var workoutIcon: String {
@@ -147,17 +197,6 @@ struct FriendWorkoutRow: View {
     }
 
     private var workoutColor: Color {
-        switch workout.workoutType.lowercased() {
-        case "running":
-            return MADTheme.Colors.madRed
-        case "walking":
-            return .blue
-        case "cycling":
-            return .green
-        case "hiking":
-            return .orange
-        default:
-            return MADTheme.Colors.madRed
-        }
+        MADTheme.workoutColor(workout.workoutType)
     }
 }

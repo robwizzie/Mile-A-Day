@@ -6,16 +6,33 @@ import MapKit
 
 struct WorkoutDetailView: View {
     let workout: HKWorkout
+    /// The run's linked post, when the presenting list already fetched it — lets
+    /// the photo appear instantly instead of re-scanning pages of posts here.
+    var preloadedPost: PostItem? = nil
+    /// Whether this page is the one on screen. In the swipe pager every page is
+    /// built up front, so the heavy loads (HealthKit + network) gate on this so
+    /// only the visible workout actually fetches. Standalone presentations pass
+    /// the default (always active).
+    var isActive: Bool = true
     @Environment(\.dismiss) private var dismiss
     @State private var calories: Double?
     @State private var splitTimes: [TimeInterval]?
     @State private var isLoadingSplits = false
     @State private var showEditSheet = false
     @State private var routeCoordinates: [CLLocationCoordinate2D]?
+    /// Retained map snapshot so the route map's pinch-zoom can compose its
+    /// floating copy on demand (same mechanism as the feed cards).
+    @State private var routeSnapshot: UIImage?
     @State private var isLoadingRoute = false
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
     @State private var deleteError: String?
+    /// The user's own feed/story post linked to this workout, when one exists.
+    @State private var linkedPost: PostItem?
+    @State private var editingLinkedPost: PostItem?
+    @State private var showPostDeleteConfirm = false
+    @State private var isAddingToFeed = false
+    @State private var addToFeedError: String?
     @EnvironmentObject var healthManager: HealthKitManager
 
     private let workoutService = WorkoutService()
@@ -65,12 +82,25 @@ struct WorkoutDetailView: View {
         }
     }
 
+    // Same accent per type as the feed (ActivityCardView.color) — one color
+    // language for a workout everywhere it appears.
     private var workoutColor: Color {
-        switch workout.workoutActivityType {
-        case .running: return MADTheme.Colors.madRed
-        case .walking: return .blue
-        case .cycling: return .green
-        default: return .purple
+        MADTheme.workoutColor(workout.workoutActivityType.madTypeKey)
+    }
+
+    /// Floating zoom copy for the route map, composed on demand at pinch-begin
+    /// from the retained snapshot (a bare route — no stats band, unlike the feed
+    /// card). Returns nil until the snapshot has landed.
+    private func routeZoomComposite() -> UIImage? {
+        guard let snapshot = routeSnapshot,
+              let coords = routeCoordinates, coords.count >= 2 else { return nil }
+        return WorkoutRouteMapView.zoomComposite(
+            snapshot: snapshot,
+            coordinates: coords,
+            routeColor: workoutColor,
+            size: CGSize(width: 900, height: 600)
+        ) {
+            EmptyView()
         }
     }
 
@@ -89,25 +119,38 @@ struct WorkoutDetailView: View {
                 MADTheme.Colors.appBackgroundGradient
                     .ignoresSafeArea()
 
+                // No entrance animation here on purpose. The sheet's own
+                // presentation IS the animation; fading + sliding the content in
+                // on top of it read as a second, mushier motion — and in the
+                // pager it was inconsistent besides, since TabView builds
+                // adjacent pages off-screen, so the reveal fired where nobody
+                // could see it and swiped-to pages just appeared.
                 ScrollView {
                     VStack(spacing: MADTheme.Spacing.lg) {
-                        // Hero card — type, distance, date
+                        // Hero — type, hero distance, date, and route/photo tags.
                         heroCard
 
-                        // Route map (only shown for outdoor workouts with GPS data)
-                        routeMapSection
+                        // The run's feed/story post, rendered exactly like the
+                        // feed shows it (photo, route + stats, caption). Owner
+                        // actions — edit caption, add to feed, delete — live
+                        // in the card's menu + header pill.
+                        linkedPostSection
 
-                        // Key stats row
-                        keyStatsRow
+                        // Route — pulled up front so a run with a GPS trace leads
+                        // with the map (hidden when the post card above already
+                        // carries the run's visuals — no double map).
+                        if linkedPost == nil {
+                            routeMapSection
+                        }
 
-                        // Timeline details card
-                        timelineCard
+                        // The numbers — one home, no repeats across cards.
+                        statsSection
 
-                        // Performance details card
-                        performanceCard
-
-                        // Mile Splits Section
+                        // Mile splits as a pace bar chart.
                         mileSplitsSection
+
+                        // When it started and ended.
+                        timelineCard
 
                         // Delete — remove an accidental / vehicle workout.
                         deleteButton
@@ -154,11 +197,138 @@ struct WorkoutDetailView: View {
                     currentWorkoutType: workoutTypeString == "Run" ? "running" : workoutTypeString == "Walk" ? "walking" : "running"
                 )
             }
-            .task {
+            .task(id: isActive) {
+                // Only the on-screen page loads (the pager builds every page up
+                // front). Photo FIRST so it shows immediately — when the list
+                // handed us the post, skip the multi-page re-scan that used to
+                // run last (why a "Photo" badge could sit blank for seconds).
+                guard isActive else { return }
+                if let preloadedPost {
+                    linkedPost = preloadedPost
+                } else {
+                    await fetchLinkedPost()
+                }
+                await fetchRouteData()
                 await fetchCalories()
                 await fetchSplitTimes()
-                await fetchRouteData()
             }
+            .sheet(item: $editingLinkedPost) { post in
+                EditCaptionSheet(post: post) { newCaption in
+                    linkedPost?.caption = newCaption
+                }
+            }
+            .alert("Delete this post?", isPresented: $showPostDeleteConfirm) {
+                Button("Delete", role: .destructive) { deleteLinkedPost() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes it from your feed and profile for good. The workout itself stays.")
+            }
+            .alert("Couldn't add to feed", isPresented: Binding(
+                get: { addToFeedError != nil },
+                set: { if !$0 { addToFeedError = nil } }
+            )) {
+                Button("OK", role: .cancel) { addToFeedError = nil }
+            } message: {
+                Text(addToFeedError ?? "")
+            }
+        }
+    }
+
+    // MARK: - Linked feed post
+
+    /// The linked post with this workout's GPS trace injected, so the card
+    /// shows the same route + stats slide the feed does (the profile posts
+    /// endpoint doesn't ship routes).
+    private var displayLinkedPost: PostItem? {
+        guard var post = linkedPost else { return nil }
+        if post.route == nil, let coords = routeCoordinates, coords.count >= 2 {
+            post.route = coords.map { [$0.latitude, $0.longitude] }
+        }
+        return post
+    }
+
+    @ViewBuilder
+    private var linkedPostSection: some View {
+        if let post = displayLinkedPost {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: "photo.on.rectangle.angled")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(MADTheme.Colors.redGradient)
+                    Text(post.share_to_feed == false ? "Your Story" : "On the Feed")
+                        .font(MADTheme.Typography.headline)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    if post.share_to_feed == false {
+                        addToFeedPill
+                    }
+                }
+
+                PostCardView(
+                    post: post,
+                    storyPhotoURL: post.storyPhotoURL,
+                    onHype: {},
+                    onReport: {},
+                    onBlock: {},
+                    onDelete: { showPostDeleteConfirm = true },
+                    onEditCaption: { editingLinkedPost = post }
+                )
+            }
+        }
+    }
+
+    private var addToFeedPill: some View {
+        Button {
+            addLinkedPostToFeed()
+        } label: {
+            HStack(spacing: 4) {
+                if isAddingToFeed {
+                    ProgressView().tint(.white).scaleEffect(0.6)
+                } else {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .heavy))
+                }
+                Text("Add to feed")
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(MADTheme.Colors.redGradient))
+        }
+        .buttonStyle(.plain)
+        .disabled(isAddingToFeed)
+    }
+
+    private func fetchLinkedPost() async {
+        guard let uid = UserManager.shared.currentUser.backendUserId else { return }
+        let post = try? await PostService.fetchOwnPostForWorkout(
+            workoutId: workout.uuid.uuidString, userId: uid
+        )
+        await MainActor.run { linkedPost = post }
+    }
+
+    private func deleteLinkedPost() {
+        guard let post = linkedPost else { return }
+        Task {
+            try? await PostService.deletePost(postId: post.post_id)
+            await MainActor.run { linkedPost = nil }
+        }
+    }
+
+    private func addLinkedPostToFeed() {
+        guard let post = linkedPost, !isAddingToFeed else { return }
+        isAddingToFeed = true
+        Task {
+            do {
+                try await PostService.addPostToFeed(postId: post.post_id)
+                await fetchLinkedPost()
+            } catch {
+                await MainActor.run {
+                    addToFeedError = "This run may already have a feed post."
+                }
+            }
+            await MainActor.run { isAddingToFeed = false }
         }
     }
 
@@ -264,118 +434,62 @@ struct WorkoutDetailView: View {
     // MARK: - Hero Card
 
     private var heroCard: some View {
-        VStack(spacing: MADTheme.Spacing.md) {
-            // Manual/edited warning banner
-            if workoutSource != .healthkit {
-                ManualWorkoutBanner(source: workoutSource)
-            }
-
+        WorkoutHeroCard(
+            icon: workoutIcon,
+            typeLabel: workoutTypeString,
+            color: workoutColor,
+            distanceText: workout.formattedDistance,
+            dateText: correctedEndTime.formattedDate,
+            source: workoutSource,
+            hasRoute: heroHasRoute,
+            hasPhoto: heroHasPhoto
+        ) {
             // Vehicle-speed warning — surfaces a likely drive so the user can remove it.
             if vehicleSuspicion != .none {
                 vehicleWarningBanner
             }
-
-            // Workout type badge
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: workoutIcon)
-                    .font(.system(size: 14, weight: .semibold))
-                Text(workoutTypeString)
-                    .font(MADTheme.Typography.smallBold)
-            }
-            .foregroundColor(workoutColor)
-            .padding(.horizontal, MADTheme.Spacing.md)
-            .padding(.vertical, MADTheme.Spacing.xs + 2)
-            .background(
-                Capsule()
-                    .fill(workoutColor.opacity(0.15))
-            )
-
-            // Distance — the hero number
-            Text(workout.formattedDistance)
-                .font(.system(size: 52, weight: .bold, design: .rounded))
-                .foregroundColor(.primary)
-
-            // Date
-            Text(correctedEndTime.formattedDate)
-                .font(MADTheme.Typography.body)
-                .foregroundColor(.secondary)
         }
-        .padding(MADTheme.Spacing.lg)
-        .frame(maxWidth: .infinity)
-        .madLiquidGlass()
     }
 
-    // MARK: - Key Stats Row
+    /// Does this run have a drawable GPS trace (drives the hero "Route" tag).
+    private var heroHasRoute: Bool {
+        (routeCoordinates?.isEmpty == false)
+    }
 
-    private var keyStatsRow: some View {
-        HStack(spacing: MADTheme.Spacing.sm) {
-            DashboardStatBox(
-                title: "Duration",
-                value: workout.formattedDuration,
-                icon: "clock.fill",
-                color: .orange
-            )
+    /// Does the linked post carry a real user photo — a deliberate photo post
+    /// or a distinct story picture, not just an auto-generated route/stats card.
+    private var heroHasPhoto: Bool {
+        guard let post = linkedPost else { return false }
+        if post.storyPhotoURL != nil { return true }
+        return post.is_auto != true && !post.media_url.isEmpty
+    }
 
-            DashboardStatBox(
-                title: "Pace",
-                value: workout.pace,
-                icon: "speedometer",
-                color: .green
-            )
+    // MARK: - Section header (shared across the detail's cards)
 
-            if let calories = calories {
-                DashboardStatBox(
-                    title: "Calories",
-                    value: "\(Int(calories))",
-                    icon: "flame.fill",
-                    color: MADTheme.Colors.madRed
-                )
-            }
-        }
+    private func sectionHeader(_ icon: String, _ title: String) -> some View {
+        WorkoutDetailSectionHeader(icon: icon, title: title)
+    }
+
+    // MARK: - Stats
+
+    /// The run's headline numbers, in ONE place — distance lives in the hero,
+    /// everything else lives here (no more repeating pace/calories in a second
+    /// "Performance" card).
+    private var statsSection: some View {
+        WorkoutStatsCard(
+            duration: workout.formattedDuration,
+            pace: workout.pace,
+            calories: calories.map { Int($0) }
+        )
     }
 
     // MARK: - Timeline Card
 
     private var timelineCard: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: "clock.arrow.2.circlepath")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(MADTheme.Colors.redGradient)
-                Text("Timeline")
-                    .font(MADTheme.Typography.headline)
-                    .foregroundColor(.primary)
-            }
-
-            DetailRow(icon: "play.fill", iconColor: .green, title: "Start", value: correctedStartTime.formattedTime)
-            DetailRow(icon: "stop.fill", iconColor: MADTheme.Colors.madRed, title: "End", value: correctedEndTime.formattedTime)
-            DetailRow(icon: "timer", iconColor: .orange, title: "Duration", value: workout.formattedDuration)
-        }
-        .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
-    }
-
-    // MARK: - Performance Card
-
-    private var performanceCard: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            HStack(spacing: MADTheme.Spacing.sm) {
-                Image(systemName: "chart.line.uptrend.xyaxis")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(MADTheme.Colors.redGradient)
-                Text("Performance")
-                    .font(MADTheme.Typography.headline)
-                    .foregroundColor(.primary)
-            }
-
-            DetailRow(icon: "point.topleft.down.to.point.bottomright.curvepath.fill", iconColor: .blue, title: "Distance", value: workout.formattedDistance)
-            DetailRow(icon: "speedometer", iconColor: .green, title: "Avg Pace", value: workout.pace)
-            if let calories = calories {
-                DetailRow(icon: "flame.fill", iconColor: MADTheme.Colors.madRed, title: "Calories", value: "\(Int(calories)) kcal")
-            }
-        }
-        .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        WorkoutTimelineCard(
+            startText: correctedStartTime.formattedTime,
+            endText: correctedEndTime.formattedTime
+        )
     }
 
     // MARK: - Mile Splits
@@ -383,66 +497,28 @@ struct WorkoutDetailView: View {
     @ViewBuilder
     private var mileSplitsSection: some View {
         if let splitTimes = splitTimes, !splitTimes.isEmpty {
+            let fastest = splitTimes.min() ?? 0
+            let slowest = splitTimes.max() ?? 0
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    Image(systemName: "flag.checkered")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(MADTheme.Colors.redGradient)
-                    Text("Mile Splits")
-                        .font(MADTheme.Typography.headline)
-                        .foregroundColor(.primary)
-                }
+                sectionHeader("flag.checkered", "Mile Splits")
 
-                let fastestIndex = splitTimes.enumerated().min(by: { $0.element < $1.element })?.offset
-
-                ForEach(Array(splitTimes.enumerated()), id: \.offset) { index, splitTime in
-                    let isFastest = index == fastestIndex && splitTimes.count > 1
-                    HStack {
-                        HStack(spacing: MADTheme.Spacing.sm) {
-                            Text("Mile \(index + 1)")
-                                .font(MADTheme.Typography.body)
-                                .foregroundColor(.primary)
-
-                            if isFastest {
-                                Text("Fastest")
-                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                    .foregroundColor(MADTheme.Colors.success)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(
-                                        Capsule()
-                                            .fill(MADTheme.Colors.success.opacity(0.15))
-                                    )
-                            }
-                        }
-
-                        Spacer()
-
-                        Text(formatSplitTime(splitTime))
-                            .font(.system(size: 17, weight: .semibold, design: .rounded))
-                            .foregroundColor(isFastest ? MADTheme.Colors.success : .primary)
-                    }
-                    .padding(.vertical, MADTheme.Spacing.xs)
-
-                    if index < splitTimes.count - 1 {
-                        Divider()
-                            .overlay(Color.white.opacity(0.06))
+                VStack(spacing: MADTheme.Spacing.sm) {
+                    ForEach(Array(splitTimes.enumerated()), id: \.offset) { index, splitTime in
+                        SplitBarRow(
+                            mile: index + 1,
+                            timeLabel: formatSplitTime(splitTime),
+                            fraction: splitBarFraction(time: splitTime, fastest: fastest, slowest: slowest),
+                            isFastest: splitTimes.count > 1 && splitTime == fastest,
+                            color: workoutColor
+                        )
                     }
                 }
             }
             .padding(MADTheme.Spacing.md)
             .madLiquidGlass()
         } else if isLoadingSplits {
-            VStack(spacing: MADTheme.Spacing.md) {
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    Image(systemName: "flag.checkered")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(MADTheme.Colors.redGradient)
-                    Text("Mile Splits")
-                        .font(MADTheme.Typography.headline)
-                        .foregroundColor(.primary)
-                    Spacer()
-                }
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                sectionHeader("flag.checkered", "Mile Splits")
 
                 HStack(spacing: MADTheme.Spacing.sm) {
                     ProgressView()
@@ -458,41 +534,44 @@ struct WorkoutDetailView: View {
         }
     }
 
+    /// Normalizes a split's time to a bar length: the fastest mile fills the
+    /// bar, the slowest reads at 35% so every mile stays visible. A run with
+    /// one split (or identical splits) fills fully.
+    private func splitBarFraction(time: Double, fastest: Double, slowest: Double) -> CGFloat {
+        guard slowest > fastest else { return 1 }
+        let normalized = (time - fastest) / (slowest - fastest) // 0 fastest → 1 slowest
+        return CGFloat(1 - normalized * 0.65)
+    }
+
     // MARK: - Route Map
 
     @ViewBuilder
     private var routeMapSection: some View {
         if let routeCoordinates, !routeCoordinates.isEmpty {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    Image(systemName: "map.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(MADTheme.Colors.redGradient)
-                    Text("Route")
-                        .font(MADTheme.Typography.headline)
-                        .foregroundColor(.primary)
-                }
+                sectionHeader("map.fill", "Route")
 
                 WorkoutRouteMapView(
                     coordinates: routeCoordinates,
-                    routeColor: workoutColor
+                    routeColor: workoutColor,
+                    onSnapshot: { routeSnapshot = $0 }
                 )
-                .frame(height: 250)
+                .frame(height: 260)
                 .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+                )
+                // Pinch to zoom the route, same as the feed cards. The floating
+                // copy is composed on demand from the retained snapshot — nothing
+                // heavy is baked up front.
+                .instagramZoomable(imageProvider: { routeZoomComposite() })
             }
             .padding(MADTheme.Spacing.md)
             .madLiquidGlass()
         } else if isLoadingRoute {
-            VStack(spacing: MADTheme.Spacing.md) {
-                HStack(spacing: MADTheme.Spacing.sm) {
-                    Image(systemName: "map.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(MADTheme.Colors.redGradient)
-                    Text("Route")
-                        .font(MADTheme.Typography.headline)
-                        .foregroundColor(.primary)
-                    Spacer()
-                }
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                sectionHeader("map.fill", "Route")
 
                 HStack(spacing: MADTheme.Spacing.sm) {
                     ProgressView()
@@ -635,5 +714,71 @@ struct DetailRow: View {
                 .foregroundColor(.primary)
         }
         .padding(.vertical, MADTheme.Spacing.xs)
+    }
+}
+
+// MARK: - Split Bar Row
+
+/// One mile's split as a labelled bar — length encodes relative pace (the
+/// fastest mile fills the bar). The fastest split is called out in green so a
+/// glance reads the run's shape without parsing a column of times.
+struct SplitBarRow: View {
+    let mile: Int
+    let timeLabel: String
+    let fraction: CGFloat
+    let isFastest: Bool
+    let color: Color
+
+    /// Animate the bar growing in the first time it appears.
+    @State private var grown = false
+
+    private var barColor: Color {
+        isFastest ? MADTheme.Colors.success : color
+    }
+
+    var body: some View {
+        HStack(spacing: MADTheme.Spacing.md) {
+            Text("Mile \(mile)")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundColor(.secondary)
+                .frame(width: 52, alignment: .leading)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.07))
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [barColor.opacity(0.85), barColor],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: max(8, geo.size.width * fraction * (grown ? 1 : 0)))
+                }
+            }
+            .frame(height: 10)
+
+            HStack(spacing: 5) {
+                if isFastest {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(MADTheme.Colors.success)
+                }
+                Text(timeLabel)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(isFastest ? MADTheme.Colors.success : .primary)
+            }
+            .frame(width: 74, alignment: .trailing)
+        }
+        .onAppear {
+            // All bars grow together — the old per-mile delay made them ripple
+            // unevenly, which is what felt clunky.
+            withAnimation(.easeOut(duration: 0.5)) {
+                grown = true
+            }
+        }
     }
 }

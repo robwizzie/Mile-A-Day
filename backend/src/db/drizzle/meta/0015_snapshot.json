@@ -1,9 +1,57 @@
 {
-  "id": "1961ee19-9921-4d01-9185-4175a75d3008",
-  "prevId": "fc8f66aa-fa68-4473-bba5-69fda107fd53",
+  "id": "c4869218-c667-499b-85fe-2b00962bed2a",
+  "prevId": "7bf4e971-6d9a-406e-a5f3-6eda4f28d916",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.android_waitlist": {
+      "name": "android_waitlist",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'website'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "android_waitlist_email_unique": {
+          "name": "android_waitlist_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.badges": {
       "name": "badges",
       "schema": "",
@@ -155,139 +203,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.comment_reports": {
-      "name": "comment_reports",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "comment_id": {
-          "name": "comment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reporter_id": {
-          "name": "reporter_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "details": {
-          "name": "details",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'open'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "comment_reports_dedupe_idx": {
-          "name": "comment_reports_dedupe_idx",
-          "columns": [
-            {
-              "expression": "comment_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "reporter_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_comment_reports_status": {
-          "name": "idx_comment_reports_status",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "first"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "comment_reports_comment_id_fkey": {
-          "name": "comment_reports_comment_id_fkey",
-          "tableFrom": "comment_reports",
-          "tableTo": "post_comments",
-          "columnsFrom": [
-            "comment_id"
-          ],
-          "columnsTo": [
-            "comment_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "comment_reports_reporter_id_fkey": {
-          "name": "comment_reports_reporter_id_fkey",
-          "tableFrom": "comment_reports",
-          "tableTo": "users",
-          "columnsFrom": [
-            "reporter_id"
-          ],
-          "columnsTo": [
-            "user_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "comment_reports_reason_check": {
-          "name": "comment_reports_reason_check",
-          "value": "reason = ANY (ARRAY['spam'::text, 'nudity'::text, 'harassment'::text, 'violence'::text, 'other'::text])"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.competition_users": {
@@ -821,6 +736,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "environment": {
+          "name": "environment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'production'"
         },
         "created_at": {
           "name": "created_at",
@@ -2212,131 +2134,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.post_comments": {
-      "name": "post_comments",
-      "schema": "",
-      "columns": {
-        "comment_id": {
-          "name": "comment_id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "post_id": {
-          "name": "post_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "parent_comment_id": {
-          "name": "parent_comment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "content": {
-          "name": "content",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "idx_post_comments_post": {
-          "name": "idx_post_comments_post",
-          "columns": [
-            {
-              "expression": "post_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "(deleted_at IS NULL)",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "post_comments_post_id_fkey": {
-          "name": "post_comments_post_id_fkey",
-          "tableFrom": "post_comments",
-          "tableTo": "posts",
-          "columnsFrom": [
-            "post_id"
-          ],
-          "columnsTo": [
-            "post_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "post_comments_user_id_fkey": {
-          "name": "post_comments_user_id_fkey",
-          "tableFrom": "post_comments",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "user_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "post_comments_parent_fkey": {
-          "name": "post_comments_parent_fkey",
-          "tableFrom": "post_comments",
-          "tableTo": "post_comments",
-          "columnsFrom": [
-            "parent_comment_id"
-          ],
-          "columnsTo": [
-            "comment_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "post_comments_content_check": {
-          "name": "post_comments_content_check",
-          "value": "char_length(content) >= 1 AND char_length(content) <= 1000"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.post_reports": {
       "name": "post_reports",
       "schema": "",
@@ -2563,24 +2360,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": true
-        },
-        "coauthor_user_id": {
-          "name": "coauthor_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "coauthor_status": {
-          "name": "coauthor_status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "coauthor_workout_id": {
-          "name": "coauthor_workout_id",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -2702,43 +2481,12 @@
           ],
           "onDelete": "set null",
           "onUpdate": "no action"
-        },
-        "posts_coauthor_user_id_fkey": {
-          "name": "posts_coauthor_user_id_fkey",
-          "tableFrom": "posts",
-          "tableTo": "users",
-          "columnsFrom": [
-            "coauthor_user_id"
-          ],
-          "columnsTo": [
-            "user_id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "posts_coauthor_workout_id_fkey": {
-          "name": "posts_coauthor_workout_id_fkey",
-          "tableFrom": "posts",
-          "tableTo": "workouts",
-          "columnsFrom": [
-            "coauthor_workout_id"
-          ],
-          "columnsTo": [
-            "workout_id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {
-        "posts_coauthor_status_check": {
-          "name": "posts_coauthor_status_check",
-          "value": "coauthor_status IS NULL OR coauthor_status = ANY (ARRAY['pending'::text, 'accepted'::text])"
-        }
-      },
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.refresh_tokens": {

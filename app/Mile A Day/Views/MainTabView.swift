@@ -22,6 +22,9 @@ struct MainTabView: View {
     @State private var activeWorkoutForBanner: InProgressWorkoutState?
     @State private var showGuidedTour = false
 
+    // "Leave us a review" moment — gated to streak milestones by ReviewPromptManager.
+    @StateObject private var reviewManager = ReviewPromptManager.shared
+
     var body: some View {
         ZStack(alignment: .bottom) {
         TabView(selection: $selectedTab) {
@@ -51,7 +54,10 @@ struct MainTabView: View {
             .badge(competitionService.invites.count)
 
             NavigationStack {
-                SocialFeedView()
+                // `isActiveTab` lets the feed refresh itself on tab re-entry —
+                // TabView keeps it alive, so its own .task can't (same reason
+                // Compete/Friends refresh in the onChange below).
+                SocialFeedView(isActiveTab: selectedTab == 2)
             }
             .tabItem {
                 Label("Feed", systemImage: "square.stack.fill")
@@ -105,6 +111,9 @@ struct MainTabView: View {
             await competitionService.refreshAllData()
             await friendService.refreshAllData()
             await refreshUnreadCount()
+            // Existing users already past a streak milestone get asked on this
+            // first calm pass — the retroactive path.
+            scheduleReviewEvaluation()
         }
         .onReceive(NotificationCenter.default.publisher(for: .didReceivePushNotification)) { notification in
             guard let type = notification.userInfo?["type"] as? String else { return }
@@ -137,6 +146,14 @@ struct MainTabView: View {
                      // silently. Route to Dashboard + open the inbox so the
                      // user actually sees the badge they earned.
                      "badge_earned", "friend_badge_earned",
+                     // challenge_won = the overnight Head-to-Head verdict; the
+                     // completion already sits in the history by the time the
+                     // push arrives, so Dashboard + inbox shows the full story.
+                     "challenge_won",
+                     // Post/story pushes carry no payload data through the
+                     // cold path, so land in the inbox — its row tap then
+                     // deep-links to the exact post/story.
+                     "friend_post", "story_reaction",
                      "friend_challenge_completed", "friend_personal_best":
                     selectedTab = 0
                     showNotificationInbox = true
@@ -176,10 +193,12 @@ struct MainTabView: View {
                     await competitionService.refreshAllData()
                     await friendService.refreshAllData()
                     await refreshUnreadCount()
+                    await syncLeaderboardWidget()
                 }
                 // Refresh health data and re-evaluate the daily reminder
                 // so "Mile still waiting" is cancelled if the user completed their mile
                 healthManager.fetchTodaysDistance()
+                scheduleReviewEvaluation()
             }
         }
         .onChange(of: healthManager.todaysDistance) { _, newDistance in
@@ -229,6 +248,12 @@ struct MainTabView: View {
                 showGuidedTour = true
             }
         }
+        .sheet(isPresented: $reviewManager.isPresented, onDismiss: handleReviewSheetDismiss) {
+            ReviewPromptView(manager: reviewManager)
+        }
+        .onChange(of: userManager.currentUser.streak) { _, _ in
+            scheduleReviewEvaluation()
+        }
         .animation(.easeInOut(duration: 0.25), value: trackingManager.isTracking)
     }
 
@@ -270,6 +295,7 @@ struct MainTabView: View {
 
         // Sync widget data
         syncWidgetData()
+        Task { await syncLeaderboardWidget() }
     }
 
     private func handlePendingNotification() {
@@ -292,7 +318,8 @@ struct MainTabView: View {
                 selectedTab = 1
             case "competition_flex", "competition_milestone", "friend_nudge",
                  "friend_activity", "streak_broken", "personal_best",
-                 "lead_change", "clash_tie":
+                 "lead_change", "clash_tie",
+                 "friend_post", "story_reaction":
                 selectedTab = 0
                 showNotificationInbox = true
                 notificationService.pendingNotificationType = nil
@@ -311,6 +338,39 @@ struct MainTabView: View {
             }
         } catch {
             // Silently fail
+        }
+    }
+
+    // MARK: - Review prompt
+
+    /// Consider showing the review moment, but only when the screen is calm:
+    /// on the Dashboard tab and with no celebration on-screen or queued (so it
+    /// never stacks on top of a goal/badge celebration). Deferred briefly so it
+    /// lands on a settled screen rather than mid-transition. Never shows during
+    /// onboarding — this view only exists once setup is complete.
+    private func scheduleReviewEvaluation() {
+        guard selectedTab == 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            let celebrations = CelebrationManager.shared
+            guard !celebrations.isShowingCelebration, celebrations.celebrationQueue.isEmpty else { return }
+            reviewManager.evaluate(streak: userManager.currentUser.streak, allowPresent: true)
+        }
+    }
+
+    /// After the review sheet dismisses, if the user tapped the positive CTA,
+    /// open the App Store review page. We deliberately do NOT use StoreKit's
+    /// `requestReview` here: it's for unprompted moments, and Apple silently
+    /// no-ops it once the user is over the ~3/year quota or has already rated —
+    /// which made the button look broken. Our sheet IS the ask, so the tap is
+    /// explicit intent and the deep link always lands. A short delay lets the
+    /// sheet finish dismissing before we hand off to the App Store.
+    private func handleReviewSheetDismiss() {
+        guard reviewManager.pendingRateRequest else { return }
+        reviewManager.pendingRateRequest = false
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let url = ReviewPromptManager.writeReviewURL else { return }
+            _ = await UIApplication.shared.open(url)
         }
     }
 
@@ -360,14 +420,74 @@ struct MainTabView: View {
         case .winning: urgency = "winning"
         }
 
+        // Top players (me always included) as a mini-leaderboard for the
+        // widget — same score grammar as the in-app competition rows.
+        func scoreText(_ user: CompetitionUser) -> String {
+            let score = user.score ?? 0
+            switch top.type {
+            case .streaks:
+                return "\(Int(score))d"
+            case .apex, .race:
+                return String(format: "%.1f %@", score, top.options.unit.shortDisplayName)
+            case .targets, .clash:
+                return "\(Int(score)) pt\(Int(score) == 1 ? "" : "s")"
+            }
+        }
+        var standings: [WidgetDataStore.StandingRow] = ranked.prefix(3).map { user in
+            WidgetDataStore.StandingRow(
+                name: user.displayName,
+                valueText: scoreText(user),
+                isMe: user.user_id == userId
+            )
+        }
+        if let uid = userId,
+           !standings.contains(where: { $0.isMe }),
+           let me = ranked.first(where: { $0.user_id == uid }) {
+            standings[standings.count - 1] = WidgetDataStore.StandingRow(
+                name: me.displayName, valueText: scoreText(me), isMe: true
+            )
+        }
+
         WidgetDataStore.save(
             competitionId: top.competition_id,
             competitionName: top.competition_name,
             pill: focus.pill,
             detail: focus.detail,
             rankText: rankText,
-            urgency: urgency
+            urgency: urgency,
+            standings: standings
         )
+    }
+
+    /// Mirror today's friends leaderboard into the App Group for the Daily
+    /// Leaderboard widget — the same standings the post-mile celebration
+    /// shows. Failed fetches keep the last good snapshot.
+    private func syncLeaderboardWidget() async {
+        let myId = UserDefaults.standard.string(forKey: "backendUserId")
+        guard myId != nil else { return }
+        guard let items = try? await friendService.fetchFriendsActivityToday() else { return }
+
+        var rows: [WidgetDataStore.LeaderboardRow] = items
+            .filter { $0.user_id != myId }
+            .map {
+                WidgetDataStore.LeaderboardRow(
+                    name: $0.displayName,
+                    miles: $0.today_miles,
+                    isMe: false,
+                    completed: $0.completed_today
+                )
+            }
+        let user = userManager.currentUser
+        rows.append(WidgetDataStore.LeaderboardRow(
+            name: user.username ?? user.name,
+            miles: healthManager.todaysDistance,
+            isMe: true,
+            completed: ProgressCalculator.isGoalCompleted(
+                current: healthManager.todaysDistance, goal: user.goalMiles
+            )
+        ))
+        rows.sort { $0.miles > $1.miles }
+        WidgetDataStore.save(leaderboardRows: rows)
     }
 }
 

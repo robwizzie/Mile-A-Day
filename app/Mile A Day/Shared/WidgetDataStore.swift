@@ -114,6 +114,7 @@ struct WidgetDataStore {
 
     private static let weekCompletionsKey = "week_completions"
     private static let weekStampKey = "week_completions_week"
+    private static let weekMilesKey = "week_miles"
 
     /// Stamp identifying the current week (its Sunday's day stamp), so data
     /// from a previous week reads as empty instead of wrong.
@@ -124,15 +125,19 @@ struct WidgetDataStore {
         return dayStamp(for: sunday)
     }
 
-    /// Saves Sun–Sat goal-completion flags for the current week.
-    static func save(weekCompletions: [Bool]) {
+    /// Saves Sun–Sat goal-completion flags for the current week, plus the
+    /// week's total miles for the streak widget's status line.
+    static func save(weekCompletions: [Bool], weekMiles: Double = 0) {
         guard let defaults = UserDefaults(suiteName: suiteName) else { return }
         let stamp = weekStamp()
         let previous = defaults.array(forKey: weekCompletionsKey) as? [Bool]
-        if previous == weekCompletions, defaults.string(forKey: weekStampKey) == stamp {
+        if previous == weekCompletions,
+           defaults.double(forKey: weekMilesKey) == weekMiles,
+           defaults.string(forKey: weekStampKey) == stamp {
             return
         }
         defaults.set(weekCompletions, forKey: weekCompletionsKey)
+        defaults.set(weekMiles, forKey: weekMilesKey)
         defaults.set(stamp, forKey: weekStampKey)
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
@@ -148,6 +153,14 @@ struct WidgetDataStore {
         return stored
     }
 
+    static func loadWeekMiles() -> Double {
+        guard let defaults = UserDefaults(suiteName: suiteName),
+              defaults.string(forKey: weekStampKey) == weekStamp() else {
+            return 0
+        }
+        return defaults.double(forKey: weekMilesKey)
+    }
+
     // MARK: - Competition summary (competition widget)
 
     private static let compIdKey = "comp_id"
@@ -157,6 +170,14 @@ struct WidgetDataStore {
     private static let compRankKey = "comp_rank"
     private static let compUrgencyKey = "comp_urgency"
     private static let compStampKey = "comp_day"
+    private static let compStandingsKey = "comp_standings"
+
+    /// One standings row for the competition widget's mini-leaderboard.
+    struct StandingRow: Codable {
+        let name: String
+        let valueText: String
+        let isMe: Bool
+    }
 
     struct CompetitionSummary {
         let id: String
@@ -166,16 +187,29 @@ struct WidgetDataStore {
         let rankText: String
         let urgency: String   // "urgent" | "behind" | "neutral" | "winning"
         let isStale: Bool     // saved on a previous day
+        /// Ranked top players (me included) — empty when written by an older
+        /// app build; the widget falls back to the detail line.
+        var standings: [StandingRow] = []
     }
 
-    static func save(competitionId: String, competitionName: String, pill: String, detail: String, rankText: String, urgency: String) {
+    static func save(
+        competitionId: String,
+        competitionName: String,
+        pill: String,
+        detail: String,
+        rankText: String,
+        urgency: String,
+        standings: [StandingRow] = []
+    ) {
         guard let defaults = UserDefaults(suiteName: suiteName) else { return }
         let stamp = dayStamp()
+        let standingsData = (try? JSONEncoder().encode(standings)) ?? Data()
         if defaults.string(forKey: compIdKey) == competitionId,
            defaults.string(forKey: compNameKey) == competitionName,
            defaults.string(forKey: compPillKey) == pill,
            defaults.string(forKey: compDetailKey) == detail,
            defaults.string(forKey: compRankKey) == rankText,
+           defaults.data(forKey: compStandingsKey) == standingsData,
            defaults.string(forKey: compStampKey) == stamp {
             return
         }
@@ -185,6 +219,7 @@ struct WidgetDataStore {
         defaults.set(detail, forKey: compDetailKey)
         defaults.set(rankText, forKey: compRankKey)
         defaults.set(urgency, forKey: compUrgencyKey)
+        defaults.set(standingsData, forKey: compStandingsKey)
         defaults.set(stamp, forKey: compStampKey)
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "CompetitionWidget")
@@ -200,6 +235,7 @@ struct WidgetDataStore {
         defaults.removeObject(forKey: compDetailKey)
         defaults.removeObject(forKey: compRankKey)
         defaults.removeObject(forKey: compUrgencyKey)
+        defaults.removeObject(forKey: compStandingsKey)
         defaults.removeObject(forKey: compStampKey)
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "CompetitionWidget")
@@ -211,6 +247,8 @@ struct WidgetDataStore {
               let name = defaults.string(forKey: compNameKey) else {
             return nil
         }
+        let standings = defaults.data(forKey: compStandingsKey)
+            .flatMap { try? JSONDecoder().decode([StandingRow].self, from: $0) } ?? []
         return CompetitionSummary(
             id: defaults.string(forKey: compIdKey) ?? "",
             name: name,
@@ -218,7 +256,55 @@ struct WidgetDataStore {
             detail: defaults.string(forKey: compDetailKey) ?? "",
             rankText: defaults.string(forKey: compRankKey) ?? "",
             urgency: defaults.string(forKey: compUrgencyKey) ?? "neutral",
-            isStale: defaults.string(forKey: compStampKey) != dayStamp()
+            isStale: defaults.string(forKey: compStampKey) != dayStamp(),
+            standings: standings
+        )
+    }
+
+    // MARK: - Daily leaderboard (leaderboard widget)
+
+    private static let leaderboardRowsKey = "daily_leaderboard_rows"
+    private static let leaderboardStampKey = "daily_leaderboard_day"
+
+    /// One ranked row of today's friends leaderboard (me included).
+    struct LeaderboardRow: Codable {
+        let name: String
+        let miles: Double
+        let isMe: Bool
+        let completed: Bool
+    }
+
+    struct LeaderboardSnapshot {
+        let rows: [LeaderboardRow]   // already sorted by miles, descending
+        let isStale: Bool            // saved on a previous day
+    }
+
+    /// Saves today's friends leaderboard for the Daily Leaderboard widget.
+    static func save(leaderboardRows: [LeaderboardRow]) {
+        guard let defaults = UserDefaults(suiteName: suiteName),
+              let data = try? JSONEncoder().encode(leaderboardRows) else { return }
+        let stamp = dayStamp()
+        if defaults.data(forKey: leaderboardRowsKey) == data,
+           defaults.string(forKey: leaderboardStampKey) == stamp {
+            return
+        }
+        defaults.set(data, forKey: leaderboardRowsKey)
+        defaults.set(stamp, forKey: leaderboardStampKey)
+        DispatchQueue.main.async {
+            WidgetCenter.shared.reloadTimelines(ofKind: "DailyLeaderboardWidget")
+        }
+    }
+
+    static func loadLeaderboard() -> LeaderboardSnapshot? {
+        guard let defaults = UserDefaults(suiteName: suiteName),
+              let data = defaults.data(forKey: leaderboardRowsKey),
+              let rows = try? JSONDecoder().decode([LeaderboardRow].self, from: data),
+              !rows.isEmpty else {
+            return nil
+        }
+        return LeaderboardSnapshot(
+            rows: rows,
+            isStale: defaults.string(forKey: leaderboardStampKey) != dayStamp()
         )
     }
 }

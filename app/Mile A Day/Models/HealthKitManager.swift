@@ -362,6 +362,21 @@ class HealthKitManager: ObservableObject {
     var hasTodaysDistanceLoaded: Bool = false
     var hasIndexOrStreakLoaded: Bool = false
 
+    /// True once fetchTodaysDistance() has actually SUCCEEDED this session — not
+    /// merely been attempted. Distinct from `hasTodaysDistanceLoaded`, which flips
+    /// true even when the query ERRORS (locked device) so `hasLoadedInitialData`
+    /// never hangs. Celebrations gate on THIS: on a cold launch behind a locked
+    /// screen the query errors, `todaysDistance` keeps the value `loadCachedData()`
+    /// seeded from last night, and firing on it re-showed "mile complete / streak
+    /// safe" + the photo prompt for yesterday's already-posted mile until a second
+    /// launch refreshed the cache.
+    @Published var hasFreshTodaysDistance: Bool = false
+
+    /// True once fetchRecentWorkouts() has SUCCEEDED at least once this session.
+    /// Lets the UI tell "still loading / query erroring" apart from a genuine
+    /// empty list, so a locked-device launch stops flashing "No recent workouts".
+    @Published var hasLoadedRecentWorkoutsOnce: Bool = false
+
     func checkInitialDataReady() {
         if hasTodaysDistanceLoaded && hasIndexOrStreakLoaded && !hasLoadedInitialData {
             hasLoadedInitialData = true
@@ -441,6 +456,13 @@ class HealthKitManager: ObservableObject {
         // shuttles authoritative iOS data (streak, today's distance, goal,
         // name) to the watch so the two never disagree.
         MADWatchBridge.shared.activate()
+
+        // Resolve real authorization immediately. Nothing else here does: the
+        // flag is set by requestAuthorization, which only the UI calls, so a
+        // background-launched process read HealthKit with it still false and
+        // every query no-opped. This never prompts, and its callback is
+        // deferred to the main queue, so it can't re-enter this init.
+        refreshAuthorizationStatus()
     }
     
     // MARK: - Caching Methods
@@ -487,7 +509,11 @@ class HealthKitManager: ObservableObject {
         if cachedTotalLifetimeMiles > 0 {
             totalLifetimeMiles = cachedTotalLifetimeMiles
         }
-        if cachedRetroactiveStreak > 0 {
+        // Raise-only: on iOS, init already derived retroactiveStreak from the
+        // workout index (activeStreak() as of now), which is fresher truth than
+        // this snapshot — the cache may hold a transient low value saved while
+        // the index had a hole (see UserManager.vettedHealthKitStreak).
+        if cachedRetroactiveStreak > retroactiveStreak {
             retroactiveStreak = cachedRetroactiveStreak
         }
             }
@@ -612,46 +638,109 @@ class HealthKitManager: ObservableObject {
         return nil
     }
     
-    // Request authorization to access HealthKit data
-    func requestAuthorization(completion: @escaping (Bool) -> Void) {
-        guard HKHealthStore.isHealthDataAvailable() else {
-            completion(false)
-            return
-        }
-        
-        // Define the types we want to read from HealthKit
-        let readTypes: Set = [
+    /// The types we read from HealthKit. Shared by the authorization request and
+    /// the non-prompting status check so the two can never drift apart.
+    private var healthKitReadTypes: Set<HKObjectType> {
+        [
             HKObjectType.workoutType(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
             HKObjectType.quantityType(forIdentifier: .stepCount)!,
             HKSeriesType.workoutRoute()
         ]
+    }
 
-        // Define the types we want to write to HealthKit (for workout tracking).
-        // workoutRoute share access lets in-app GPS workouts save their route,
-        // which is what the feed's route maps are built from at sync time.
-        let writeTypes: Set = [
+    /// The types we write (for workout tracking). workoutRoute share access lets
+    /// in-app GPS workouts save their route, which is what the feed's route maps
+    /// are built from at sync time.
+    private var healthKitWriteTypes: Set<HKSampleType> {
+        [
             HKObjectType.workoutType(),
             HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!,
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
             HKSeriesType.workoutRoute()
         ]
+    }
 
-        healthStore.requestAuthorization(toShare: writeTypes, read: readTypes) { success, error in
+    /// Resolve authorization WITHOUT prompting, so a process that never shows UI
+    /// can still read HealthKit.
+    ///
+    /// `isAuthorized` only ever became true inside `requestAuthorization`'s
+    /// completion — a UI path — which made it really mean "did someone ask
+    /// during THIS process", not "is this app authorized". It starts false in
+    /// every new process, and HealthKit's own background delivery launches this
+    /// app with no UI constantly, so in those processes every read guarded on
+    /// the flag silently no-opped: the index logged "❌ Not authorized" and
+    /// `recentWorkouts` stayed empty even though the user had granted access
+    /// long ago.
+    ///
+    /// `.unnecessary` means every type we use has already been answered for, so
+    /// queries can run. That is exactly what `requestAuthorization`'s `success`
+    /// already meant — neither reports whether READ access was *granted*, which
+    /// Apple hides by design (a denied read just returns no samples).
+    func refreshAuthorizationStatus(completion: ((Bool) -> Void)? = nil) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            completion?(false)
+            return
+        }
+        healthStore.getRequestStatusForAuthorization(
+            toShare: healthKitWriteTypes,
+            read: healthKitReadTypes
+        ) { [weak self] status, _ in
+            DispatchQueue.main.async {
+                guard let self else {
+                    completion?(false)
+                    return
+                }
+                // Only ever promote to true — never clobber a live grant from an
+                // in-flight requestAuthorization. Deliberately no other side
+                // effects: this is a question, not a request. Background
+                // delivery stays owned by requestAuthorization, which the UI
+                // runs on every foreground launch.
+                if status == .unnecessary && !self.isAuthorized {
+                    self.isAuthorized = true
+                }
+                completion?(self.isAuthorized)
+            }
+        }
+    }
+
+    // Request authorization to access HealthKit data
+    func requestAuthorization(completion: @escaping (Bool) -> Void) {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            completion(false)
+            return
+        }
+
+        healthStore.requestAuthorization(
+            toShare: healthKitWriteTypes,
+            read: healthKitReadTypes
+        ) { success, error in
             DispatchQueue.main.async {
                 self.isAuthorized = success
-                
+
                 // Enable background delivery for workouts when authorized
                 if success {
                     self.enableBackgroundDelivery()
                 }
-                
+
                 completion(success)
             }
         }
     }
-    
+
+    /// Whether the user has explicitly turned OFF *write* access to Workouts for
+    /// this app. Unlike reads (which Apple hides — a denied read just returns no
+    /// samples), share-authorization status is reliable, so an in-app workout
+    /// that fails to save can distinguish "user denied Health access"
+    /// (actionable — send them to Settings) from a transient save failure.
+    /// `.notDetermined` and `.sharingAuthorized` both return false: the former
+    /// will prompt on the next save attempt, the latter is already fine.
+    func isWorkoutSharingDenied() -> Bool {
+        guard HKHealthStore.isHealthDataAvailable() else { return false }
+        return healthStore.authorizationStatus(for: HKObjectType.workoutType()) == .sharingDenied
+    }
+
     // Enable background delivery for HealthKit data
     private func enableBackgroundDelivery() {
         let workoutType = HKObjectType.workoutType()
@@ -706,6 +795,13 @@ class HealthKitManager: ObservableObject {
                 return
             }
 
+            // Reached only on a SUCCESSFUL query (locked-device errors returned
+            // above). Now `todaysDistance` is about to reflect a value we just
+            // fetched, not the cached one init seeded — so celebrations may fire.
+            DispatchQueue.main.async {
+                self.hasFreshTodaysDistance = true
+            }
+
             #if os(watchOS)
             let workouts = ((samples as? [HKWorkout]) ?? [])
             #else
@@ -741,11 +837,22 @@ class HealthKitManager: ObservableObject {
         healthStore.execute(query)
     }
     
+    /// Retries left for a `fetchRecentWorkouts` that errored out. A locked
+    /// device is the common case and it resolves on its own, so a couple of
+    /// spaced retries recover the list without waiting for the next refresh.
+    private var recentWorkoutsRetriesLeft = 3
+
     // Fetch recent running/walking workouts (last 30 days, capped at 50).
     // The date predicate keeps HealthKit from scanning all-time history just to
     // pull the most recent samples — far cheaper for users with long histories.
     func fetchRecentWorkouts() {
-        guard isAuthorized else { return }
+        // print, not log(): log() is a no-op stub, so this path had no voice at
+        // all — an empty Recent Workouts list looked identical whether the query
+        // was skipped, errored, or genuinely returned nothing.
+        guard isAuthorized else {
+            print("[HealthKit] ⏭️ fetchRecentWorkouts skipped — isAuthorized == false")
+            return
+        }
 
         let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
         let walkingPredicate = HKQuery.predicateForWorkouts(with: .walking)
@@ -762,15 +869,47 @@ class HealthKitManager: ObservableObject {
             predicate: predicate,
             limit: 50,
             sortDescriptors: [sortDescriptor]
-        ) { [weak self] _, samples, _ in
-            guard let self = self, let workouts = samples as? [HKWorkout] else { return }
+        ) { [weak self] _, samples, error in
+            guard let self = self else { return }
 
+            // Query failed — most commonly because the device is locked
+            // (HealthKit data is protected while locked, so the query errors
+            // rather than returning). Same rule as fetchTodaysDistance: this is
+            // "no answer", NOT "no workouts". Keep the last good list and retry,
+            // because swallowing the error left the list empty until something
+            // else happened to call fetchAllWorkoutData again.
+            guard error == nil, let workouts = samples as? [HKWorkout] else {
+                print("[HealthKit] ⚠️ fetchRecentWorkouts failed: \(error?.localizedDescription ?? "nil samples") — will retry")
+                self.retryFetchRecentWorkouts()
+                return
+            }
+
+            // Successful query: trust the result, empty or not (a real zero).
             DispatchQueue.main.async {
+                print("[HealthKit] ✅ fetchRecentWorkouts → \(workouts.count) workouts")
+                self.recentWorkoutsRetriesLeft = 3
                 self.recentWorkouts = workouts
+                // Only NOW is an empty list meaningful — before the first success
+                // the UI must show "loading", not "no recent workouts".
+                self.hasLoadedRecentWorkoutsOnce = true
             }
         }
 
         healthStore.execute(query)
+    }
+
+    /// Re-run a failed recent-workouts query a few times, backing off, so a
+    /// launch behind a locked screen still fills the list once it unlocks.
+    private func retryFetchRecentWorkouts() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.recentWorkoutsRetriesLeft > 0 else { return }
+            let attempt = 4 - self.recentWorkoutsRetriesLeft
+            self.recentWorkoutsRetriesLeft -= 1
+            let delay = Double(attempt) * 2.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.fetchRecentWorkouts()
+            }
+        }
     }
     
     // Helper method to check if user has completed their mile goal today
@@ -921,14 +1060,20 @@ class HealthKitManager: ObservableObject {
         return workoutsByDay
     }
     
-    /// Filters workouts for today using device timezone (legacy behavior)
+    /// Filters workouts to those that belong to "today" in the device timezone.
+    /// A workout is attributed to the day it STARTED — matching groupWorkoutsByDeviceDay,
+    /// the timezone-aware streak grouping, the backend's `local_date` (= start date),
+    /// and Apple Health's own daily totals. Keying off endDate instead pulled a workout
+    /// that started before midnight but ended after it into today, adding that whole run
+    /// to Today's Progress (a walk left "on as it crossed 12am") and falsely completing
+    /// the daily goal — while the streak, backend, and Apple Health all counted it
+    /// yesterday.
     func filterWorkoutsByDeviceToday(workouts: [HKWorkout]) -> [HKWorkout] {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let _ = calendar.date(byAdding: .day, value: 1, to: today)!
-        
+
         return workouts.filter { workout in
-            let workoutDate = calendar.startOfDay(for: workout.endDate)
+            let workoutDate = calendar.startOfDay(for: workout.startDate)
             return workoutDate == today
         }
     }
@@ -1454,7 +1599,11 @@ final class MADWatchBridge: NSObject {
         let user = UserManager.shared.currentUser
 
         var payload: [String: Any] = [
-            "streak": hk.retroactiveStreak,
+            // Display-grade streak: hk.retroactiveStreak can transiently hold an
+            // unverified low value mid-recompute (WorkoutIndex hole). The user
+            // model's streak is quarantine-protected (vettedHealthKitStreak), so
+            // never push below it — the watch renders this number directly.
+            "streak": max(hk.retroactiveStreak, user.streak),
             "todayMiles": hk.todaysDistance,
             "goalMiles": user.goalMiles > 0 ? user.goalMiles : 1.0,
             "firstName": user.firstName ?? "",

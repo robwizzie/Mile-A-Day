@@ -413,6 +413,11 @@ struct FriendsListView: View {
                                 && (hypesRemaining ?? HypeService.dailyLimit) <= 0
                                 && !item.is_hyped
                         ) {
+                            // Same clap burst as double-tapping the row — the
+                            // button and the gesture feel identical (and match
+                            // the feed cards' behavior).
+                            rowHypeBursts[item.workout_id, default: 0] += 1
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                             Task { await sendHype(for: item) }
                         }
                     }
@@ -568,13 +573,7 @@ struct FriendsListView: View {
     }
 
     private func workoutColor(_ type: String) -> Color {
-        switch type.lowercased() {
-        case "running": return MADTheme.Colors.madRed
-        case "walking": return .blue
-        case "cycling": return .green
-        case "hiking": return .orange
-        default: return MADTheme.Colors.madRed
-        }
+        MADTheme.workoutColor(type)
     }
 
     /// Double-tap on a row = hype, mirroring the feed cards: clap burst +

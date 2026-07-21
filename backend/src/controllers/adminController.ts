@@ -13,6 +13,17 @@ import {
   getPostForensics,
   restoreDeletedPost,
   getUsers,
+  getUserDetail,
+  getEngagement,
+  getSignupsByDay,
+  getLeaderboards,
+  getWorkoutTypeBreakdown,
+  getStorageStats,
+  getPostsSummary,
+  getPostsByDay,
+  listPosts,
+  getReferralStats,
+  type PostFilter,
 } from "../services/adminService.js";
 import { signMediaUrlsDeep } from "../services/mediaSigningService.js";
 
@@ -76,8 +87,95 @@ export async function milesByDay(_req: Request, res: Response) {
   res.json(await getMilesByDay());
 }
 
-export async function users(_req: Request, res: Response) {
-  res.json(await getUsers());
+const USER_SORTS = new Set(["recent", "streak", "miles", "active"]);
+
+export async function users(req: Request, res: Response) {
+  const search =
+    typeof req.query.search === "string" && req.query.search.trim()
+      ? req.query.search.trim()
+      : null;
+  const limit = Math.min(
+    Math.max(parseInt(String(req.query.limit ?? "25"), 10) || 25, 1),
+    100,
+  );
+  const offset = Math.max(
+    parseInt(String(req.query.offset ?? "0"), 10) || 0,
+    0,
+  );
+  const sortParam = String(req.query.sort ?? "recent");
+  const sort = (USER_SORTS.has(sortParam) ? sortParam : "recent") as
+    | "recent"
+    | "streak"
+    | "miles"
+    | "active";
+  res.json(await getUsers({ search, limit, offset, sort }));
+}
+
+export async function userDetail(req: Request, res: Response) {
+  const detail = await getUserDetail(req.params.userId);
+  if (!detail) return res.status(404).json({ error: "User not found" });
+  res.json(signMediaUrlsDeep(detail));
+}
+
+export async function engagement(_req: Request, res: Response) {
+  res.json(await getEngagement());
+}
+
+export async function signupsByDay(_req: Request, res: Response) {
+  res.json(await getSignupsByDay());
+}
+
+export async function leaderboards(_req: Request, res: Response) {
+  res.json(await getLeaderboards());
+}
+
+export async function workoutTypes(_req: Request, res: Response) {
+  res.json(await getWorkoutTypeBreakdown());
+}
+
+export async function storage(_req: Request, res: Response) {
+  res.json(await getStorageStats());
+}
+
+export async function postsSummary(_req: Request, res: Response) {
+  res.json(await getPostsSummary());
+}
+
+export async function postsByDay(_req: Request, res: Response) {
+  res.json(await getPostsByDay());
+}
+
+const POST_FILTERS = new Set<PostFilter>([
+  "all",
+  "live",
+  "deleted",
+  "feed",
+  "story",
+  "auto",
+  "user",
+]);
+
+export async function postsList(req: Request, res: Response) {
+  const search =
+    typeof req.query.search === "string" && req.query.search.trim()
+      ? req.query.search.trim()
+      : null;
+  const filterParam = String(req.query.filter ?? "all") as PostFilter;
+  const filter = POST_FILTERS.has(filterParam) ? filterParam : "all";
+  const limit = Math.min(
+    Math.max(parseInt(String(req.query.limit ?? "24"), 10) || 24, 1),
+    100,
+  );
+  const offset = Math.max(
+    parseInt(String(req.query.offset ?? "0"), 10) || 0,
+    0,
+  );
+  const result = await listPosts({ search, filter, limit, offset });
+  res.json({ total: result.total, posts: signMediaUrlsDeep(result.posts) });
+}
+
+export async function referrals(_req: Request, res: Response) {
+  res.json(await getReferralStats());
 }
 
 export async function errors(req: Request, res: Response) {

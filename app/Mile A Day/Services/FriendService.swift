@@ -38,7 +38,12 @@ class FriendService: ObservableObject {
     }
     
     // MARK: - Private Helper Methods
-    private func makeRequest<T: Codable>(
+    /// `nonisolated` because this only forwards to `APIClient.fancyFetch` and
+    /// maps errors — it touches no actor state. Staying on @MainActor made the
+    /// call to the nonisolated `fancyFetch` cross into a @concurrent context,
+    /// which Swift 6 rejects: T's `Decodable` conformance may itself be
+    /// actor-isolated, and an isolated conformance can't be sent across.
+    private nonisolated func makeRequest<T: Codable & SendableMetatype>(
         endpoint: String,
         method: HTTPMethod = .GET,
         body: Data? = nil,
@@ -582,6 +587,24 @@ class FriendService: ObservableObject {
         return response
     }
 
+    /// One of a friend's workouts' GPS trace, for the detail screen's map.
+    ///
+    /// Your own detail reads its route from HealthKit, which only holds your own
+    /// runs — this is the equivalent for someone else's. Returns nil when there
+    /// is no route OR when the author's "Share route maps" setting hides it;
+    /// the server answers `{ "route": null }` either way, so the map simply
+    /// isn't drawn rather than erroring.
+    func fetchWorkoutRoute(for friendId: String, workoutId: String) async throws -> [[Double]]? {
+        let encodedId = workoutId.addingPercentEncoding(
+            withAllowedCharacters: .urlPathAllowed
+        ) ?? workoutId
+        let response: WorkoutRouteResponse = try await makeRequest(
+            endpoint: "/workouts/\(friendId)/workout/\(encodedId)/route",
+            responseType: WorkoutRouteResponse.self
+        )
+        return response.route
+    }
+
     /// Fetch stats for a friend
     func fetchFriendStats(for friendId: String) async throws -> FriendStats {
         let endpoint = "/workouts/\(friendId)/stats"
@@ -775,6 +798,14 @@ struct FeedWorkoutItem: Codable, Identifiable {
 // MARK: - Friend Workout Models
 
 /// Workout data for a friend
+/// `{ "route": [[lat, lng], ...] | null }` from
+/// `/workouts/:userId/workout/:workoutId/route`. Codable (not just Decodable)
+/// because `makeRequest` is generic over one `Codable` type for both body and
+/// response.
+struct WorkoutRouteResponse: Codable {
+    let route: [[Double]]?
+}
+
 struct FriendWorkout: Codable, Identifiable {
     let id: String
     let userId: String
@@ -785,6 +816,11 @@ struct FriendWorkout: Codable, Identifiable {
     let deviceEndDate: String?
     let calories: Double?
     let source: String?
+    /// This run carries a stored GPS trace. Optional: absent from older servers.
+    let hasRoute: Bool?
+    /// This run has a real (non-auto) photo post — never a generated route/stats
+    /// card. Optional: absent from older servers. Existence only, never a url.
+    let hasPhoto: Bool?
 
     var isManualOrEdited: Bool {
         source == "manual" || source == "edited"
@@ -800,6 +836,8 @@ struct FriendWorkout: Codable, Identifiable {
         case deviceEndDate = "device_end_date"
         case calories
         case source
+        case hasRoute = "has_route"
+        case hasPhoto = "has_photo"
     }
 
     var formattedDate: String {

@@ -141,6 +141,23 @@ struct NotificationSettingsView: View {
                         settingsToggle("Friend nudges", isOn: $prefs.friendNudgeEnabled)
                     }
 
+                    // Privacy — the coarse gate. Sits above the sharing toggles
+                    // because it decides WHO gets in at all; those decide what
+                    // they then see.
+                    settingsSection(title: "WHO CAN SEE MY WORKOUTS", icon: "eye.fill", iconColor: .purple) {
+                        VStack(spacing: 0) {
+                            ForEach(Array(WorkoutVisibility.allCases.enumerated()), id: \.element.id) { index, option in
+                                if index > 0 { settingsDivider }
+                                visibilityOption(option)
+                            }
+                        }
+                        Text("Applies to your routes, photos and posts. Blocked people never see them, whatever you pick.")
+                            .font(.system(size: 11, design: .rounded))
+                            .foregroundColor(.white.opacity(0.35))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 2)
+                    }
+
                     // Feed & Stories (v2)
                     settingsSection(title: "FEED & STORIES", icon: "square.stack.fill", iconColor: MADTheme.Colors.madRed) {
                         settingsToggle("Share my walks & runs to the feed", isOn: $prefs.shareWorkoutsToFeed,
@@ -340,6 +357,7 @@ struct NotificationSettingsView: View {
         .task {
             await friendService.refreshAllData()
             await loadFriendSettingsAsync()
+            await loadVisibilityFromServer()
         }
     }
 
@@ -389,6 +407,66 @@ struct NotificationSettingsView: View {
         Divider().overlay(Color.white.opacity(0.06))
     }
 
+    // MARK: - Visibility picker
+
+    /// Accent per option — green reads "open", red reads "shut". The tint is
+    /// what carries the state at a glance, before you read a word.
+    private func visibilityTint(_ option: WorkoutVisibility) -> Color {
+        switch option {
+        case .public: return .green
+        case .friends: return .blue
+        case .private: return MADTheme.Colors.madRed
+        }
+    }
+
+    /// One choice in the visibility picker. A row rather than a segmented
+    /// control because each option needs a sentence to be honest about what it
+    /// does — nobody should have to guess what "Everyone" reaches.
+    private func visibilityOption(_ option: WorkoutVisibility) -> some View {
+        let selected = prefs.workoutVisibility == option
+        let tint = visibilityTint(option)
+        return Button {
+            guard !selected else { return }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.easeInOut(duration: 0.15)) {
+                prefs.workoutVisibility = option
+            }
+        } label: {
+            HStack(spacing: MADTheme.Spacing.md) {
+                ZStack {
+                    Circle()
+                        .fill(selected ? tint.opacity(0.22) : Color.white.opacity(0.06))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: option.icon)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(selected ? tint : .white.opacity(0.4))
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(option.title)
+                        .font(MADTheme.Typography.body)
+                        .foregroundColor(.white)
+                    Text(option.subtitle)
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundColor(.white.opacity(0.35))
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: MADTheme.Spacing.sm)
+
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(selected ? tint : .white.opacity(0.2))
+            }
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    }
+
     // MARK: - Friend Notification List
     private var friendNotificationList: some View {
         VStack(spacing: MADTheme.Spacing.sm) {
@@ -435,6 +513,7 @@ struct NotificationSettingsView: View {
                     "friend_posts_enabled": prefs.friendPostsEnabled,
                     "share_route_maps": prefs.shareRouteMaps,
                     "weekly_recap_enabled": prefs.weeklyRecapEnabled,
+                    "workout_visibility": prefs.workoutVisibility.rawValue,
                 ]
                 _ = try await friendService.updateNotificationSettings(backendSettings)
             } catch {
@@ -446,6 +525,26 @@ struct NotificationSettingsView: View {
         withAnimation(.easeInOut(duration: 0.2)) { savedFeedback = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             withAnimation(.easeInOut(duration: 0.2)) { savedFeedback = false }
+        }
+    }
+
+    /// Pull the visibility the SERVER actually enforces.
+    ///
+    /// Every other setting on this screen is local-first, which is fine for a
+    /// notification preference — but this one is a privacy control, and showing
+    /// "Friends only" to someone the server has as "Everyone" would be a lie
+    /// about who can see their photos. The server is the authority here.
+    private func loadVisibilityFromServer() async {
+        guard let settings = try? await friendService.getNotificationSettings(),
+              let raw = settings.workout_visibility,
+              let visibility = WorkoutVisibility(rawValue: raw)
+        else { return }
+        await MainActor.run {
+            guard prefs.workoutVisibility != visibility else { return }
+            prefs.workoutVisibility = visibility
+            // Keep the local copy honest too, so a later Save of some unrelated
+            // toggle can't push the stale value back over the server's.
+            prefs.save()
         }
     }
 
