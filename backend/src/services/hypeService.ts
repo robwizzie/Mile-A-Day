@@ -9,6 +9,13 @@ const db = PostgresService.getInstance();
 
 export const HYPE_DAILY_LIMIT = 3;
 
+// Silent anti-abuse ceiling. Hypes are UNLIMITED as a product (clients are
+// told so and never see this), but one sender still can't exceed this many
+// hypes/day. It only trips under abuse — a friend/co-participant scripting
+// fabricated-context or context-less push spam at a target — never in normal
+// use. Tune, or drop the WHERE below entirely for truly no ceiling.
+export const HYPE_DAILY_ABUSE_CEILING = 50;
+
 /**
  * Count of hypes the sender has sent since midnight ET today.
  * The window resets at midnight America/New_York, not rolling 24h.
@@ -154,53 +161,49 @@ export async function getContextHypers(
 }
 
 /**
- * Atomically insert a hype_log row only if the sender is still under the
- * daily limit. Optional context describes what was hyped (mile/badge/pr) and
- * enables dedupe via the partial unique index on (sender, target, ctx_type, ctx_id).
- * Returns the new row's id, or null if the limit was reached.
+ * Insert a hype_log row, bounded by the silent daily abuse ceiling.
  *
- * Caller is responsible for the dedupe pre-check via `hasHypedContext`; this
- * function will surface a PG unique violation otherwise.
+ * Hypes are unlimited as a product; this only stops a single sender from
+ * exceeding HYPE_DAILY_ABUSE_CEILING hypes in a day. Context-ful hypes are also
+ * deduped (caller's hasHyped* pre-check + the partial unique index); the ceiling
+ * is the backstop for contexts that can't be validated/deduped (badge/pr/
+ * challenge, an unresolvable mile id, or a context-less legacy/push "hype back").
+ * Returns the new row's id, or null if the ceiling was hit / a dedupe race lost.
  */
 export async function logHypeIfUnderLimit(
   senderId: string,
   targetId: string,
   context?: HypeContext,
 ): Promise<{ id: string } | null> {
-  const unlimited = await hasUnlimitedHypes(senderId);
+  const underCeiling = `(
+				SELECT COUNT(*) FROM hype_log
+				WHERE sender_id = $1 AND created_at >= ${START_OF_TODAY_ET_SQL}
+			) < ${HYPE_DAILY_ABUSE_CEILING}`;
 
   if (context) {
-    const sql = unlimited
-      ? `INSERT INTO hype_log (sender_id, target_id, context_type, context_id, context_label)
-				VALUES ($1, $2, $3, $4, $5)
-				RETURNING id`
-      : `INSERT INTO hype_log (sender_id, target_id, context_type, context_id, context_label)
+    const rows = await db.query<{ id: string }>(
+      `INSERT INTO hype_log (sender_id, target_id, context_type, context_id, context_label)
 				SELECT $1, $2, $3, $4, $5
-				WHERE (
-					SELECT COUNT(*) FROM hype_log
-					WHERE sender_id = $1 AND created_at >= ${START_OF_TODAY_ET_SQL}
-				) < ${HYPE_DAILY_LIMIT}
-				RETURNING id`;
-    const rows = await db.query<{ id: string }>(sql, [
-      senderId,
-      targetId,
-      context.contextType,
-      context.contextId,
-      context.contextLabel,
-    ]);
+				WHERE ${underCeiling}
+				RETURNING id`,
+      [
+        senderId,
+        targetId,
+        context.contextType,
+        context.contextId,
+        context.contextLabel,
+      ],
+    );
     return rows[0] ?? null;
   }
 
-  const sql = unlimited
-    ? `INSERT INTO hype_log (sender_id, target_id) VALUES ($1, $2) RETURNING id`
-    : `INSERT INTO hype_log (sender_id, target_id)
+  const rows = await db.query<{ id: string }>(
+    `INSERT INTO hype_log (sender_id, target_id)
 			SELECT $1, $2
-			WHERE (
-				SELECT COUNT(*) FROM hype_log
-				WHERE sender_id = $1 AND created_at >= ${START_OF_TODAY_ET_SQL}
-			) < ${HYPE_DAILY_LIMIT}
-			RETURNING id`;
-  const rows = await db.query<{ id: string }>(sql, [senderId, targetId]);
+			WHERE ${underCeiling}
+			RETURNING id`,
+    [senderId, targetId],
+  );
   return rows[0] ?? null;
 }
 

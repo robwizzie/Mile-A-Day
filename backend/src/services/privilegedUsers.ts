@@ -28,8 +28,10 @@ export async function hasUnlimitedActions(userId: string): Promise<boolean> {
 	return (await getRole(userId)) === 'admin';
 }
 
-/** Admins and founders bypass the daily hype cap. */
-export async function hasUnlimitedHypes(userId: string): Promise<boolean> {
-	const role = await getRole(userId);
-	return role === 'admin' || role === 'founder';
+/** Hypes are unlimited for everyone. */
+// ponytail: hypes made unlimited for all users. Kept the function (and its role
+// lookup path) so response shapes stay identical for old clients; restore the
+// role check here if daily caps ever come back.
+export async function hasUnlimitedHypes(_userId: string): Promise<boolean> {
+	return true;
 }

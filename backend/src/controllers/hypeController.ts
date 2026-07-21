@@ -64,24 +64,6 @@ async function isFriendOrCoParticipant(
   return shareActiveCompetition(senderId, targetId);
 }
 
-/**
- * Formats an ISO timestamp as a human-readable "in X" string (e.g. "in 2 hours",
- * "in 45 minutes"). Returns null if the timestamp is missing or already past.
- */
-function formatTimeUntil(isoTimestamp: string | null): string | null {
-  if (!isoTimestamp) return null;
-  const target = new Date(isoTimestamp).getTime();
-  if (Number.isNaN(target)) return null;
-  const deltaMs = target - Date.now();
-  if (deltaMs <= 0) return null;
-  const minutes = Math.round(deltaMs / 60_000);
-  if (minutes < 60) return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"}`;
-  const days = Math.round(hours / 24);
-  return `${days} ${days === 1 ? "day" : "days"}`;
-}
-
 function buildHypeBackBody(
   senderName: string,
   context: HypeContext | undefined,
@@ -244,15 +226,14 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
       throw err;
     }
     if (!inserted) {
-      const resetsAt = await getHypeResetsAt(senderId);
-      const resetIn = formatTimeUntil(resetsAt);
-      const error = resetIn
-        ? `You're out of hypes — you've used all ${HYPE_DAILY_LIMIT} today. Try again in ${resetIn}.`
-        : `You're out of hypes — you've used all ${HYPE_DAILY_LIMIT} today. Come back tomorrow.`;
+      // Hypes are unlimited; the only thing that can block an insert now is the
+      // silent per-day abuse ceiling (HYPE_DAILY_ABUSE_CEILING). Keep the copy
+      // generic — don't cite the retired 3/day cap or leak the ceiling value.
       return res.status(429).json({
-        error,
+        error:
+          "You're hyping a lot right now — take a breather and try again in a bit.",
         hypes_remaining: 0,
-        resets_at: resetsAt,
+        resets_at: null,
       });
     }
 

@@ -56,5 +56,7 @@ Service (`services/`) → controller (`controllers/`) → route (`routes/`) → 
 ## Push Notifications
 - `device_tokens.environment` selects the APNs host per token (`sandbox` for local DEBUG installs, `production` for App Store/TestFlight); never route pushes solely from server `APNS_PRODUCTION`.
 
+- Hype daily limit did double duty as anti-abuse: dedupe only guards VALIDATED contexts (post, resolvable mile). badge/pr/challenge context_ids and context-less push "hype back" are unvalidated, and `shouldSendNotification` has no rate throttle — so `HYPE_DAILY_ABUSE_CEILING` (hypeService) is their only spam backstop. Keep a ceiling if you make hypes "unlimited".
+
 ## ESM Reminder
 All imports MUST end with `.js` extension, e.g. `import { foo } from './services/fooService.js';`
