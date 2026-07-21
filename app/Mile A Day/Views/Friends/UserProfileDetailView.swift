@@ -21,6 +21,10 @@ struct UserProfileDetailView: View {
     @State private var closeFriendActionInProgress = false
 
     @State private var userStats: UserStats?
+    /// Pure Flame — true when this user's streak is 100% natural (from the
+    /// gated streak_features payload; false for un-enrolled users).
+    @State private var hasPureFlame = false
+    @State private var showPureFlameInfo = false
     @State private var userBadges: [Badge] = []
     @State private var catalogBadges: [Badge] = []
     @State private var hasLoadedBadges = false
@@ -336,9 +340,23 @@ struct UserProfileDetailView: View {
 
                     // User Info
                     VStack(spacing: MADTheme.Spacing.sm) {
-                        Text(user.username ?? "Unknown")
-                            .font(MADTheme.Typography.title1)
-                            .foregroundColor(MADTheme.Colors.primaryText)
+                        HStack(spacing: 6) {
+                            Text(user.username ?? "Unknown")
+                                .font(MADTheme.Typography.title1)
+                                .foregroundColor(MADTheme.Colors.primaryText)
+                            if hasPureFlame {
+                                // Natural-streak seal — tap explains it.
+                                Button {
+                                    showPureFlameInfo = true
+                                } label: {
+                                    PureFlameBadge(size: 20)
+                                }
+                                .buttonStyle(.plain)
+                                .sheet(isPresented: $showPureFlameInfo) {
+                                    PureFlameInfoSheet()
+                                }
+                            }
+                        }
 
                         if user.displayName != user.username {
                             Text(user.displayName)
@@ -983,6 +1001,7 @@ struct UserProfileDetailView: View {
                         hasCompletedGoalToday: hasCompletedGoalToday,
                         goalMiles: goalMiles
                     )
+                    hasPureFlame = stats.naturalStreak && stats.streak > 0
 
                     friendWorkouts = workouts
                     hasLoadedInitial = true

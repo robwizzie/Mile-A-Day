@@ -8,6 +8,7 @@ struct ProfileView: View {
     /// the profile token shelf.
     @ObservedObject private var tokensState = StreakTokensState.shared
     @State private var showTokenSheet = false
+    @State private var showPureFlameInfo = false
 
     @State private var activeSheet: ProfileSheetType?
     @State private var showingEditProfile = false
@@ -501,7 +502,16 @@ struct ProfileView: View {
                                     .foregroundColor(MADTheme.Colors.primaryText)
                                 if tokensState.payload?.natural_streak == true,
                                    userManager.currentUser.streak > 0 {
-                                    PureFlameBadge(size: 22)
+                                    // Tappable — the badge explains itself.
+                                    Button {
+                                        showPureFlameInfo = true
+                                    } label: {
+                                        PureFlameBadge(size: 22)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .sheet(isPresented: $showPureFlameInfo) {
+                                        PureFlameInfoSheet()
+                                    }
                                 }
                             }
                         }

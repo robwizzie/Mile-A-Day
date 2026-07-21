@@ -196,10 +196,7 @@ enum StreakFeatureService {
             StreakCoverageStore.deactivate()
         }
         Task { @MainActor in
-            StreakTokensState.shared.payload = payload
-            if let payload {
-                StreakTokensState.shared.registerHeldStates(from: payload)
-            }
+            StreakTokensState.shared.apply(payload)
         }
     }
 }
