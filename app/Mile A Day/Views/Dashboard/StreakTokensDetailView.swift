@@ -5,6 +5,16 @@ import SwiftUI
 enum StreakTokenKind {
     case doubleDown, save, assist
 
+    /// Backend raw kind — the key used by meter-gain chips and the unlock
+    /// event list (inverse of `from(raw:)`).
+    var raw: String {
+        switch self {
+        case .doubleDown: return "double_down"
+        case .save: return "streak_save"
+        case .assist: return "streak_assist"
+        }
+    }
+
     var title: String {
         switch self {
         case .doubleDown: return "Double Down"
@@ -190,14 +200,15 @@ struct StreakTokensCard: View {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 showDetail = true
             } label: {
-                VStack(spacing: 14) {
-                    HStack(spacing: MADTheme.Spacing.sm) {
-                        Image(systemName: "shield.lefthalf.filled")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(MADTheme.Colors.redGradient)
-                        Text("Streak Tokens")
-                            .font(.system(size: 16, weight: .heavy, design: .rounded))
-                            .foregroundColor(.white)
+                VStack(spacing: 12) {
+                    // Eyebrow header — matches the streak/today cards' quiet
+                    // caption grammar; the medallions are the headline here.
+                    HStack(spacing: 6) {
+                        Text("STREAK TOKENS")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .tracking(1.2)
+                            .foregroundColor(.white.opacity(0.7))
                         Spacer()
                         let ready = [
                             payload.double_down.held,
@@ -277,6 +288,27 @@ struct StreakTokensCard: View {
                     value: pulse
                 )
                 .onAppear { pulse = true }
+                // Transient "+1 run day" chip when a fresh payload moved
+                // this meter forward — the bar visibly ticks, not just sits.
+                .overlay(alignment: .top) {
+                    if let gain = tokensState.meterGains[kind.raw] {
+                        Text(gain)
+                            .font(.system(size: 9, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(kind.tint))
+                            .fixedSize()
+                            .offset(y: -15)
+                            .transition(
+                                .scale(scale: 0.5).combined(with: .opacity)
+                            )
+                    }
+                }
+                .animation(
+                    .spring(response: 0.4, dampingFraction: 0.7),
+                    value: tokensState.meterGains
+                )
             Text(kind.title)
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .foregroundColor(.white.opacity(held ? 0.95 : 0.6))
@@ -298,6 +330,7 @@ struct StreakTokensCard: View {
 struct StreakTokensDetailView: View {
     @ObservedObject var tokensState = StreakTokensState.shared
     @Environment(\.dismiss) private var dismiss
+    @State private var showPureFlameInfo = false
 
     var body: some View {
         NavigationStack {
@@ -423,32 +456,76 @@ struct StreakTokensDetailView: View {
         .madLiquidGlass()
     }
 
+    /// Pure Flame explainer — deliberately an INFO PANEL, not another card in
+    /// the earnable-token language above it (no medallion, no meter, flat
+    /// fill, gold accent stripe): it's a status you keep, not a token you
+    /// spend. Tapping opens the full badge explainer.
     private func naturalCard(_ natural: Bool) -> some View {
-        HStack(spacing: 12) {
-            if natural {
-                PureFlameBadge(size: 30)
-            } else {
-                Image(systemName: "flame")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .frame(width: 30, height: 30)
+        Button {
+            showPureFlameInfo = true
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "info.circle.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(pureFlameGold)
+                    .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text("ABOUT THE PURE FLAME")
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                            .tracking(1.1)
+                            .foregroundColor(pureFlameGold)
+                        if natural {
+                            PureFlameBadge(size: 15)
+                        }
+                    }
+                    Text(natural
+                         ? "Your streak is 100% natural — every day earned on the day. The gold flame shows beside your name."
+                         : "A token kept this streak alive, so the badge is resting. It returns with your next untouched streak.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("A status, not a token — nothing to spend. Tap to learn more.")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.secondary.opacity(0.7))
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.secondary.opacity(0.5))
+                    .padding(.top, 2)
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(natural ? "Pure Flame — natural streak" : "Streak rescued along the way")
-                    .font(.system(size: 14, weight: .heavy, design: .rounded))
-                    .foregroundColor(.primary)
-                Text(natural
-                     ? "Every day of this streak was earned on the day. The gold flame shows on your profile."
-                     : "A token kept this streak alive — the Pure Flame returns with your next untouched streak. (Helping a friend never affects yours.)")
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(pureFlameGold.opacity(0.25), lineWidth: 1)
+                    )
+            )
+            .overlay(alignment: .leading) {
+                // Gold accent stripe — the info-box signature.
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(pureFlameGold.opacity(0.8))
+                    .frame(width: 3)
+                    .padding(.vertical, 12)
+                    .padding(.leading, 1)
             }
-            Spacer(minLength: 0)
+            .contentShape(Rectangle())
         }
-        .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showPureFlameInfo) {
+            PureFlameInfoSheet()
+        }
     }
+
+    private var pureFlameGold: Color { Color(red: 1.0, green: 0.84, blue: 0.35) }
 
     private func trimmed(_ value: Double) -> String {
         value.truncatingRemainder(dividingBy: 1) == 0
@@ -539,5 +616,91 @@ private struct TokenMeterBar: View {
             ? String(Int(meter.target))
             : String(format: "%.1f", meter.target)
         return "\(progressText) / \(targetText) \(unit) · \(togo) to go"
+    }
+}
+
+// MARK: - Pure Flame info sheet
+
+/// "What's the gold flame?" — presented when anyone taps a Pure Flame badge
+/// next to a name (own profile, friend profiles, the explainer's info panel).
+/// One badge, one sentence, three quick rules. Medium detent.
+struct PureFlameInfoSheet: View {
+    private var gold: Color { Color(red: 1.0, green: 0.84, blue: 0.35) }
+
+    var body: some View {
+        ZStack {
+            MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
+
+            VStack(spacing: MADTheme.Spacing.md) {
+                PureFlameBadge(size: 68)
+                    .padding(.top, MADTheme.Spacing.xl)
+
+                VStack(spacing: 6) {
+                    Text("Pure Flame")
+                        .font(.system(size: 26, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+
+                    Text("A 100% natural streak — every single day earned the day it happened. No saves, no rescues.")
+                        .font(.system(size: 14, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.75))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, MADTheme.Spacing.lg)
+                }
+
+                VStack(spacing: 10) {
+                    ruleRow(
+                        icon: "figure.run",
+                        tint: .green,
+                        text: "Keep completing your mile every day and the gold flame stays lit."
+                    )
+                    ruleRow(
+                        icon: "snowflake",
+                        tint: MADTheme.Colors.walkBlue,
+                        text: "Using a token to cover a missed day rests the badge until your next untouched streak."
+                    )
+                    ruleRow(
+                        icon: "lifepreserver",
+                        tint: MADTheme.Colors.madRed,
+                        text: "Saving a friend's streak never dims your own flame."
+                    )
+                }
+                .padding(.horizontal, MADTheme.Spacing.lg)
+                .padding(.top, MADTheme.Spacing.xs)
+
+                Text("It's a status, not a token — nothing to spend, everything to defend.")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(gold.opacity(0.9))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, MADTheme.Spacing.lg)
+
+                Spacer(minLength: 0)
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func ruleRow(icon: String, tint: Color, text: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(tint)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(tint.opacity(0.15)))
+
+            Text(text)
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.85))
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.05))
+        )
     }
 }

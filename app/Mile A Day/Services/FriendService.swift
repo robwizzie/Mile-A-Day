@@ -922,6 +922,10 @@ struct FriendStats: Codable {
     let recentWorkouts: [FriendWorkout]?
     let todayMiles: Double?
     let goalMiles: Double?
+    /// True when this user's current streak is 100% natural. Read from the
+    /// gated `streak_features` payload — absent for un-enrolled users, so it
+    /// safely defaults to false and the Pure Flame badge simply doesn't show.
+    let naturalStreak: Bool
 
     enum CodingKeys: String, CodingKey {
         case streak
@@ -932,6 +936,18 @@ struct FriendStats: Codable {
         case recentWorkouts = "recent_workouts"
         case todayMiles = "today_miles"
         case goalMiles = "goal_miles"
+    }
+
+    /// Separate key enum for the gated payload so `streak_features` stays out
+    /// of CodingKeys — `naturalStreak` has no server-side twin field, and an
+    /// unmatched CodingKeys case would break the synthesized encode.
+    private enum GatedKeys: String, CodingKey {
+        case streakFeatures = "streak_features"
+    }
+
+    /// Only the one field friend surfaces need from the gated payload.
+    private struct GatedStreakFeatures: Decodable {
+        let natural_streak: Bool?
     }
     
     init(from decoder: Decoder) throws {
@@ -955,6 +971,12 @@ struct FriendStats: Codable {
         recentWorkouts = try? container.decode([FriendWorkout].self, forKey: .recentWorkouts)
         todayMiles = try? container.decode(Double.self, forKey: .todayMiles)
         goalMiles = try? container.decode(Double.self, forKey: .goalMiles)
+        if let gated = try? decoder.container(keyedBy: GatedKeys.self),
+           let features = try? gated.decode(GatedStreakFeatures.self, forKey: .streakFeatures) {
+            naturalStreak = features.natural_streak ?? false
+        } else {
+            naturalStreak = false
+        }
     }
 }
 

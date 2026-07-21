@@ -76,36 +76,18 @@ struct StreakCard: View {
                             .foregroundColor(.white.opacity(0.8))
                     }
 
-                    // Status message - make completion status super obvious with consistent colors
-                    VStack(alignment: .leading, spacing: 6) {
-                        if isGoalCompleted {
-                            HStack(spacing: 4) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.subheadline)
-                                    .foregroundColor(statusColor)
-                                Text("Goal completed today!")
-                                    .font(.subheadline)
-                                    .foregroundColor(statusColor)
-                                    .fontWeight(.bold)
-                            }
-                        } else {
-                            HStack(spacing: 4) {
-                                Image(systemName: isAtRisk ? "exclamationmark.triangle.fill" : "exclamationmark.circle.fill")
-                                    .font(.subheadline)
-                                    .foregroundColor(statusColor)
-                                Text(isAtRisk ? "Streak at risk!" : "Goal not completed")
-                                    .font(.subheadline)
-                                    .foregroundColor(statusColor)
-                                    .fontWeight(.bold)
-                            }
-
-                            if !isAtRisk {
-                                Text("\(String(format: "%.2f", user.goalMiles - currentDistance)) mi to go")
-                                    .font(.caption)
-                                    .foregroundColor(.white.opacity(0.8))
-                            }
-                        }
+                    // One status line — completion, distance-to-go, and
+                    // time-left merged into a single caption instead of
+                    // three stacked fragments (calm-pass density cut).
+                    HStack(spacing: 5) {
+                        Image(systemName: statusIconName)
+                            .font(.system(size: 12, weight: .bold))
+                        Text(statusLineText)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                     }
+                    .foregroundColor(statusColor)
                 }
 
                 Spacer()
@@ -113,26 +95,9 @@ struct StreakCard: View {
                 // Right side: Flame icon - consistent colors based on status
                 ZStack {
                     if isGoalCompleted {
-                        // Outer glow - green/orange when completed
-                        Circle()
-                            .fill(
-                                RadialGradient(
-                                    colors: [
-                                        statusColor.opacity(0.5),
-                                        statusColor.opacity(0.2),
-                                        Color.clear
-                                    ],
-                                    center: .center,
-                                    startRadius: 20,
-                                    endRadius: 45
-                                )
-                            )
-                            .frame(width: 90, height: 90)
-                            .scaleEffect(animateFire ? 1.15 : 0.95)
-                            .opacity(animateFire ? 0.9 : 0.5)
-                            .animation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true), value: animateFire)
-
-                        // Inner circle background - green/orange when completed
+                        // Flat completed state: one tinted disc + a gently
+                        // breathing flame. The old animated radial glow ring
+                        // was pure ornament — cut in the calm pass.
                         Circle()
                             .fill(
                                 LinearGradient(
@@ -146,7 +111,6 @@ struct StreakCard: View {
                             )
                             .frame(width: 70, height: 70)
 
-                        // Flame icon with animation - green/orange and pulsing when completed
                         Image(systemName: "flame.fill")
                             .font(.system(size: 36))
                             .foregroundStyle(
@@ -156,54 +120,42 @@ struct StreakCard: View {
                                     endPoint: .bottom
                                 )
                             )
-                            .scaleEffect(animateFire ? 1.15 : 1.0)
-                            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: animateFire)
-                            .shadow(color: statusColor.opacity(0.7), radius: animateFire ? 15 : 8)
+                            .scaleEffect(animateFire ? 1.08 : 1.0)
+                            .animation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: animateFire)
+                            .shadow(color: statusColor.opacity(0.5), radius: animateFire ? 9 : 6)
                     } else if isAtRisk {
-                        // At-risk state: countdown ring around flame with time label below
                         let countdownProgress: Double = {
                             guard let remaining = user.timeUntilStreakReset else { return 0 }
                             // 6 hours = 21600 seconds (from 6pm to midnight)
                             return min(remaining / 21600, 1.0)
                         }()
 
-                        VStack(spacing: 6) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.red.opacity(0.1))
-                                    .frame(width: 70, height: 70)
+                        // At-risk: countdown ring around the flame. The time
+                        // itself lives in the status line on the left now —
+                        // no duplicate label under the ring.
+                        ZStack {
+                            Circle()
+                                .fill(Color.red.opacity(0.1))
+                                .frame(width: 70, height: 70)
 
-                                // Countdown ring
-                                Circle()
-                                    .trim(from: 0, to: countdownProgress)
-                                    .stroke(
-                                        LinearGradient(
-                                            colors: [.red, .orange],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        ),
-                                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
-                                    )
-                                    .frame(width: 74, height: 74)
-                                    .rotationEffect(.degrees(-90))
+                            Circle()
+                                .trim(from: 0, to: countdownProgress)
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [.red, .orange],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                                )
+                                .frame(width: 74, height: 74)
+                                .rotationEffect(.degrees(-90))
 
-                                Image(systemName: "flame.fill")
-                                    .font(.system(size: 36))
-                                    .foregroundColor(.red.opacity(0.8))
-                                    .scaleEffect(animateUrgency ? 1.05 : 0.95)
-                                    .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: animateUrgency)
-                            }
-
-                            if !timeRemainingText.isEmpty {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .font(.system(size: 10, weight: .bold))
-                                    Text(formattedTimeOnly)
-                                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                                }
-                                .foregroundColor(.red)
-                                .opacity(animateUrgency ? 1.0 : 0.6)
-                            }
+                            Image(systemName: "flame.fill")
+                                .font(.system(size: 36))
+                                .foregroundColor(.red.opacity(0.8))
+                                .scaleEffect(animateUrgency ? 1.05 : 0.95)
+                                .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: animateUrgency)
                         }
                     } else {
                         // Default: not completed, not at risk
@@ -218,31 +170,16 @@ struct StreakCard: View {
                 }
             }
 
-            // Milestone progress
+            // Milestone — one slim row (bar + tiny caption) instead of the
+            // old two-line header + thick bar block.
             if let milestone = nextMilestone {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Next Milestone: \(milestone.value) Days")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white.opacity(0.9))
-
-                        Spacer()
-
-                        Text("\(milestone.daysToGo) days to go")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundColor(statusColor)
-                    }
-
-                    // Progress bar
+                HStack(spacing: 10) {
                     GeometryReader { geometry in
                         ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.white.opacity(0.15))
-                                .frame(height: 8)
+                            Capsule()
+                                .fill(Color.white.opacity(0.12))
 
-                            RoundedRectangle(cornerRadius: 8)
+                            Capsule()
                                 .fill(
                                     LinearGradient(
                                         colors: [.yellow, .orange, .red],
@@ -250,27 +187,21 @@ struct StreakCard: View {
                                         endPoint: .trailing
                                     )
                                 )
-                                .frame(width: milestone.progress * geometry.size.width, height: 8)
+                                .frame(width: max(5, milestone.progress * geometry.size.width))
                                 .animation(.easeOut(duration: 0.8), value: milestone.progress)
                         }
                     }
-                    .frame(height: 8)
+                    .frame(height: 5)
+
+                    Text("Day \(milestone.value) in \(milestone.daysToGo)")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                        .layoutPriority(1)
                 }
             }
 
             // Compact week-at-a-glance row
             compactWeekRow
-
-            // Share hint
-            HStack(spacing: 6) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 10))
-                Text("Tap to share your streak")
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .foregroundColor(.white.opacity(0.45))
-            .frame(maxWidth: .infinity)
-            .padding(.top, 4)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 24)
@@ -307,27 +238,14 @@ struct StreakCard: View {
             }
         )
         .overlay(alignment: .topTrailing) {
-            // Time/check positioned at absolute top right edge.
-            // At-risk state renders its time label under the flame ring instead.
-            if isGoalCompleted {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundColor(.green)
-                    .padding(.top, 24)
-                    .padding(.trailing, 24)
-            } else if !isAtRisk && !timeRemainingText.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "clock.fill")
-                        .font(.caption2)
-                        .foregroundColor(statusColor)
-                    Text(formattedTimeOnly)
-                        .font(.caption2)
-                        .foregroundColor(statusColor)
-                        .fontWeight(.medium)
-                }
-                .padding(.top, 24)
-                .padding(.trailing, 24)
-            }
+            // Quiet share affordance — replaces the old check/clock cluster
+            // (both merged into the status line) and the full-width
+            // "Tap to share" hint row.
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white.opacity(0.35))
+                .padding(.top, 20)
+                .padding(.trailing, 20)
         }
         .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
         .onAppear {
@@ -492,6 +410,30 @@ struct StreakCard: View {
             return .orange  // Orange when not completed but not at risk
         }
     }
+
+    private var statusIconName: String {
+        if isGoalCompleted { return "checkmark.circle.fill" }
+        if isAtRisk { return "exclamationmark.triangle.fill" }
+        return "clock.fill"
+    }
+
+    /// The merged single-line status: completion / distance-to-go / time-left.
+    /// Reads `timeRemainingText` (the timer-refreshed @State) — nothing else
+    /// in body does anymore, and without that dependency SwiftUI would never
+    /// re-render on the minute tick and the countdown would freeze.
+    private var statusLineText: String {
+        if isGoalCompleted { return "Done for today" }
+        let toGo = String(format: "%.2f", max(user.goalMiles - currentDistance, 0))
+        let time = timeRemainingText.isEmpty ? "" : formattedTimeOnly
+        if isAtRisk {
+            return time.isEmpty
+                ? "At risk — \(toGo) mi to go"
+                : "At risk — \(toGo) mi to go · \(time) left"
+        }
+        return time.isEmpty
+            ? "\(toGo) mi to go"
+            : "\(toGo) mi to go · \(time) left"
+    }
 }
 
 struct TodayProgressCard: View {
@@ -518,21 +460,20 @@ struct TodayProgressCard: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            // Header
-            HStack {
-                Image(systemName: "figure.run")
-                    .foregroundColor(.white)
-                    .font(.title3)
-                Text("Today's Progress")
-                    .font(.headline)
+            // Eyebrow header — same quiet grammar as the streak card's
+            // "CURRENT STREAK" label; the big number below is the headline.
+            HStack(spacing: 6) {
+                Text("TODAY")
+                    .font(.caption)
                     .fontWeight(.semibold)
-                    .foregroundColor(.white)
-                Spacer()
+                    .tracking(1.2)
+                    .foregroundColor(didComplete ? .green : .white.opacity(0.7))
                 if didComplete {
                     Image(systemName: "checkmark.circle.fill")
+                        .font(.caption)
                         .foregroundColor(.green)
-                        .font(.title3)
                 }
+                Spacer()
             }
 
             // Large progress display

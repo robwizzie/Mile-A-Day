@@ -21,10 +21,58 @@ final class StreakTokensState: ObservableObject {
     /// "streak_save", "streak_assist") — drives the unlock celebration.
     /// Cleared by the overlay's dismiss.
     @Published var newlyEarned: [String] = []
+    /// Transient "+1 run day" chips per raw kind — set when a fresh payload
+    /// moves a meter forward within a session, auto-cleared a few seconds
+    /// later. Purely celebratory; nothing reads it for logic.
+    @Published var meterGains: [String: String] = [:]
+    private var gainsClearTask: Task<Void, Never>?
 
     var isActive: Bool { payload != nil }
 
     private static let heldFlagsKey = "streakTokenHeldFlags"
+
+    /// Single entry point for a fresh (or absent) payload: diffs meters for
+    /// the gain chips, publishes the payload, and diffs held flags for the
+    /// unlock celebration. Callers go through
+    /// `StreakFeatureService.applyStatsPayload`, which also syncs the
+    /// coverage store.
+    @MainActor
+    func apply(_ new: StreakFeaturesPayload?) {
+        if let new, let old = payload {
+            noteMeterGains(old: old, new: new)
+        }
+        payload = new
+        if let new {
+            registerHeldStates(from: new)
+        }
+    }
+
+    /// Meter deltas → short gain chips ("+1 day", "+0.8 mi"). Held meters are
+    /// skipped — the unlock overlay owns that bigger moment.
+    @MainActor
+    private func noteMeterGains(old: StreakFeaturesPayload, new: StreakFeaturesPayload) {
+        var gains: [String: String] = [:]
+        if !new.double_down.held {
+            let d = Int(new.double_down.progress) - Int(old.double_down.progress)
+            if d > 0 { gains["double_down"] = "+\(d) day\(d == 1 ? "" : "s")" }
+        }
+        if !new.streak_save.held {
+            let d = Int(new.streak_save.progress) - Int(old.streak_save.progress)
+            if d > 0 { gains["streak_save"] = "+\(d) run day\(d == 1 ? "" : "s")" }
+        }
+        if !new.streak_assist.held {
+            let d = new.streak_assist.progress - old.streak_assist.progress
+            if d >= 0.05 { gains["streak_assist"] = String(format: "+%.1f mi", d) }
+        }
+        guard !gains.isEmpty else { return }
+        meterGains = gains
+        gainsClearTask?.cancel()
+        gainsClearTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.meterGains = [:]
+        }
+    }
 
     /// Diff the held flags against the last seen set (persisted, so the
     /// celebration fires exactly once per earn — including the very first
@@ -61,7 +109,6 @@ final class StreakTokensState: ObservableObject {
                   let save = status.streak_save,
                   let assist = status.streak_assist
             else {
-                payload = nil
                 assistableFriends = []
                 StreakFeatureService.applyStatsPayload(nil)
                 return
@@ -74,9 +121,10 @@ final class StreakTokensState: ObservableObject {
                 natural_streak: status.natural_streak ?? true,
                 streak_at_risk: status.streak_at_risk ?? false
             )
-            payload = fresh
             assistableFriends = status.assistable_friends ?? []
-            registerHeldStates(from: fresh)
+            // Route through applyStatsPayload → apply() so the payload is
+            // published, held flags are diffed, gain chips fire, and the
+            // coverage store stays in sync — one path for every payload.
             StreakFeatureService.applyStatsPayload(fresh)
         } catch {
             // Keep last known state on transient failures.
