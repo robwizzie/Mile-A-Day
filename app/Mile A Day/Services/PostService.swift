@@ -59,11 +59,6 @@ struct PostItem: Codable, Identifiable {
     /// The viewer's own emoji reaction to this story, hydrated on load so a
     /// re-view shows the reaction they already left. nil = not reacted.
     var viewer_reaction: String? = nil
-
-    var id: String { post_id }
-
-    /// Whether the server locked this post's photo (viewer hasn't run today).
-    var isPhotoLocked: Bool { photo_locked == true }
     /// Collab post: the invited/accepted coauthor. Pending invites are only
     /// visible to the two authors; everyone else decodes nil.
     var coauthor_user_id: String?
@@ -74,6 +69,9 @@ struct PostItem: Codable, Identifiable {
     var coauthor_profile_image_url: String?
 
     var id: String { post_id }
+
+    /// Whether the server locked this post's photo (viewer hasn't run today).
+    var isPhotoLocked: Bool { photo_locked == true }
 
     var hasAcceptedCoauthor: Bool { coauthor_user_id != nil && coauthor_status == "accepted" }
 
@@ -530,6 +528,11 @@ enum PostService {
         _ = try await APIClient.fancyFetch(
             endpoint: "/posts/\(postId)/coauthor",
             method: .POST,
+            body: bodyData,
+            responseType: OKResponse.self
+        )
+    }
+
     /// The caller's own post (feed or story-only) linked to a workout, if any.
     /// Scans the first few pages of own posts — Recent Workouts surfaces
     /// recent runs, so the match is nearly always on page one.

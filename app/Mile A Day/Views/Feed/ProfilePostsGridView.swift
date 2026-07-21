@@ -409,22 +409,6 @@ struct ProfilePostsFeedSheet: View {
                     }
                 }
             }
-        }
-    }
-
-    /// Same media treatment as the feed card: the real photo leads, the
-    /// workout card is the second slide (badged "Stats"), page dots when
-    /// there's more than one. Slides pinch-zoom in place (no hype here —
-    /// this surface is read-only).
-    @ViewBuilder
-    private func media(_ post: PostItem) -> some View {
-        if let storyPhoto = post.storyPhotoURL {
-            TabView {
-                ZoomablePhotoSlide(url: storyPhoto)
-                ZoomablePhotoSlide(
-                    url: post.mediaURL,
-                    badge: post.is_auto == true ? ("Stats", "chart.bar.fill") : nil
-                )
             .sheet(item: $reportingPost) { post in
                 ReportPostSheet(postId: post.post_id) {
                     reportingPost = nil
