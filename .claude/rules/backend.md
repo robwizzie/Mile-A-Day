@@ -5,7 +5,7 @@ globs: backend/**
 # Backend Conventions
 
 - Daily-mile completion checks must use `DAILY_GOAL_TOLERANCE` (0.95) from workoutService, never a raw `>= 1.0` — streaks/challenges count 0.95 days, and today_miles is displayed 2-decimal-rounded ("1.00" can be 0.996). iOS mirror: `ProgressCalculator.dailyGoalTolerance`.
-- Streak tokens (streak_coverage): any code that recomputes a streak MUST branch through `coverageActiveFor`/`computeCoveredStreak` (streakFeatureCore) like getActiveStreak + refreshCurrentStreak do — the 6h `reconcileStaleStreaks` cron rewrites `current_streak` via refreshCurrentStreak, so an unrouted walk silently erases token-saved streaks. Un-enrolled/env-off users must keep the byte-identical legacy loop. Meters are DERIVED from workouts since `*_last_used` (never stored counters).
+- Streak tokens (streak_coverage): any code that recomputes a streak MUST branch through `coverageActiveFor`/`computeCoveredStreak` (streakFeatureCore) like getActiveStreak + refreshCurrentStreak do — the 6h `reconcileStaleStreaks` cron rewrites `current_streak` via refreshCurrentStreak, so an unrouted walk silently erases token-saved streaks. Un-enrolled/env-off users must keep the byte-identical legacy loop. Meters are DERIVED from workouts since `*_last_used` (never stored counters). Raw-SQL `timestamptz` columns come back as JS Date objects (only `date` cols are strings) — `to_char(...)` in SQL or coerce before any string op; a `.slice()` on `streak_features_at` 500'd the status endpoint in prod.
 
 ## Architecture: Routes -> Controllers -> Services
 - `routes/` - Express Router definitions. Thin: just wire HTTP verbs to controller functions + middleware.

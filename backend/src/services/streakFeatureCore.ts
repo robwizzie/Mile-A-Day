@@ -30,7 +30,9 @@ export function streakFeaturesGloballyEnabled(): boolean {
 
 /** One users-row read of everything the token logic needs. */
 export interface StreakFeatureUserRow {
-  streak_features_at: string | null;
+  // timestamptz: node-pg parses this to a JS Date (unlike `date` columns,
+  // which arrive as strings) — never call string methods on it directly.
+  streak_features_at: string | Date | null;
   double_down_last_used: string | null;
   streak_save_last_used: string | null;
   streak_assist_last_used: string | null;
