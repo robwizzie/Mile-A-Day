@@ -17,8 +17,36 @@ final class StreakTokensState: ObservableObject {
     /// DEBUG preview: while true, refreshStatus() is a no-op so server state
     /// can't clobber the injected sample data. Never persisted.
     @Published var isPreviewingSampleData = false
+    /// Tokens that just flipped to EARNED (raw kinds: "double_down",
+    /// "streak_save", "streak_assist") — drives the unlock celebration.
+    /// Cleared by the overlay's dismiss.
+    @Published var newlyEarned: [String] = []
 
     var isActive: Bool { payload != nil }
+
+    private static let heldFlagsKey = "streakTokenHeldFlags"
+
+    /// Diff the held flags against the last seen set (persisted, so the
+    /// celebration fires exactly once per earn — including the very first
+    /// payload after enrollment backfill, the "you start fully loaded" moment).
+    @MainActor
+    func registerHeldStates(from payload: StreakFeaturesPayload) {
+        let previous =
+            UserDefaults.standard.dictionary(forKey: Self.heldFlagsKey) as? [String: Bool] ?? [:]
+        let current: [String: Bool] = [
+            "double_down": payload.double_down.held,
+            "streak_save": payload.streak_save.held,
+            "streak_assist": payload.streak_assist.held,
+        ]
+        let earned = current
+            .filter { $0.value && previous[$0.key] != true }
+            .map { $0.key }
+            .sorted()
+        UserDefaults.standard.set(current, forKey: Self.heldFlagsKey)
+        if !earned.isEmpty {
+            newlyEarned = earned
+        }
+    }
 
     /// Refresh meters + rescuable friends from the status endpoint (used by
     /// surfaces that need fresher data than the last stats fetch, e.g. the
@@ -48,6 +76,7 @@ final class StreakTokensState: ObservableObject {
             )
             payload = fresh
             assistableFriends = status.assistable_friends ?? []
+            registerHeldStates(from: fresh)
             StreakFeatureService.applyStatsPayload(fresh)
         } catch {
             // Keep last known state on transient failures.

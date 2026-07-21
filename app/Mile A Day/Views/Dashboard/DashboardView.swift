@@ -34,6 +34,8 @@ struct DashboardView: View {
     /// What's New popup — auto-presents once per release, reopenable from
     /// Settings → What's New.
     @State private var showWhatsNew = false
+    /// Streak tokens — drives the tokens card + the unlock celebration.
+    @ObservedObject private var tokensState = StreakTokensState.shared
     @State private var newGoalMiles: Double = 1.0
     @State private var isRefreshing = false
     @State private var showWorkoutUploadAlert = false
@@ -577,6 +579,21 @@ struct DashboardView: View {
             }
             .sheet(isPresented: $showWhatsNew) {
                 WhatsNewView()
+            }
+            // Token unlock celebration — a meter just completed (or enrollment
+            // backfill handed over the starting set). Self-contained overlay;
+            // stands down while a goal celebration is playing (newlyEarned
+            // persists until dismissed, so the moment isn't lost).
+            .overlay {
+                if !tokensState.newlyEarned.isEmpty,
+                   !celebrationManager.isShowingCelebration {
+                    TokenUnlockOverlay(
+                        kinds: tokensState.newlyEarned.compactMap { StreakTokenKind.from(raw: $0) },
+                        onDismiss: { tokensState.newlyEarned = [] }
+                    )
+                    .transition(.opacity)
+                    .zIndex(50)
+                }
             }
             .sheet(isPresented: $showGoalSheet) {
                 GoalSettingSheet(
