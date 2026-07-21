@@ -261,11 +261,6 @@ struct StreakCard: View {
             // Compact week-at-a-glance row
             compactWeekRow
 
-            // Streak tokens (Double Down / Save / Assist) — renders ONLY when
-            // the server has the feature on for this user; its own Button
-            // swallows taps so it never triggers the card's share gesture.
-            StreakTokensRow()
-
             // Share hint
             HStack(spacing: 6) {
                 Image(systemName: "square.and.arrow.up")
