@@ -542,6 +542,13 @@ struct DashboardView: View {
                 // launches (the foreground observer only fires on background→
                 // foreground, and completeAuthentication only on fresh sign-in).
                 StreakFeatureService.enrollIfNeeded()
+                // Belt-and-braces activation: if the tokens aren't lit yet,
+                // ask the status endpoint directly — independent of the
+                // getUserStats decode path, so one broken link can't keep the
+                // whole feature invisible.
+                if StreakTokensState.shared.payload == nil {
+                    Task { await StreakTokensState.shared.refreshStatus() }
+                }
 
                 // What's New: auto-present once per release. Same stand-down
                 // rules as the tour — never stack on a celebration, the

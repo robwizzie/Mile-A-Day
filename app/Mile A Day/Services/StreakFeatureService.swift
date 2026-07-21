@@ -87,18 +87,22 @@ struct StreakFeaturesStatus: Codable {
 /// the backend turns the feature on, status returns {active:false}, stats omit
 /// the payload, and this build shows nothing.
 enum StreakFeatureService {
-    private static let enrolledFlagKey = "streakFeaturesEnrollPosted"
+    /// Once-per-process latch. Deliberately NOT persisted: a stored "already
+    /// enrolled" flag is per-install while enrollment is per-BACKEND, so an
+    /// enroll against a dev backend would permanently skip enrolling against
+    /// production. The endpoint is COALESCE-idempotent — one tiny request per
+    /// launch is the correct price for self-healing.
+    private static var enrolledThisLaunch = false
 
     /// Idempotent enrollment stamp — fire-and-forget on launch (mirrors device
-    /// token registration). Marks this install as a streak-features-capable
-    /// build; the server still shows nothing until its env switch flips. The
-    /// local flag only skips redundant calls: the endpoint itself is COALESCE-
-    /// idempotent, so a lost flag (reinstall) is harmless.
+    /// token registration). Marks this account as token-UI-capable; the server
+    /// decides everything else.
     static func enrollIfNeeded() {
         // Keychain-backed token check (the UserDefaults mirror can be missing
         // on installs that authed before the mirror existed).
         guard TokenStore.accessToken != nil else { return }
-        guard !UserDefaults.standard.bool(forKey: enrolledFlagKey) else { return }
+        guard !enrolledThisLaunch else { return }
+        enrolledThisLaunch = true
         Task {
             struct EnrollResponse: Decodable { let enrolled: Bool }
             do {
@@ -108,16 +112,53 @@ enum StreakFeatureService {
                     responseType: EnrollResponse.self
                 )
                 if resp.enrolled {
-                    UserDefaults.standard.set(true, forKey: enrolledFlagKey)
                     // Light the token surfaces up on THIS launch instead of
                     // waiting for the next stats fetch.
                     await StreakTokensState.shared.refreshStatus()
                 }
             } catch {
-                // Non-fatal: next launch retries.
+                // Non-fatal, but retry next call — the latch shouldn't stick
+                // on a failed request.
+                enrolledThisLaunch = false
                 print("[StreakFeatures] enroll failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// Step-by-step diagnostic for Developer Settings — pinpoints WHERE the
+    /// chain breaks (wrong API target, backend missing the endpoints because a
+    /// deploy didn't land, kill switch on, or not enrolled) instead of the
+    /// surfaces just silently showing nothing.
+    static func diagnose() async -> String {
+        var lines = ["API: \(AppConfig.baseURL)"]
+        guard TokenStore.accessToken != nil else {
+            return lines.joined(separator: "\n") + "\nNo auth token — sign in first."
+        }
+        struct EnrollResponse: Decodable { let enrolled: Bool }
+        do {
+            _ = try await APIClient.fancyFetch(
+                endpoint: "/users/streak-features/enable",
+                method: .POST,
+                responseType: EnrollResponse.self
+            )
+            lines.append("Enroll: OK (stamp written)")
+        } catch {
+            lines.append("Enroll FAILED: \(error.localizedDescription)")
+            lines.append("→ If this is a 404, this backend doesn't have the streak endpoints — the deploy didn't land.")
+            return lines.joined(separator: "\n")
+        }
+        do {
+            let status = try await fetchStatus()
+            if status.active {
+                lines.append("Status: ACTIVE — meters loaded. UI should be visible everywhere.")
+                await StreakTokensState.shared.refreshStatus()
+            } else {
+                lines.append("Status: inactive — enrolled, but the server gate is off (STREAK_FEATURES_DISABLED is set, or this backend predates the gate inversion).")
+            }
+        } catch {
+            lines.append("Status FAILED: \(error.localizedDescription)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// Meters + rescuable friends for the token surfaces.
