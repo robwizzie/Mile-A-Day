@@ -82,6 +82,14 @@ struct PostCardView: View {
         )
     }
 
+    /// "rob & sarah" for accepted collabs, plain author name otherwise.
+    private var authorLine: String {
+        if post.hasAcceptedCoauthor {
+            return "\(post.displayName) & \(post.coauthorDisplayName)"
+        }
+        return post.displayName
+    }
+
     /// "Fresh" chip for a post shared inside the run's 10-minute window.
     private var freshChip: some View {
         HStack(spacing: 3) {
@@ -117,9 +125,7 @@ struct PostCardView: View {
                         AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
                     }
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(post.hasAcceptedCoauthor
-                             ? "\(post.displayName) & \(post.coauthorDisplayName)"
-                             : post.displayName)
+                        Text(authorLine)
                             .font(.system(size: 15, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                             .lineLimit(1)

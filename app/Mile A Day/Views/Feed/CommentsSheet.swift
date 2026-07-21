@@ -33,14 +33,26 @@ struct CommentsSheet: View {
     }
 
     /// Friends matching the @token being typed at the end of the draft.
+    /// Explicit types throughout — inference across filter/prefix chains is
+    /// what makes the type checker crawl.
     private var mentionCandidates: [BackendUser] {
         guard let token = draft.split(separator: " ").last, token.hasPrefix("@") else { return [] }
-        let query = token.dropFirst().lowercased()
-        return friendService.friends.filter {
-            guard let name = $0.username?.lowercased() else { return false }
+        let query: String = String(token.dropFirst()).lowercased()
+        let matches: [BackendUser] = friendService.friends.filter { friend in
+            guard let name = friend.username?.lowercased() else { return false }
             return query.isEmpty || name.hasPrefix(query)
         }
-        .prefix(8).map { $0 }
+        return Array(matches.prefix(8))
+    }
+
+    private var draftIsEmpty: Bool {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var sendFill: AnyShapeStyle {
+        draftIsEmpty
+            ? AnyShapeStyle(Color.white.opacity(0.15))
+            : AnyShapeStyle(MADTheme.Colors.redGradient)
     }
 
     var body: some View {
@@ -81,7 +93,7 @@ struct CommentsSheet: View {
         }) {
             PostTermsGateView { termsJustAccepted = true }
         }
-        .alert("Couldn't post comment", isPresented: .init(
+        .alert("Couldn't post comment", isPresented: Binding<Bool>(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
         )) {
@@ -220,21 +232,7 @@ struct CommentsSheet: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(mentionCandidates, id: \.user_id) { friend in
-                            Button {
-                                completeMention(friend)
-                            } label: {
-                                HStack(spacing: 6) {
-                                    AvatarView(name: friend.username ?? "?",
-                                               imageURL: friend.profile_image_url, size: 24)
-                                    Text("@\(friend.username ?? "")")
-                                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                                        .foregroundColor(.white)
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Capsule().fill(Color.white.opacity(0.08)))
-                            }
-                            .buttonStyle(.plain)
+                            mentionChip(friend)
                         }
                     }
                     .padding(.horizontal, MADTheme.Spacing.md)
@@ -242,12 +240,14 @@ struct CommentsSheet: View {
                 .padding(.vertical, 8)
             }
             if let replyingTo {
-                HStack {
+                // Two plain Texts, NOT `Text + Text` — the concat overload is a
+                // known Swift type-checker explosion that hangs the build.
+                HStack(spacing: 0) {
                     Text("Replying to ")
                         .foregroundColor(.white.opacity(0.55))
-                    + Text(replyingTo.displayName)
-                        .foregroundColor(.white)
+                    Text(replyingTo.displayName)
                         .fontWeight(.bold)
+                        .foregroundColor(.white)
                     Spacer()
                     Button {
                         self.replyingTo = nil
@@ -285,14 +285,10 @@ struct CommentsSheet: View {
                             .font(.system(size: 15, weight: .bold))
                             .foregroundColor(.white)
                             .frame(width: 36, height: 36)
-                            .background(Circle().fill(
-                                draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                    ? AnyShapeStyle(Color.white.opacity(0.15))
-                                    : AnyShapeStyle(MADTheme.Colors.redGradient)
-                            ))
+                            .background(Circle().fill(sendFill))
                     }
                 }
-                .disabled(isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(isSending || draftIsEmpty)
             }
             .padding(.horizontal, MADTheme.Spacing.md)
             .padding(.vertical, 10)
@@ -327,6 +323,24 @@ struct CommentsSheet: View {
             isLoading = false
             failed = true
         }
+    }
+
+    private func mentionChip(_ friend: BackendUser) -> some View {
+        Button {
+            completeMention(friend)
+        } label: {
+            HStack(spacing: 6) {
+                AvatarView(name: friend.username ?? "?",
+                           imageURL: friend.profile_image_url, size: 24)
+                Text("@\(friend.username ?? "")")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.white.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
     }
 
     private func completeMention(_ friend: BackendUser) {
@@ -399,6 +413,12 @@ struct ReportCommentSheet: View {
         ("other", "Something else"),
     ]
 
+    private var submitFill: AnyShapeStyle {
+        selected == nil
+            ? AnyShapeStyle(Color.gray.opacity(0.4))
+            : AnyShapeStyle(MADTheme.Colors.redGradient)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -454,11 +474,7 @@ struct ReportCommentSheet: View {
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
-                            .background(
-                                Capsule().fill(selected == nil
-                                    ? AnyShapeStyle(Color.gray.opacity(0.4))
-                                    : AnyShapeStyle(MADTheme.Colors.redGradient))
-                            )
+                            .background(Capsule().fill(submitFill))
                         }
                         .disabled(selected == nil || isSubmitting)
                     }

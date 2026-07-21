@@ -955,14 +955,40 @@ struct PostComposerView: View {
     }
 
     /// Friends matching an @token being typed at the end of the caption.
+    /// Explicit types — inference across filter/prefix chains slows the
+    /// type checker to a crawl.
     private var captionMentionCandidates: [BackendUser] {
         guard let token = vm.caption.split(separator: " ").last, token.hasPrefix("@") else { return [] }
-        let query = token.dropFirst().lowercased()
-        return friendService.friends.filter {
-            guard let name = $0.username?.lowercased() else { return false }
+        let query: String = String(token.dropFirst()).lowercased()
+        let matches: [BackendUser] = friendService.friends.filter { friend in
+            guard let name = friend.username?.lowercased() else { return false }
             return query.isEmpty || name.hasPrefix(query)
         }
-        .prefix(8).map { $0 }
+        return Array(matches.prefix(8))
+    }
+
+    private func completeCaptionMention(_ friend: BackendUser) {
+        var parts = vm.caption.split(separator: " ", omittingEmptySubsequences: false)
+        if let last = parts.last, last.hasPrefix("@") { parts.removeLast() }
+        vm.caption = (parts + ["@\(friend.username ?? "") "]).joined(separator: " ")
+    }
+
+    private func mentionChip(_ friend: BackendUser) -> some View {
+        Button {
+            completeCaptionMention(friend)
+        } label: {
+            HStack(spacing: 6) {
+                AvatarView(name: friend.username ?? "?",
+                           imageURL: friend.profile_image_url, size: 22)
+                Text("@\(friend.username ?? "")")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.white.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
     }
 
     private var captionField: some View {
@@ -981,23 +1007,7 @@ struct PostComposerView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(captionMentionCandidates, id: \.user_id) { friend in
-                            Button {
-                                var parts = vm.caption.split(separator: " ", omittingEmptySubsequences: false)
-                                if let last = parts.last, last.hasPrefix("@") { parts.removeLast() }
-                                vm.caption = (parts + ["@\(friend.username ?? "") "]).joined(separator: " ")
-                            } label: {
-                                HStack(spacing: 6) {
-                                    AvatarView(name: friend.username ?? "?",
-                                               imageURL: friend.profile_image_url, size: 22)
-                                    Text("@\(friend.username ?? "")")
-                                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                                        .foregroundColor(.white)
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Capsule().fill(Color.white.opacity(0.08)))
-                            }
-                            .buttonStyle(.plain)
+                            mentionChip(friend)
                         }
                     }
                 }
