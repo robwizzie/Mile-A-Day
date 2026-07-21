@@ -110,28 +110,24 @@ struct DeveloperSettingsView: View {
                 }
 
                 Button(action: {
-                    tokenStatusResult = nil
+                    tokenStatusResult = "Running diagnostics…"
                     Task {
-                        StreakFeatureService.enrollIfNeeded()
-                        await tokensState.refreshStatus()
-                        await MainActor.run {
-                            tokenStatusResult = tokensState.isActive
-                                ? "ACTIVE — meters loaded from \(AppConfig.baseURL)"
-                                : "inactive — server gate is off for this user on \(AppConfig.baseURL)"
-                        }
+                        let report = await StreakFeatureService.diagnose()
+                        await MainActor.run { tokenStatusResult = report }
                     }
                 }) {
                     HStack {
-                        Image(systemName: "bolt.horizontal.circle.fill")
+                        Image(systemName: "stethoscope")
                             .foregroundColor(.green)
-                        Text("Enroll + refresh status")
+                        Text("Diagnose streak tokens")
                     }
                 }
 
                 if let result = tokenStatusResult {
                     Text(result)
                         .font(.caption)
-                        .foregroundColor(result.hasPrefix("ACTIVE") ? .green : .secondary)
+                        .foregroundColor(result.contains("ACTIVE") ? .green : .secondary)
+                        .textSelection(.enabled)
                 }
 
                 HStack {
@@ -153,8 +149,6 @@ struct DeveloperSettingsView: View {
                 Button(action: {
                     let url = customBaseURL.isEmpty ? "http://localhost:3000" : customBaseURL
                     UserDefaults.standard.set(url, forKey: "devBaseURLOverride")
-                    // Fresh enroll against the new target after relaunch.
-                    UserDefaults.standard.removeObject(forKey: "streakFeaturesEnrollPosted")
                     tokenStatusResult = "Override saved: \(url) — relaunch the app to apply."
                 }) {
                     HStack {
@@ -165,7 +159,6 @@ struct DeveloperSettingsView: View {
 
                 Button(action: {
                     UserDefaults.standard.removeObject(forKey: "devBaseURLOverride")
-                    UserDefaults.standard.removeObject(forKey: "streakFeaturesEnrollPosted")
                     tokenStatusResult = "Override cleared — relaunch to return to production."
                 }) {
                     HStack {
