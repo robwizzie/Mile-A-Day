@@ -47,12 +47,29 @@ struct PostItem: Codable, Identifiable {
     let is_self: Bool
     var is_hyped: Bool
     var hype_count: Int?
+    var comment_count: Int?
     var is_viewed: Bool?
     /// Story rows only: does this run already have a live feed post? Hides the
     /// story viewer's "Add to feed" when the workout is already on the feed.
     var workout_on_feed: Bool?
+    /// Collab post: the invited/accepted coauthor. Pending invites are only
+    /// visible to the two authors; everyone else decodes nil.
+    var coauthor_user_id: String?
+    var coauthor_status: String?    // "pending" | "accepted"
+    var coauthor_username: String?
+    var coauthor_first_name: String?
+    var coauthor_last_name: String?
+    var coauthor_profile_image_url: String?
 
     var id: String { post_id }
+
+    var hasAcceptedCoauthor: Bool { coauthor_user_id != nil && coauthor_status == "accepted" }
+
+    var coauthorDisplayName: String {
+        if let coauthor_username, !coauthor_username.isEmpty { return coauthor_username }
+        if let coauthor_first_name, !coauthor_first_name.isEmpty { return coauthor_first_name }
+        return "a friend"
+    }
 
     /// Decoded route polyline (nil when absent or degenerate).
     var routeCoordinates: [CLLocationCoordinate2D]? { decodeRouteCoordinates(route) }
@@ -148,6 +165,15 @@ struct FeedEntry: Codable, Identifiable {
     let is_self: Bool
     var is_hyped: Bool
     var hype_count: Int?
+    var comment_count: Int?
+    // Collab post fields (post entries only; nil while pending unless viewer
+    // is one of the two authors).
+    var coauthor_user_id: String?
+    var coauthor_status: String?
+    var coauthor_username: String?
+    var coauthor_first_name: String?
+    var coauthor_last_name: String?
+    var coauthor_profile_image_url: String?
 
     enum CodingKeys: String, CodingKey {
         case kind
@@ -155,7 +181,9 @@ struct FeedEntry: Codable, Identifiable {
         case sort_ts, user_id, username, first_name, last_name, profile_image_url
         case media_url, caption, stats_snapshot, story_photo_url, is_auto
         case workout_id, workout_type, distance, total_duration, calories, steps, route
-        case is_self, is_hyped, hype_count
+        case is_self, is_hyped, hype_count, comment_count
+        case coauthor_user_id, coauthor_status, coauthor_username
+        case coauthor_first_name, coauthor_last_name, coauthor_profile_image_url
     }
 
     var id: String { "\(kind)-\(entryId)" }
@@ -189,7 +217,13 @@ struct FeedEntry: Codable, Identifiable {
             created_at: sort_ts, is_auto: is_auto, workout_type: workout_type,
             route: route, story_photo_url: story_photo_url,
             is_self: is_self, is_hyped: is_hyped,
-            hype_count: hype_count, is_viewed: nil, workout_on_feed: nil
+            hype_count: hype_count, comment_count: comment_count,
+            is_viewed: nil, workout_on_feed: nil,
+            coauthor_user_id: coauthor_user_id, coauthor_status: coauthor_status,
+            coauthor_username: coauthor_username,
+            coauthor_first_name: coauthor_first_name,
+            coauthor_last_name: coauthor_last_name,
+            coauthor_profile_image_url: coauthor_profile_image_url
         )
     }
 }
@@ -326,7 +360,8 @@ enum PostService {
         shareToStory: Bool,
         stats: PostStats?,
         isAuto: Bool = false,
-        includeRoute: Bool = true
+        includeRoute: Bool = true,
+        coauthorUserId: String? = nil
     ) async throws -> PostItem {
         struct Body: Encodable {
             let media_url: String
@@ -337,6 +372,7 @@ enum PostService {
             let stats_snapshot: PostStats?
             let is_auto: Bool
             let include_route: Bool
+            let coauthor_user_id: String?
         }
         let bodyData = try JSONEncoder().encode(
             Body(
@@ -347,7 +383,8 @@ enum PostService {
                 share_to_story: shareToStory,
                 stats_snapshot: stats,
                 is_auto: isAuto,
-                include_route: includeRoute
+                include_route: includeRoute,
+                coauthor_user_id: coauthorUserId
             )
         )
         return try await APIClient.fancyFetch(
@@ -420,6 +457,18 @@ enum PostService {
     static func fetchUserPosts(userId: String, before: String? = nil) async throws -> FeedResponse {
         let endpoint = "/posts/user/\(userId)?limit=24" + beforeSuffix(before)
         return try await APIClient.fancyFetch(endpoint: endpoint, responseType: FeedResponse.self)
+    }
+
+    /// Accept (true) or decline/leave (false) a collab-post invite.
+    static func respondToCoauthor(postId: String, accept: Bool) async throws {
+        struct Body: Encodable { let accept: Bool }
+        let bodyData = try JSONEncoder().encode(Body(accept: accept))
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/\(postId)/coauthor",
+            method: .POST,
+            body: bodyData,
+            responseType: OKResponse.self
+        )
     }
 
     static func deletePost(postId: String) async throws {

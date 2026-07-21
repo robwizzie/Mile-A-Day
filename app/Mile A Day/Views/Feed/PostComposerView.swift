@@ -118,6 +118,9 @@ final class PostComposerViewModel: ObservableObject {
     @Published var hasRoute = false
     /// User choice: show the route map with this post (carousel slide 2).
     @Published var includeRoute = true
+    /// Collab post: the friend this mile was run with. They get an invite and,
+    /// once accepted, the post shows both names and lands on both profiles.
+    @Published var coauthor: BackendUser?
 
     let stats: RunStatsInput
     /// Captured on-screen canvas size (points), reused to render the composite.
@@ -196,7 +199,8 @@ final class PostComposerViewModel: ObservableObject {
                 shareToStory: destination.toStory,
                 stats: stats.snapshot,
                 isAuto: false,
-                includeRoute: includeRoute
+                includeRoute: includeRoute,
+                coauthorUserId: coauthor?.user_id
             )
             if stickerEnabled {
                 // Remember the user's overlay style — but merge back any stats
@@ -216,6 +220,9 @@ final class PostComposerViewModel: ObservableObject {
             return false
         } catch let APIError.apiError(message) where message == "terms_not_accepted" {
             errorMessage = "Please accept the community terms to post."
+            return false
+        } catch APIError.badRequest("invalid_coauthor") {
+            errorMessage = "You can only co-post with an accepted friend."
             return false
         } catch APIError.conflict {
             // One deliberate post per workout — a reward, not a redo.
@@ -261,6 +268,8 @@ struct PostCanvas: View {
 
 struct PostComposerView: View {
     @StateObject private var vm: PostComposerViewModel
+    @StateObject private var friendService = FriendService()
+    @State private var showCoauthorPicker = false
     @State private var showCamera = false
     @State private var gestureBaseScale: CGFloat = 1.0
     /// Sticker position at drag start (normalized) — drags apply translation
@@ -296,6 +305,7 @@ struct PostComposerView: View {
                             overlayEditor
                             if vm.hasRoute { routeToggle }
                             captionField
+                            coauthorRow
                             destinationToggles
                         }
                         if let error = vm.errorMessage {
@@ -349,6 +359,7 @@ struct PostComposerView: View {
                 }
             }
             .task { await vm.checkRouteAvailability() }
+            .task { try? await friendService.loadFriends() }
             // Re-probe once a photo lands — todaysWorkouts may not have been
             // loaded yet when the composer first appeared.
             .onChange(of: vm.pickedImage) { _, newImage in
@@ -610,9 +621,20 @@ struct PostComposerView: View {
         .buttonStyle(.plain)
     }
 
+    /// Friends matching an @token being typed at the end of the caption.
+    private var captionMentionCandidates: [BackendUser] {
+        guard let token = vm.caption.split(separator: " ").last, token.hasPrefix("@") else { return [] }
+        let query = token.dropFirst().lowercased()
+        return friendService.friends.filter {
+            guard let name = $0.username?.lowercased() else { return false }
+            return query.isEmpty || name.hasPrefix(query)
+        }
+        .prefix(8).map { $0 }
+    }
+
     private var captionField: some View {
         VStack(alignment: .leading, spacing: 6) {
-            TextField("", text: $vm.caption, prompt: Text("Add a caption…").foregroundColor(.white.opacity(0.4)), axis: .vertical)
+            TextField("", text: $vm.caption, prompt: Text("Add a caption… (@ to tag a friend)").foregroundColor(.white.opacity(0.4)), axis: .vertical)
                 .lineLimit(1...4)
                 .font(.system(size: 15, weight: .medium, design: .rounded))
                 .foregroundColor(.white)
@@ -621,6 +643,31 @@ struct PostComposerView: View {
                     RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                         .fill(Color.white.opacity(0.06))
                 )
+            if !captionMentionCandidates.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(captionMentionCandidates, id: \.user_id) { friend in
+                            Button {
+                                var parts = vm.caption.split(separator: " ", omittingEmptySubsequences: false)
+                                if let last = parts.last, last.hasPrefix("@") { parts.removeLast() }
+                                vm.caption = (parts + ["@\(friend.username ?? "") "]).joined(separator: " ")
+                            } label: {
+                                HStack(spacing: 6) {
+                                    AvatarView(name: friend.username ?? "?",
+                                               imageURL: friend.profile_image_url, size: 22)
+                                    Text("@\(friend.username ?? "")")
+                                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                                        .foregroundColor(.white)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Capsule().fill(Color.white.opacity(0.08)))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
             Text("\(vm.caption.count)/280")
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundColor(vm.caption.count > 280 ? MADTheme.Colors.error : .white.opacity(0.4))
@@ -628,6 +675,52 @@ struct PostComposerView: View {
         }
         .onChange(of: vm.caption) { _, newValue in
             if newValue.count > 280 { vm.caption = String(newValue.prefix(280)) }
+        }
+    }
+
+    /// "Ran it together?" — pick ONE friend to co-post with. They're invited
+    /// on share and the post goes dual-author once they accept.
+    private var coauthorRow: some View {
+        Button { showCoauthorPicker = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(MADTheme.Colors.madRed)
+                if let coauthor = vm.coauthor {
+                    AvatarView(name: coauthor.username ?? "?",
+                               imageURL: coauthor.profile_image_url, size: 26)
+                    Text("Co-posting with @\(coauthor.username ?? "")")
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Spacer()
+                    Button {
+                        vm.coauthor = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
+                } else {
+                    Text("Ran it together? Add a co-poster")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.7))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white.opacity(0.4))
+                }
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
+                    .fill(Color.white.opacity(0.06))
+            )
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showCoauthorPicker) {
+            CoauthorPickerSheet(friends: friendService.friends) { picked in
+                vm.coauthor = picked
+            }
         }
     }
 
@@ -674,5 +767,85 @@ struct PostComposerView: View {
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                 .fill(Color.white.opacity(0.04))
         )
+    }
+}
+
+/// Pick one accepted friend as the post's co-author (Instagram collab style).
+struct CoauthorPickerSheet: View {
+    let friends: [BackendUser]
+    let onPick: (BackendUser) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var search = ""
+
+    private var filtered: [BackendUser] {
+        guard !search.isEmpty else { return friends }
+        let q = search.lowercased()
+        return friends.filter {
+            ($0.username?.lowercased().contains(q) ?? false)
+                || ($0.first_name?.lowercased().contains(q) ?? false)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
+                if friends.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "person.2")
+                            .font(.system(size: 34))
+                            .foregroundColor(.white.opacity(0.3))
+                        Text("Add friends to co-post")
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                    }
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(filtered, id: \.user_id) { friend in
+                                Button {
+                                    onPick(friend)
+                                    dismiss()
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        AvatarView(name: friend.username ?? "?",
+                                                   imageURL: friend.profile_image_url, size: 42)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(friend.username ?? friend.first_name ?? "Friend")
+                                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                                .foregroundColor(.white)
+                                            if let first = friend.first_name, !first.isEmpty {
+                                                Text(first)
+                                                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                                                    .foregroundColor(.white.opacity(0.5))
+                                            }
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, MADTheme.Spacing.md)
+                                    .padding(.vertical, 8)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.vertical, MADTheme.Spacing.sm)
+                    }
+                    .scrollIndicators(.hidden)
+                }
+            }
+            .navigationTitle("Co-post with")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .searchable(text: $search, prompt: "Search friends")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundColor(.white.opacity(0.7))
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }

@@ -49,6 +49,7 @@ struct SocialFeedView: View {
     @State private var profileUser: BackendUser?
     /// Tapped hype tally — presents the "who hyped this" sheet.
     @State private var hypersContext: HypersListContext?
+    @State private var commentsPost: PostItem?
     /// Profile tapped INSIDE the hypers sheet — presented after that sheet
     /// fully dismisses (sheet-over-sheet races drop the second presentation).
     @State private var pendingProfileUser: BackendUser?
@@ -250,6 +251,18 @@ struct SocialFeedView: View {
         .sheet(item: $reportingPost) { post in
             ReportPostSheet(postId: post.post_id) { reportingPost = nil }
         }
+        .sheet(item: $commentsPost) { post in
+            CommentsSheet(
+                post: post,
+                canModerate: post.is_self ||
+                    (post.coauthor_status == "accepted" && post.coauthor_user_id == currentUserId)
+            ) { newCount in
+                // Keep the card's bubble tally in sync with the sheet.
+                if let index = feed.firstIndex(where: { $0.isPost && $0.entryId == post.post_id }) {
+                    feed[index].comment_count = newCount
+                }
+            }
+        }
         .sheet(isPresented: $showTermsGate, onDismiss: {
             // Present the composer only after the gate sheet is fully gone.
             if pendingCompose && termsAccepted == true {
@@ -378,6 +391,8 @@ struct SocialFeedView: View {
             )
         }
         if entry.isPost, let post = entry.asPostItem() {
+            let isMyPendingInvite = post.coauthor_status == "pending"
+                && post.coauthor_user_id == currentUserId
             PostCardView(
                 post: post,
                 storyPhotoURL: entry.storyPhotoURL,
@@ -388,7 +403,11 @@ struct SocialFeedView: View {
                 onBlock: { Task { await block(entry) } },
                 onDelete: { Task { await deletePost(entry) } },
                 onTapAuthor: openProfile,
-                onTapHypeCount: openHypers
+                onTapHypeCount: openHypers,
+                onOpenComments: { commentsPost = post },
+                onRespondCoauthor: isMyPendingInvite
+                    ? { accept in Task { await respondToCoauthor(post, accept: accept) } }
+                    : nil
             )
         } else {
             ActivityCardView(
@@ -662,6 +681,15 @@ struct SocialFeedView: View {
         do {
             try await PostService.deletePost(postId: entry.entryId)
             await MainActor.run { feed.removeAll { $0.id == entry.id } }
+        } catch {}
+    }
+
+    /// Accept/decline a collab-post invite, then refresh so the card flips to
+    /// the dual-author header (or drops the banner).
+    private func respondToCoauthor(_ post: PostItem, accept: Bool) async {
+        do {
+            try await PostService.respondToCoauthor(postId: post.post_id, accept: accept)
+            await refresh()
         } catch {}
     }
 

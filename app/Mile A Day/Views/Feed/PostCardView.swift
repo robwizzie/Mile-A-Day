@@ -26,6 +26,11 @@ struct PostCardView: View {
     var onTapAuthor: (() -> Void)? = nil
     /// Tap the hype tally to see who hyped (Instagram-likes style).
     var onTapHypeCount: (() -> Void)? = nil
+    /// Open the Instagram-style comments sheet.
+    var onOpenComments: (() -> Void)? = nil
+    /// Non-nil when the CURRENT user is this post's pending coauthor —
+    /// shows the Accept/Decline collab banner. Called with accept/decline.
+    var onRespondCoauthor: ((Bool) -> Void)? = nil
 
     @State private var hypeBurst = 0
     /// Collapses the same physical double-tap arriving from two recognizers
@@ -47,7 +52,7 @@ struct PostCardView: View {
                     PostStatStrip(stats: stats).padding(.horizontal, 2)
                 }
                 if let caption = post.caption, !caption.isEmpty {
-                    Text(caption)
+                    Text(MentionText.attributed(caption))
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.9))
                         .padding(.horizontal, 2)
@@ -57,6 +62,9 @@ struct PostCardView: View {
             .simultaneousGesture(
                 TapGesture(count: 2).onEnded { doubleTapHype() }
             )
+            if onRespondCoauthor != nil {
+                coauthorInviteBanner
+            }
             footer
         }
         .padding(MADTheme.Spacing.sm)
@@ -72,9 +80,24 @@ struct PostCardView: View {
                 onTapAuthor?()
             } label: {
                 HStack(spacing: 10) {
-                    AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
+                    if post.hasAcceptedCoauthor {
+                        // Collab post: overlapping avatars + "a & b", like
+                        // Instagram's collab header.
+                        ZStack(alignment: .bottomTrailing) {
+                            AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
+                            AvatarView(name: post.coauthorDisplayName,
+                                       imageURL: post.coauthor_profile_image_url, size: 26)
+                                .overlay(Circle().strokeBorder(Color.black.opacity(0.7), lineWidth: 2))
+                                .offset(x: 8, y: 4)
+                        }
+                        .padding(.trailing, 8)
+                    } else {
+                        AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
+                    }
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(post.displayName)
+                        Text(post.hasAcceptedCoauthor
+                             ? "\(post.displayName) & \(post.coauthorDisplayName)"
+                             : post.displayName)
                             .font(.system(size: 15, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                             .lineLimit(1)
@@ -238,6 +261,35 @@ struct PostCardView: View {
         .allowsHitTesting(false)
     }
 
+    /// "rob added you to this post" — Accept / Decline, shown only to the
+    /// invited coauthor while the invite is pending.
+    private var coauthorInviteBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "person.2.fill")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(MADTheme.Colors.madRed)
+            Text("\(post.displayName) added you to this post")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .lineLimit(2)
+            Spacer()
+            Button("Accept") { onRespondCoauthor?(true) }
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(MADTheme.Colors.redGradient))
+            Button("Decline") { onRespondCoauthor?(false) }
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(0.7))
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+        )
+    }
+
     private var footer: some View {
         HStack(spacing: 10) {
             if let count = post.hype_count, count > 0 {
@@ -248,6 +300,23 @@ struct PostCardView: View {
                 .buttonStyle(.plain)
                 .disabled(onTapHypeCount == nil)
             }
+            // Instagram-style comments entry: bubble + count, everyone incl.
+            // the author.
+            Button { onOpenComments?() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "bubble.right")
+                        .font(.system(size: 15, weight: .semibold))
+                    if let count = post.comment_count, count > 0 {
+                        Text("\(count)")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                    }
+                }
+                .foregroundColor(.white.opacity(0.7))
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(onOpenComments == nil)
             Spacer()
             if !post.is_self {
                 HypeButton(

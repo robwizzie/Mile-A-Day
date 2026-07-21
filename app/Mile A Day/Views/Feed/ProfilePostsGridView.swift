@@ -154,6 +154,8 @@ struct ProfilePostsFeedSheet: View {
     @Environment(\.dismiss) private var dismiss
     /// Tapped hype tally — presents the "who hyped this" sheet.
     @State private var hypersContext: HypersListContext?
+    /// Tapped comment bubble — presents the comments sheet.
+    @State private var commentsPost: PostItem?
 
     var body: some View {
         NavigationStack {
@@ -200,6 +202,13 @@ struct ProfilePostsFeedSheet: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .sheet(item: $hypersContext) { context in
                 HypersListSheet(context: context)
+            }
+            .sheet(item: $commentsPost) { post in
+                CommentsSheet(post: post, canModerate: post.is_self) { newCount in
+                    if let index = posts.firstIndex(where: { $0.post_id == post.post_id }) {
+                        posts[index].comment_count = newCount
+                    }
+                }
             }
         }
     }
@@ -254,24 +263,39 @@ struct ProfilePostsFeedSheet: View {
                 PostStatStrip(stats: stats).padding(.horizontal, 2)
             }
             if let caption = post.caption, !caption.isEmpty {
-                Text(caption)
+                Text(MentionText.attributed(caption))
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.9))
                     .padding(.horizontal, 2)
             }
-            if let count = post.hype_count, count > 0 {
-                Button {
-                    hypersContext = HypersListContext(
-                        contextType: "post",
-                        contextId: post.post_id,
-                        targetUserId: post.user_id
-                    )
-                } label: {
-                    HypeTally(count: count, showsLabel: true).contentShape(Rectangle())
+            HStack(spacing: 12) {
+                if let count = post.hype_count, count > 0 {
+                    Button {
+                        hypersContext = HypersListContext(
+                            contextType: "post",
+                            contextId: post.post_id,
+                            targetUserId: post.user_id
+                        )
+                    } label: {
+                        HypeTally(count: count, showsLabel: true).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button { commentsPost = post } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "bubble.right")
+                            .font(.system(size: 15, weight: .semibold))
+                        if let count = post.comment_count, count > 0 {
+                            Text("\(count)")
+                                .font(.system(size: 13, weight: .bold, design: .rounded))
+                        }
+                    }
+                    .foregroundColor(.white.opacity(0.7))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .padding(.horizontal, 2)
             }
+            .padding(.horizontal, 2)
         }
         .padding(MADTheme.Spacing.sm)
         .background(
