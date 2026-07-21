@@ -181,6 +181,8 @@ struct PureFlameBadge: View {
 struct StreakTokensCard: View {
     @ObservedObject var tokensState = StreakTokensState.shared
     @State private var showDetail = false
+    /// Drives the slow breathing pulse on earned medallions.
+    @State private var pulse = false
 
     var body: some View {
         if let payload = tokensState.payload {
@@ -266,6 +268,15 @@ struct StreakTokensCard: View {
     ) -> some View {
         VStack(spacing: 6) {
             TokenMedallion(kind: kind, held: held, progress: progress, size: 46)
+                // Earned tokens breathe gently — alive, not static.
+                .scaleEffect(held && pulse ? 1.05 : 1.0)
+                .animation(
+                    held
+                        ? .easeInOut(duration: 1.5).repeatForever(autoreverses: true)
+                        : .default,
+                    value: pulse
+                )
+                .onAppear { pulse = true }
             Text(kind.title)
                 .font(.system(size: 10, weight: .bold, design: .rounded))
                 .foregroundColor(.white.opacity(held ? 0.95 : 0.6))
@@ -406,31 +417,7 @@ struct StreakTokensDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Meter bar + count
-            VStack(alignment: .leading, spacing: 4) {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.08))
-                        Capsule()
-                            .fill(
-                                LinearGradient(
-                                    colors: kind.gradient,
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: max(6, geo.size.width * (meter.held ? 1 : meter.fraction)))
-                    }
-                }
-                .frame(height: 8)
-
-                Text(meter.held
-                     ? "Earned — you're holding 1 (max 1). Using it restarts the meter."
-                     : "\(trimmed(meter.progress)) / \(trimmed(meter.target)) \(unit)")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundColor(meter.held ? .green : .secondary)
-            }
+            TokenMeterBar(kind: kind, meter: meter, unit: unit)
         }
         .padding(MADTheme.Spacing.md)
         .madLiquidGlass()
@@ -467,5 +454,90 @@ struct StreakTokensDetailView: View {
         value.truncatingRemainder(dividingBy: 1) == 0
             ? String(Int(value))
             : String(format: "%.1f", value)
+    }
+}
+
+// MARK: - Animated meter bar
+
+/// The earn meter, made satisfying: the fill springs from zero on appear, a
+/// light shimmer sweeps the filled portion, and the copy counts DOWN ("3 to
+/// go") so progress reads as approach, not bookkeeping.
+private struct TokenMeterBar: View {
+    let kind: StreakTokenKind
+    let meter: StreakTokenMeter
+    let unit: String
+
+    @State private var grown = false
+    @State private var shimmer = false
+
+    private var fraction: Double { meter.held ? 1 : meter.fraction }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            GeometryReader { geo in
+                let fillWidth = max(6, geo.size.width * fraction * (grown ? 1 : 0))
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.08))
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: kind.gradient,
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: fillWidth)
+                        .overlay(
+                            // Shimmer sweep across the filled portion.
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [.clear, .white.opacity(0.45), .clear],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: 46)
+                                .offset(x: shimmer ? fillWidth : -46)
+                                .animation(
+                                    .linear(duration: 1.8)
+                                        .repeatForever(autoreverses: false)
+                                        .delay(0.8),
+                                    value: shimmer
+                                )
+                                .mask(Capsule().frame(width: fillWidth))
+                        , alignment: .leading)
+                }
+            }
+            .frame(height: 8)
+
+            Text(statusLine)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundColor(meter.held ? .green : .secondary)
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.7, dampingFraction: 0.85).delay(0.15)) {
+                grown = true
+            }
+            if fraction > 0.1 { shimmer = true }
+        }
+    }
+
+    private var statusLine: String {
+        if meter.held {
+            return "Earned — you're holding 1 (max 1). Using it restarts the meter."
+        }
+        let remaining = max(meter.target - meter.progress, 0)
+        let togo = remaining.truncatingRemainder(dividingBy: 1) == 0
+            ? String(Int(remaining))
+            : String(format: "%.1f", remaining)
+        let progressText = meter.progress.truncatingRemainder(dividingBy: 1) == 0
+            ? String(Int(meter.progress))
+            : String(format: "%.1f", meter.progress)
+        let targetText = meter.target.truncatingRemainder(dividingBy: 1) == 0
+            ? String(Int(meter.target))
+            : String(format: "%.1f", meter.target)
+        return "\(progressText) / \(targetText) \(unit) · \(togo) to go"
     }
 }

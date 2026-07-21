@@ -46,8 +46,12 @@ export const STREAK_ASSIST_TARGET_MILES = 20;
 const DOUBLE_DOWN_GOAL_MULTIPLIER = 2;
 const DOUBLE_DOWN_TOLERANCE = 0.05;
 // Meter windows: retroactive credit at enrollment + a hard query bound.
-const ENROLL_LOOKBACK_DAYS = 30;
-const METER_WINDOW_DAYS = 90;
+// A FULL YEAR on purpose — a 400-day streaker must enroll fully loaded
+// (all three tokens held), not start from scratch like a new runner. The
+// original 30/90 made long streaks count the same as one month. Post-launch
+// the window is naturally bounded by each token's last-used date anyway.
+const ENROLL_LOOKBACK_DAYS = 365;
+const METER_WINDOW_DAYS = 365;
 // Assist-opportunity pushes only fire for streaks worth mourning.
 const MIN_NOTIFY_PRIOR_STREAK = 3;
 // A break stays rescuable for this many days after the missed day.

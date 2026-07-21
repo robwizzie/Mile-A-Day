@@ -4,8 +4,10 @@ struct ProfileView: View {
     @Environment(\.appStateManager) var appStateManager
     @ObservedObject var userManager: UserManager
     @ObservedObject var healthManager: HealthKitManager
-    /// Streak-token state — drives the Pure Flame (natural streak) seal.
+    /// Streak-token state — drives the Pure Flame (natural streak) seal and
+    /// the profile token shelf.
     @ObservedObject private var tokensState = StreakTokensState.shared
+    @State private var showTokenSheet = false
 
     @State private var activeSheet: ProfileSheetType?
     @State private var showingEditProfile = false
@@ -510,6 +512,40 @@ struct ProfileView: View {
                             Text(displayName)
                                 .font(MADTheme.Typography.body)
                                 .foregroundColor(MADTheme.Colors.secondaryText)
+                        }
+
+                        // Token shelf — your minted set, right on the profile.
+                        // Hidden until streak features are active.
+                        if let tokens = tokensState.payload {
+                            Button {
+                                showTokenSheet = true
+                            } label: {
+                                HStack(spacing: 14) {
+                                    TokenMedallion(
+                                        kind: .doubleDown,
+                                        held: tokens.double_down.held,
+                                        progress: tokens.double_down.fraction,
+                                        size: 34
+                                    )
+                                    TokenMedallion(
+                                        kind: .save,
+                                        held: tokens.streak_save.held,
+                                        progress: tokens.streak_save.fraction,
+                                        size: 34
+                                    )
+                                    TokenMedallion(
+                                        kind: .assist,
+                                        held: tokens.streak_assist.held,
+                                        progress: tokens.streak_assist.fraction,
+                                        size: 34
+                                    )
+                                }
+                                .padding(.top, MADTheme.Spacing.xs)
+                            }
+                            .buttonStyle(ScaleButtonStyle())
+                            .sheet(isPresented: $showTokenSheet) {
+                                StreakTokensDetailView()
+                            }
                         }
 
                         // Bio with quote-style accent
