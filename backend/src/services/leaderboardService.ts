@@ -1,4 +1,8 @@
 import { PostgresService } from "./DbService.js";
+import {
+  coverageActiveFor,
+  computeCoveredStreak,
+} from "./streakFeatureCore.js";
 
 const db = PostgresService.getInstance();
 
@@ -682,6 +686,21 @@ export async function refreshCurrentStreak(userId: string): Promise<number> {
       userId,
     ]);
     return 0;
+  }
+
+  // Streak-features gate. CRITICAL: this function is the ONLY writer of
+  // users.current_streak and is also invoked by the 6-hourly
+  // reconcileStaleStreaks cron — if it didn't honor coverage, that cron would
+  // silently erase every token-saved streak within hours. Enrolled users (new
+  // build + env switch on) get the coverage-aware walk; everyone else runs
+  // the untouched legacy loop below, byte-identical to before.
+  if (await coverageActiveFor(userId)) {
+    const covered = await computeCoveredStreak(userId, userToday);
+    await db.query(`UPDATE users SET current_streak = $1 WHERE user_id = $2`, [
+      covered.streak,
+      userId,
+    ]);
+    return covered.streak;
   }
 
   const days = await db.query(

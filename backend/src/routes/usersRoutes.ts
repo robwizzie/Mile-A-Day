@@ -13,6 +13,11 @@ import {
   uploadProfileImage,
 } from "../controllers/usersController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
+import {
+  enableStreakFeaturesController,
+  streakFeaturesStatusController,
+  giveStreakAssistController,
+} from "../controllers/streakFeaturesController.js";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -27,6 +32,13 @@ const upload = multer({
 });
 
 const router = Router();
+
+// Streak tokens (Double Down / Streak Save / Streak Assist). Self-scoped via
+// req.userId, so no :userId param — registered above the param routes so the
+// static paths can never be captured by /:userId.
+router.post("/streak-features/enable", enableStreakFeaturesController);
+router.get("/streak-features/status", streakFeaturesStatusController);
+router.post("/streak-features/assist/:friendId", giveStreakAssistController);
 
 router.get("/search", searchUsers);
 router.get("/check-username", checkUsername);

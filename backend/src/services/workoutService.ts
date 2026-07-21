@@ -1,6 +1,10 @@
 import { Workout } from "../types/workouts.js";
 import { PostgresService } from "./DbService.js";
 import { VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL } from "./visibilityService.js";
+import {
+  coverageActiveFor,
+  computeCoveredStreak,
+} from "./streakFeatureCore.js";
 
 const db = PostgresService.getInstance();
 
@@ -242,6 +246,15 @@ export async function getUserLocalToday(userId: string): Promise<string> {
 
 export async function getActiveStreak(userId: string) {
   const userToday = await getUserLocalToday(userId);
+
+  // Streak-features gate: enrolled users (new build + env switch on) walk the
+  // coverage-aware path so token-covered days count. Everyone else falls
+  // through to the UNTOUCHED legacy walk below — their output is byte-
+  // identical to before this feature existed.
+  if (await coverageActiveFor(userId)) {
+    return computeCoveredStreak(userId, userToday);
+  }
+
   const yesterday = dateStringMinus(userToday, 1);
 
   const qualifyingDaysQuery = `

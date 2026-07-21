@@ -716,7 +716,16 @@ export async function checkStreaksBroken(): Promise<void> {
 			SELECT us.user_id, u.username
 			FROM user_streaks us
 			JOIN users u ON u.user_id = us.user_id
-			WHERE us.last_active_date < $1`,
+			WHERE us.last_active_date < $1
+			-- Streak tokens: a covered day after the last workout day means the
+			-- streak did NOT break (a Save/Double Down/Assist bridged it) — don't
+			-- send this user a "streak broken" push. Coverage rows only exist for
+			-- enrolled users, so this is a no-op for everyone else.
+			AND NOT EXISTS (
+				SELECT 1 FROM streak_coverage sc
+				WHERE sc.user_id = us.user_id
+					AND sc.local_date > us.last_active_date
+			)`,
       [yesterdayStr],
     );
 

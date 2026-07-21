@@ -130,7 +130,13 @@ export type NotificationType =
   | "friend_post"
   | "story_reaction"
   | "daily_reminder"
-  | "weekly_recap";
+  | "weekly_recap"
+  // Streak tokens (gated behind STREAK_FEATURES_ENABLED + per-user enrollment;
+  // none are high-priority, so quiet hours apply automatically).
+  | "streak_double_down"
+  | "streak_saved"
+  | "streak_assist_opportunity"
+  | "streak_assisted";
 
 interface PushPayload {
   title: string;
