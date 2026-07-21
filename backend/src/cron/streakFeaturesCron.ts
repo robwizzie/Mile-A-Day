@@ -9,7 +9,8 @@ import { streakFeaturesGloballyEnabled } from "../services/streakFeatureCore.js"
  * the rescue to assist-holding friends. Runs at :10 so it never lands on the
  * same tick as the :00 daily-reminder batch.
  *
- * Instant no-op while STREAK_FEATURES_ENABLED is unset — safe to deploy dark.
+ * Only enrolled users are processed (none exist until a token-UI build runs),
+ * and STREAK_FEATURES_DISABLED=true freezes the sweep entirely.
  */
 export function startStreakFeaturesCron(): void {
   cron.schedule("10 * * * *", async () => {
