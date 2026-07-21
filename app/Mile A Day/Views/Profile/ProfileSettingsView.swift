@@ -14,6 +14,10 @@ struct ProfileSettingsView: View {
     let isRecalibratingStreak: Bool
     let onPrivacySettings: () -> Void
 
+    /// What's New sheet — reopenable here anytime (auto-presents once per
+    /// release from the Dashboard).
+    @State private var showWhatsNew = false
+
     var body: some View {
         ScrollView {
             VStack(spacing: MADTheme.Spacing.lg) {
@@ -109,6 +113,23 @@ struct ProfileSettingsView: View {
                 )
             }
             .buttonStyle(.plain)
+
+            settingsDivider
+
+            Button {
+                showWhatsNew = true
+            } label: {
+                MADSettingsRow(
+                    icon: "sparkles",
+                    title: "What's New",
+                    subtitle: "Latest features and updates",
+                    iconColor: Color.yellow
+                )
+            }
+            .buttonStyle(.plain)
+            .sheet(isPresented: $showWhatsNew) {
+                WhatsNewView()
+            }
 
             settingsDivider
 
