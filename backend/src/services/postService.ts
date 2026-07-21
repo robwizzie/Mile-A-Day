@@ -244,7 +244,10 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
     input.isAuto === undefined ? legacyLooksAuto : input.isAuto === true;
   // Coauthor must be a real accepted friend (no block either way) — validated
   // here so the constraint holds no matter which controller path inserts.
-  const coauthorId = isAutoValue ? null : (input.coauthorUserId ?? null);
+  // Collabs are a FEED concept (profile grids + feed reach are feed-only) —
+  // a story-only invite would be accepted into nothing. Silently ignored.
+  const coauthorId =
+    isAutoValue || !input.shareToFeed ? null : (input.coauthorUserId ?? null);
   if (coauthorId) {
     if (coauthorId === input.userId) throw new Error("invalid_coauthor");
     const ok = await db.query(
@@ -955,9 +958,15 @@ export async function getUnifiedFeed(
 				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 				AND NOT EXISTS (
 					SELECT 1 FROM posts p2
-					WHERE (p2.workout_id = w.workout_id
-							OR (p2.coauthor_status = 'accepted' AND p2.coauthor_workout_id = w.workout_id))
-						AND p2.deleted_at IS NULL AND p2.share_to_feed
+					WHERE p2.deleted_at IS NULL AND p2.share_to_feed
+						AND (p2.workout_id = w.workout_id
+							-- A collab post only stands in for the coauthor's mile when
+							-- the viewer can actually SEE that post (primary author not
+							-- blocked or private) — otherwise they'd get neither.
+							OR (p2.coauthor_status = 'accepted'
+								AND p2.coauthor_workout_id = w.workout_id
+								AND p2.user_id NOT IN (SELECT uid FROM blocked)
+								AND ${OWNER_NOT_PRIVATE_SQL("p2.user_id")}))
 				)
 		),
 		page AS (
@@ -1127,12 +1136,17 @@ export async function getUserPosts(
 			)
 			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$2", "$1")}
 			-- Collab rows surface the PRIMARY author's content on the coauthor's
-			-- profile — hide them when a block exists between viewer and author.
-			AND NOT EXISTS (
-				SELECT 1 FROM user_blocks b
-				WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
-					OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
-			)
+			-- profile. Reach mirrors the unified feed: a collab deliberately
+			-- shares BOTH audiences, so the viewer needn't be the author's
+			-- friend — but a private or blocked author still disappears.
+			AND (p.user_id = $2 OR (
+				${OWNER_NOT_PRIVATE_SQL("p.user_id")}
+				AND NOT EXISTS (
+					SELECT 1 FROM user_blocks b
+					WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
+						OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
+				)
+			))
 			AND ($3::timestamptz IS NULL OR p.created_at < $3::timestamptz)
 		ORDER BY p.created_at DESC
 		LIMIT $4
@@ -1293,6 +1307,8 @@ export async function visiblePostAuthor(
   const rows = await db.query<{ user_id: string }>(
     `SELECT p.user_id FROM posts p
 		 WHERE p.post_id = $2 AND p.deleted_at IS NULL AND p.share_to_feed
+			 AND (p.user_id = $1 OR p.coauthor_user_id = $1
+				 OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")})
 			 AND (p.user_id = $1
 				 OR p.coauthor_user_id = $1
 				 OR EXISTS (

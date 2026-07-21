@@ -223,7 +223,8 @@ final class PostComposerViewModel: ObservableObject {
                 stats: stats.snapshot,
                 isAuto: false,
                 includeRoute: includeRoute,
-                coauthorUserId: coauthor?.user_id
+                // Feed posts only — the server ignores it otherwise anyway.
+                coauthorUserId: destination.toFeed ? coauthor?.user_id : nil
             )
             // Reward posts shared inside the run's 10-min fresh window with a
             // "Fresh" badge. No-op when the window is closed.
@@ -481,7 +482,8 @@ struct PostComposerView: View {
                             overlayEditor
                             if vm.hasRoute { routeToggle }
                             captionField
-                            coauthorRow
+                            // Collabs are a feed concept — hidden for story-only.
+                            if vm.destination.toFeed { coauthorRow }
                             destinationToggles
                         }
                         if let error = vm.errorMessage {
