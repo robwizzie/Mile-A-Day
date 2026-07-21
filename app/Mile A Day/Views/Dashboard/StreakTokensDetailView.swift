@@ -30,12 +30,13 @@ struct PureFlameBadge: View {
     }
 }
 
-// MARK: - Compact meters row (lives inside StreakCard)
+// MARK: - Dashboard card
 
-/// One-glance strip of the three token meters. Rendered only when the server
-/// says streak features are active for this user; tapping opens the full
-/// explainer. Has its OWN tap target so it never triggers the card's share.
-struct StreakTokensRow: View {
+/// The tokens' one home on the Dashboard: a standalone card, always present
+/// while the feature is active (never dependent on which week-view tab is
+/// selected — the old in-StreakCard row vanished on the chart/trends tabs).
+/// Renders nothing when the server gate is off. Tapping opens the explainer.
+struct StreakTokensCard: View {
     @ObservedObject var tokensState = StreakTokensState.shared
     @State private var showDetail = false
 
@@ -45,10 +46,27 @@ struct StreakTokensRow: View {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 showDetail = true
             } label: {
-                VStack(spacing: 8) {
-                    Rectangle()
-                        .fill(Color.white.opacity(0.1))
-                        .frame(height: 1)
+                VStack(spacing: 12) {
+                    HStack(spacing: MADTheme.Spacing.sm) {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(MADTheme.Colors.redGradient)
+                        Text("Streak Tokens")
+                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                        Spacer()
+                        let ready = [
+                            payload.double_down.held,
+                            payload.streak_save.held,
+                            payload.streak_assist.held,
+                        ].filter { $0 }.count
+                        Text(ready > 0 ? "\(ready) ready" : "How they work")
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .foregroundColor(ready > 0 ? .green : .white.opacity(0.55))
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
 
                     HStack(spacing: 0) {
                         meterCell(
@@ -87,6 +105,8 @@ struct StreakTokensRow: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+                .padding(MADTheme.Spacing.md)
+                .madLiquidGlass()
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
