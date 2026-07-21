@@ -34,6 +34,7 @@ import { startStoriesCron } from "./cron/storiesCron.js";
 import { startPendingSendCron } from "./cron/pendingSendCron.js";
 import { startWeeklyRecapCron } from "./cron/weeklyRecapCron.js";
 import { startH2hChallengeCron } from "./cron/h2hChallengeCron.js";
+import { startStreakFeaturesCron } from "./cron/streakFeaturesCron.js";
 import { seedExtraBadges } from "./services/badgeService.js";
 import { seedExtraChallenges } from "./services/dailyChallengeService.js";
 import { PostgresService } from "./services/DbService.js";
@@ -253,6 +254,7 @@ function startCrons() {
   startPendingSendCron();
   startWeeklyRecapCron();
   startH2hChallengeCron();
+  startStreakFeaturesCron();
   // Idempotently ensure the v2 social/app-function badges exist in the catalog.
   seedExtraBadges();
   // Idempotently ensure the v2 daily challenges (5K/10K/social) exist.

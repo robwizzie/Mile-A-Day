@@ -143,6 +143,21 @@ export const users = pgTable(
     })
       .defaultNow()
       .notNull(),
+    // Streak-features enrollment stamp (Double Down / Streak Save / Streak
+    // Assist). Only the new app build calls the enable endpoint, so null =
+    // legacy build → every streak feature is invisible AND inert for this user
+    // (their streak math runs the exact legacy path). Mirrors terms_accepted_at.
+    streakFeaturesAt: timestamp("streak_features_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    // Token meters are DERIVED (counted from workouts since the matching
+    // last-used date), never stored — these anchors are the only state.
+    // Null = never used → the meter window opens at enrollment (with a
+    // bounded retroactive lookback).
+    doubleDownLastUsed: date("double_down_last_used"),
+    streakSaveLastUsed: date("streak_save_last_used"),
+    streakAssistLastUsed: date("streak_assist_last_used"),
   },
   (table) => [
     index("idx_users_current_streak_desc").using(
@@ -976,6 +991,71 @@ export const dailySteps = pgTable(
       name: "daily_steps_pkey",
     }),
     check("daily_steps_steps_check", sql`steps >= 0`),
+  ],
+);
+
+// One row = one missed local day that still counts toward the user's streak.
+// The SINGLE substrate all three streak tokens converge on: Double Down writes
+// kind 'double_down_recover', an auto-consumed Streak Save writes 'streak_save',
+// and a friend's rescue writes 'streak_assist' (source_user = the giver). The
+// composite PK makes every write idempotent (ON CONFLICT DO NOTHING) — the
+// upload-vs-sweep race defense — and means a day can only ever be covered once.
+export const streakCoverage = pgTable(
+  "streak_coverage",
+  {
+    userId: text("user_id").notNull(),
+    localDate: date("local_date").notNull(),
+    kind: varchar({ length: 32 }).notNull(),
+    // The local day whose activity triggered the coverage (e.g. the 2× run
+    // day for a Double Down, the giver's day for an Assist).
+    triggerDate: date("trigger_date"),
+    // Assist only: who rescued this user. Plain text (no FK) so a deleted
+    // giver never blocks the receiver's history.
+    sourceUser: text("source_user"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "streak_coverage_user_id_fkey",
+    }).onDelete("cascade"),
+    primaryKey({
+      columns: [table.userId, table.localDate],
+      name: "streak_coverage_pkey",
+    }),
+  ],
+);
+
+// Streak lifecycle events, currently just kind 'break': stamped once by the
+// sweep when an enrolled user's streak actually breaks (no token covered it).
+// Drives the "you can save your friend" flow — assist eligibility reads it,
+// and the ON CONFLICT-guarded insert doubles as the push de-dupe so hourly
+// sweep re-runs never re-notify.
+export const streakEvents = pgTable(
+  "streak_events",
+  {
+    userId: text("user_id").notNull(),
+    localDate: date("local_date").notNull(),
+    kind: varchar({ length: 24 }).notNull(),
+    // Length of the streak that ended (what an assist would restore).
+    priorStreak: integer("prior_streak").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "streak_events_user_id_fkey",
+    }).onDelete("cascade"),
+    primaryKey({
+      columns: [table.userId, table.localDate, table.kind],
+      name: "streak_events_pkey",
+    }),
   ],
 );
 

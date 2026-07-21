@@ -41,6 +41,10 @@ import {
   fanOutFriendRacePrPush,
 } from "../services/pushNotificationService.js";
 import { refreshCurrentStreak } from "../services/leaderboardService.js";
+import {
+  reconcileStreakFeaturesOnUpload,
+  getStreakFeaturesPayload,
+} from "../services/streakFeatureService.js";
 
 export async function uploadWorkouts(req: Request, res: Response) {
   if (!hasRequiredKeys(["userId"], req, res)) return;
@@ -99,6 +103,13 @@ export async function uploadWorkouts(req: Request, res: Response) {
     // user, so it's cheap, but blocking the response on it isn't worth it.
     refreshCurrentStreak(userId).catch((err) =>
       console.error("Error refreshing current_streak:", err.message),
+    );
+
+    // Streak tokens: detect a completed Double Down (missed yesterday, 2× goal
+    // today). Fire-and-forget and double-gated — instant no-op until the env
+    // switch is on AND this user enrolled via the new build.
+    reconcileStreakFeaturesOnUpload(userId).catch((err) =>
+      console.error("Error reconciling streak features:", err.message),
     );
 
     try {
@@ -554,6 +565,14 @@ export async function getUserStats(req: AuthenticatedRequest, res: Response) {
     // Default goal miles is 1.0 (can be updated when user preferences are stored)
     const goal_miles = 1.0;
 
+    // Streak tokens: null (→ field omitted, JSON byte-identical to today)
+    // unless the env switch is on AND this user enrolled via the new build.
+    const streak_features = await getStreakFeaturesPayload(
+      userId,
+      streak,
+      start,
+    );
+
     return res.status(200).json({
       streak,
       start_date: start,
@@ -563,6 +582,7 @@ export async function getUserStats(req: AuthenticatedRequest, res: Response) {
       recent_workouts,
       today_miles,
       goal_miles,
+      ...(streak_features ? { streak_features } : {}),
     });
   } catch (error: any) {
     console.error("Error getting user stats:", error.message);

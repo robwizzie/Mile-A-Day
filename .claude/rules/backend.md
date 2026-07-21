@@ -5,6 +5,7 @@ globs: backend/**
 # Backend Conventions
 
 - Daily-mile completion checks must use `DAILY_GOAL_TOLERANCE` (0.95) from workoutService, never a raw `>= 1.0` — streaks/challenges count 0.95 days, and today_miles is displayed 2-decimal-rounded ("1.00" can be 0.996). iOS mirror: `ProgressCalculator.dailyGoalTolerance`.
+- Streak tokens (streak_coverage): any code that recomputes a streak MUST branch through `coverageActiveFor`/`computeCoveredStreak` (streakFeatureCore) like getActiveStreak + refreshCurrentStreak do — the 6h `reconcileStaleStreaks` cron rewrites `current_streak` via refreshCurrentStreak, so an unrouted walk silently erases token-saved streaks. Un-enrolled/env-off users must keep the byte-identical legacy loop. Meters are DERIVED from workouts since `*_last_used` (never stored counters).
 
 ## Architecture: Routes -> Controllers -> Services
 - `routes/` - Express Router definitions. Thin: just wire HTTP verbs to controller functions + middleware.
@@ -27,7 +28,6 @@ globs: backend/**
 - If two branches both add migrations, a merge silently corrupts `meta/_journal.json` (one side's entries vanish while its .sql files remain). Resolve by REGENERATING: restore one side's journal+snapshots, delete the other side's .sql, and `db:generate` its DDL back as the next index. `npx drizzle-kit check` must pass.
 - Existing prod schema was baselined via `scripts/drizzle-baseline.mjs` (records `0000` as applied without running it). Run it ONCE per environment before the first `db:migrate`.
 - `drizzle-kit pull` has introspection bugs to fix by hand after every pull: (1) some SQL-expression/empty-string defaults emit broken TS → fix with `.default(sql\`...\`)` / `.default('')`; (2) composite-index per-column opclasses get misaligned (text col tagged `timestamptz_ops` etc.) → these are all DEFAULT opclasses, so strip every `.op(...)` EXCEPT non-defaults like `gin_trgm_ops`; (3) `relations.ts` imports `./schema` without `.js` → add it. After fixing, regenerate the baseline (empty `meta/_journal.json` + `db:generate`) and confirm it says "No schema changes".
-
 - Never emit raw `timestamptz::text` in URL query params (pagination cursors): its `+00` offset decodes as a SPACE in Express's query parser and the `::timestamptz` cast 500s. Emit cursors via `URL_SAFE_CURSOR` (ISO `…Z`, postService.ts); iOS must percent-encode query values with a set that excludes `+` (`PostService.queryValueAllowed`).
 
 ## Auth Pattern
@@ -57,6 +57,8 @@ Service (`services/`) → controller (`controllers/`) → route (`routes/`) → 
 
 ## Push Notifications
 - `device_tokens.environment` selects the APNs host per token (`sandbox` for local DEBUG installs, `production` for App Store/TestFlight); never route pushes solely from server `APNS_PRODUCTION`.
+
+- Hype daily limit did double duty as anti-abuse: dedupe only guards VALIDATED contexts (post, resolvable mile). badge/pr/challenge context_ids and context-less push "hype back" are unvalidated, and `shouldSendNotification` has no rate throttle — so `HYPE_DAILY_ABUSE_CEILING` (hypeService) is their only spam backstop. Keep a ceiling if you make hypes "unlimited".
 
 ## ESM Reminder
 All imports MUST end with `.js` extension, e.g. `import { foo } from './services/fooService.js';`
