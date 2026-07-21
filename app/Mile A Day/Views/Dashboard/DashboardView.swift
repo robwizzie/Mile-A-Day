@@ -36,6 +36,15 @@ struct DashboardView: View {
     @State private var showWhatsNew = false
     /// Streak tokens — drives the tokens card + the unlock celebration.
     @ObservedObject private var tokensState = StreakTokensState.shared
+    /// One-time streak reveal: fires the first time HealthKit history yields
+    /// a streak worth announcing (≥ 3 days), for new installs and upgraders
+    /// alike. Persisted so it can only ever play once.
+    @AppStorage("hasSeenStreakReveal") private var hasSeenStreakReveal = false
+    @State private var showStreakReveal = false
+    /// Monthly recap — auto-presents once when the calendar flips (previous
+    /// month had activity), then reachable via its share from then on.
+    @State private var showMonthlyRecap = false
+    @State private var monthlyRecapStats: MonthlyRecapStats?
     @State private var newGoalMiles: Double = 1.0
     @State private var isRefreshing = false
     @State private var showWorkoutUploadAlert = false
@@ -537,6 +546,11 @@ struct DashboardView: View {
                 // launches (the foreground observer only fires on background→
                 // foreground, and completeAuthentication only on fresh sign-in).
                 StreakFeatureService.enrollIfNeeded()
+                // Retire a stale at-risk Live Activity (e.g. the mile was
+                // logged from the watch overnight) or refresh its numbers.
+                syncStreakRiskActivity()
+                // The reveal may already be ready on a warm relaunch.
+                maybeTriggerStreakReveal()
                 // Belt-and-braces activation: if the tokens aren't lit yet,
                 // ask the status endpoint directly — independent of the
                 // getUserStats decode path, so one broken link can't keep the
@@ -555,11 +569,17 @@ struct DashboardView: View {
                            !celebrationManager.isShowingCelebration,
                            !showWorkoutView,
                            !showWelcomeTour,
-                           !showPendingSheet {
+                           !showPendingSheet,
+                           !showMonthlyRecap {
                             showWhatsNew = true
                         }
                     }
                 }
+
+                // Monthly recap ("Your July") — once per month, lowest
+                // priority of all auto-surfaces; if anything else claims
+                // this visit, it simply takes the next one.
+                maybePresentMonthlyRecap()
             }
             // Self-cleaning replacements for the old NotificationCenter.addObserver
             // calls in onAppear — those registered a fresh observer on every
@@ -575,13 +595,40 @@ struct DashboardView: View {
             .sheet(isPresented: $showWhatsNew) {
                 WhatsNewView()
             }
-            // Token unlock celebration — a meter just completed (or enrollment
-            // backfill handed over the starting set). Self-contained overlay;
-            // stands down while a goal celebration is playing (newlyEarned
-            // persists until dismissed, so the moment isn't lost).
+            .sheet(isPresented: $showMonthlyRecap) {
+                if let monthlyRecapStats {
+                    MonthlyRecapView(stats: monthlyRecapStats)
+                }
+            }
+            // Big-moment overlays, strictly one at a time, in narrative order:
+            // 1. the one-time streak reveal (who you already are),
+            // 2. a token story (something saved you),
+            // 3. the token unlock ceremony (something you earned).
+            // Each stands down for goal celebrations; all state persists until
+            // dismissed, so no moment is ever lost — just queued.
             .overlay {
-                if !tokensState.newlyEarned.isEmpty,
-                   !celebrationManager.isShowingCelebration {
+                if showStreakReveal,
+                   !celebrationManager.isShowingCelebration,
+                   !showWelcomeTour, !showWorkoutView {
+                    StreakRevealOverlay(
+                        streak: max(healthManager.retroactiveStreak, userManager.currentUser.streak)
+                    ) {
+                        hasSeenStreakReveal = true
+                        showStreakReveal = false
+                    }
+                    .transition(.opacity)
+                    .zIndex(52)
+                } else if let story = tokensState.storyEvent,
+                          !celebrationManager.isShowingCelebration {
+                    TokenStoryOverlay(
+                        event: story,
+                        streak: userManager.currentUser.streak,
+                        onDismiss: { tokensState.storyEvent = nil }
+                    )
+                    .transition(.opacity)
+                    .zIndex(51)
+                } else if !tokensState.newlyEarned.isEmpty,
+                          !celebrationManager.isShowingCelebration {
                     TokenUnlockOverlay(
                         kinds: tokensState.newlyEarned.compactMap { StreakTokenKind.from(raw: $0) },
                         onDismiss: { tokensState.newlyEarned = [] }
@@ -626,6 +673,10 @@ struct DashboardView: View {
                 } else if newPhase == .background || newPhase == .inactive {
                     celebrationManager.onAppResignedActive()
                 }
+                // Keep the at-risk Live Activity in lockstep: starts when the
+                // user leaves the app on an at-risk evening, ends the moment
+                // the mile lands or the risk passes.
+                syncStreakRiskActivity()
             }
             .onChange(of: celebrationManager.isShowingCelebration) { wasShowing, isShowing in
                 // When a celebration finishes, surface any leftover pendings the
@@ -645,6 +696,7 @@ struct DashboardView: View {
                 if isLoaded {
                     applyHealthDataToUserManager()
                     checkAndShowGoalCelebration()
+                    maybeTriggerStreakReveal()
                     // Defer checklist visibility until data has settled so
                     // established users never see a single-frame flash.
                     if !gettingStartedReady && !gettingStartedDismissed {
@@ -658,6 +710,7 @@ struct DashboardView: View {
             }
             .onChange(of: healthManager.retroactiveStreak) { _, _ in
                 applyHealthDataToUserManager()
+                maybeTriggerStreakReveal()
             }
             .onChange(of: currentState.isCompleted) { oldValue, newValue in
                 if newValue && !oldValue {
@@ -668,6 +721,9 @@ struct DashboardView: View {
                 // Completing the goal clears the "photo waiting" state (the
                 // post-run prompt now offers the snap directly).
                 refreshMidRunPhotoWaiting()
+                // Mile landed (or state changed) — retire/refresh the at-risk
+                // Live Activity immediately.
+                syncStreakRiskActivity()
             }
             .onChange(of: healthManager.todaysDistance) { oldValue, newValue in
                 // Check for extra mile when distance increases after goal already celebrated
@@ -872,6 +928,58 @@ struct DashboardView: View {
         } catch {
             print("[Dashboard] ⚠️ Fresh streak fetch for celebration failed: \(error)")
         }
+    }
+
+    /// One-shot decision, made the first time real HealthKit data is ready:
+    /// a streak ≥ 3 gets the full count-up reveal; anything less marks the
+    /// moment seen forever (an organic day-3 later must not replay a "we
+    /// checked your history" story).
+    private func maybeTriggerStreakReveal() {
+        guard !hasSeenStreakReveal, !showStreakReveal else { return }
+        guard healthManager.hasLoadedInitialData else { return }
+        let streak = max(healthManager.retroactiveStreak, userManager.currentUser.streak)
+        if streak >= 3 {
+            showStreakReveal = true
+        } else {
+            hasSeenStreakReveal = true
+        }
+    }
+
+    /// Present last month's recap once per month — the least urgent of all
+    /// auto-surfaces, so it yields to literally everything else on screen.
+    private func maybePresentMonthlyRecap() {
+        guard !showMonthlyRecap else { return }
+        guard let stats = MonthlyRecapStats.computePreviousMonth(
+            healthManager: healthManager,
+            goal: userManager.currentUser.goalMiles,
+            streak: userManager.currentUser.streak
+        ), MonthlyRecapManager.shouldAutoPresent(stats) else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            guard !celebrationManager.isShowingCelebration,
+                  !showWorkoutView,
+                  !showWelcomeTour,
+                  !showWhatsNew,
+                  !showPendingSheet,
+                  !showStreakReveal,
+                  tokensState.storyEvent == nil,
+                  tokensState.newlyEarned.isEmpty
+            else { return }
+            monthlyRecapStats = stats
+            showMonthlyRecap = true
+            MonthlyRecapManager.markSeen(stats.monthKey)
+        }
+    }
+
+    /// Idempotent — safe to call on every relevant state change.
+    private func syncStreakRiskActivity() {
+        StreakRiskActivityManager.sync(
+            isAtRisk: userManager.currentUser.isStreakAtRisk,
+            isCompleted: currentState.isCompleted,
+            streak: userManager.currentUser.streak,
+            goalMiles: currentState.goal,
+            currentMiles: currentState.distance
+        )
     }
 
     private func triggerConfetti() {
@@ -1151,6 +1259,7 @@ struct DashboardView: View {
             progress: currentState.progress,
             isGoalCompleted: currentState.isCompleted,
             hasActiveWorkout: hasActiveWorkout,
+            distanceIsFresh: healthManager.hasFreshTodaysDistance,
             fastestPace: userManager.currentUser.fastestMilePace,
             mostMiles: healthManager.cachedCurrentStreakStats.mostMiles > 0
                 ? healthManager.cachedCurrentStreakStats.mostMiles

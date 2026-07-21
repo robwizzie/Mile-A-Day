@@ -1,6 +1,15 @@
 import Foundation
 import SwiftUI
 
+/// A coverage event worth telling the user about: a token fired on their
+/// behalf (their own Save/Double Down, or a friend's Assist landing on them).
+struct TokenStoryEvent: Equatable {
+    /// Coverage kind: "streak_save" | "double_down_recover" | "streak_assist".
+    let kind: String
+    /// The covered local day, "yyyy-MM-dd".
+    let localDate: String
+}
+
 /// Observable snapshot of the user's streak-token state (meters, natural
 /// streak, at-risk), refreshed whenever the user's OWN gated stats payload
 /// arrives. `payload == nil` means the feature is off server-side — every
@@ -26,6 +35,10 @@ final class StreakTokensState: ObservableObject {
     /// later. Purely celebratory; nothing reads it for logic.
     @Published var meterGains: [String: String] = [:]
     private var gainsClearTask: Task<Void, Never>?
+    /// A token just fired (save auto-covered a day / Double Down completed /
+    /// a friend's Assist landed) — drives the story overlay. Cleared on
+    /// dismiss; each coverage row tells its story exactly once (persisted).
+    @Published var storyEvent: TokenStoryEvent?
 
     var isActive: Bool { payload != nil }
 
@@ -44,6 +57,7 @@ final class StreakTokensState: ObservableObject {
         payload = new
         if let new {
             registerHeldStates(from: new)
+            detectCoverageStories(in: new)
         }
         // Mirror the held count to the streak widget and the watch. Both
         // sinks dedupe (no-op write skip / stable-hash), so calling on every
@@ -80,6 +94,38 @@ final class StreakTokensState: ObservableObject {
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled else { return }
             self?.meterGains = [:]
+        }
+    }
+
+    private static let seenCoverageKey = "streakTokenSeenCoverage"
+
+    /// Coverage rows are the receipts of tokens FIRING. Any row we haven't
+    /// seen before (persisted set) is a story to tell — but only recent ones:
+    /// a months-old row appearing on a reinstall isn't a moment. The very
+    /// first payload baselines silently so existing coverage can't storm.
+    @MainActor
+    private func detectCoverageStories(in payload: StreakFeaturesPayload) {
+        let keys = payload.frozen_dates.map { "\($0.kind):\($0.local_date)" }
+        guard UserDefaults.standard.object(forKey: Self.seenCoverageKey) != nil else {
+            UserDefaults.standard.set(keys, forKey: Self.seenCoverageKey)
+            return
+        }
+        var seen = Set(UserDefaults.standard.stringArray(forKey: Self.seenCoverageKey) ?? [])
+        let fresh = payload.frozen_dates.filter { !seen.contains("\($0.kind):\($0.local_date)") }
+        guard !fresh.isEmpty else { return }
+        keys.forEach { seen.insert($0) }
+        UserDefaults.standard.set(Array(seen), forKey: Self.seenCoverageKey)
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+        let recent = fresh.filter {
+            guard let d = formatter.date(from: $0.local_date) else { return false }
+            return d >= cutoff
+        }
+        // One story at a time — the most recent covered day wins.
+        if let latest = recent.max(by: { $0.local_date < $1.local_date }) {
+            storyEvent = TokenStoryEvent(kind: latest.kind, localDate: latest.local_date)
         }
     }
 

@@ -503,6 +503,10 @@ struct HomeScreenStreakView: View {
                 .foregroundColor(Color(red: 1.0, green: 0.84, blue: 0.35))
             }
         }
+        // Unfinished mile → tapping the widget lands straight in the tracker
+        // (the widget is a remote control, not just a readout). Once done,
+        // tap opens the app normally.
+        .widgetURL(entry.isGoalCompleted ? nil : URL(string: "mileaday://workout/start"))
     }
 
     @ViewBuilder

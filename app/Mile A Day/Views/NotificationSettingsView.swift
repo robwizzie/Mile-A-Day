@@ -3,6 +3,28 @@ import UserNotifications
 
 struct NotificationSettingsView: View {
     @State private var prefs = NotificationPreferences.load()
+    /// At-risk streak Live Activity master switch (default on; the activity
+    /// only appears when the streak is genuinely about to die).
+    @State private var streakRiskActivityEnabled = StreakRiskActivityManager.isEnabled
+
+    /// Persists the switch and retires any activity already on the lock
+    /// screen the moment it's turned off. (A didSet on @State never fires
+    /// through a Toggle's binding — the custom Binding is the reliable hook.)
+    private var streakRiskBinding: Binding<Bool> {
+        Binding(
+            get: { streakRiskActivityEnabled },
+            set: { newValue in
+                streakRiskActivityEnabled = newValue
+                StreakRiskActivityManager.isEnabled = newValue
+                if !newValue {
+                    StreakRiskActivityManager.sync(
+                        isAtRisk: false, isCompleted: false, streak: 0,
+                        goalMiles: 1, currentMiles: 0
+                    )
+                }
+            }
+        )
+    }
     /// Local master switch for the post-run photo prompt + auto-sharing the mile.
     @AppStorage("autoShareRunsToFeed") private var autoShareRunsToFeed = true
     @ObservedObject private var notificationService = MADNotificationService.shared
@@ -266,6 +288,11 @@ struct NotificationSettingsView: View {
                                 .datePickerStyle(.compact)
                                 .tint(MADTheme.Colors.madRed)
                         }
+
+                        settingsDivider
+
+                        settingsToggle("Streak countdown on Lock Screen", isOn: streakRiskBinding,
+                            description: "A Live Activity with the time left when your streak is at risk in the evening")
 
                         settingsDivider
 
