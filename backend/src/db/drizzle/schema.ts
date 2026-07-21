@@ -1181,6 +1181,96 @@ export const postReports = pgTable(
   ],
 );
 
+// Instagram-style comments on feed posts. One level of nesting: a reply's
+// parent_comment_id always points at a TOP-LEVEL comment (replies to replies
+// are re-rooted at write time). Soft-deleted like posts; deleting a top-level
+// comment also soft-deletes its replies.
+export const postComments = pgTable(
+  "post_comments",
+  {
+    commentId: uuid("comment_id").defaultRandom().primaryKey().notNull(),
+    postId: uuid("post_id").notNull(),
+    userId: text("user_id").notNull(),
+    parentCommentId: uuid("parent_comment_id"),
+    content: text().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    index("idx_post_comments_post")
+      .using(
+        "btree",
+        table.postId.asc().nullsLast(),
+        table.createdAt.asc().nullsLast(),
+      )
+      .where(sql`(deleted_at IS NULL)`),
+    foreignKey({
+      columns: [table.postId],
+      foreignColumns: [posts.postId],
+      name: "post_comments_post_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "post_comments_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.parentCommentId],
+      foreignColumns: [table.commentId],
+      name: "post_comments_parent_fkey",
+    }).onDelete("cascade"),
+    check(
+      "post_comments_content_check",
+      sql`char_length(content) >= 1 AND char_length(content) <= 1000`,
+    ),
+  ],
+);
+
+// Abuse reports on comments (App Store Guideline 1.2) — mirrors post_reports.
+// One report per (comment, reporter); moderators action the open queue.
+export const commentReports = pgTable(
+  "comment_reports",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    commentId: uuid("comment_id").notNull(),
+    reporterId: text("reporter_id").notNull(),
+    reason: text().notNull(),
+    details: text(),
+    status: text().default("open").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("comment_reports_dedupe_idx").using(
+      "btree",
+      table.commentId.asc().nullsLast(),
+      table.reporterId.asc().nullsLast(),
+    ),
+    index("idx_comment_reports_status").using(
+      "btree",
+      table.status.asc().nullsLast(),
+      table.createdAt.desc().nullsFirst(),
+    ),
+    foreignKey({
+      columns: [table.commentId],
+      foreignColumns: [postComments.commentId],
+      name: "comment_reports_comment_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.reporterId],
+      foreignColumns: [users.userId],
+      name: "comment_reports_reporter_id_fkey",
+    }).onDelete("cascade"),
+    check(
+      "comment_reports_reason_check",
+      sql`reason = ANY (ARRAY['spam'::text, 'nudity'::text, 'harassment'::text, 'violence'::text, 'other'::text])`,
+    ),
+  ],
+);
+
 // Directed user blocks. Filtering applies in BOTH directions so neither party
 // sees the other's posts/stories once a block exists.
 export const userBlocks = pgTable(

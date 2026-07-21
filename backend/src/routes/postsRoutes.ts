@@ -17,6 +17,12 @@ import {
   getTermsStatusController,
   acceptTermsController,
 } from "../controllers/postsController.js";
+import {
+  listCommentsController,
+  addCommentController,
+  deleteCommentController,
+  reportCommentController,
+} from "../controllers/commentsController.js";
 
 // Post photos are larger than avatars (full-res portrait stories), so allow 8MB.
 const upload = multer({
@@ -57,6 +63,12 @@ router.get("/feed/unified", getUnifiedFeedController);
 
 // A user's posts for the Instagram-style profile grid.
 router.get("/user/:userId", getUserPostsController);
+
+// Comments (Instagram-style, one level of replies).
+router.get("/:postId/comments", listCommentsController);
+router.post("/:postId/comments", addCommentController);
+router.delete("/comments/:commentId", deleteCommentController);
+router.post("/comments/:commentId/report", reportCommentController);
 
 // Per-post actions.
 router.post("/:postId/report", reportPostController);

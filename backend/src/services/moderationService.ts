@@ -46,6 +46,31 @@ export async function reportPost(
 }
 
 /**
+ * Record an abuse report on a comment (App Store Guideline 1.2). Idempotent
+ * per (comment, reporter) — repeat reports are silently ignored.
+ */
+export async function reportComment(
+  reporterId: string,
+  commentId: string,
+  reason: ReportReason,
+  details?: string,
+): Promise<"ok" | "not_found" | "own_comment"> {
+  const rows = await db.query<{ user_id: string }>(
+    `SELECT user_id FROM post_comments WHERE comment_id = $1 AND deleted_at IS NULL`,
+    [commentId],
+  );
+  if (rows.length === 0) return "not_found";
+  if (rows[0].user_id === reporterId) return "own_comment";
+  await db.query(
+    `INSERT INTO comment_reports (comment_id, reporter_id, reason, details)
+		 VALUES ($1, $2, $3, $4)
+		 ON CONFLICT (comment_id, reporter_id) DO NOTHING`,
+    [commentId, reporterId, reason, details ?? null],
+  );
+  return "ok";
+}
+
+/**
  * Block another user. Also tears down any friendship in both directions so the
  * relationship-gated surfaces (hype, feed circle) drop immediately.
  */

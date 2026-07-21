@@ -50,6 +50,7 @@ export interface PostRow {
   is_self: boolean;
   is_hyped: boolean;
   hype_count: number;
+  comment_count: number;
   is_viewed?: boolean;
   // Microsecond-precise created_at (Postgres text form) for keyset pagination.
   // node-pg parses timestamptz to a ms-truncated JS Date, and a truncated
@@ -130,7 +131,11 @@ const POST_SELECT = `${POST_COLUMNS},
 		SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
 		WHERE hc.target_id = p.user_id
 			AND ${postHypeMatchSql("hc", "p")}
-	) AS hype_count`;
+	) AS hype_count,
+	(
+		SELECT COUNT(*)::int FROM post_comments pc
+		WHERE pc.post_id = p.post_id AND pc.deleted_at IS NULL
+	) AS comment_count`;
 
 export interface CreatePostInput {
   userId: string;
@@ -151,7 +156,7 @@ export interface CreatePostInput {
 // Shape the freshly inserted/updated row like a PostRow (is_self=true).
 const CREATED_POST_SELECT = `
 	SELECT ${POST_COLUMNS},
-		true AS is_self, false AS is_hyped, 0 AS hype_count`;
+		true AS is_self, false AS is_hyped, 0 AS hype_count, 0 AS comment_count`;
 
 /**
  * Insert a post and return it shaped as a PostRow (is_self=true, no hypes yet).
@@ -637,6 +642,8 @@ export interface FeedEntryRow {
   is_self: boolean;
   is_hyped: boolean;
   hype_count: number;
+  // Comments only exist on posts; always 0 for workout entries.
+  comment_count: number;
   // Microsecond-precise sort_ts (Postgres text form) for keyset pagination.
   cursor?: string;
 }
@@ -703,7 +710,9 @@ export async function getUnifiedFeed(
 				) AS is_hyped,
 				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
 					WHERE hc.target_id = p.user_id
-						AND ${postHypeMatchSql("hc", "p")}) AS hype_count
+						AND ${postHypeMatchSql("hc", "p")}) AS hype_count,
+				(SELECT COUNT(*)::int FROM post_comments pc
+					WHERE pc.post_id = p.post_id AND pc.deleted_at IS NULL) AS comment_count
 			FROM posts p
 			JOIN circle c ON c.uid = p.user_id
 			JOIN users u ON u.user_id = p.user_id
@@ -743,7 +752,8 @@ export async function getUnifiedFeed(
 				) AS is_hyped,
 				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
 					WHERE hc.target_id = w.user_id
-						AND ${runHypeMatchSql("hc", "w")}) AS hype_count
+						AND ${runHypeMatchSql("hc", "w")}) AS hype_count,
+				0 AS comment_count
 			FROM workouts w
 			JOIN circle c ON c.uid = w.user_id
 			JOIN users u ON u.user_id = w.user_id

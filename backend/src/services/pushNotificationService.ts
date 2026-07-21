@@ -110,6 +110,7 @@ export type NotificationType =
   | "hype_received"
   | "friend_post"
   | "story_reaction"
+  | "post_comment"
   | "daily_reminder"
   | "weekly_recap";
 
