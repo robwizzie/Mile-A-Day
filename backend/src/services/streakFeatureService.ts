@@ -67,6 +67,13 @@ export interface StreakFeatureMeters {
   goalMiles: number;
 }
 
+/** "YYYY-MM-DD" from either pg shape: `date` → string, timestamptz → Date. */
+function dateOnly(value: string | Date | null): string | null {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  return String(value).slice(0, 10);
+}
+
 /** Window floor for one meter: last use vs enrollment lookback vs hard bound. */
 function meterFloor(
   lastUsed: string | null,
@@ -94,7 +101,11 @@ export async function getMeters(
   row: StreakFeatureUserRow,
   userToday: string,
 ): Promise<StreakFeatureMeters> {
-  const enrolledAt = row.streak_features_at ?? userToday;
+  // streak_features_at is a timestamptz → node-pg hands back a JS Date (not a
+  // string like `date` columns). Calling .slice() on it was a TypeError that
+  // 500'd the status endpoint (and silently killed Double Down detection and
+  // the sweep) for every enrolled user.
+  const enrolledAt = dateOnly(row.streak_features_at) ?? userToday;
   const ddFloor = meterFloor(row.double_down_last_used, enrolledAt, userToday);
   const saveFloor = meterFloor(
     row.streak_save_last_used,
