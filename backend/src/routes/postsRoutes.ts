@@ -16,6 +16,7 @@ import {
   reportPostController,
   getTermsStatusController,
   acceptTermsController,
+  respondToCoauthorController,
 } from "../controllers/postsController.js";
 import {
   listCommentsController,
@@ -71,6 +72,7 @@ router.delete("/comments/:commentId", deleteCommentController);
 router.post("/comments/:commentId/report", reportCommentController);
 
 // Per-post actions.
+router.post("/:postId/coauthor", respondToCoauthorController);
 router.post("/:postId/report", reportPostController);
 router.delete("/:postId", deletePostController);
 

@@ -51,6 +51,14 @@ export interface PostRow {
   is_hyped: boolean;
   hype_count: number;
   comment_count: number;
+  // Collab post fields — null unless a coauthor exists AND (accepted, or the
+  // viewer is one of the two authors; pending invites are private to them).
+  coauthor_user_id?: string | null;
+  coauthor_status?: "pending" | "accepted" | null;
+  coauthor_username?: string | null;
+  coauthor_first_name?: string | null;
+  coauthor_last_name?: string | null;
+  coauthor_profile_image_url?: string | null;
   is_viewed?: boolean;
   // Microsecond-precise created_at (Postgres text form) for keyset pagination.
   // node-pg parses timestamptz to a ms-truncated JS Date, and a truncated
@@ -114,6 +122,18 @@ const POST_COLUMNS = `
 	p.include_route,
 	(SELECT w.workout_type FROM workouts w WHERE w.workout_id = p.workout_id) AS workout_type`;
 
+// Collab-post columns. `$1` must be the viewer id: a PENDING coauthor is
+// visible only to the two people involved; accepted collabs are public to
+// whoever can see the post.
+const COAUTHOR_VISIBLE = `(p.coauthor_user_id IS NOT NULL AND (p.coauthor_status = 'accepted' OR p.user_id = $1 OR p.coauthor_user_id = $1))`;
+const COAUTHOR_COLUMNS = `
+	CASE WHEN ${COAUTHOR_VISIBLE} THEN p.coauthor_user_id END AS coauthor_user_id,
+	CASE WHEN ${COAUTHOR_VISIBLE} THEN p.coauthor_status END AS coauthor_status,
+	(SELECT cu.username FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_username,
+	(SELECT cu.first_name FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_first_name,
+	(SELECT cu.last_name FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_last_name,
+	(SELECT cu.profile_image_url FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_profile_image_url`;
+
 // SELECT list shared by feed + story-detail reads so both shapes match PostRow.
 // `$1` must be the viewer id (drives is_self / is_hyped).
 // Hype fields use the unified RUN rule (postHypeMatchSql): a post linked to a
@@ -135,7 +155,8 @@ const POST_SELECT = `${POST_COLUMNS},
 	(
 		SELECT COUNT(*)::int FROM post_comments pc
 		WHERE pc.post_id = p.post_id AND pc.deleted_at IS NULL
-	) AS comment_count`;
+	) AS comment_count,
+	${COAUTHOR_COLUMNS}`;
 
 export interface CreatePostInput {
   userId: string;
@@ -151,12 +172,16 @@ export interface CreatePostInput {
   // original always-upsert behavior so shipped app versions don't break).
   isAuto?: boolean;
   includeRoute?: boolean;
+  // Collab post: invite this accepted friend as coauthor (status 'pending'
+  // until they accept). Ignored for auto posts.
+  coauthorUserId?: string | null;
 }
 
 // Shape the freshly inserted/updated row like a PostRow (is_self=true).
 const CREATED_POST_SELECT = `
 	SELECT ${POST_COLUMNS},
-		true AS is_self, false AS is_hyped, 0 AS hype_count, 0 AS comment_count`;
+		true AS is_self, false AS is_hyped, 0 AS hype_count, 0 AS comment_count,
+		${COAUTHOR_COLUMNS}`;
 
 /**
  * Insert a post and return it shaped as a PostRow (is_self=true, no hypes yet).
@@ -191,6 +216,23 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
     !input.shareToStory;
   const isAutoValue =
     input.isAuto === undefined ? legacyLooksAuto : input.isAuto === true;
+  // Coauthor must be a real accepted friend (no block either way) — validated
+  // here so the constraint holds no matter which controller path inserts.
+  const coauthorId = isAutoValue ? null : (input.coauthorUserId ?? null);
+  if (coauthorId) {
+    if (coauthorId === input.userId) throw new Error("invalid_coauthor");
+    const ok = await db.query(
+      `SELECT 1 FROM friendships f
+			 WHERE f.user_id = $1 AND f.friend_id = $2 AND f.status = 'accepted'
+				 AND NOT EXISTS (
+					 SELECT 1 FROM user_blocks b
+					 WHERE (b.blocker_id = $1 AND b.blocked_id = $2)
+							OR (b.blocker_id = $2 AND b.blocked_id = $1)
+				 )`,
+      [input.userId, coauthorId],
+    );
+    if (ok.length === 0) throw new Error("invalid_coauthor");
+  }
   // Only the slot's AUTO post may be overwritten in place — for legacy
   // requests too. Legacy upserts used to overwrite ANYTHING the caller owned,
   // which let an old build's background auto-card post silently DESTROY a
@@ -212,12 +254,12 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 			INSERT INTO posts (
 				user_id, media_url, caption, workout_id, stats_snapshot,
 				local_date, share_to_feed, share_to_story, story_expires_at,
-				is_auto, include_route
+				is_auto, include_route, coauthor_user_id, coauthor_status
 			)
 			VALUES (
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
 				CASE WHEN $8 THEN NOW() + INTERVAL '24 hours' ELSE NULL END,
-				$9, $10
+				$9, $10, $11, CASE WHEN $11::text IS NULL THEN NULL ELSE 'pending' END
 			)
 				ON CONFLICT ${conflictTarget}
 				DO UPDATE SET
@@ -226,7 +268,11 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 					stats_snapshot = COALESCE(EXCLUDED.stats_snapshot, posts.stats_snapshot),
 					share_to_feed = EXCLUDED.share_to_feed,
 					share_to_story = EXCLUDED.share_to_story,
-					story_expires_at = CASE WHEN EXCLUDED.share_to_story THEN NOW() + INTERVAL '24 hours' ELSE NULL END${flagUpdates}
+					story_expires_at = CASE WHEN EXCLUDED.share_to_story THEN NOW() + INTERVAL '24 hours' ELSE NULL END,
+					-- The update guard only ever overwrites an AUTO post, which never
+					-- carries a coauthor — so taking EXCLUDED wholesale is safe.
+					coauthor_user_id = EXCLUDED.coauthor_user_id,
+					coauthor_status = EXCLUDED.coauthor_status${flagUpdates}
 				${updateGuard}
 			RETURNING *
 		)
@@ -245,6 +291,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       input.shareToStory,
       isAutoValue,
       input.includeRoute !== false,
+      coauthorId,
     ],
   );
   if (rows[0]) return rows[0];
@@ -591,11 +638,19 @@ export async function getFeed(
 		SELECT ${POST_SELECT},
 			${URL_SAFE_CURSOR("p.created_at")} AS cursor
 		FROM posts p
-		JOIN circle c ON c.uid = p.user_id
 		JOIN users u ON u.user_id = p.user_id
 		WHERE p.share_to_feed
 			AND p.deleted_at IS NULL
+			-- Accepted collab posts reach BOTH authors' circles (semi-join, not a
+			-- JOIN, so a post whose two authors share the viewer isn't doubled).
+			AND EXISTS (
+				SELECT 1 FROM circle c
+				WHERE c.uid = p.user_id
+					OR (p.coauthor_status = 'accepted' AND c.uid = p.coauthor_user_id)
+			)
 			AND p.user_id NOT IN (SELECT uid FROM blocked)
+			AND (p.coauthor_status IS DISTINCT FROM 'accepted'
+				OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
 			AND ($2::timestamptz IS NULL OR p.created_at < $2::timestamptz)
 		ORDER BY p.created_at DESC
 		LIMIT $3
@@ -644,6 +699,13 @@ export interface FeedEntryRow {
   hype_count: number;
   // Comments only exist on posts; always 0 for workout entries.
   comment_count: number;
+  // Collab post fields (post entries only, same visibility rule as PostRow).
+  coauthor_user_id: string | null;
+  coauthor_status: "pending" | "accepted" | null;
+  coauthor_username: string | null;
+  coauthor_first_name: string | null;
+  coauthor_last_name: string | null;
+  coauthor_profile_image_url: string | null;
   // Microsecond-precise sort_ts (Postgres text form) for keyset pagination.
   cursor?: string;
 }
@@ -712,13 +774,21 @@ export async function getUnifiedFeed(
 					WHERE hc.target_id = p.user_id
 						AND ${postHypeMatchSql("hc", "p")}) AS hype_count,
 				(SELECT COUNT(*)::int FROM post_comments pc
-					WHERE pc.post_id = p.post_id AND pc.deleted_at IS NULL) AS comment_count
+					WHERE pc.post_id = p.post_id AND pc.deleted_at IS NULL) AS comment_count,
+				${COAUTHOR_COLUMNS}
 			FROM posts p
-			JOIN circle c ON c.uid = p.user_id
 			JOIN users u ON u.user_id = p.user_id
 			LEFT JOIN notification_settings nsp ON nsp.user_id = p.user_id
 			WHERE p.share_to_feed AND p.deleted_at IS NULL
+				-- Accepted collab posts reach BOTH authors' circles.
+				AND EXISTS (
+					SELECT 1 FROM circle c
+					WHERE c.uid = p.user_id
+						OR (p.coauthor_status = 'accepted' AND c.uid = p.coauthor_user_id)
+				)
 				AND p.user_id NOT IN (SELECT uid FROM blocked)
+				AND (p.coauthor_status IS DISTINCT FROM 'accepted'
+					OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
 
 			UNION ALL
 
@@ -753,7 +823,13 @@ export async function getUnifiedFeed(
 				(SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
 					WHERE hc.target_id = w.user_id
 						AND ${runHypeMatchSql("hc", "w")}) AS hype_count,
-				0 AS comment_count
+				0 AS comment_count,
+				NULL::text AS coauthor_user_id,
+				NULL::text AS coauthor_status,
+				NULL::text AS coauthor_username,
+				NULL::text AS coauthor_first_name,
+				NULL::text AS coauthor_last_name,
+				NULL::text AS coauthor_profile_image_url
 			FROM workouts w
 			JOIN circle c ON c.uid = w.user_id
 			JOIN users u ON u.user_id = w.user_id
@@ -763,7 +839,9 @@ export async function getUnifiedFeed(
 				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 				AND NOT EXISTS (
 					SELECT 1 FROM posts p2
-					WHERE p2.workout_id = w.workout_id AND p2.deleted_at IS NULL AND p2.share_to_feed
+					WHERE (p2.workout_id = w.workout_id
+							OR (p2.coauthor_status = 'accepted' AND p2.coauthor_workout_id = w.workout_id))
+						AND p2.deleted_at IS NULL AND p2.share_to_feed
 				)
 		) feed
 		WHERE ($2::timestamptz IS NULL OR sort_ts < $2::timestamptz)
@@ -808,10 +886,12 @@ export async function getUserPosts(
 			) AS story_photo_url
 		FROM posts p
 		JOIN users u ON u.user_id = p.user_id
-		WHERE p.user_id = $2
+		WHERE (p.user_id = $2
+				OR (p.coauthor_user_id = $2 AND p.coauthor_status = 'accepted'))
 			AND p.share_to_feed
 			AND p.deleted_at IS NULL
 			AND EXISTS (SELECT 1 FROM circle WHERE uid = $2)
+			AND p.user_id NOT IN (SELECT uid FROM blocked)
 			AND $2 NOT IN (SELECT uid FROM blocked)
 			AND ($3::timestamptz IS NULL OR p.created_at < $3::timestamptz)
 		ORDER BY p.created_at DESC
@@ -870,6 +950,133 @@ export async function notifyFriendsOfPost(
     }
   } catch (e: any) {
     console.error("[notifyFriendsOfPost] failed:", e?.message ?? e);
+  }
+}
+
+/**
+ * The post's author IF the viewer may see the post: viewer is the author or
+ * an accepted friend, post is live on the feed, and no block exists in either
+ * direction. Null when not visible — callers map that to 404 so post
+ * existence isn't leaked. Shared by comments + mentions.
+ */
+export async function visiblePostAuthor(
+  viewerId: string,
+  postId: string,
+): Promise<string | null> {
+  const rows = await db.query<{ user_id: string }>(
+    `SELECT p.user_id FROM posts p
+		 WHERE p.post_id = $2 AND p.deleted_at IS NULL AND p.share_to_feed
+			 AND (p.user_id = $1
+				 OR p.coauthor_user_id = $1
+				 OR EXISTS (
+					 SELECT 1 FROM friendships f
+					 WHERE f.user_id = $1 AND f.status = 'accepted'
+						 AND (f.friend_id = p.user_id
+							 OR (p.coauthor_status = 'accepted' AND f.friend_id = p.coauthor_user_id))
+				 ))
+			 AND NOT EXISTS (
+				 SELECT 1 FROM user_blocks b
+				 WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
+						OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
+			 )`,
+    [viewerId, postId],
+  );
+  return rows[0]?.user_id ?? null;
+}
+
+/**
+ * The post's accepted coauthor, if any (comment notifications + moderation).
+ */
+export async function acceptedCoauthor(postId: string): Promise<string | null> {
+  const rows = await db.query<{ coauthor_user_id: string }>(
+    `SELECT coauthor_user_id FROM posts
+		 WHERE post_id = $1 AND coauthor_status = 'accepted' AND deleted_at IS NULL`,
+    [postId],
+  );
+  return rows[0]?.coauthor_user_id ?? null;
+}
+
+/**
+ * Coauthor accepts or declines a collab invite. Decline also works AFTER
+ * acceptance ("leave post") — it clears the collab entirely. On accept, the
+ * coauthor's own mile that day (their biggest workout on the post's
+ * local_date) is linked so it stops duplicating in the unified feed.
+ */
+export async function respondToCoauthorInvite(
+  userId: string,
+  postId: string,
+  accept: boolean,
+): Promise<{ author_id: string } | null> {
+  const rows = accept
+    ? await db.query<{ author_id: string }>(
+        `UPDATE posts SET
+					coauthor_status = 'accepted',
+					coauthor_workout_id = (
+						SELECT w.workout_id FROM workouts w
+						WHERE w.user_id = $1 AND w.local_date = posts.local_date
+							AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+						ORDER BY w.distance DESC LIMIT 1
+					)
+				 WHERE post_id = $2 AND coauthor_user_id = $1
+					 AND coauthor_status = 'pending' AND deleted_at IS NULL
+				 RETURNING user_id AS author_id`,
+        [userId, postId],
+      )
+    : await db.query<{ author_id: string }>(
+        `UPDATE posts SET
+					coauthor_user_id = NULL, coauthor_status = NULL, coauthor_workout_id = NULL
+				 WHERE post_id = $2 AND coauthor_user_id = $1 AND deleted_at IS NULL
+				 RETURNING user_id AS author_id`,
+        [userId, postId],
+      );
+  return rows[0] ?? null;
+}
+
+/** Push the collab invite to the invited coauthor. Never throws. */
+export async function notifyCoauthorInvite(
+  authorId: string,
+  coauthorId: string,
+  postId: string,
+): Promise<void> {
+  try {
+    if (!(await shouldSendNotification(coauthorId, authorId, "hype"))) return;
+    const rows = await db.query<{ username: string | null }>(
+      `SELECT username FROM users WHERE user_id = $1`,
+      [authorId],
+    );
+    const name = rows[0]?.username ?? "A friend";
+    await sendPush(coauthorId, {
+      title: `${name} added you to their post 🤝`,
+      body: "Accept to share this mile on your profile too",
+      type: "coauthor_invite",
+      data: { user_id: authorId, post_id: postId },
+    });
+  } catch (e: any) {
+    console.error("[notifyCoauthorInvite] failed:", e?.message ?? e);
+  }
+}
+
+/** Tell the author their invited coauthor accepted. Never throws. */
+export async function notifyCoauthorAccepted(
+  coauthorId: string,
+  authorId: string,
+  postId: string,
+): Promise<void> {
+  try {
+    if (!(await shouldSendNotification(authorId, coauthorId, "hype"))) return;
+    const rows = await db.query<{ username: string | null }>(
+      `SELECT username FROM users WHERE user_id = $1`,
+      [coauthorId],
+    );
+    const name = rows[0]?.username ?? "Your friend";
+    await sendPush(authorId, {
+      title: `${name} joined your post 🤝`,
+      body: "You're sharing this mile together",
+      type: "coauthor_accepted",
+      data: { user_id: coauthorId, post_id: postId },
+    });
+  } catch (e: any) {
+    console.error("[notifyCoauthorAccepted] failed:", e?.message ?? e);
   }
 }
 

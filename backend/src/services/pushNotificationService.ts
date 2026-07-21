@@ -111,6 +111,9 @@ export type NotificationType =
   | "friend_post"
   | "story_reaction"
   | "post_comment"
+  | "mention"
+  | "coauthor_invite"
+  | "coauthor_accepted"
   | "daily_reminder"
   | "weekly_recap";
 

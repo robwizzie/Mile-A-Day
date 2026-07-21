@@ -1033,6 +1033,14 @@ export const posts = pgTable(
     isAuto: boolean("is_auto").default(false).notNull(),
     // Whether the post surfaces the workout's route map alongside the photo.
     includeRoute: boolean("include_route").default(true).notNull(),
+    // Instagram-style collab post: the author invites ONE accepted friend as
+    // coauthor ('pending' → 'accepted'; decline clears all three columns).
+    // Once accepted the post reaches both friend circles, shows on both
+    // profiles, and coauthor_workout_id (their mile that day, linked at
+    // accept time) suppresses their duplicate raw-workout feed entry.
+    coauthorUserId: text("coauthor_user_id"),
+    coauthorStatus: text("coauthor_status"),
+    coauthorWorkoutId: varchar("coauthor_workout_id", { length: 255 }),
   },
   (table) => [
     index("idx_posts_user_created").using(
@@ -1075,6 +1083,22 @@ export const posts = pgTable(
       foreignColumns: [workouts.workoutId],
       name: "posts_workout_id_fkey",
     }).onDelete("set null"),
+    foreignKey({
+      columns: [table.coauthorUserId],
+      foreignColumns: [users.userId],
+      name: "posts_coauthor_user_id_fkey",
+    }).onDelete("set null"),
+    foreignKey({
+      columns: [table.coauthorWorkoutId],
+      foreignColumns: [workouts.workoutId],
+      name: "posts_coauthor_workout_id_fkey",
+    }).onDelete("set null"),
+    // Enum-only (no null-pairing) so the coauthor account-deletion SET NULL
+    // can't violate it; queries always key on user_id + status together.
+    check(
+      "posts_coauthor_status_check",
+      sql`coauthor_status IS NULL OR coauthor_status = ANY (ARRAY['pending'::text, 'accepted'::text])`,
+    ),
   ],
 );
 

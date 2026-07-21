@@ -30,6 +30,12 @@ import {
   REPORT_REASONS,
   ReportReason,
 } from "../services/moderationService.js";
+import { notifyCaptionMentions } from "../services/mentionService.js";
+import {
+  notifyCoauthorInvite,
+  notifyCoauthorAccepted,
+  respondToCoauthorInvite,
+} from "../services/postService.js";
 import { getDailyGoalStatus } from "../services/workoutService.js";
 import { hasUnlimitedActions } from "../services/privilegedUsers.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
@@ -110,6 +116,7 @@ export async function createPostController(
     stats_snapshot,
     is_auto,
     include_route,
+    coauthor_user_id,
   } = req.body ?? {};
 
   try {
@@ -201,12 +208,27 @@ export async function createPostController(
       isAuto: typeof is_auto === "boolean" ? is_auto : undefined,
       includeRoute:
         typeof include_route === "boolean" ? include_route : undefined,
+      coauthorUserId:
+        typeof coauthor_user_id === "string" ? coauthor_user_id : null,
     });
+
+    // Collab invite — fire-and-forget push to the invited coauthor.
+    if (post.coauthor_user_id && post.coauthor_status === "pending") {
+      notifyCoauthorInvite(userId, post.coauthor_user_id, post.post_id).catch(
+        () => {},
+      );
+    }
 
     // Fire-and-forget: tell friends about a new feed post (respects their
     // friend_posts_enabled setting). Never blocks the response.
     if (shareToFeed && FRIEND_POST_NOTIFICATIONS_ENABLED) {
       notifyFriendsOfPost(userId, post.caption).catch(() => {});
+    }
+    // Caption @mentions ("ran with @rob") — personal, so not behind the
+    // friend-post flag. ponytail: a legacy-client caption re-upsert can
+    // re-notify; rare enough to accept over tracking notified state.
+    if (shareToFeed && !post.is_auto && post.caption) {
+      notifyCaptionMentions(userId, post.post_id, post.caption).catch(() => {});
     }
     // Re-evaluate story badges (first story, X stories) in the background.
     if (shareToStory) {
@@ -219,6 +241,10 @@ export async function createPostController(
     // deleted. Surface as a conflict the client can message, not a 500.
     if (error?.message === "workout_already_posted") {
       return res.status(409).json({ error: "workout_already_posted" });
+    }
+    // Coauthor must be an accepted friend with no blocks either way.
+    if (error?.message === "invalid_coauthor") {
+      return res.status(400).json({ error: "invalid_coauthor" });
     }
     console.error("Error creating post:", error.message);
     res.status(500).json({ error: "Error creating post" });
@@ -499,6 +525,44 @@ export async function reportPostController(
   } catch (error: any) {
     console.error("Error reporting post:", error.message);
     res.status(500).json({ error: "Error reporting post" });
+  }
+}
+
+/**
+ * POST /posts/:postId/coauthor — { accept: boolean }. The invited coauthor
+ * accepts (pending → accepted, links their mile) or declines/leaves (clears
+ * the collab, works from pending OR accepted).
+ */
+export async function respondToCoauthorController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    if (!isUuid(req.params.postId)) {
+      return res.status(404).json({ error: "post_not_found" });
+    }
+    if (typeof req.body?.accept !== "boolean") {
+      return res.status(400).json({ error: "accept must be a boolean" });
+    }
+    const result = await respondToCoauthorInvite(
+      req.userId!,
+      req.params.postId,
+      req.body.accept,
+    );
+    if (!result) {
+      return res.status(404).json({ error: "invite_not_found" });
+    }
+    if (req.body.accept) {
+      notifyCoauthorAccepted(
+        req.userId!,
+        result.author_id,
+        req.params.postId,
+      ).catch(() => {});
+    }
+    res.json({ ok: true });
+  } catch (error: any) {
+    console.error("Error responding to coauthor invite:", error.message);
+    res.status(500).json({ error: "Error responding to coauthor invite" });
   }
 }
 

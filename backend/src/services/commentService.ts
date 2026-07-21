@@ -1,6 +1,12 @@
 import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { shouldSendNotification } from "./notificationSettingsService.js";
+import { visiblePostAuthor, acceptedCoauthor } from "./postService.js";
+import {
+  resolveMentions,
+  notifyMentions,
+  MentionedUser,
+} from "./mentionService.js";
 
 const db = PostgresService.getInstance();
 
@@ -23,33 +29,6 @@ const COMMENT_SELECT = `
 	u.username, u.first_name, u.last_name, u.profile_image_url,
 	c.parent_comment_id, c.content, c.created_at,
 	(c.user_id = $1) AS is_self`;
-
-/**
- * The post's author IF the viewer may see (and therefore comment on) the
- * post: viewer is the author or an accepted friend, post is live on the feed,
- * and no block exists in either direction. Null when not visible — callers
- * map that to 404 so post existence isn't leaked.
- */
-async function visiblePostAuthor(
-  viewerId: string,
-  postId: string,
-): Promise<string | null> {
-  const rows = await db.query<{ user_id: string }>(
-    `SELECT p.user_id FROM posts p
-		 WHERE p.post_id = $2 AND p.deleted_at IS NULL AND p.share_to_feed
-			 AND (p.user_id = $1 OR EXISTS (
-				 SELECT 1 FROM friendships f
-				 WHERE f.user_id = $1 AND f.friend_id = p.user_id AND f.status = 'accepted'
-			 ))
-			 AND NOT EXISTS (
-				 SELECT 1 FROM user_blocks b
-				 WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
-						OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
-			 )`,
-    [viewerId, postId],
-  );
-  return rows[0]?.user_id ?? null;
-}
 
 /**
  * All live comments on a post, oldest first (client groups replies under
@@ -133,16 +112,47 @@ export async function addComment(
   return comment;
 }
 
-/** Push "X commented / replied" to the post author + parent-comment author. */
+/**
+ * Push "X commented / replied" to the post author + parent-comment author,
+ * and "X mentioned you" to @mentioned users. A recipient gets at most ONE
+ * push per comment — mention wins over comment/reply.
+ */
 async function notifyForComment(
   comment: CommentRow,
   commenterId: string,
   postAuthor: string,
   parentAuthor: string | null,
 ): Promise<void> {
+  let mentioned: MentionedUser[] = [];
+  try {
+    mentioned = await resolveMentions(comment.content, commenterId);
+  } catch (e: any) {
+    console.error("[notifyForComment] mentions failed:", e?.message ?? e);
+  }
+  const mentionedIds = new Set(mentioned.map((m) => m.user_id));
+  notifyMentions(
+    commenterId,
+    mentioned,
+    comment.post_id,
+    comment.content,
+    "comment",
+  ).catch((e: any) =>
+    console.error("[notifyForComment] mention push failed:", e?.message ?? e),
+  );
+
   const recipients = new Set<string>();
-  if (postAuthor !== commenterId) recipients.add(postAuthor);
-  if (parentAuthor && parentAuthor !== commenterId) recipients.add(parentAuthor);
+  if (postAuthor !== commenterId && !mentionedIds.has(postAuthor))
+    recipients.add(postAuthor);
+  // Accepted collab posts notify BOTH authors.
+  const coauthor = await acceptedCoauthor(comment.post_id);
+  if (coauthor && coauthor !== commenterId && !mentionedIds.has(coauthor))
+    recipients.add(coauthor);
+  if (
+    parentAuthor &&
+    parentAuthor !== commenterId &&
+    !mentionedIds.has(parentAuthor)
+  )
+    recipients.add(parentAuthor);
   if (recipients.size === 0) return;
 
   const sender = await db.query<{ username: string | null }>(
@@ -159,7 +169,9 @@ async function notifyForComment(
       "hype",
     );
     if (!shouldSend) continue;
-    const replied = recipient === parentAuthor && recipient !== postAuthor;
+    const replied =
+      recipient === parentAuthor && recipient !== postAuthor &&
+      recipient !== coauthor;
     sendPush(recipient, {
       title: replied
         ? `${name} replied to your comment 💬`
@@ -179,8 +191,9 @@ async function notifyForComment(
 
 /**
  * Soft-delete a comment. Allowed for the comment's author and the post's
- * author (owners moderate their own post, Instagram-style). Deleting a
- * top-level comment also soft-deletes its replies.
+ * author(s) — including an accepted collab coauthor (owners moderate their
+ * own post, Instagram-style). Deleting a top-level comment also soft-deletes
+ * its replies.
  */
 export async function deleteComment(
   callerId: string,
@@ -191,7 +204,8 @@ export async function deleteComment(
 		 FROM posts p
 		 WHERE c.comment_id = $1 AND c.deleted_at IS NULL
 			 AND p.post_id = c.post_id
-			 AND (c.user_id = $2 OR p.user_id = $2)
+			 AND (c.user_id = $2 OR p.user_id = $2
+				 OR (p.coauthor_user_id = $2 AND p.coauthor_status = 'accepted'))
 		 RETURNING c.comment_id`,
     [commentId, callerId],
   );
