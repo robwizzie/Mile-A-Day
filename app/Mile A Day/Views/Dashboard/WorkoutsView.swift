@@ -8,8 +8,11 @@ import HealthKit
 /// so it owns no NavigationStack of its own and gets the standard back button.
 struct WorkoutsView: View {
     @ObservedObject var healthManager: HealthKitManager
+    /// For the Trends mode (weekly chart + trend card moved here from the
+    /// old dashboard week-view picker).
+    @ObservedObject private var userManager = UserManager.shared
 
-    private enum Mode: Hashable { case calendar, list }
+    private enum Mode: Hashable { case calendar, list, trends }
     @State private var mode: Mode = .calendar
     @State private var month: Date = Date()
     @State private var selectedDay: Date?
@@ -29,14 +32,27 @@ struct WorkoutsView: View {
                     Picker("View", selection: $mode) {
                         Text("Calendar").tag(Mode.calendar)
                         Text("List").tag(Mode.list)
+                        Text("Trends").tag(Mode.trends)
                     }
                     .pickerStyle(.segmented)
 
-                    if mode == .calendar {
+                    switch mode {
+                    case .calendar:
                         calendarCard
                         selectedDaySection
-                    } else {
+                    case .list:
                         RecentWorkoutsView(workouts: healthManager.recentWorkouts)
+                    case .trends:
+                        // Moved here from the dashboard's old week-view
+                        // picker: this week's chart + longer-range trends.
+                        WeeklyMileChartView(
+                            healthManager: healthManager,
+                            userManager: userManager
+                        )
+                        WeeklyTrendCard(
+                            healthManager: healthManager,
+                            userManager: userManager
+                        )
                     }
                 }
                 .padding(MADTheme.Spacing.md)
