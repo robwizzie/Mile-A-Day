@@ -64,11 +64,12 @@ struct FriendsListView: View {
     // "Cheer Them On" and "Done Today" when their status flips.
     @Namespace private var friendRowNamespace
 
-    // Streak Assist: rescuable friends + send state (server-gated; empty
-    // until streak features are live for this user).
+    // Streak Assist: rescuable friends + per-row send state (server-gated;
+    // the rescuable list is empty until streak features are live). The CTA
+    // lives ON the friend's row, in the nudge/action slot.
     @ObservedObject private var tokensState = StreakTokensState.shared
-    @State private var isSendingAssist = false
-    @State private var assistSavedName: String?
+    @State private var assistingFriendId: String?
+    @State private var savedFriendIds: Set<String> = []
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -98,16 +99,6 @@ struct FriendsListView: View {
                     .zIndex(100)
             }
 
-            // Streak Assist hero moment: a friend's streak broke and the user
-            // holds an Assist — offer the rescue. Server-gated (the list is
-            // empty unless streak features are on), one friend at a time.
-            if nudgeFeedback == nil, let rescue = tokensState.assistableFriends.first {
-                assistBanner(rescue)
-                    .padding(.horizontal, MADTheme.Spacing.md)
-                    .padding(.top, 6)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .zIndex(99)
-            }
         }
         .background(MADTheme.Colors.appBackgroundGradient)
         .toolbar(.hidden, for: .navigationBar)
@@ -194,90 +185,84 @@ struct FriendsListView: View {
         }
     }
 
-    // MARK: - Streak Assist banner
+    // MARK: - Streak Assist (in-row rescue)
 
-    /// "You can save them" — shown while the user holds a Streak Assist and a
-    /// friend's streak broke yesterday. One tap spends the token, restores the
-    /// friend's streak, and the friend gets a push that they were saved.
-    private func assistBanner(_ friend: AssistableFriend) -> some View {
-        HStack(spacing: 10) {
-            AvatarView(name: friend.displayName, imageURL: friend.profile_image_url, size: 36)
-            VStack(alignment: .leading, spacing: 2) {
-                if let saved = assistSavedName {
-                    Text("You saved \(saved)'s streak! \u{1F91D}")
-                        .font(.system(size: 13, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white)
-                } else {
-                    Text("\(friend.displayName)'s \(friend.prior_streak)-day streak broke")
-                        .font(.system(size: 13, weight: .heavy, design: .rounded))
-                        .foregroundColor(.white)
-                    Text("You're holding a Streak Assist — save it before the day ends.")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.75))
-                        .lineLimit(2)
-                }
-            }
-            Spacer(minLength: 6)
-            if assistSavedName == nil {
-                Button {
-                    sendAssist(to: friend)
-                } label: {
-                    HStack(spacing: 5) {
-                        if isSendingAssist {
-                            ProgressView().tint(.white).scaleEffect(0.7)
-                        } else {
-                            Image(systemName: "hands.clap.fill")
-                                .font(.system(size: 11, weight: .bold))
-                        }
-                        Text("Save it")
-                            .font(.system(size: 13, weight: .heavy, design: .rounded))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 8)
-                    .background(Capsule().fill(MADTheme.Colors.redGradient))
-                }
-                .buttonStyle(.plain)
-                .disabled(isSendingAssist)
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.black.opacity(0.75))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(MADTheme.Colors.madRed.opacity(0.5), lineWidth: 1)
-                )
-        )
+    /// The rescue for this friend, if one is open: their streak broke within
+    /// the window, I'm holding an Assist, and I haven't just saved them.
+    private func assistRescue(for friend: BackendUser) -> AssistableFriend? {
+        guard tokensState.payload?.streak_assist.held == true else { return nil }
+        guard !savedFriendIds.contains(friend.user_id) else { return nil }
+        return tokensState.assistableFriends.first { $0.user_id == friend.user_id }
     }
 
-    private func sendAssist(to friend: AssistableFriend) {
-        guard !isSendingAssist else { return }
-        isSendingAssist = true
+    /// "Save Streak" — lives in the row's action slot (where Nudge sits), led
+    /// by the minted Assist medallion. One tap spends the token, restores the
+    /// friend's streak, and they get the "saved your streak" push.
+    private func saveStreakButton(friend: BackendUser, rescue: AssistableFriend) -> some View {
+        Button {
+            sendAssist(to: rescue)
+        } label: {
+            HStack(spacing: 6) {
+                if assistingFriendId == rescue.user_id {
+                    ProgressView().tint(.white).scaleEffect(0.6)
+                } else {
+                    TokenMedallion(kind: .assist, held: true, size: 18)
+                }
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Save Streak")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    Text("\(rescue.prior_streak) days")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .opacity(0.8)
+                }
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(MADTheme.Colors.redGradient))
+            .shadow(color: MADTheme.Colors.madRed.opacity(0.45), radius: 5)
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .disabled(assistingFriendId != nil)
+    }
+
+    /// Post-rescue confirmation chip in the same slot.
+    private var savedChip: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 11, weight: .bold))
+            Text("Saved!")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+        }
+        .foregroundColor(.green)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(Color.green.opacity(0.14)))
+    }
+
+    private func sendAssist(to rescue: AssistableFriend) {
+        guard assistingFriendId == nil else { return }
+        assistingFriendId = rescue.user_id
         Task {
             do {
-                let result = try await StreakFeatureService.assist(friendId: friend.user_id)
+                let result = try await StreakFeatureService.assist(friendId: rescue.user_id)
                 await MainActor.run {
-                    isSendingAssist = false
-                    assistSavedName = friend.displayName
+                    assistingFriendId = nil
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                        savedFriendIds.insert(rescue.user_id)
+                    }
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     print("[Assist] restored streak: \(result.restored_streak ?? -1)")
                 }
-                // Let the hero moment breathe, then clear the banner + refresh.
-                try? await Task.sleep(for: .seconds(2.5))
-                await MainActor.run {
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        assistSavedName = nil
-                        tokensState.assistableFriends.removeAll { $0.user_id == friend.user_id }
-                    }
-                }
+                // Refresh meters/rescues + row statuses so the friend's flame
+                // comes back at its restored length.
                 await tokensState.refreshStatus()
+                await loadNudgeStatuses()
             } catch {
                 await MainActor.run {
-                    isSendingAssist = false
+                    assistingFriendId = nil
                     // Someone else may have saved them first, or the window
-                    // closed — refresh so the banner reflects reality.
+                    // closed — refresh so the slot reflects reality.
                     UINotificationFeedbackGenerator().notificationOccurred(.warning)
                 }
                 await tokensState.refreshStatus()
@@ -1060,7 +1045,15 @@ struct FriendsListView: View {
             }
             .buttonStyle(.plain)
 
-            if !isCompleted {
+            // Action slot (where hype used to live): a rescuable broken streak
+            // outranks a nudge — restoring yesterday beats poking about today.
+            if let rescue = assistRescue(for: friend) {
+                saveStreakButton(friend: friend, rescue: rescue)
+                    .padding(.trailing, MADTheme.Spacing.md)
+            } else if savedFriendIds.contains(friend.user_id) {
+                savedChip
+                    .padding(.trailing, MADTheme.Spacing.md)
+            } else if !isCompleted {
                 nudgeButton(friend: friend, alreadyNudged: alreadyNudged, canRenudge: canRenudge)
                     .padding(.trailing, MADTheme.Spacing.md)
             }

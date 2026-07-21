@@ -1,5 +1,147 @@
 import SwiftUI
 
+// MARK: - Token identity (one source of truth for look & copy)
+
+enum StreakTokenKind {
+    case doubleDown, save, assist
+
+    var title: String {
+        switch self {
+        case .doubleDown: return "Double Down"
+        case .save: return "Streak Save"
+        case .assist: return "Streak Assist"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .doubleDown: return "flame.fill"
+        case .save: return "snowflake"
+        case .assist: return "lifepreserver"
+        }
+    }
+
+    /// Coin-face gradient. Kept saturated and MAD-branded: ember for effort,
+    /// ice for the freeze, brand red for the friend rescue.
+    var gradient: [Color] {
+        switch self {
+        case .doubleDown:
+            return [Color(red: 1.0, green: 0.62, blue: 0.20),
+                    Color(red: 0.86, green: 0.28, blue: 0.08)]
+        case .save:
+            return [Color(red: 0.45, green: 0.78, blue: 1.0),
+                    Color(red: 0.12, green: 0.42, blue: 0.85)]
+        case .assist:
+            return [Color(red: 0.95, green: 0.35, blue: 0.55),
+                    MADTheme.Colors.madRed]
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .doubleDown: return .orange
+        case .save: return MADTheme.Colors.walkBlue
+        case .assist: return MADTheme.Colors.madRed
+        }
+    }
+
+    var what: String {
+        switch self {
+        case .doubleDown:
+            return "Miss a day? Run 2× your goal the next day and yesterday still counts."
+        case .save:
+            return "Life happens — if you miss a day and can't Double Down, this covers it automatically."
+        case .assist:
+            return "Save a friend's streak the day after it breaks — be their hero."
+        }
+    }
+
+    var howToEarn: String {
+        switch self {
+        case .doubleDown:
+            return "Complete your mile on 14 days — runs or walks both count."
+        case .save:
+            return "Run your full mile on 7 days. Running only — walks don't tick this one."
+        case .assist:
+            return "Go a total of 20 miles beyond your daily goal, over any number of days."
+        }
+    }
+}
+
+// MARK: - Token medallion (the token itself — a minted coin, not an emoji)
+
+/// The canonical rendering of a token everywhere it appears: a coin with a
+/// gradient face, top-light sheen, inner ring, and an engraved SF Symbol.
+/// EARNED  → full color, gold rim, soft glow.
+/// EARNING → dimmed face with a progress arc filling the rim.
+struct TokenMedallion: View {
+    let kind: StreakTokenKind
+    var held: Bool = false
+    /// 0…1 earn progress; ignored when held.
+    var progress: Double = 0
+    var size: CGFloat = 44
+
+    private var gold: Color { Color(red: 1.0, green: 0.84, blue: 0.35) }
+
+    var body: some View {
+        ZStack {
+            // Coin face
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: kind.gradient,
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            // Top-light sheen — what makes it read as minted metal, not a dot.
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [Color.white.opacity(0.45), .clear],
+                        center: .init(x: 0.32, y: 0.25),
+                        startRadius: 0,
+                        endRadius: size * 0.75
+                    )
+                )
+
+            // Inner ring (the coin's lip)
+            Circle()
+                .strokeBorder(Color.white.opacity(0.35), lineWidth: max(1, size * 0.035))
+                .padding(size * 0.10)
+
+            // Engraved icon
+            Image(systemName: kind.icon)
+                .font(.system(size: size * 0.42, weight: .bold))
+                .foregroundColor(.white)
+                .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
+        }
+        .frame(width: size, height: size)
+        .saturation(held ? 1 : 0.45)
+        .opacity(held ? 1 : 0.85)
+        .overlay(
+            // Rim: solid gold when earned; progress arc while earning.
+            Group {
+                if held {
+                    Circle().strokeBorder(gold, lineWidth: max(1.5, size * 0.05))
+                } else {
+                    Circle()
+                        .trim(from: 0, to: max(0.02, min(progress, 1)))
+                        .stroke(
+                            kind.tint,
+                            style: StrokeStyle(lineWidth: max(1.5, size * 0.05), lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .padding(max(0.75, size * 0.025))
+                }
+            }
+        )
+        .shadow(color: held ? kind.tint.opacity(0.55) : .clear, radius: size * 0.18)
+        .accessibilityLabel("\(kind.title)\(held ? ", ready" : "")")
+    }
+}
+
 // MARK: - Pure Flame badge (natural streak)
 
 /// The "never needed a rescue" seal — shown beside the username when the
@@ -32,10 +174,10 @@ struct PureFlameBadge: View {
 
 // MARK: - Dashboard card
 
-/// The tokens' one home on the Dashboard: a standalone card, always present
-/// while the feature is active (never dependent on which week-view tab is
-/// selected — the old in-StreakCard row vanished on the chart/trends tabs).
-/// Renders nothing when the server gate is off. Tapping opens the explainer.
+/// The tokens' home on the Dashboard: three minted medallions with earn
+/// progress, always present while the feature is active (never dependent on
+/// which week-view tab is selected). Renders nothing when the server gate is
+/// off. Tapping opens the explainer.
 struct StreakTokensCard: View {
     @ObservedObject var tokensState = StreakTokensState.shared
     @State private var showDetail = false
@@ -46,7 +188,7 @@ struct StreakTokensCard: View {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 showDetail = true
             } label: {
-                VStack(spacing: 12) {
+                VStack(spacing: 14) {
                     HStack(spacing: MADTheme.Spacing.sm) {
                         Image(systemName: "shield.lefthalf.filled")
                             .font(.system(size: 14, weight: .semibold))
@@ -69,26 +211,29 @@ struct StreakTokensCard: View {
                     }
 
                     HStack(spacing: 0) {
-                        meterCell(
-                            emoji: "\u{1F525}",
-                            label: "Double Down",
-                            fraction: payload.double_down.fraction,
+                        medallionCell(
+                            kind: .doubleDown,
                             held: payload.double_down.held,
-                            tint: .orange
+                            progress: payload.double_down.fraction,
+                            caption: payload.double_down.held
+                                ? "Ready"
+                                : "\(Int(payload.double_down.progress))/\(Int(payload.double_down.target))"
                         )
-                        meterCell(
-                            emoji: "\u{2744}\u{FE0F}",
-                            label: "Streak Save",
-                            fraction: payload.streak_save.fraction,
+                        medallionCell(
+                            kind: .save,
                             held: payload.streak_save.held,
-                            tint: MADTheme.Colors.walkBlue
+                            progress: payload.streak_save.fraction,
+                            caption: payload.streak_save.held
+                                ? "Ready"
+                                : "\(Int(payload.streak_save.progress))/\(Int(payload.streak_save.target))"
                         )
-                        meterCell(
-                            emoji: "\u{1F91D}",
-                            label: "Assist",
-                            fraction: payload.streak_assist.fraction,
+                        medallionCell(
+                            kind: .assist,
                             held: payload.streak_assist.held,
-                            tint: MADTheme.Colors.madRed
+                            progress: payload.streak_assist.fraction,
+                            caption: payload.streak_assist.held
+                                ? "Ready"
+                                : String(format: "%.1f/%.0f mi", payload.streak_assist.progress, payload.streak_assist.target)
                         )
                     }
 
@@ -116,36 +261,20 @@ struct StreakTokensCard: View {
         }
     }
 
-    private func meterCell(
-        emoji: String, label: String, fraction: Double, held: Bool, tint: Color
+    private func medallionCell(
+        kind: StreakTokenKind, held: Bool, progress: Double, caption: String
     ) -> some View {
-        VStack(spacing: 4) {
-            ZStack {
-                Circle()
-                    .stroke(Color.white.opacity(0.12), lineWidth: 3)
-                Circle()
-                    .trim(from: 0, to: held ? 1 : fraction)
-                    .stroke(tint, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                Text(emoji)
-                    .font(.system(size: 13))
-                    .opacity(held ? 1 : 0.55)
-            }
-            .frame(width: 32, height: 32)
-            .overlay(alignment: .topTrailing) {
-                if held {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.green)
-                        .background(Circle().fill(.black.opacity(0.6)))
-                        .offset(x: 4, y: -3)
-                }
-            }
-
-            Text(label)
-                .font(.system(size: 9, weight: .bold, design: .rounded))
-                .foregroundColor(.white.opacity(held ? 0.9 : 0.55))
+        VStack(spacing: 6) {
+            TokenMedallion(kind: kind, held: held, progress: progress, size: 46)
+            Text(kind.title)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .foregroundColor(.white.opacity(held ? 0.95 : 0.6))
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(caption)
+                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .foregroundColor(held ? .green : .white.opacity(0.45))
         }
         .frame(maxWidth: .infinity)
     }
@@ -171,12 +300,8 @@ struct StreakTokensDetailView: View {
                             }
 
                             tokenCard(
-                                emoji: "\u{1F525}",
-                                title: "Double Down",
-                                tint: .orange,
-                                what: "Miss a day? Run 2× your goal the next day and yesterday still counts.",
-                                how: "Earn it by completing your mile 14 days (runs or walks count).",
-                                meter: .init(
+                                kind: .doubleDown,
+                                meter: StreakTokenMeter(
                                     progress: payload.double_down.progress,
                                     target: payload.double_down.target,
                                     held: payload.double_down.held,
@@ -184,26 +309,8 @@ struct StreakTokensDetailView: View {
                                 ),
                                 unit: "days"
                             )
-
-                            tokenCard(
-                                emoji: "\u{2744}\u{FE0F}",
-                                title: "Streak Save",
-                                tint: MADTheme.Colors.walkBlue,
-                                what: "Life happens — if you miss a day and can't Double Down, this covers it automatically.",
-                                how: "Earn it with 7 days of running your mile (walks don't count toward this one).",
-                                meter: payload.streak_save,
-                                unit: "run days"
-                            )
-
-                            tokenCard(
-                                emoji: "\u{1F91D}",
-                                title: "Streak Assist",
-                                tint: MADTheme.Colors.madRed,
-                                what: "Save a FRIEND's streak the day after it breaks — be their hero.",
-                                how: "Earn it by going 20 miles beyond your daily goal, over any number of days.",
-                                meter: payload.streak_assist,
-                                unit: "mi over goal"
-                            )
+                            tokenCard(kind: .save, meter: payload.streak_save, unit: "run days")
+                            tokenCard(kind: .assist, meter: payload.streak_assist, unit: "mi over goal")
 
                             naturalCard(payload.natural_streak)
                         } else {
@@ -256,21 +363,28 @@ struct StreakTokensDetailView: View {
     }
 
     private func tokenCard(
-        emoji: String,
-        title: String,
-        tint: Color,
-        what: String,
-        how: String,
+        kind: StreakTokenKind,
         meter: StreakTokenMeter,
         unit: String
     ) -> some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            HStack(spacing: 10) {
-                Text(emoji).font(.system(size: 22))
-                Text(title)
-                    .font(.system(size: 17, weight: .heavy, design: .rounded))
-                    .foregroundColor(.primary)
-                Spacer()
+            HStack(spacing: 14) {
+                TokenMedallion(
+                    kind: kind,
+                    held: meter.held,
+                    progress: meter.fraction,
+                    size: 54
+                )
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(kind.title)
+                        .font(.system(size: 17, weight: .heavy, design: .rounded))
+                        .foregroundColor(.primary)
+                    Text(kind.what)
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .foregroundColor(.primary.opacity(0.85))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
                 if meter.held {
                     Text("READY")
                         .font(.system(size: 11, weight: .heavy, design: .rounded))
@@ -281,15 +395,16 @@ struct StreakTokensDetailView: View {
                 }
             }
 
-            Text(what)
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundColor(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Text(how)
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("HOW TO EARN")
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .tracking(1.1)
+                    .foregroundColor(kind.tint)
+                Text(kind.howToEarn)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             // Meter bar + count
             VStack(alignment: .leading, spacing: 4) {
@@ -297,14 +412,20 @@ struct StreakTokensDetailView: View {
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.white.opacity(0.08))
                         Capsule()
-                            .fill(tint)
+                            .fill(
+                                LinearGradient(
+                                    colors: kind.gradient,
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
                             .frame(width: max(6, geo.size.width * (meter.held ? 1 : meter.fraction)))
                     }
                 }
                 .frame(height: 8)
 
                 Text(meter.held
-                     ? "Earned — 1 held (max 1). Using it restarts the meter."
+                     ? "Earned — you're holding 1 (max 1). Using it restarts the meter."
                      : "\(trimmed(meter.progress)) / \(trimmed(meter.target)) \(unit)")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .monospacedDigit()
