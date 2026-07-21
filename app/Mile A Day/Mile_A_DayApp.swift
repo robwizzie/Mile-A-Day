@@ -42,6 +42,9 @@ struct Mile_A_DayApp: App {
                             MADNotificationService.shared.registerForRemoteNotifications()
                             await MADNotificationService.shared.syncDailyReminderPrefsToBackend()
                             await DailyStepsSyncService.shared.syncNow(force: true)
+                            // Streak-tokens enrollment stamp (idempotent; covers
+                            // users who authed on an older build).
+                            StreakFeatureService.enrollIfNeeded()
                         }
                     }
                 }

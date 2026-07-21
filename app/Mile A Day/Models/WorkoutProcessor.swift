@@ -115,9 +115,14 @@ class WorkoutProcessor {
             milesByDate[date, default: 0] += record.distance
         }
         
-        // Find days with qualifying workouts (>= 0.95 miles)
+        // Find days with qualifying workouts (>= 0.95 miles), plus any
+        // token-covered days from the server (Streak Save / Double Down /
+        // Assist) — a rescued day has no workout, so without the union this
+        // walk would break there and diverge from the backend. Empty store
+        // (feature off) leaves behavior identical.
         let qualifyingDays = Set(milesByDate.filter { $0.value >= 0.95 }.keys)
-        
+            .union(StreakCoverageStore.coveredDays)
+
         guard !qualifyingDays.isEmpty else {
             print("[WorkoutProcessor] No qualifying workout days found")
             return 0

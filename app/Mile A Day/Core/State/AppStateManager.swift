@@ -85,6 +85,11 @@ class AppStateManager: ObservableObject {
             await MADNotificationService.shared.syncDailyReminderPrefsToBackend()
         }
 
+        // Stamp this install as a streak-tokens-capable build (idempotent,
+        // fire-and-forget). The server still shows nothing until its env
+        // switch flips — this only marks that the UI exists here.
+        StreakFeatureService.enrollIfNeeded()
+
         DispatchQueue.main.async {
             withAnimation(MADTheme.Animation.standard) {
                 if userManager.currentUser.hasUsername {

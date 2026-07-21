@@ -766,6 +766,9 @@ struct DashboardView: View {
                     // updateStreakFromBackend only raises the value, so it can't clobber a
                     // higher HealthKit-computed streak from a later refresh.
                     userManager.updateStreakFromBackend(stats.streak)
+                    // Sync the streak-token state (meters + covered days) from the
+                    // gated payload — this is OUR stats call, never a friend's.
+                    StreakFeatureService.applyStatsPayload(stats.streakFeatures)
                     repairWorkoutIndexIfStale(backendStreak: stats.streak)
                     if let bestSplitSeconds = stats.bestSplitTimeSeconds, bestSplitSeconds > 0 {
                         let paceMinutesPerMile = bestSplitSeconds / 60.0
@@ -810,6 +813,7 @@ struct DashboardView: View {
             let stats = try await workoutService.getUserStats(userId: userId)
             print("[Dashboard] 🔄 Fresh streak for celebration = \(stats.streak)")
             userManager.updateStreakFromBackend(stats.streak)
+            StreakFeatureService.applyStatsPayload(stats.streakFeatures)
         } catch {
             print("[Dashboard] ⚠️ Fresh streak fetch for celebration failed: \(error)")
         }

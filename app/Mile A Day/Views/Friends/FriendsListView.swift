@@ -64,6 +64,12 @@ struct FriendsListView: View {
     // "Cheer Them On" and "Done Today" when their status flips.
     @Namespace private var friendRowNamespace
 
+    // Streak Assist: rescuable friends + send state (server-gated; empty
+    // until streak features are live for this user).
+    @ObservedObject private var tokensState = StreakTokensState.shared
+    @State private var isSendingAssist = false
+    @State private var assistSavedName: String?
+
     var body: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
@@ -90,6 +96,17 @@ struct FriendsListView: View {
                     .padding(.top, 6)
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .zIndex(100)
+            }
+
+            // Streak Assist hero moment: a friend's streak broke and the user
+            // holds an Assist — offer the rescue. Server-gated (the list is
+            // empty unless streak features are on), one friend at a time.
+            if nudgeFeedback == nil, let rescue = tokensState.assistableFriends.first {
+                assistBanner(rescue)
+                    .padding(.horizontal, MADTheme.Spacing.md)
+                    .padding(.top, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(99)
             }
         }
         .background(MADTheme.Colors.appBackgroundGradient)
@@ -145,6 +162,9 @@ struct FriendsListView: View {
             await loadNudgeStatuses()
             await loadMyRank()
             await loadFeed()
+            // Rescuable friends + meters (no-op {active:false} until the
+            // server enables streak features for this user).
+            await tokensState.refreshStatus()
         }
         .onReceive(DeepLinkRouter.shared.$pendingProfileUsername) { username in
             guard let username else { return }
@@ -171,6 +191,97 @@ struct FriendsListView: View {
             }
         } message: {
             Text("You will no longer be friends with this person.")
+        }
+    }
+
+    // MARK: - Streak Assist banner
+
+    /// "You can save them" — shown while the user holds a Streak Assist and a
+    /// friend's streak broke yesterday. One tap spends the token, restores the
+    /// friend's streak, and the friend gets a push that they were saved.
+    private func assistBanner(_ friend: AssistableFriend) -> some View {
+        HStack(spacing: 10) {
+            AvatarView(name: friend.displayName, imageURL: friend.profile_image_url, size: 36)
+            VStack(alignment: .leading, spacing: 2) {
+                if let saved = assistSavedName {
+                    Text("You saved \(saved)'s streak! \u{1F91D}")
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                } else {
+                    Text("\(friend.displayName)'s \(friend.prior_streak)-day streak broke")
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("You're holding a Streak Assist — save it before the day ends.")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.75))
+                        .lineLimit(2)
+                }
+            }
+            Spacer(minLength: 6)
+            if assistSavedName == nil {
+                Button {
+                    sendAssist(to: friend)
+                } label: {
+                    HStack(spacing: 5) {
+                        if isSendingAssist {
+                            ProgressView().tint(.white).scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "hands.clap.fill")
+                                .font(.system(size: 11, weight: .bold))
+                        }
+                        Text("Save it")
+                            .font(.system(size: 13, weight: .heavy, design: .rounded))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(MADTheme.Colors.redGradient))
+                }
+                .buttonStyle(.plain)
+                .disabled(isSendingAssist)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.black.opacity(0.75))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(MADTheme.Colors.madRed.opacity(0.5), lineWidth: 1)
+                )
+        )
+    }
+
+    private func sendAssist(to friend: AssistableFriend) {
+        guard !isSendingAssist else { return }
+        isSendingAssist = true
+        Task {
+            do {
+                let result = try await StreakFeatureService.assist(friendId: friend.user_id)
+                await MainActor.run {
+                    isSendingAssist = false
+                    assistSavedName = friend.displayName
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    print("[Assist] restored streak: \(result.restored_streak ?? -1)")
+                }
+                // Let the hero moment breathe, then clear the banner + refresh.
+                try? await Task.sleep(for: .seconds(2.5))
+                await MainActor.run {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        assistSavedName = nil
+                        tokensState.assistableFriends.removeAll { $0.user_id == friend.user_id }
+                    }
+                }
+                await tokensState.refreshStatus()
+            } catch {
+                await MainActor.run {
+                    isSendingAssist = false
+                    // Someone else may have saved them first, or the window
+                    // closed — refresh so the banner reflects reality.
+                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                }
+                await tokensState.refreshStatus()
+            }
         }
     }
 

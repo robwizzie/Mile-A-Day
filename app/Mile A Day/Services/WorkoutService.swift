@@ -530,6 +530,10 @@ struct UserStatsAPIResponse: Decodable {
     let recentWorkouts: [RecentWorkout]
     let todayMiles: Double?
     let goalMiles: Double?
+    /// Gated streak-tokens payload — absent (nil) until the server enables the
+    /// feature for this user. Only apply it to local state for the CURRENT
+    /// user's own stats; this response type is also used for friends.
+    let streakFeatures: StreakFeaturesPayload?
 
     enum CodingKeys: String, CodingKey {
         case streak
@@ -540,6 +544,7 @@ struct UserStatsAPIResponse: Decodable {
         case recentWorkouts = "recent_workouts"
         case todayMiles = "today_miles"
         case goalMiles = "goal_miles"
+        case streakFeatures = "streak_features"
     }
 
     init(from decoder: Decoder) throws {
@@ -571,6 +576,8 @@ struct UserStatsAPIResponse: Decodable {
             (try? container.decode([RecentWorkout].self, forKey: .recentWorkouts)) ?? []
         self.todayMiles = try? container.decode(Double.self, forKey: .todayMiles)
         self.goalMiles = try? container.decode(Double.self, forKey: .goalMiles)
+        self.streakFeatures = try? container.decode(
+            StreakFeaturesPayload.self, forKey: .streakFeatures)
     }
 
     /// Calculates if the user has completed their goal today

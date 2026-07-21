@@ -64,7 +64,10 @@ extension HealthKitManager {
 
         // Calculate current streak. Set lookup keeps the walk-back O(1) per
         // day — Array.contains made a 365-day streak do 365 linear scans.
+        // Union in token-covered days (Streak Save / Double Down / Assist) so
+        // a rescued day doesn't break the walk; empty store = identical.
         let qualifyingDaySet = Set(daysWithQualifyingWorkouts)
+            .union(StreakCoverageStore.coveredDays)
         var currentStreak = 0
         var checkDate = today
 

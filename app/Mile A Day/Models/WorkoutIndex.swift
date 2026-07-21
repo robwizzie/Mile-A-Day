@@ -156,14 +156,24 @@ struct WorkoutIndex: Codable {
     /// streak from this method — which reads `qualifyingDays` relative to `now` —
     /// instead of trusting `currentStreak`.
     func activeStreak(asOf now: Date = Date()) -> Int {
+        // Token-covered days (Streak Save / Double Down / Assist) count as
+        // "not a miss", matching the server's coverage-aware walk — otherwise
+        // a local recompute would break at a rescued day and fight the backend.
+        // Empty store (feature off) = byte-identical legacy behavior.
+        let covered = StreakCoverageStore.coveredDayKeys
         guard !qualifyingDays.isEmpty else { return 0 }
 
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: now)
         var streak = 0
 
+        func dayCounts(_ date: Date) -> Bool {
+            let key = dateKey(from: date)
+            return qualifyingDays.contains(key) || covered.contains(key)
+        }
+
         // Today counts if it qualifies, but isn't required (grace window).
-        if hasQualifyingWorkout(on: today) {
+        if dayCounts(today) {
             streak += 1
         }
 
@@ -171,7 +181,7 @@ struct WorkoutIndex: Codable {
         guard var checkDate = calendar.date(byAdding: .day, value: -1, to: today) else {
             return streak
         }
-        while hasQualifyingWorkout(on: checkDate) {
+        while dayCounts(checkDate) {
             streak += 1
             guard let previous = calendar.date(byAdding: .day, value: -1, to: checkDate) else { break }
             checkDate = previous
