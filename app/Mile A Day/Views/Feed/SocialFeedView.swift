@@ -255,14 +255,6 @@ struct SocialFeedView: View {
     var body: some View {
         VStack(spacing: 0) {
             MADTabHeader(title: "Feed")
-                // Same allowance pill as the notifications tab — "N left",
-                // or ∞ for unlimited roles.
-                .overlay(alignment: .trailing) {
-                    if let remaining = hypesRemaining {
-                        HypePill(remaining: remaining, compact: true, unlimited: hypesUnlimited)
-                            .padding(.trailing, MADTheme.Spacing.md)
-                    }
-                }
 
             ScrollViewReader { proxy in
             ScrollView {

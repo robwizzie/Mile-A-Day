@@ -309,7 +309,6 @@ struct FriendsListView: View {
                     )
                     .padding(.top, MADTheme.Spacing.lg)
                 } else {
-                    hypesRemainingChip
                     ForEach(groupedFeed(), id: \.title) { group in
                         feedSectionHeader(group.title)
                         ForEach(group.items) { feedRow($0) }
@@ -321,15 +320,6 @@ struct FriendsListView: View {
             .padding(.bottom, MADTheme.Spacing.xxl)
         }
         .scrollIndicators(.hidden)
-    }
-
-    private var hypesRemainingChip: some View {
-        HStack {
-            Spacer()
-            HypePill(remaining: hypesRemaining ?? HypeService.dailyLimit, unlimited: hypesUnlimited)
-            Spacer()
-        }
-        .padding(.top, 2)
     }
 
     private func feedSectionHeader(_ title: String) -> some View {

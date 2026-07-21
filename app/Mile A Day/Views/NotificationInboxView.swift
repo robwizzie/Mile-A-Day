@@ -81,25 +81,6 @@ struct NotificationInboxView: View {
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.large)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .toolbar {
-            if let remaining = hypesRemaining {
-                // Top RIGHT, mirroring the feed's header pill placement.
-                // iOS 26 wraps toolbar items in a shared glass capsule; hiding it
-                // stops the orange pill from rendering inside a second system pill.
-                if #available(iOS 26.0, *) {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        HypePill(remaining: remaining, compact: true, unlimited: hypesUnlimited)
-                    }
-                    .sharedBackgroundVisibility(.hidden)
-                } else {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        HypePill(remaining: remaining, compact: true, unlimited: hypesUnlimited)
-                    }
-                }
-            }
-            // "Read All" button removed — opening the inbox now auto-marks
-            // everything read (see loadNotifications).
-        }
         .task {
             await loadNotifications()
         }
