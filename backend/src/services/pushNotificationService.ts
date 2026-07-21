@@ -135,8 +135,8 @@ export type NotificationType =
   | "coauthor_accepted"
   | "daily_reminder"
   | "weekly_recap"
-  // Streak tokens (gated behind STREAK_FEATURES_ENABLED + per-user enrollment;
-  // none are high-priority, so quiet hours apply automatically).
+  // Streak tokens (gated by per-user enrollment + the STREAK_FEATURES_DISABLED
+  // kill switch; none are high-priority, so quiet hours apply automatically).
   | "streak_double_down"
   | "streak_saved"
   | "streak_assist_opportunity"

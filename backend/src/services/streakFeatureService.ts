@@ -32,8 +32,9 @@ const db = PostgresService.getInstance();
  * opens at GREATEST(last use, enrollment − 30d lookback, today − 90d), which
  * both grants retroactive credit at enrollment and bounds the query.
  *
- * Everything here no-ops unless STREAK_FEATURES_ENABLED=true AND the user has
- * the (new-build-only) enrollment stamp.
+ * Everything here no-ops unless the user has the (new-build-only) enrollment
+ * stamp — and freezes entirely if the STREAK_FEATURES_DISABLED kill switch is
+ * set (normally unset).
  */
 
 // Meter targets (product-locked; see docs). The Assist threshold is the dial

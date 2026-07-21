@@ -9,21 +9,23 @@ const db = PostgresService.getInstance();
  * streakFeatureService, which imports those services in turn).
  *
  * The safety contract of the whole feature lives here:
- *   - streak features are DOUBLE-gated: the STREAK_FEATURES_ENABLED env switch
- *     (fail-closed master kill switch) AND a per-user enrollment stamp that
- *     only the new app build writes. Un-enrolled users' streak math runs the
- *     EXACT legacy code path — the callers branch before any of this runs.
+ *   - the per-user gate is the ENROLLMENT STAMP, which only app builds that
+ *     ship the token UI write — so the feature reaches a user exactly when
+ *     their app can display it. Un-enrolled users' streak math runs the EXACT
+ *     legacy code path — the callers branch before any of this runs.
+ *   - STREAK_FEATURES_DISABLED=true is the emergency kill switch: it freezes
+ *     every token behavior (walks fall back to legacy, no earning/consuming,
+ *     no pushes) for everyone without needing an app release. Normally unset.
  *   - a covered day (one streak_coverage row) counts as "not a miss" in the
  *     walk, no matter WHICH token wrote it. The walks never branch per token.
  */
 
 export function streakFeaturesGloballyEnabled(): boolean {
-  // Always ON in local dev (`npm run dev` sets NODE_ENV=development, same
-  // fail-closed pattern as /dev/* — a prod deploy can never have it) so the
-  // feature is testable without env plumbing. Prod stays dark until
-  // STREAK_FEATURES_ENABLED=true is set deliberately.
-  if (process.env.NODE_ENV === "development") return true;
-  return process.env.STREAK_FEATURES_ENABLED === "true";
+  // ON by default everywhere — enrollment does the targeting. The env var is
+  // only the emergency brake, deliberately inverted (fail-open) now that the
+  // feature is code-complete: nothing to remember at launch, one line of
+  // config to freeze it in an incident.
+  return process.env.STREAK_FEATURES_DISABLED !== "true";
 }
 
 /** One users-row read of everything the token logic needs. */
