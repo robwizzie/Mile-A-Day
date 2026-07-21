@@ -31,6 +31,9 @@ struct DashboardView: View {
     /// the destination is registered on the stack's root — a
     /// navigationDestination declared inside the scroll content can miss.
     @State private var showWorkouts = false
+    /// What's New popup — auto-presents once per release, reopenable from
+    /// Settings → What's New.
+    @State private var showWhatsNew = false
     @State private var newGoalMiles: Double = 1.0
     @State private var isRefreshing = false
     @State private var showWorkoutUploadAlert = false
@@ -526,6 +529,25 @@ struct DashboardView: View {
                         }
                     }
                 }
+
+                // Streak-tokens enrollment stamp — idempotent; covers cold
+                // launches (the foreground observer only fires on background→
+                // foreground, and completeAuthentication only on fresh sign-in).
+                StreakFeatureService.enrollIfNeeded()
+
+                // What's New: auto-present once per release. Same stand-down
+                // rules as the tour — never stack on a celebration, the
+                // tracker, or the first-run tour itself.
+                if WhatsNewManager.shouldAutoPresent {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                        if WhatsNewManager.shouldAutoPresent,
+                           !celebrationManager.isShowingCelebration,
+                           !showWorkoutView,
+                           !showWelcomeTour {
+                            showWhatsNew = true
+                        }
+                    }
+                }
             }
             // Self-cleaning replacements for the old NotificationCenter.addObserver
             // calls in onAppear — those registered a fresh observer on every
@@ -537,6 +559,9 @@ struct DashboardView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MAD_OpenWorkoutFromLiveActivity"))) { _ in
                 showWorkoutView = true
+            }
+            .sheet(isPresented: $showWhatsNew) {
+                WhatsNewView()
             }
             .sheet(isPresented: $showGoalSheet) {
                 GoalSettingSheet(

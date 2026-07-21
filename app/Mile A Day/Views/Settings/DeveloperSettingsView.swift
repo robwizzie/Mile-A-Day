@@ -33,6 +33,10 @@ struct DeveloperSettingsView: View {
     @State private var testNotificationMessage = ""
     @State private var isSendingNotification = false
     @State private var notificationResult: String?
+    // Streak-token testing
+    @ObservedObject private var tokensState = StreakTokensState.shared
+    @State private var tokenStatusResult: String?
+    @State private var customBaseURL = ""
 
     var body: some View {
         List {
@@ -85,6 +89,103 @@ struct DeveloperSettingsView: View {
                 }
                 .disabled(workoutService.isLoading)
             }
+
+            // Streak Tokens Section
+            #if DEBUG
+            Section(
+                header: Text("Streak Tokens"),
+                footer: Text("Preview shows every token surface (StreakCard meters, explainer sheet, friends-page rescue banner, Pure Flame badge) with sample data — no backend needed. The API target override needs an app relaunch and only exists in DEBUG builds.")
+            ) {
+                Toggle(isOn: Binding(
+                    get: { tokensState.isPreviewingSampleData },
+                    set: { on in
+                        if on { tokensState.enableSamplePreview() }
+                        else { tokensState.disableSamplePreview() }
+                    }
+                )) {
+                    HStack {
+                        Image(systemName: "eye.fill").foregroundColor(.orange)
+                        Text("Preview token UI (sample data)")
+                    }
+                }
+
+                Button(action: {
+                    tokenStatusResult = nil
+                    Task {
+                        StreakFeatureService.enrollIfNeeded()
+                        await tokensState.refreshStatus()
+                        await MainActor.run {
+                            tokenStatusResult = tokensState.isActive
+                                ? "ACTIVE — meters loaded from \(AppConfig.baseURL)"
+                                : "inactive — server gate is off for this user on \(AppConfig.baseURL)"
+                        }
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: "bolt.horizontal.circle.fill")
+                            .foregroundColor(.green)
+                        Text("Enroll + refresh status")
+                    }
+                }
+
+                if let result = tokenStatusResult {
+                    Text(result)
+                        .font(.caption)
+                        .foregroundColor(result.hasPrefix("ACTIVE") ? .green : .secondary)
+                }
+
+                HStack {
+                    Image(systemName: "server.rack").foregroundColor(.blue)
+                    Text("API")
+                    Spacer()
+                    Text(AppConfig.baseURL)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                TextField("http://localhost:3000", text: $customBaseURL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+
+                Button(action: {
+                    let url = customBaseURL.isEmpty ? "http://localhost:3000" : customBaseURL
+                    UserDefaults.standard.set(url, forKey: "devBaseURLOverride")
+                    // Fresh enroll against the new target after relaunch.
+                    UserDefaults.standard.removeObject(forKey: "streakFeaturesEnrollPosted")
+                    tokenStatusResult = "Override saved: \(url) — relaunch the app to apply."
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.right.circle.fill").foregroundColor(.blue)
+                        Text("Point at dev backend")
+                    }
+                }
+
+                Button(action: {
+                    UserDefaults.standard.removeObject(forKey: "devBaseURLOverride")
+                    UserDefaults.standard.removeObject(forKey: "streakFeaturesEnrollPosted")
+                    tokenStatusResult = "Override cleared — relaunch to return to production."
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.uturn.backward.circle.fill")
+                            .foregroundColor(.orange)
+                        Text("Reset API to production")
+                    }
+                }
+
+                Button(action: {
+                    WhatsNewManager.resetForTesting()
+                    tokenStatusResult = "What's New reset — it auto-opens on the next Dashboard visit."
+                }) {
+                    HStack {
+                        Image(systemName: "sparkles").foregroundColor(.yellow)
+                        Text("Reset What's New popup")
+                    }
+                }
+            }
+            #endif
 
             // Review Prompt Section
             Section(

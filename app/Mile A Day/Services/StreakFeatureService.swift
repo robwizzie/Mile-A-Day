@@ -95,7 +95,9 @@ enum StreakFeatureService {
     /// local flag only skips redundant calls: the endpoint itself is COALESCE-
     /// idempotent, so a lost flag (reinstall) is harmless.
     static func enrollIfNeeded() {
-        guard UserDefaults.standard.string(forKey: "authToken") != nil else { return }
+        // Keychain-backed token check (the UserDefaults mirror can be missing
+        // on installs that authed before the mirror existed).
+        guard TokenStore.accessToken != nil else { return }
         guard !UserDefaults.standard.bool(forKey: enrolledFlagKey) else { return }
         Task {
             struct EnrollResponse: Decodable { let enrolled: Bool }
@@ -107,6 +109,9 @@ enum StreakFeatureService {
                 )
                 if resp.enrolled {
                     UserDefaults.standard.set(true, forKey: enrolledFlagKey)
+                    // Light the token surfaces up on THIS launch instead of
+                    // waiting for the next stats fetch.
+                    await StreakTokensState.shared.refreshStatus()
                 }
             } catch {
                 // Non-fatal: next launch retries.

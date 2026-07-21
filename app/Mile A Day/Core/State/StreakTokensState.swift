@@ -14,6 +14,9 @@ final class StreakTokensState: ObservableObject {
     @Published var payload: StreakFeaturesPayload?
     /// Friends the user can rescue right now (from the status endpoint).
     @Published var assistableFriends: [AssistableFriend] = []
+    /// DEBUG preview: while true, refreshStatus() is a no-op so server state
+    /// can't clobber the injected sample data. Never persisted.
+    @Published var isPreviewingSampleData = false
 
     var isActive: Bool { payload != nil }
 
@@ -22,6 +25,7 @@ final class StreakTokensState: ObservableObject {
     /// friends page assist banner).
     @MainActor
     func refreshStatus() async {
+        guard !isPreviewingSampleData else { return }
         do {
             let status = try await StreakFeatureService.fetchStatus()
             guard status.active,
@@ -50,4 +54,48 @@ final class StreakTokensState: ObservableObject {
             print("[StreakTokens] status refresh failed: \(error.localizedDescription)")
         }
     }
+
+    #if DEBUG
+    /// Inject rich sample data so every token surface (StreakCard row, the
+    /// explainer sheet, the friends-page rescue banner, the Pure Flame badge)
+    /// is visible WITHOUT any backend — pure UI/UX review mode. Session-only.
+    @MainActor
+    func enableSamplePreview() {
+        isPreviewingSampleData = true
+        payload = StreakFeaturesPayload(
+            double_down: .init(
+                progress: 9, target: 14, held: false, last_used: nil,
+                recover_miles: 1.95
+            ),
+            streak_save: StreakTokenMeter(
+                progress: 7, target: 7, held: true, last_used: nil
+            ),
+            streak_assist: StreakTokenMeter(
+                progress: 12.5, target: 20, held: true, last_used: nil
+            ),
+            frozen_dates: [],
+            natural_streak: true,
+            streak_at_risk: true
+        )
+        assistableFriends = [
+            AssistableFriend(
+                user_id: "preview-friend",
+                username: "davey",
+                first_name: "Dave",
+                last_name: nil,
+                profile_image_url: nil,
+                broke_date: "2026-07-20",
+                prior_streak: 42
+            )
+        ]
+    }
+
+    @MainActor
+    func disableSamplePreview() {
+        isPreviewingSampleData = false
+        payload = nil
+        assistableFriends = []
+        Task { await refreshStatus() }
+    }
+    #endif
 }
