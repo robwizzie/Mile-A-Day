@@ -21,6 +21,11 @@ struct DashboardHeroCard: View {
     let progress: Double
     let isGoalCompleted: Bool
     let hasActiveWorkout: Bool
+    /// False until today's distance has been freshly fetched this session.
+    /// A locked-device launch can serve yesterday's cached value — the card
+    /// shows it dimmed as "syncing" instead of asserting a number (or a
+    /// completion state) it doesn't actually know yet.
+    let distanceIsFresh: Bool
     let fastestPace: TimeInterval
     let mostMiles: Double
     let totalMiles: Double
@@ -56,6 +61,10 @@ struct DashboardHeroCard: View {
         return nil
     }
 
+    /// Completion the card is allowed to CLAIM: never assert "done" off a
+    /// stale value (the cached distance can be yesterday's).
+    private var trustedDone: Bool { isGoalCompleted && distanceIsFresh }
+
     var body: some View {
         VStack(spacing: 16) {
             // Eyebrow — one state word for the whole card.
@@ -65,7 +74,7 @@ struct DashboardHeroCard: View {
                     .fontWeight(.semibold)
                     .tracking(1.2)
                     .foregroundColor(statusColor)
-                if isGoalCompleted {
+                if trustedDone {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.caption)
                         .foregroundColor(.green)
@@ -143,7 +152,7 @@ struct DashboardHeroCard: View {
 
             // The action — present until the mile is done; "Resume" whenever
             // a workout is live (even post-goal, so it can't be orphaned).
-            if !isGoalCompleted || hasActiveWorkout {
+            if !trustedDone || hasActiveWorkout {
                 startButton
             }
         }
@@ -219,10 +228,10 @@ struct DashboardHeroCard: View {
                 .stroke(Color.white.opacity(0.10), lineWidth: 9)
 
             Circle()
-                .trim(from: 0, to: animateRing ? min(max(progress, isGoalCompleted ? 1 : 0.015), 1) : 0)
+                .trim(from: 0, to: animateRing ? min(max(progress, trustedDone ? 1 : 0.015), 1) : 0)
                 .stroke(
                     LinearGradient(
-                        colors: isGoalCompleted
+                        colors: trustedDone
                             ? [Color.green, Color(red: 0.2, green: 0.75, blue: 0.4)]
                             : (isAtRisk
                                 ? [Color.red, Color.orange]
@@ -238,7 +247,8 @@ struct DashboardHeroCard: View {
                 Text(String(format: "%.2f", currentDistance))
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundColor(.white)
+                    // Dimmed while the value is still last-known, not fresh.
+                    .foregroundColor(.white.opacity(distanceIsFresh ? 1 : 0.45))
                     .contentTransition(.numericText())
                 Text(String(format: "of %.1f mi", goalDistance))
                     .font(.system(size: 10, weight: .medium, design: .rounded))
@@ -344,19 +354,20 @@ struct DashboardHeroCard: View {
     // MARK: - Status
 
     private var statusColor: Color {
-        if isGoalCompleted { return .green }
+        if trustedDone { return .green }
         if isAtRisk { return .red }
         return .orange
     }
 
     private var eyebrowText: String {
-        if isGoalCompleted { return "DONE FOR TODAY" }
+        if trustedDone { return "DONE FOR TODAY" }
         if isAtRisk { return "STREAK AT RISK" }
         return "TODAY'S MILE"
     }
 
     private var statusIconName: String {
-        if isGoalCompleted { return "checkmark.circle.fill" }
+        if trustedDone { return "checkmark.circle.fill" }
+        if !distanceIsFresh { return "arrow.triangle.2.circlepath" }
         if isAtRisk { return "exclamationmark.triangle.fill" }
         return "clock.fill"
     }
@@ -365,7 +376,9 @@ struct DashboardHeroCard: View {
     /// @State) — nothing else in body does, and without that dependency
     /// SwiftUI would never re-render on the minute tick.
     private var statusLineText: String {
-        if isGoalCompleted { return "Streak safe — see you tomorrow" }
+        if trustedDone { return "Streak safe — see you tomorrow" }
+        // Never do arithmetic on a number we don't trust yet.
+        if !distanceIsFresh { return "Syncing today's miles…" }
         let toGo = String(format: "%.2f", max(goalDistance - currentDistance, 0))
         let time = timeRemainingText.isEmpty ? "" : formattedTimeOnly
         return time.isEmpty
@@ -374,7 +387,7 @@ struct DashboardHeroCard: View {
     }
 
     private func updateTimeRemaining() {
-        timeRemainingText = isGoalCompleted ? "" : user.formattedTimeUntilReset
+        timeRemainingText = trustedDone ? "" : user.formattedTimeUntilReset
     }
 
     private var formattedTimeOnly: String {

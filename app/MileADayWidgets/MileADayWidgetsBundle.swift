@@ -17,6 +17,7 @@ struct MileADayWidgetsBundle: WidgetBundle {
         CompetitionWidget()
         DailyLeaderboardWidget()
         WorkoutLiveActivity()
+        StreakRiskLiveActivity()
     }
 }
 
