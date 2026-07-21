@@ -8,6 +8,9 @@ struct DashboardSettingsView: View {
     let currentGoal: Double
     let onSetGoal: () -> Void
     @Environment(\.dismiss) private var dismiss
+    /// Reopenable What's New — lives here next to the App Tour so both
+    /// "show me around" surfaces share one home.
+    @State private var showWhatsNew = false
 
     var body: some View {
         ScrollView {
@@ -55,6 +58,23 @@ struct DashboardSettingsView: View {
                 )
             }
             .buttonStyle(.plain)
+
+            settingsDivider
+
+            Button {
+                showWhatsNew = true
+            } label: {
+                MADSettingsRow(
+                    icon: "sparkles",
+                    title: "What's New",
+                    subtitle: "See what changed in the latest update",
+                    iconColor: .orange
+                )
+            }
+            .buttonStyle(.plain)
+            .sheet(isPresented: $showWhatsNew) {
+                WhatsNewView()
+            }
         }
         .padding(MADTheme.Spacing.md)
         .madLiquidGlass()
