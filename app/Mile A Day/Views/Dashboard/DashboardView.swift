@@ -409,6 +409,14 @@ struct DashboardView: View {
                         .padding(.top, 8)
                         .padding(.bottom, 8)
 
+                    // Streak Tokens — its own card, ALWAYS on the dashboard
+                    // when the feature is active (it must never depend on
+                    // which week-view tab is selected). Renders nothing when
+                    // the server gate is off.
+                    StreakTokensCard()
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+
                     dashboardContent
                         .frame(maxWidth: .infinity)
                 }
