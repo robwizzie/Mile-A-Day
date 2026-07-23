@@ -399,6 +399,9 @@ struct MainTabView: View {
     private func syncWidgetData() {
         WidgetDataStore.save(todayMiles: healthManager.todaysDistance, goal: userManager.currentUser.goalMiles)
         WidgetDataStore.save(streak: userManager.currentUser.streak)
+        // Backfill the flame widget's style for users who chose it before the
+        // widget existed (the setter mirrors it going forward).
+        WidgetDataStore.save(dashboardStyle: DashboardStylePreference.current.rawValue)
     }
 
     /// Mirror the most urgent active competition into the App Group for the
