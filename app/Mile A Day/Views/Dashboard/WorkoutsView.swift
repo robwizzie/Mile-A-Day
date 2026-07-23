@@ -1,5 +1,6 @@
 import SwiftUI
 import HealthKit
+import UIKit
 
 /// A dedicated home for a user's runs: a month calendar (completed days lit in
 /// the same language as the streak calendar) plus the selected day's workouts.
@@ -249,13 +250,38 @@ struct WorkoutsView: View {
             }
 
             if dayWorkouts.isEmpty {
+                let isToday = calendar.isDateInToday(day)
                 VStack(spacing: MADTheme.Spacing.sm) {
                     Image(systemName: "moon.zzz.fill")
                         .font(.system(size: 26))
                         .foregroundColor(.white.opacity(0.25))
-                    Text("No workouts this day")
+                    Text(isToday ? "No mile logged yet today" : "No workouts this day")
                         .font(.system(size: 14, weight: .semibold, design: .rounded))
                         .foregroundColor(.secondary)
+                    // On today's empty state, teach the two things new users most
+                    // often miss (per App Store feedback): runs sync in from
+                    // Apple Health automatically, and if nothing shows up it's
+                    // usually Health access that needs switching on.
+                    if isToday {
+                        Text("Runs from Apple Health — your Apple Watch, a treadmill, or another app — show up here automatically.")
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .foregroundColor(.secondary.opacity(0.85))
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, MADTheme.Spacing.md)
+                        Button {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        } label: {
+                            Text("Not seeing your runs? Check Health access")
+                                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                                .foregroundColor(MADTheme.Colors.madRed)
+                                .multilineTextAlignment(.center)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 2)
+                    }
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, MADTheme.Spacing.lg)

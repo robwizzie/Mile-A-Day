@@ -1245,10 +1245,10 @@ struct DashboardView: View {
                     Text("Enable Apple Health")
                         .font(.system(size: 15, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
-                    Text("Mile A Day needs Health access to count today's miles.")
+                    Text("Turn it on and runs from your Apple Watch, treadmill, and other apps count automatically.")
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.55))
-                        .lineLimit(2)
+                        .lineLimit(3)
                 }
                 Spacer()
             }
@@ -1537,7 +1537,7 @@ struct DashboardView: View {
                 id: "first-mile",
                 icon: "figure.run",
                 title: "Do your first mile",
-                subtitle: "Run or walk it — any workout counts",
+                subtitle: "Run or walk it — Apple Watch & treadmill runs count too",
                 isDone: healthManager.totalLifetimeMiles >= 0.95
                     || userManager.currentUser.streak > 0
                     || currentState.isCompleted,

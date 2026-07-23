@@ -52,10 +52,10 @@ struct HealthAccessView: View {
 
                 // Feature list
                 VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                    featureRow(icon: "figure.run", text: "Track your running workouts")
-                    featureRow(icon: "flame.fill", text: "Calculate calories and distance")
-                    featureRow(icon: "chart.line.uptrend.xyaxis", text: "Sync workout history")
-                    featureRow(icon: "bolt.fill", text: "Maintain your daily streak")
+                    featureRow(icon: "arrow.triangle.2.circlepath", text: "Automatically count runs & walks from your Apple Watch, treadmills, and other fitness apps")
+                    featureRow(icon: "figure.run", text: "Track a run in the app — outdoors with GPS or indoors on a treadmill")
+                    featureRow(icon: "flame.fill", text: "Measure your distance, calories, and personal records")
+                    featureRow(icon: "bolt.fill", text: "Keep your daily streak alive")
                 }
                 .padding(MADTheme.Spacing.lg)
                 .background(

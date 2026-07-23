@@ -1,5 +1,6 @@
 import SwiftUI
 import HealthKit
+import UIKit
 import CoreLocation
 import CoreMotion
 import ActivityKit
@@ -223,7 +224,7 @@ struct WorkoutTrackingView: View {
                     workoutOptionButton(icon: "location.fill", title: "Outdoor", subtitle: "Uses GPS for accurate tracking") {
                         selectLocationType(.outdoor)
                     }
-                    workoutOptionButton(icon: "figure.indoor.cycle", title: "Indoor", subtitle: "Uses motion sensors for distance") {
+                    workoutOptionButton(icon: indoorLocationIcon, title: "Indoor", subtitle: "Treadmill or indoors — uses motion sensors") {
                         selectLocationType(.indoor)
                     }
                 }
@@ -797,6 +798,20 @@ struct WorkoutTrackingView: View {
     }
 
     // MARK: - Reusable Option Button
+
+    /// Icon for the Indoor (treadmill) option. Prefers the treadmill glyph
+    /// (`figure.run.treadmill` / `figure.walk.treadmill`, SF Symbols 6 / iOS 18+)
+    /// so the option reads clearly as "treadmill," and falls back to a plain
+    /// run/walk figure on iOS 17 — where that symbol doesn't exist and would
+    /// otherwise render as a blank box. `UIImage(systemName:)` returns nil for a
+    /// name the running OS doesn't ship, so this checks availability at runtime
+    /// rather than guessing the version. Matches the chosen activity.
+    private var indoorLocationIcon: String {
+        let isWalk = selectedActivityType == .walking
+        let treadmill = isWalk ? "figure.walk.treadmill" : "figure.run.treadmill"
+        if UIImage(systemName: treadmill) != nil { return treadmill }
+        return isWalk ? "figure.walk" : "figure.run"
+    }
 
     private func workoutOptionButton(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
