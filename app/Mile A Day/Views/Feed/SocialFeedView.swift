@@ -391,10 +391,13 @@ struct SocialFeedView: View {
             }
         }
         .fullScreenCover(item: $viewerGroup) { group in
+            // The whole viewable rail rides along so the viewer can cube
+            // between authors Instagram-style, starting at the tapped one.
             StoryViewerView(
-                group: group,
+                groups: stories.filter { canViewStories(of: $0) },
+                initialGroupId: group.user_id,
                 currentUserId: currentUserId,
-                allowedDays: allowedStoryDays(for: group)
+                allowedDaysFor: { allowedStoryDays(for: $0) }
             ) { changed in
                 viewerGroup = nil
                 if changed {
