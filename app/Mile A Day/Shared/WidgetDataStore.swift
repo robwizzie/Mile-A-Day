@@ -7,6 +7,7 @@ struct WidgetDataStore {
     private static let goalKey = "daily_goal"
     private static let streakKey = "streak_count"
     private static let dataDayKey = "widget_data_day"
+    private static let dashboardStyleKey = "dashboard_style"
 
     /// Day stamp (device-local calendar day) for the saved progress values.
     /// Lets `load()` detect data written on a previous day so widgets show a
@@ -60,6 +61,7 @@ struct WidgetDataStore {
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "TodayProgressWidget")
             WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+            WidgetCenter.shared.reloadTimelines(ofKind: "StreakFlameWidget")
         }
     }
 
@@ -100,6 +102,7 @@ struct WidgetDataStore {
 
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+            WidgetCenter.shared.reloadTimelines(ofKind: "StreakFlameWidget")
         }
     }
 
@@ -108,6 +111,28 @@ struct WidgetDataStore {
             return 0
         }
         return defaults.integer(forKey: streakKey)
+    }
+
+    // MARK: - Dashboard style (streak flame widget)
+
+    /// Mirrors the user's chosen dashboard style ("fun" / "modern") into the
+    /// App Group so the Streak Flame widget can match it. The style itself
+    /// lives in `UserDefaults.standard` (app-process only); the widget process
+    /// can only see the shared suite, so it must be copied here.
+    static func save(dashboardStyle: String) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        // Skip no-op writes — see save(todayMiles:goal:).
+        if defaults.string(forKey: dashboardStyleKey) == dashboardStyle { return }
+        defaults.set(dashboardStyle, forKey: dashboardStyleKey)
+        DispatchQueue.main.async {
+            WidgetCenter.shared.reloadTimelines(ofKind: "StreakFlameWidget")
+        }
+    }
+
+    /// Defaults to "modern" to match `DashboardStylePreference.current`.
+    static func loadDashboardStyle() -> String {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return "modern" }
+        return defaults.string(forKey: dashboardStyleKey) ?? "modern"
     }
 
     // MARK: - Streak tokens (streak widget accessory)
@@ -125,6 +150,7 @@ struct WidgetDataStore {
         defaults.set(tokensReady, forKey: tokensReadyKey)
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+            WidgetCenter.shared.reloadTimelines(ofKind: "StreakFlameWidget")
         }
     }
 
@@ -164,6 +190,7 @@ struct WidgetDataStore {
         defaults.set(stamp, forKey: weekStampKey)
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
+            WidgetCenter.shared.reloadTimelines(ofKind: "StreakFlameWidget")
         }
     }
 

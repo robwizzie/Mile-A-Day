@@ -54,6 +54,8 @@ struct FlameBuddyFigure: View {
     var flickerPhase: CGFloat = 0
     var blink: Bool = false
     var size: CGFloat = 170
+    /// The Modern flame renders faceless; the Fun buddy keeps its face.
+    var showsFace: Bool = true
 
     var body: some View {
         ZStack {
@@ -75,8 +77,10 @@ struct FlameBuddyFigure: View {
                     .offset(y: size * 0.13)
                     .opacity(health == .dead ? 0 : innerOpacity)
 
-                face
-                    .offset(y: size * 0.18)
+                if showsFace {
+                    face
+                        .offset(y: size * 0.18)
+                }
             }
             .frame(width: size * 0.82, height: size)
             .scaleEffect(health.bodyScale, anchor: .bottom)

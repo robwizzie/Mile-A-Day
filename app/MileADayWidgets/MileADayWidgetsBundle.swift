@@ -12,6 +12,7 @@ import SwiftUI
 struct MileADayWidgetsBundle: WidgetBundle {
     @WidgetBundleBuilder
     var body: some Widget {
+        StreakFlameWidget()
         TodayProgressWidget()
         StreakCountWidget()
         CompetitionWidget()
