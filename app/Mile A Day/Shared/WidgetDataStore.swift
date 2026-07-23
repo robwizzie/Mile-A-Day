@@ -190,7 +190,6 @@ struct WidgetDataStore {
         defaults.set(stamp, forKey: weekStampKey)
         DispatchQueue.main.async {
             WidgetCenter.shared.reloadTimelines(ofKind: "StreakCountWidget")
-            WidgetCenter.shared.reloadTimelines(ofKind: "StreakFlameWidget")
         }
     }
 

@@ -1,5 +1,11 @@
 import SwiftUI
 
+// Widget-target copy of the flame figure. KEEP IN SYNC with
+// app/Mile A Day/Views/Components/FlameBuddyFigure.swift — the Streak Flame
+// widget drives it with `vigor` so the flame burns down in lock-step with the
+// dashboard. Widgets render statically, so callers pass flickerPhase 0 / no
+// blink; the size + palette still track time left via `vigor`.
+
 enum FlameHealth: String, CaseIterable {
     case blazing
     case healthy
@@ -56,6 +62,14 @@ struct FlameBuddyFigure: View {
     var size: CGFloat = 170
     /// The Modern flame renders faceless; the Fun buddy keeps its face.
     var showsFace: Bool = true
+    /// Continuous time-left driver (1 = full day ahead, 0 = midnight). When set,
+    /// the flame's size, palette and glow burn down with the day — matching the
+    /// dashboard. When nil the figure keeps its stage-based look.
+    var vigor: CGFloat? = nil
+    /// Grounded flames (the Fun buddy) shrink toward their base and cast a
+    /// ground shadow; a non-grounded flame (the Modern ring) shrinks toward its
+    /// center so it stays framed in the circle.
+    var grounded: Bool = true
 
     var body: some View {
         ZStack {
@@ -65,7 +79,7 @@ struct FlameBuddyFigure: View {
             ZStack {
                 FlameBuddyOuterShape(wobble: wobble)
                     .fill(outerFill)
-                    .shadow(color: glowColor.opacity(health.glowOpacity), radius: size * 0.16)
+                    .shadow(color: glowColor.opacity(effectiveGlowOpacity), radius: size * 0.16)
                     .overlay(
                         FlameBuddyOuterShape(wobble: wobble)
                             .stroke(Color.white.opacity(health == .dead ? 0.10 : 0.28), lineWidth: max(1.5, size * 0.012))
@@ -83,12 +97,28 @@ struct FlameBuddyFigure: View {
                 }
             }
             .frame(width: size * 0.82, height: size)
-            .scaleEffect(health.bodyScale, anchor: .bottom)
+            .scaleEffect(effectiveBodyScale, anchor: grounded ? .bottom : .center)
             .offset(y: health == .dead ? size * 0.16 : 0)
         }
         .frame(width: size, height: size)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
+    }
+
+    /// Clamped vigor, only honored for states that represent a live flame.
+    private var vigorValue: CGFloat? {
+        guard let vigor, health != .dead, health != .blazing else { return nil }
+        return min(max(vigor, 0), 1)
+    }
+
+    private var effectiveBodyScale: CGFloat {
+        if let v = vigorValue { return StreakFlameClock.flameScale(vigor: Double(v)) }
+        return health.bodyScale
+    }
+
+    private var effectiveGlowOpacity: Double {
+        if let v = vigorValue, health != .critical { return 0.16 + Double(v) * 0.36 }
+        return health.glowOpacity
     }
 
     private var wobble: CGFloat {
@@ -105,6 +135,9 @@ struct FlameBuddyFigure: View {
     }
 
     private var outerColors: [Color] {
+        if let v = vigorValue, health != .critical {
+            return FlamePalette.outer(vigor: v)
+        }
         switch health {
         case .blazing:
             return [.white, Color(red: 1, green: 0.88, blue: 0.28), .orange, Color(red: 1, green: 0.20, blue: 0.10)]
@@ -122,6 +155,9 @@ struct FlameBuddyFigure: View {
     }
 
     private var innerColors: [Color] {
+        if let v = vigorValue, health != .critical {
+            return FlamePalette.inner(vigor: v)
+        }
         switch health {
         case .blazing:
             return [.white, Color(red: 1, green: 0.92, blue: 0.30), Color(red: 1, green: 0.50, blue: 0.08)]
@@ -137,6 +173,9 @@ struct FlameBuddyFigure: View {
     }
 
     private var innerOpacity: Double {
+        if let v = vigorValue, health != .critical {
+            return 0.36 + Double(v) * 0.52
+        }
         switch health {
         case .blazing: return 0.95
         case .healthy: return 0.82
@@ -156,28 +195,44 @@ struct FlameBuddyFigure: View {
         }
     }
 
+    /// Light and shadow follow the flame's real size so a guttering wisp casts
+    /// a small pool of light, not a full-size halo.
+    private var lightSpread: CGFloat {
+        vigorValue == nil ? 1 : 0.45 + effectiveBodyScale * 0.55
+    }
+
+    /// How far the glow sinks toward the base as the flame shrinks. A grounded
+    /// flame's light pool follows it down; a centered flame keeps it centered.
+    private var glowSink: CGFloat {
+        grounded ? (1 - lightSpread) : 0
+    }
+
     private var glowLayer: some View {
         ZStack {
             Circle()
-                .fill(glowColor.opacity(health.glowOpacity * 0.45))
-                .blur(radius: size * 0.18)
-                .frame(width: size * 1.1, height: size * 0.92)
+                .fill(glowColor.opacity(effectiveGlowOpacity * 0.45))
+                .blur(radius: size * 0.18 * lightSpread)
+                .frame(width: size * 1.1 * lightSpread, height: size * 0.92 * lightSpread)
+                .offset(y: size * 0.46 * glowSink)
             Circle()
-                .fill(Color.yellow.opacity(health == .dead ? 0 : 0.16))
+                .fill(Color.yellow.opacity(health == .dead ? 0 : 0.16 * Double(lightSpread)))
                 .blur(radius: size * 0.09)
-                .frame(width: size * 0.62, height: size * 0.62)
-                .offset(y: size * 0.12)
+                .frame(width: size * 0.62 * lightSpread, height: size * 0.62 * lightSpread)
+                .offset(y: size * (grounded ? 0.12 : 0) + size * 0.30 * glowSink)
         }
     }
 
+    @ViewBuilder
     private var groundLayer: some View {
-        VStack {
-            Spacer()
-            Ellipse()
-                .fill(Color.black.opacity(0.24))
-                .frame(width: size * 0.78, height: size * 0.16)
-                .blur(radius: 3)
-                .offset(y: size * 0.02)
+        if grounded {
+            VStack {
+                Spacer()
+                Ellipse()
+                    .fill(Color.black.opacity(0.24))
+                    .frame(width: size * 0.78 * lightSpread, height: size * 0.16 * lightSpread)
+                    .blur(radius: 3)
+                    .offset(y: size * 0.02)
+            }
         }
     }
 
