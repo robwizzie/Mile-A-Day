@@ -29,6 +29,13 @@ struct PostCardView: View {
     var onEditCaption: (() -> Void)? = nil
     /// Tap the author's avatar or name to open their profile.
     var onTapAuthor: (() -> Void)? = nil
+    /// Tap the collab coauthor's avatar or name to open THEIR profile —
+    /// Instagram behavior: each tagged name on a collab post routes to its own
+    /// person, not the primary author.
+    var onTapCoauthor: (() -> Void)? = nil
+    /// Tap an @mention inside the caption — called with the mentioned
+    /// username (lowercased, without the '@') to open that user's profile.
+    var onTapMention: ((String) -> Void)? = nil
     /// Tap the hype tally to see who hyped (Instagram-likes style).
     var onTapHypeCount: (() -> Void)? = nil
     /// Open the Instagram-style comments sheet.
@@ -64,6 +71,15 @@ struct PostCardView: View {
                         .font(.system(size: 14, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.9))
                         .padding(.horizontal, 2)
+                        // @mention links route to the mentioned user's profile
+                        // instead of leaving the app — the scheme is ours alone.
+                        .environment(\.openURL, OpenURLAction { url in
+                            if let username = MentionText.username(from: url) {
+                                onTapMention?(username)
+                                return .handled
+                            }
+                            return .systemAction
+                        })
                 }
             }
             .contentShape(Rectangle())
@@ -82,12 +98,12 @@ struct PostCardView: View {
         )
     }
 
-    /// "rob & sarah" for accepted collabs, plain author name otherwise.
-    private var authorLine: String {
-        if post.hasAcceptedCoauthor {
-            return "\(post.displayName) & \(post.coauthorDisplayName)"
-        }
-        return post.displayName
+    /// Name style shared by the header's tappable name segments.
+    private func nameText(_ name: String) -> some View {
+        Text(name)
+            .font(.system(size: 15, weight: .bold, design: .rounded))
+            .foregroundColor(.white)
+            .lineLimit(1)
     }
 
     /// "Fresh" chip for a post shared inside the run's 10-minute window.
@@ -106,37 +122,59 @@ struct PostCardView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Button {
-                onTapAuthor?()
-            } label: {
-                HStack(spacing: 10) {
-                    if post.hasAcceptedCoauthor {
-                        // Collab post: overlapping avatars + "a & b", like
-                        // Instagram's collab header.
-                        ZStack(alignment: .bottomTrailing) {
-                            AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
-                            AvatarView(name: post.coauthorDisplayName,
-                                       imageURL: post.coauthor_profile_image_url, size: 26)
-                                .overlay(Circle().strokeBorder(Color.black.opacity(0.7), lineWidth: 2))
-                                .offset(x: 8, y: 4)
-                        }
-                        .padding(.trailing, 8)
-                    } else {
+            if post.hasAcceptedCoauthor {
+                // Collab post: overlapping avatars + "a & b", like Instagram's
+                // collab header — and like Instagram, each avatar/name is its
+                // OWN tap target routing to that person's profile.
+                ZStack(alignment: .bottomTrailing) {
+                    Button { onTapAuthor?() } label: {
                         AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
                     }
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(authorLine)
+                    .buttonStyle(.plain)
+                    .disabled(onTapAuthor == nil)
+                    Button { onTapCoauthor?() } label: {
+                        AvatarView(name: post.coauthorDisplayName,
+                                   imageURL: post.coauthor_profile_image_url, size: 26)
+                            .overlay(Circle().strokeBorder(Color.black.opacity(0.7), lineWidth: 2))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(onTapCoauthor == nil)
+                    .offset(x: 8, y: 4)
+                }
+                .padding(.trailing, 8)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 0) {
+                        Button { onTapAuthor?() } label: { nameText(post.displayName) }
+                            .buttonStyle(.plain)
+                            .disabled(onTapAuthor == nil)
+                        Text(" & ")
                             .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        Text(post.relativeTime)
-                            .font(.system(size: 12, weight: .medium, design: .rounded))
-                            .foregroundColor(.white.opacity(0.5))
+                            .foregroundColor(.white.opacity(0.6))
+                        Button { onTapCoauthor?() } label: { nameText(post.coauthorDisplayName) }
+                            .buttonStyle(.plain)
+                            .disabled(onTapCoauthor == nil)
+                    }
+                    Text(post.relativeTime)
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+            } else {
+                Button {
+                    onTapAuthor?()
+                } label: {
+                    HStack(spacing: 10) {
+                        AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
+                        VStack(alignment: .leading, spacing: 1) {
+                            nameText(post.displayName)
+                            Text(post.relativeTime)
+                                .font(.system(size: 12, weight: .medium, design: .rounded))
+                                .foregroundColor(.white.opacity(0.5))
+                        }
                     }
                 }
+                .buttonStyle(.plain)
+                .disabled(onTapAuthor == nil)
             }
-            .buttonStyle(.plain)
-            .disabled(onTapAuthor == nil)
             if isFresh { freshChip }
             Spacer()
             if let type = post.workout_type {

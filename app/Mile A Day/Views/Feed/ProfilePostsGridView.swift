@@ -8,6 +8,11 @@ struct ProfilePostsGridView: View {
     let userId: String
     var isSelf: Bool = false
 
+    /// Which grid is showing: the user's own posts, or posts they're tagged
+    /// in (accepted collabs + caption @mentions) — Instagram's two profile tabs.
+    private enum GridSection { case posts, tagged }
+    @State private var section: GridSection = .posts
+
     @State private var posts: [PostItem] = []
     /// Own story posts whose run never made the feed (self view only) — shown
     /// in their own strip so the owner can add one to the feed or let it be.
@@ -21,36 +26,22 @@ struct ProfilePostsGridView: View {
     @State private var addingToFeedIds: Set<String> = []
     @State private var addToFeedError: String?
 
+    // Tagged grid — loaded lazily the first time the section is opened.
+    @State private var taggedPosts: [PostItem] = []
+    @State private var taggedNextBefore: String?
+    @State private var isTaggedLoading = false
+    @State private var isTaggedLoadingMore = false
+    @State private var taggedLoaded = false
+    @State private var selectedTaggedPost: PostItem?
+
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 3)
 
     var body: some View {
-        Group {
-            if isLoading && posts.isEmpty && storyPosts.isEmpty {
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
-                    .padding(.top, MADTheme.Spacing.xl)
-            } else if posts.isEmpty && storyPosts.isEmpty {
-                emptyState
-            } else {
-                VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-                    if isSelf && !storyPosts.isEmpty {
-                        storySection
-                    }
-                    if !posts.isEmpty {
-                        LazyVGrid(columns: columns, spacing: 4) {
-                            ForEach(posts) { post in
-                                Button { selectedPost = post } label: { thumbnail(post) }
-                                    .buttonStyle(.plain)
-                                    .onAppear {
-                                        if post.id == posts.last?.id { Task { await loadMore() } }
-                                    }
-                            }
-                        }
-                    }
-                    if isLoadingMore {
-                        ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
-                    }
-                }
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+            sectionPicker
+            switch section {
+            case .posts: postsContent
+            case .tagged: taggedContent
             }
         }
         .task { if !loaded { await load() } }
@@ -70,6 +61,17 @@ struct ProfilePostsGridView: View {
                 onNeedMore: {}
             )
         }
+        .sheet(item: $selectedTaggedPost) { post in
+            // Tagged posts belong to OTHER authors — let taps on their names
+            // (and @mentions) open profiles from inside the sheet.
+            ProfilePostsFeedSheet(
+                title: "Tagged",
+                posts: $taggedPosts,
+                initialPostId: post.post_id,
+                onNeedMore: { Task { await loadMoreTagged() } },
+                showsAuthorProfiles: true
+            )
+        }
         .alert("Couldn't add to feed", isPresented: Binding(
             get: { addToFeedError != nil },
             set: { if !$0 { addToFeedError = nil } }
@@ -78,6 +80,126 @@ struct ProfilePostsGridView: View {
         } message: {
             Text(addToFeedError ?? "")
         }
+    }
+
+    // MARK: - Section picker (Posts | Tagged)
+
+    private var sectionPicker: some View {
+        HStack(spacing: 8) {
+            segmentButton(.posts, icon: "square.grid.3x3", label: "Posts")
+            segmentButton(.tagged, icon: "person.crop.square", label: "Tagged")
+            Spacer()
+        }
+    }
+
+    private func segmentButton(_ target: GridSection, icon: String, label: String) -> some View {
+        let isActive = section == target
+        return Button {
+            guard section != target else { return }
+            section = target
+            if target == .tagged && !taggedLoaded {
+                Task { await loadTagged() }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .bold))
+                Text(label)
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+            }
+            .foregroundColor(isActive ? .white : .white.opacity(0.45))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule().fill(isActive ? Color.white.opacity(0.12) : Color.white.opacity(0.04))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Posts grid
+
+    @ViewBuilder
+    private var postsContent: some View {
+        if isLoading && posts.isEmpty && storyPosts.isEmpty {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
+                .frame(maxWidth: .infinity)
+                .padding(.top, MADTheme.Spacing.xl)
+        } else if posts.isEmpty && storyPosts.isEmpty {
+            emptyState
+        } else {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                if isSelf && !storyPosts.isEmpty {
+                    storySection
+                }
+                if !posts.isEmpty {
+                    LazyVGrid(columns: columns, spacing: 4) {
+                        ForEach(posts) { post in
+                            Button { selectedPost = post } label: { thumbnail(post) }
+                                .buttonStyle(.plain)
+                                .onAppear {
+                                    if post.id == posts.last?.id { Task { await loadMore() } }
+                                }
+                        }
+                    }
+                }
+                if isLoadingMore {
+                    ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
+                }
+            }
+        }
+    }
+
+    // MARK: - Tagged grid
+
+    @ViewBuilder
+    private var taggedContent: some View {
+        if isTaggedLoading && taggedPosts.isEmpty {
+            ProgressView()
+                .progressViewStyle(CircularProgressViewStyle(tint: MADTheme.Colors.madRed))
+                .frame(maxWidth: .infinity)
+                .padding(.top, MADTheme.Spacing.xl)
+        } else if taggedPosts.isEmpty {
+            taggedEmptyState
+        } else {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
+                LazyVGrid(columns: columns, spacing: 4) {
+                    ForEach(taggedPosts) { post in
+                        Button { selectedTaggedPost = post } label: { thumbnail(post) }
+                            .buttonStyle(.plain)
+                            .onAppear {
+                                if post.id == taggedPosts.last?.id {
+                                    Task { await loadMoreTagged() }
+                                }
+                            }
+                    }
+                }
+                if isTaggedLoadingMore {
+                    ProgressView().tint(.white).padding(.vertical, MADTheme.Spacing.md)
+                }
+            }
+        }
+    }
+
+    private var taggedEmptyState: some View {
+        VStack(spacing: MADTheme.Spacing.sm) {
+            Image(systemName: "person.crop.square")
+                .font(.system(size: 34))
+                .foregroundColor(.white.opacity(0.3))
+            Text(isSelf ? "No tagged posts yet" : "No tagged posts")
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+            Text(isSelf
+                 ? "When friends collab with you or @mention you, those posts show up here."
+                 : "Collabs and @mentions of them will show up here.")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.5))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, MADTheme.Spacing.xl)
+        .padding(.horizontal, MADTheme.Spacing.lg)
     }
 
     // MARK: - Story-only strip (own profile)
@@ -270,6 +392,7 @@ struct ProfilePostsGridView: View {
                     .multilineTextAlignment(.center)
             }
         }
+        .frame(maxWidth: .infinity)
         .padding(.top, MADTheme.Spacing.xl)
         .padding(.horizontal, MADTheme.Spacing.lg)
     }
@@ -307,6 +430,33 @@ struct ProfilePostsGridView: View {
             isLoadingMore = false
         }
     }
+
+    private func loadTagged() async {
+        await MainActor.run { isTaggedLoading = taggedPosts.isEmpty }
+        let response = try? await PostService.fetchUserTaggedPosts(userId: userId)
+        await MainActor.run {
+            if let response {
+                taggedPosts = response.items
+                taggedNextBefore = response.next_before
+            }
+            isTaggedLoading = false
+            taggedLoaded = true
+        }
+    }
+
+    private func loadMoreTagged() async {
+        guard let before = taggedNextBefore, !isTaggedLoadingMore else { return }
+        await MainActor.run { isTaggedLoadingMore = true }
+        let response = try? await PostService.fetchUserTaggedPosts(userId: userId, before: before)
+        await MainActor.run {
+            if let response {
+                let existing = Set(taggedPosts.map(\.post_id))
+                taggedPosts.append(contentsOf: response.items.filter { !existing.contains($0.post_id) })
+                taggedNextBefore = response.next_before
+            }
+            isTaggedLoadingMore = false
+        }
+    }
 }
 
 /// A user's posts as a scrollable, read-only feed — opened from the profile
@@ -319,6 +469,9 @@ struct ProfilePostsFeedSheet: View {
     @Binding var posts: [PostItem]
     let initialPostId: String
     let onNeedMore: () -> Void
+    /// True for surfaces showing OTHER people's posts (the Tagged tab):
+    /// author/coauthor names and caption @mentions open profiles.
+    var showsAuthorProfiles: Bool = false
     @Environment(\.dismiss) private var dismiss
     /// Tapped hype tally — presents the "who hyped this" sheet.
     @State private var hypersContext: HypersListContext?
@@ -329,6 +482,11 @@ struct ProfilePostsFeedSheet: View {
     @State private var deletingPost: PostItem?
     @State private var reportingPost: PostItem?
     @State private var hypingIds: Set<String> = []
+    /// Profile opened from a tapped author/coauthor name or @mention.
+    @State private var profileUser: BackendUser?
+    /// One stable service for profiles opened from this sheet (same pattern as
+    /// SocialFeedView — recreating it per presentation wipes loaded friends).
+    @StateObject private var profileFriendService = FriendService()
     /// The list starts at the TOP and only then scrolls to the tapped post, so
     /// the first frames show whoever is newest — reading as a flash of someone
     /// else's card (a lock card, when today's photo is still unearned) before
@@ -421,6 +579,11 @@ struct ProfilePostsFeedSheet: View {
                     }
                 }
             }
+            .sheet(item: $profileUser) { user in
+                NavigationStack {
+                    UserProfileDetailView(user: user, friendService: profileFriendService)
+                }
+            }
             .alert(
                 "Delete this post?",
                 isPresented: Binding(
@@ -444,8 +607,35 @@ struct ProfilePostsFeedSheet: View {
         }
     }
 
+    private var currentUserId: String? {
+        UserDefaults.standard.string(forKey: "backendUserId")
+    }
+
     private func card(_ post: PostItem) -> some View {
-        PostCardView(
+        // Profile taps only on surfaces that show other people's posts.
+        let openAuthor: (() -> Void)? = (showsAuthorProfiles && !post.is_self)
+            ? {
+                profileUser = BackendUser(
+                    user_id: post.user_id, username: post.username, email: nil,
+                    first_name: post.first_name, last_name: post.last_name,
+                    bio: nil, profile_image_url: post.profile_image_url,
+                    apple_id: nil, auth_provider: nil, role: nil
+                )
+            }
+            : nil
+        let openCoauthor: (() -> Void)? =
+            (showsAuthorProfiles && post.hasAcceptedCoauthor && post.coauthor_user_id != currentUserId)
+            ? {
+                profileUser = BackendUser(
+                    user_id: post.coauthor_user_id ?? "", username: post.coauthor_username,
+                    email: nil, first_name: post.coauthor_first_name,
+                    last_name: post.coauthor_last_name, bio: nil,
+                    profile_image_url: post.coauthor_profile_image_url,
+                    apple_id: nil, auth_provider: nil, role: nil
+                )
+            }
+            : nil
+        return PostCardView(
             post: post,
             storyPhotoURL: post.storyPhotoURL,
             isHyping: hypingIds.contains(post.post_id),
@@ -454,7 +644,9 @@ struct ProfilePostsFeedSheet: View {
             onBlock: { Task { await block(post) } },
             onDelete: { deletingPost = post },
             onEditCaption: post.is_self ? { editingPost = post } : nil,
-            onTapAuthor: nil,
+            onTapAuthor: openAuthor,
+            onTapCoauthor: openCoauthor,
+            onTapMention: showsAuthorProfiles ? { username in openMentionProfile(username) } : nil,
             onTapHypeCount: {
                 hypersContext = HypersListContext(
                     contextType: "post",
@@ -464,6 +656,20 @@ struct ProfilePostsFeedSheet: View {
             },
             onOpenComments: { commentsPost = post }
         )
+    }
+
+    /// A tapped caption @mention: resolve to the exact user and open their
+    /// profile (same behavior as the main feed).
+    private func openMentionProfile(_ username: String) {
+        let lowered = username.lowercased()
+        Task {
+            guard let match = try? await profileFriendService.searchUsers(byUsername: lowered)
+                .first(where: { $0.username?.lowercased() == lowered }) else { return }
+            await MainActor.run {
+                guard match.user_id != currentUserId else { return }
+                profileUser = match
+            }
+        }
     }
 
     private func hype(_ post: PostItem) async {

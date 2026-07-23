@@ -12,6 +12,7 @@ import {
   getFeed,
   getUnifiedFeed,
   getUserPosts,
+  getUserTaggedPosts,
   notifyFriendsOfPost,
   getPostAuthor,
   softDeletePost,
@@ -524,6 +525,39 @@ export async function getUserPostsController(
       .json({ items: signMediaUrlsDeep(items), next_before: nextBefore });
   } catch (error: any) {
     console.error("Error fetching user posts:", error.message);
+    res.status(500).json({ error: "Error fetching posts" });
+  }
+}
+
+/**
+ * GET /posts/user/:userId/tagged — posts the user is tagged in (accepted
+ * collabs + caption @mentions), the Instagram-style profile "Tagged" tab.
+ */
+export async function getUserTaggedPostsController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const rawLimit = parseInt(String(req.query.limit ?? ""), 10);
+    const limit = Number.isFinite(rawLimit)
+      ? Math.min(Math.max(rawLimit, 1), MAX_FEED_LIMIT)
+      : DEFAULT_FEED_LIMIT;
+    const before = repairBeforeCursor(req);
+    const items = await getUserTaggedPosts(
+      req.userId!,
+      req.params.userId,
+      limit,
+      before,
+    );
+    lockUnearnedPhotos(items, req.userId!, await viewerPhotoGate(req.userId!));
+    const last = items[items.length - 1];
+    const nextBefore =
+      items.length === limit ? (last.cursor ?? last.created_at) : null;
+    res
+      .status(200)
+      .json({ items: signMediaUrlsDeep(items), next_before: nextBefore });
+  } catch (error: any) {
+    console.error("Error fetching tagged posts:", error.message);
     res.status(500).json({ error: "Error fetching posts" });
   }
 }

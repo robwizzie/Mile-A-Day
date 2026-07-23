@@ -37,6 +37,7 @@ globs: app/**
 - Shared UI components in `Views/Components/`.
 - Watch app is a separate target at `Mile A Day Watch App/`.
 - fullScreenCover gotchas (post composer): pass tap-selected content via `.fullScreenCover(item:)` (isPresented + separate @State races to a stale nil), guard onAppear side effects with a one-shot flag (onAppear RE-FIRES when a cover dismisses — an auto-opened camera re-traps the user), and attach two covers to two different nodes or one drops.
+- Celebrations: `CelebrationContainerView` hosts ONCE at MainTabView root (a Dashboard-hosted overlay played invisibly whenever another tab was selected) and one-shot flags (goal-shown-today, per-workout photo prompt) stamp at DISMISSAL (`markConsumed`), never on display. `hasFreshTodaysDistance` must flip in the SAME main.async block that publishes todaysDistance/todaysWorkouts — a separate earlier dispatch let celebration checks read stale values and eat the flame/photo prompt/fresh window.
 - iOS 26 auto-wraps custom `ToolbarItem` views in a shared glass capsule. For a custom-styled pill, apply `.sharedBackgroundVisibility(.hidden)` to the `ToolbarItem` itself (it's on `CustomizableToolbarContent`, NOT a `View` modifier; gate with `#available(iOS 26)`) or it renders pill-inside-a-pill. Also `.fixedSize()` toolbar HStacks — leading items truncate `Text` to zero width otherwise.
 
 ## Entitlements

@@ -311,7 +311,7 @@ struct DashboardView: View {
             // dedup swallowed the new walk's photo prompt — the "it never
             // re-prompted me at the end of this other walk" bug.
             let latestHK = healthManager.todaysWorkouts.first
-            if let uuid = latestHK?.uuid.uuidString ?? healthManager.workoutIndex?.latestWorkoutUUID {
+            if let uuid = latestHK?.uuid.uuidString ?? todayIndexWorkoutUUID {
                 // Open the 10-min fresh-post window on the goal-completing run
                 // regardless of the auto-share prompt, so the feed countdown /
                 // ring and "Fresh" reward work even when auto-share is off.
@@ -323,6 +323,18 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    /// WorkoutIndex fallback uuid for the fresh window / photo prompt — but only
+    /// when the index's latest workout is actually from TODAY. A stale uuid
+    /// (yesterday's run, before the index catches up) keyed the fresh window to
+    /// the wrong workout and the per-uuid prompt dedup swallowed today's photo
+    /// prompt entirely.
+    private var todayIndexWorkoutUUID: String? {
+        guard let index = healthManager.workoutIndex,
+              let latestDate = index.latestWorkoutDate,
+              Calendar.current.isDateInToday(latestDate) else { return nil }
+        return index.latestWorkoutUUID
     }
 
     /// Show encouragement when the user completes additional workouts after reaching their goal.
@@ -352,7 +364,7 @@ struct DashboardView: View {
         // WorkoutIndex uuid, so each extra walk/run actually earns its own
         // window + photo prompt instead of being deduped against the last one.
         let latestHK = healthManager.todaysWorkouts.first
-        if let uuid = latestHK?.uuid.uuidString ?? healthManager.workoutIndex?.latestWorkoutUUID {
+        if let uuid = latestHK?.uuid.uuidString ?? todayIndexWorkoutUUID {
             // Each extra qualifying walk/run reopens a fresh 10-min window (a
             // new uuid resets it), regardless of the auto-share prompt.
             FreshPostWindowManager.shared.open(workoutId: uuid)
@@ -740,9 +752,9 @@ struct DashboardView: View {
                 refreshMidRunPhotoWaiting()
             }
             .confetti(isShowing: $showConfetti)
-            .overlay(
-                CelebrationContainerView()
-            )
+            // CelebrationContainerView is hosted by MainTabView at the app root
+            // (above the tab bar, visible on every tab) — hosting it here played
+            // celebrations invisibly whenever another tab was selected.
             .navigationDestination(isPresented: $navigateToBadgesFromCelebration) {
                 BadgesView(userManager: userManager, initialBadge: nil)
             }

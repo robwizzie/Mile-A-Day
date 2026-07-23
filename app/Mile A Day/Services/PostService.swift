@@ -521,6 +521,16 @@ enum PostService {
         return try await APIClient.fancyFetch(endpoint: endpoint, responseType: FeedResponse.self)
     }
 
+    /// Posts a user is TAGGED in — accepted collabs + caption @mentions —
+    /// for the profile's Instagram-style "Tagged" tab.
+    static func fetchUserTaggedPosts(
+        userId: String,
+        before: String? = nil
+    ) async throws -> FeedResponse {
+        let endpoint = "/posts/user/\(userId)/tagged?limit=24" + beforeSuffix(before)
+        return try await APIClient.fancyFetch(endpoint: endpoint, responseType: FeedResponse.self)
+    }
+
     /// Accept (true) or decline/leave (false) a collab-post invite.
     static func respondToCoauthor(postId: String, accept: Bool) async throws {
         struct Body: Encodable { let accept: Bool }

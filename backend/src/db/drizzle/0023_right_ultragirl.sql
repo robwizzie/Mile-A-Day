@@ -1,0 +1,2 @@
+CREATE INDEX "idx_posts_coauthor_workout" ON "posts" USING btree ("coauthor_workout_id") WHERE (coauthor_workout_id IS NOT NULL);--> statement-breakpoint
+CREATE INDEX "idx_posts_coauthor_user" ON "posts" USING btree ("coauthor_user_id") WHERE (coauthor_user_id IS NOT NULL);

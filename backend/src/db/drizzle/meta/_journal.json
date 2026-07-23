@@ -162,6 +162,13 @@
       "when": 1784598194533,
       "tag": "0022_parallel_sway",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784765470051,
+      "tag": "0023_right_ultragirl",
+      "breakpoints": true
     }
   ]
 }

@@ -24,6 +24,8 @@ struct CommentsSheet: View {
     @State private var showTermsGate = false
     @State private var termsJustAccepted = false
     @State private var errorMessage: String?
+    /// Profile opened from a tapped @mention inside a comment.
+    @State private var profileUser: BackendUser?
     @StateObject private var friendService = FriendService()
     @FocusState private var inputFocused: Bool
 
@@ -82,6 +84,11 @@ struct CommentsSheet: View {
         }
         .sheet(item: $reportingComment) { comment in
             ReportCommentSheet(commentId: comment.comment_id) { reportingComment = nil }
+        }
+        .sheet(item: $profileUser) { user in
+            NavigationStack {
+                UserProfileDetailView(user: user, friendService: friendService)
+            }
         }
         .sheet(isPresented: $showTermsGate, onDismiss: {
             // Re-send the kept draft ONLY when the gate was actually accepted —
@@ -170,6 +177,21 @@ struct CommentsSheet: View {
         .buttonStyle(.plain)
     }
 
+    /// A tapped @mention: resolve the username (exact, case-insensitive) via
+    /// the search endpoint and open that profile. No-ops for unknown names and
+    /// for the viewer themself.
+    private func openMentionProfile(_ username: String) {
+        let lowered = username.lowercased()
+        Task {
+            guard let match = try? await friendService.searchUsers(byUsername: lowered)
+                .first(where: { $0.username?.lowercased() == lowered }) else { return }
+            await MainActor.run {
+                guard match.user_id != UserDefaults.standard.string(forKey: "backendUserId") else { return }
+                profileUser = match
+            }
+        }
+    }
+
     private func row(_ comment: PostComment, isReply: Bool) -> some View {
         HStack(alignment: .top, spacing: 10) {
             AvatarView(name: comment.displayName,
@@ -188,6 +210,15 @@ struct CommentsSheet: View {
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.9))
                     .fixedSize(horizontal: false, vertical: true)
+                    // Tapping an @mention opens that user's profile, same as
+                    // post captions.
+                    .environment(\.openURL, OpenURLAction { url in
+                        if let username = MentionText.username(from: url) {
+                            openMentionProfile(username)
+                            return .handled
+                        }
+                        return .systemAction
+                    })
                 Button {
                     replyingTo = comment
                     // Instagram prefills the @handle when replying.

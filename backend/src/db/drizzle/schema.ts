@@ -1252,6 +1252,17 @@ export const posts = pgTable(
       .where(
         sql`(deleted_at IS NULL AND workout_id IS NOT NULL AND share_to_story AND NOT share_to_feed)`,
       ),
+    // Collab lookups: the unified feed's "does a collab post stand in for this
+    // workout" NOT EXISTS probes coauthor_workout_id per candidate row, and the
+    // profile grid / Tagged tab filter on coauthor_user_id — both were
+    // unindexed (sequential scans that grow with the posts table). Partial:
+    // the overwhelming majority of posts carry no coauthor.
+    index("idx_posts_coauthor_workout")
+      .using("btree", table.coauthorWorkoutId.asc().nullsLast())
+      .where(sql`(coauthor_workout_id IS NOT NULL)`),
+    index("idx_posts_coauthor_user")
+      .using("btree", table.coauthorUserId.asc().nullsLast())
+      .where(sql`(coauthor_user_id IS NOT NULL)`),
     foreignKey({
       columns: [table.userId],
       foreignColumns: [users.userId],

@@ -1157,6 +1157,90 @@ export async function getUserPosts(
 }
 
 /**
+ * Posts a user is TAGGED in, for the Instagram-style profile "Tagged" tab:
+ * feed posts by OTHER people that either carry them as an ACCEPTED collab
+ * coauthor or @mention their username in the caption. Mention matching
+ * mirrors mentionService.extractMentionUsernames (token charset
+ * [A-Za-z0-9._-], trailing dots stripped, case-insensitive) in SQL so the
+ * tab agrees with who mention pushes went to.
+ *
+ * Visibility mirrors getUserPosts' collab-row reach: the viewer needn't be
+ * the author's friend (a tag deliberately shares the post with the tagged
+ * user's audience), but a private or blocked author still disappears, and
+ * the whole tab is gated on the viewer being allowed to see the tagged
+ * user's content at all. Blocks between the TAGGED user and the author also
+ * hide the row — a block ends the tag in both directions.
+ */
+export async function getUserTaggedPosts(
+  viewerId: string,
+  taggedUserId: string,
+  limit: number,
+  before?: string | null,
+): Promise<PostRow[]> {
+  const users = await db.query<{ username: string | null }>(
+    `SELECT username FROM users WHERE user_id = $1`,
+    [taggedUserId],
+  );
+  const username = users[0]?.username ?? null;
+  // Caption-mention pattern, matching extractMentionUsernames: the token
+  // after '@' is [A-Za-z0-9._-]+ with trailing dots stripped — so after the
+  // escaped username only dots may follow before a non-token char or the end.
+  const mentionPattern = username
+    ? `@${username.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.*([^a-zA-Z0-9._-]|$)`
+    : null;
+  const rows = await db.query<PostRow>(
+    `
+		SELECT ${POST_SELECT},
+			${URL_SAFE_CURSOR("p.created_at")} AS cursor,
+			-- Same story-photo lead as the profile grid, so tagged cards match.
+			(
+				SELECT p3.media_url FROM posts p3
+				WHERE p.workout_id IS NOT NULL
+					AND p3.workout_id = p.workout_id
+					AND p3.user_id = p.user_id
+					AND p3.post_id <> p.post_id
+					AND p3.deleted_at IS NULL
+					AND p3.share_to_story AND NOT p3.share_to_feed
+				ORDER BY p3.created_at DESC
+				LIMIT 1
+			) AS story_photo_url
+		FROM posts p
+		JOIN users u ON u.user_id = p.user_id
+		WHERE p.deleted_at IS NULL
+			AND p.share_to_feed
+			AND p.user_id <> $2
+			AND (
+				(p.coauthor_user_id = $2 AND p.coauthor_status = 'accepted')
+				OR ($5::text IS NOT NULL AND p.caption IS NOT NULL AND p.caption ~* $5)
+			)
+			-- Profile gate: may the viewer see the tagged user's content at all?
+			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$2", "$1")}
+			-- Author gate (mirrors getUserPosts' collab reach): the viewer's own
+			-- posts always show; others' need not-private + no blocks either way.
+			AND (p.user_id = $1 OR (
+				${OWNER_NOT_PRIVATE_SQL("p.user_id")}
+				AND NOT EXISTS (
+					SELECT 1 FROM user_blocks b
+					WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
+						OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
+				)
+			))
+			-- Blocks between the tagged user and the author end the tag.
+			AND NOT EXISTS (
+				SELECT 1 FROM user_blocks tb
+				WHERE (tb.blocker_id = $2 AND tb.blocked_id = p.user_id)
+					OR (tb.blocker_id = p.user_id AND tb.blocked_id = $2)
+			)
+			AND ($3::timestamptz IS NULL OR p.created_at < $3::timestamptz)
+		ORDER BY p.created_at DESC
+		LIMIT $4
+		`,
+    [viewerId, taggedUserId, before ?? null, limit, mentionPattern],
+  );
+  return rows;
+}
+
+/**
  * Best-effort push to the author's friends that they shared a new post/story.
  * One notification per deliberate createPost — a post going to the story AND
  * the feed together still produces a single push. Respects each friend's
