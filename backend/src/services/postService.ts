@@ -1203,10 +1203,12 @@ export async function getUserPosts(
 
 /**
  * Posts a user is TAGGED in, for the Instagram-style profile "Tagged" tab:
- * feed posts by OTHER people that either carry them as a collab coauthor
- * (pending is visible only to the author/invitee; accepted is visible to
- * anyone who may view the tagged profile) or @mention their username in the
- * caption. Mention matching
+ * feed posts by OTHER people that either carry them as an ACCEPTED collab
+ * coauthor or @mention their username in the caption. A pending collab invite
+ * is NOT a tag yet — it stays out of the tab entirely until accepted, for
+ * every viewer including the author (COAUTHOR_VISIBLE gates the coauthor
+ * LABEL on a displayed post, never tab ENTRY — don't reuse it here). Mention
+ * matching
  * mirrors mentionService.extractMentionUsernames (token charset
  * [A-Za-z0-9._-], trailing dots stripped, case-insensitive) in SQL so the
  * tab agrees with who mention pushes went to.
@@ -1257,11 +1259,7 @@ export async function getUserTaggedPosts(
 			AND p.share_to_feed
 			AND p.user_id <> $2
 			AND (
-				(p.coauthor_user_id = $2 AND (
-					p.coauthor_status = 'accepted'
-					OR p.user_id = $1
-					OR p.coauthor_user_id = $1
-				))
+				(p.coauthor_user_id = $2 AND p.coauthor_status = 'accepted')
 				OR ($5::text IS NOT NULL AND p.caption IS NOT NULL AND p.caption ~* $5)
 			)
 			-- Profile gate: may the viewer see the tagged user's content at all?
