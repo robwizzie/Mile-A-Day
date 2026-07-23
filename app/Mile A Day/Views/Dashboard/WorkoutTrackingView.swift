@@ -1149,8 +1149,14 @@ struct WorkoutTrackingView: View {
         guard !isStopping else { return }
         isStopping = true
 
-        // Capture final distance before stopping tracking
-        let finalDistance = currentDistance
+        // Final distance: outdoor sessions reconcile the live GPS sum against
+        // the phone's calibrated pedometer (see reconciledFinalDistance) so
+        // the SAME walk saves nearly the same number on everyone's phone.
+        // Indoor sessions already are the pedometer; failures fall back to
+        // the live figure unchanged.
+        let finalDistance = locationManager.reconciledFinalDistance(
+            isWalk: selectedActivityType != .running
+        )
 
         // Freeze the recap stats now, before anything refreshes underneath us
         recapDistance = finalDistance

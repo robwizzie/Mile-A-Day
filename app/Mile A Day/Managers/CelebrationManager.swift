@@ -482,8 +482,26 @@ class CelebrationManager: ObservableObject {
         }
     }
 
+    /// Record a celebration's one-shot flags once the user has actually SEEN it
+    /// (i.e. they dismissed it). Marking used to happen in showNextCelebration(),
+    /// but "shown" there only meant "the overlay rendered somewhere" — when the
+    /// container lived on a hidden tab (or behind a cover) the flame + photo
+    /// prompt were consumed invisibly and could never fire again that day.
+    /// Marking on dismissal means a moment the user never saw is never spent;
+    /// worst case (force-quit mid-celebration) it simply replays next launch.
+    private func markConsumed(_ celebration: CelebrationType?) {
+        guard let celebration else { return }
+        if case .goalCompleted = celebration {
+            markGoalCelebrationShown()
+        }
+        if case .postRunPhotoPrompt(let workoutId, _) = celebration {
+            markPromptedPhoto(for: workoutId)
+        }
+    }
+
     /// Dismiss the current celebration and show the next one if available
     func dismissCurrentCelebration() {
+        markConsumed(currentCelebration)
         isShowingCelebration = false
         currentCelebration = nil
 
@@ -492,17 +510,18 @@ class CelebrationManager: ObservableObject {
             self?.showNextCelebration()
         }
     }
-    
+
     /// Dismiss the current celebration with a specific action
     func dismissWithAction(_ action: CelebrationDismissAction) {
+        markConsumed(currentCelebration)
         // Clear remaining queue when user wants to navigate away
         if action != .none {
             celebrationQueue.removeAll()
         }
-        
+
         isShowingCelebration = false
         currentCelebration = nil
-        
+
         // Set the pending action after a brief delay for animation
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.pendingAction = action
@@ -539,16 +558,11 @@ class CelebrationManager: ObservableObject {
 
         let next = celebrationQueue.removeFirst()
 
-        // Mark goal celebration as shown now that the user will actually see it
-        if case .goalCompleted = next {
-            markGoalCelebrationShown()
-        }
-        // Same for the photo prompt — record the workout so it's never re-offered,
-        // even across a relaunch.
-        if case .postRunPhotoPrompt(let workoutId, _) = next {
-            markPromptedPhoto(for: workoutId)
-        }
-
+        // One-shot flags (goal shown today / photo prompted for this workout)
+        // are stamped in markConsumed() at DISMISSAL — not here. Displaying is
+        // not seeing: an overlay on a hidden tab or behind a full-screen cover
+        // "showed" without the user ever seeing it, permanently eating the
+        // flame + photo prompt for that day/workout.
         currentCelebration = next
         isShowingCelebration = true
     }

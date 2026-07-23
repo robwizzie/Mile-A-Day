@@ -330,8 +330,9 @@ struct SocialFeedView: View {
             }
             .scrollIndicators(.hidden)
             .refreshable {
-                await refresh()
-                await loadHypeStatus()
+                async let feedLoad: Void = refresh()
+                async let hypeLoad: Void = loadHypeStatus()
+                _ = await (feedLoad, hypeLoad)
             }
             // Deep-link consumption: the poke covers "feed already mounted";
             // the task covers "feed first mounted because of the deep link"
@@ -353,10 +354,13 @@ struct SocialFeedView: View {
         }
         .task {
             if !loadedOnce {
-                await refresh()
-                await loadTermsStatus()
+                // One parallel wave, not a serial chain — the feed used to wait
+                // behind terms + memories + hype round trips before first paint.
                 loadMemories()
-                await loadHypeStatus()
+                async let feedLoad: Void = refresh()
+                async let termsLoad: Void = loadTermsStatus()
+                async let hypeLoad: Void = loadHypeStatus()
+                _ = await (feedLoad, termsLoad, hypeLoad)
             }
         }
         // Returning to the Feed tab silently pulls fresh posts so a mile just
@@ -374,21 +378,26 @@ struct SocialFeedView: View {
             // just completed still shows up on return.
             if let last = lastFeedRefreshAt, Date().timeIntervalSince(last) < 20 {
                 Task {
-                    await refreshRail()
-                    await loadHypeStatus()
+                    async let railLoad: Void = refreshRail()
+                    async let hypeLoad: Void = loadHypeStatus()
+                    _ = await (railLoad, hypeLoad)
                 }
                 return
             }
             Task {
-                await refresh()
-                await loadHypeStatus()
+                async let feedLoad: Void = refresh()
+                async let hypeLoad: Void = loadHypeStatus()
+                _ = await (feedLoad, hypeLoad)
             }
         }
         .fullScreenCover(item: $viewerGroup) { group in
+            // The whole viewable rail rides along so the viewer can cube
+            // between authors Instagram-style, starting at the tapped one.
             StoryViewerView(
-                group: group,
+                groups: stories.filter { canViewStories(of: $0) },
+                initialGroupId: group.user_id,
                 currentUserId: currentUserId,
-                allowedDays: allowedStoryDays(for: group)
+                allowedDaysFor: { allowedStoryDays(for: $0) }
             ) { changed in
                 viewerGroup = nil
                 if changed {
@@ -580,11 +589,34 @@ struct SocialFeedView: View {
         if entry.isPost, let post = entry.asPostItem() {
             let isMyPendingInvite = post.coauthor_status == "pending"
                 && post.coauthor_user_id == currentUserId
+            // The collab coauthor's name/avatar routes to THEIR profile (nil
+            // when it's the viewer, or while the invite is still pending).
+            let openCoauthorProfile: (() -> Void)? =
+                (post.hasAcceptedCoauthor && post.coauthor_user_id != currentUserId)
+                    ? {
+                        profileUser = BackendUser(
+                            user_id: post.coauthor_user_id ?? "",
+                            username: post.coauthor_username,
+                            email: nil,
+                            first_name: post.coauthor_first_name,
+                            last_name: post.coauthor_last_name,
+                            bio: nil,
+                            profile_image_url: post.coauthor_profile_image_url,
+                            apple_id: nil,
+                            auth_provider: nil,
+                            role: nil
+                        )
+                    }
+                    : nil
             PostCardView(
                 post: post,
                 storyPhotoURL: entry.storyPhotoURL,
-                isFresh: entry.is_self
-                    && freshWindow.wasPostedLive(postId: post.post_id, workoutId: post.workout_id),
+                // Server truth first (every viewer sees a friend's fresh post);
+                // the local window keeps the poster's OWN badge instant while
+                // the next refresh catches up.
+                isFresh: (entry.is_fresh ?? false)
+                    || (entry.is_self
+                        && freshWindow.wasPostedLive(postId: post.post_id, workoutId: post.workout_id)),
                 isHyping: hypingIds.contains(entry.id),
                 isOutOfHypes: isOutOfHypes,
                 onHype: { Task { await hype(entry) } },
@@ -593,6 +625,8 @@ struct SocialFeedView: View {
                 onDelete: { deletingEntry = entry },
                 onEditCaption: post.is_self ? { editingPost = post } : nil,
                 onTapAuthor: openProfile,
+                onTapCoauthor: openCoauthorProfile,
+                onTapMention: { username in openMentionProfile(username) },
                 onTapHypeCount: openHypers,
                 onOpenComments: { commentsPost = post },
                 onRespondCoauthor: isMyPendingInvite
@@ -606,7 +640,8 @@ struct SocialFeedView: View {
                 isOutOfHypes: isOutOfHypes,
                 onHype: { Task { await hype(entry) } },
                 onTapAuthor: openProfile,
-                onTapHypeCount: openHypers
+                onTapHypeCount: openHypers,
+                onBlock: entry.is_self ? nil : { Task { await block(entry) } }
             )
         }
     }
@@ -825,8 +860,23 @@ struct SocialFeedView: View {
 
     private func refresh() async {
         await MainActor.run { isLoading = feed.isEmpty }
+        // The rail request goes out CONCURRENTLY with the feed request, and the
+        // feed paints the moment its response lands — it used to queue behind
+        // the rail + own-stories round trips (three serial fetches), which was
+        // the bulk of the "feed takes forever to load" wait.
+        async let railFetch = PostService.fetchStoriesRail()
         let feedResponse = try? await PostService.fetchUnifiedFeed(before: nil)
-        let storyGroups = try? await PostService.fetchStoriesRail()
+        await MainActor.run {
+            if let feedResponse {
+                feed = feedResponse.items
+                nextBefore = feedResponse.next_before
+                loadMoreFailed = false
+                lastFeedRefreshAt = Date()
+            }
+            isLoading = false
+            loadedOnce = true
+        }
+        let storyGroups = try? await railFetch
         // Own active stories carry their workout ids — needed to know which
         // of today's workouts are already "spent" on a story share.
         var storyWorkoutIds: Set<String> = []
@@ -836,12 +886,6 @@ struct SocialFeedView: View {
             storyWorkoutIds = Set(ownStories.compactMap(\.workout_id))
         }
         await MainActor.run {
-            if let feedResponse {
-                feed = feedResponse.items
-                nextBefore = feedResponse.next_before
-                loadMoreFailed = false
-                lastFeedRefreshAt = Date()
-            }
             if let storyGroups {
                 stories = storyGroups
                 myStoryWorkoutIds = storyWorkoutIds
@@ -852,8 +896,6 @@ struct SocialFeedView: View {
             if feedResponse != nil, storyGroups != nil {
                 optimisticSharedWorkoutIds.removeAll()
             }
-            isLoading = false
-            loadedOnce = true
         }
     }
 
@@ -1029,6 +1071,21 @@ struct SocialFeedView: View {
     private func updateEntry(_ id: String, _ mutate: (inout FeedEntry) -> Void) {
         guard let idx = feed.firstIndex(where: { $0.id == id }) else { return }
         mutate(&feed[idx])
+    }
+
+    /// A tapped caption @mention: resolve the username to a real user via the
+    /// search endpoint (exact match, case-insensitive) and open their profile.
+    /// Silently no-ops for unknown usernames and for the viewer themself.
+    private func openMentionProfile(_ username: String) {
+        let lowered = username.lowercased()
+        Task {
+            guard let match = try? await profileFriendService.searchUsers(byUsername: lowered)
+                .first(where: { $0.username?.lowercased() == lowered }) else { return }
+            await MainActor.run {
+                guard match.user_id != currentUserId else { return }
+                profileUser = match
+            }
+        }
     }
 
     private static func todayText() -> String {

@@ -15,6 +15,8 @@ const {
   getUnifiedFeed,
   getStoriesRail,
   getUserPosts,
+  getUserTaggedPosts,
+  respondToCoauthorInvite,
   lockUnearnedPhotos,
 } = await import("../dist/services/postService.js");
 const { canonicalizeMileContext, logHypeIfUnderLimit, hasHypedMile } =
@@ -129,6 +131,14 @@ assert.ok(
   feed.some((r) => r.route != null),
   "route data attached to a feed row (include_route + share_route_maps)",
 );
+// FRESH is server truth now, visible to OTHER viewers (it used to be a
+// client-local badge only the poster saw). Bob's post was created moments
+// after his workout reached the backend → the legacy derivation marks it.
+assert.equal(
+  feedPost.is_fresh,
+  true,
+  "post created right after its workout arrived reads fresh to other viewers",
+);
 
 // Stories rail as Alice: Bob's fresh story must appear.
 const rail = await getStoriesRail(ALICE);
@@ -142,6 +152,103 @@ const posts = await getUserPosts(ALICE, BOB, 20, null);
 assert.ok(
   posts.some((p) => p.post_id === post.post_id),
   "Bob's post shows on his profile grid",
+);
+
+// Tagged tab (getUserTaggedPosts): caption @mentions use exact-token matching,
+// and a collab invite only counts once ACCEPTED.
+const alicePost = (
+  caption,
+  mediaUrl,
+  coauthorUserId = null,
+  postedLive = false,
+) =>
+  createPost({
+    userId: ALICE,
+    mediaUrl,
+    caption,
+    workoutId: null,
+    localDate,
+    shareToFeed: true,
+    shareToStory: false,
+    statsSnapshot: null,
+    isAuto: false,
+    includeRoute: false,
+    coauthorUserId,
+    postedLive,
+  });
+const mentionPost = await alicePost(
+  "post-run coffee with @ci_bob",
+  "/uploads/posts/ci-alice-mention.jpg",
+);
+const superstringPost = await alicePost(
+  "shoutout @ci_bobber",
+  "/uploads/posts/ci-alice-superstring.jpg",
+);
+const collabPost = await alicePost(
+  "ran it together",
+  "/uploads/posts/ci-alice-collab.jpg",
+  BOB,
+  true, // posted_live claim — the client-owned FRESH path
+);
+assert.equal(
+  collabPost.coauthor_status,
+  "pending",
+  "collab invite starts pending",
+);
+let tagged = await getUserTaggedPosts(ALICE, BOB, 20, null);
+assert.ok(
+  tagged.some((p) => p.post_id === mentionPost.post_id),
+  "@ci_bob mention shows in Bob's tagged tab",
+);
+assert.ok(
+  !tagged.some((p) => p.post_id === superstringPost.post_id),
+  "@ci_bobber does NOT count as a ci_bob mention (exact token match)",
+);
+assert.ok(
+  !tagged.some((p) => p.post_id === collabPost.post_id),
+  "pending collab invite stays out of the tagged tab",
+);
+const collabAccept = await respondToCoauthorInvite(
+  BOB,
+  collabPost.post_id,
+  true,
+);
+assert.equal(
+  collabAccept?.author_id,
+  ALICE,
+  "coauthor accept returns the author",
+);
+tagged = await getUserTaggedPosts(ALICE, BOB, 20, null);
+assert.ok(
+  tagged.some(
+    (p) => p.post_id === collabPost.post_id && p.coauthor_status === "accepted",
+  ),
+  "accepted collab shows in Bob's tagged tab",
+);
+assert.ok(
+  !(await getUserTaggedPosts(ALICE, ALICE, 20, null)).some(
+    (p) => p.post_id === mentionPost.post_id,
+  ),
+  "your own posts never show in your own tagged tab",
+);
+// FRESH both paths, as seen by Bob: the posted_live claim marks a post with
+// no linked workout; a plain post with no claim and no workout stays unfresh.
+const bobFeed = await getUnifiedFeed(BOB, 20, null);
+const collabInFeed = bobFeed.find(
+  (r) => r.kind === "post" && r.id === collabPost.post_id,
+);
+const mentionInFeed = bobFeed.find(
+  (r) => r.kind === "post" && r.id === mentionPost.post_id,
+);
+assert.equal(
+  collabInFeed?.is_fresh,
+  true,
+  "posted_live claim marks the post fresh for other viewers",
+);
+assert.equal(
+  mentionInFeed?.is_fresh,
+  false,
+  "no claim + no linked workout stays unfresh",
 );
 
 // Heatmap endpoint query.

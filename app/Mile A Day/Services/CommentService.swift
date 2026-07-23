@@ -90,13 +90,25 @@ enum CommentService {
     }
 }
 
-/// Renders @mentions in brand red within otherwise-plain text. Shared by
-/// comment rows and post captions.
+/// Renders @mentions in brand red within otherwise-plain text, each one a
+/// tappable link to that user's profile. Shared by comment rows and post
+/// captions — hosting views intercept the taps with an `OpenURLAction` and
+/// route them through `MentionText.username(from:)`.
 enum MentionText {
     /// Mirrors the backend's mention token rule (mentionService.ts).
     /// Extended `#/…/#` delimiters — bare-slash regex literals need a compiler
     /// flag this project doesn't set.
     private static let mentionRegex = #/@[A-Za-z0-9._-]+/#
+
+    /// Custom scheme carrying the tapped mention's username. Never reaches the
+    /// system: every rendering view installs an OpenURLAction that consumes it.
+    static let linkScheme = "mad-mention"
+
+    /// The username a mention link points at, or nil for any other URL.
+    static func username(from url: URL) -> String? {
+        guard url.scheme == linkScheme, let host = url.host, !host.isEmpty else { return nil }
+        return host
+    }
 
     static func attributed(_ text: String) -> AttributedString {
         var out = AttributedString()
@@ -106,6 +118,14 @@ enum MentionText {
             var mention = AttributedString(String(match.output))
             mention.foregroundColor = MADTheme.Colors.madRed
             mention.font = .system(size: 14, weight: .bold, design: .rounded)
+            // Same token rule as the backend: trailing dots aren't part of the
+            // username ("nice one @rob." mentions rob). Lowercased — usernames
+            // resolve case-insensitively server-side.
+            var username = String(match.output.dropFirst()).lowercased()
+            while username.hasSuffix(".") { username.removeLast() }
+            if !username.isEmpty, let url = URL(string: "\(linkScheme)://\(username)") {
+                mention.link = url
+            }
             out += mention
             rest = rest[match.range.upperBound...]
         }

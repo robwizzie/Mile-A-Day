@@ -25,6 +25,13 @@ struct MainTabView: View {
     // "Leave us a review" moment — gated to streak milestones by ReviewPromptManager.
     @StateObject private var reviewManager = ReviewPromptManager.shared
 
+    // Celebrations (flame, leaderboard climb, photo prompt…) host HERE, above
+    // the whole TabView — not inside DashboardView. The manager marks a
+    // celebration consumed when it's dismissed, so the overlay must be visible
+    // wherever the user is; hosted on the Dashboard tab it played invisibly
+    // (and got spent) whenever a mile landed while another tab was selected.
+    @StateObject private var celebrationManager = CelebrationManager.shared
+
     var body: some View {
         ZStack(alignment: .bottom) {
         TabView(selection: $selectedTab) {
@@ -152,8 +159,10 @@ struct MainTabView: View {
                      "challenge_won",
                      // Post/story pushes carry no payload data through the
                      // cold path, so land in the inbox — its row tap then
-                     // deep-links to the exact post/story.
+                     // deep-links to the exact post/story. Collab + mention +
+                     // comment pushes follow the same route.
                      "friend_post", "story_reaction",
+                     "coauthor_invite", "coauthor_accepted", "mention", "post_comment",
                      "friend_challenge_completed", "friend_personal_best":
                     selectedTab = 0
                     showNotificationInbox = true
@@ -242,6 +251,18 @@ struct MainTabView: View {
                 }
                 .transition(.opacity)
             }
+
+            // Full-app celebration takeover (flame, leaderboard, photo prompt).
+            // Last child = above the tab bar, the workout banner, and the tour,
+            // on whichever tab the user is actually looking at.
+            CelebrationContainerView()
+        }
+        .onChange(of: celebrationManager.pendingAction) { _, action in
+            // "View badges" from a badge celebration navigates on the Dashboard
+            // stack — make sure the user is ON that tab to see it land.
+            if action == .viewBadges {
+                selectedTab = 0
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("MAD_StartGuidedTour"))) { _ in
             withAnimation(.easeIn(duration: 0.25)) {
@@ -319,7 +340,8 @@ struct MainTabView: View {
             case "competition_flex", "competition_milestone", "friend_nudge",
                  "friend_activity", "streak_broken", "personal_best",
                  "lead_change", "clash_tie",
-                 "friend_post", "story_reaction":
+                 "friend_post", "story_reaction",
+                 "coauthor_invite", "coauthor_accepted", "mention", "post_comment":
                 selectedTab = 0
                 showNotificationInbox = true
                 notificationService.pendingNotificationType = nil

@@ -800,11 +800,13 @@ class HealthKitManager: ObservableObject {
             }
 
             // Reached only on a SUCCESSFUL query (locked-device errors returned
-            // above). Now `todaysDistance` is about to reflect a value we just
-            // fetched, not the cached one init seeded — so celebrations may fire.
-            DispatchQueue.main.async {
-                self.hasFreshTodaysDistance = true
-            }
+            // above). `hasFreshTodaysDistance` is deliberately NOT flipped here:
+            // it must land in the SAME main-queue block that publishes
+            // todaysDistance/todaysWorkouts (below). Flipping it in its own
+            // earlier block let the Dashboard's onChange run the celebration
+            // check against the STALE cached values — the goal guard failed (or
+            // read yesterday's workout uuid), and the flame/photo-prompt/fresh
+            // window were skipped for a mile that genuinely completed.
 
             #if os(watchOS)
             let workouts = ((samples as? [HKWorkout]) ?? [])
@@ -817,6 +819,7 @@ class HealthKitManager: ObservableObject {
                 DispatchQueue.main.async {
                     self.todaysDistance = 0.0
                     self.todaysWorkouts = []
+                    self.hasFreshTodaysDistance = true
                     #if !os(watchOS)
                     // Get current goal from widget store or default to 1.0
                     let widgetData = WidgetDataStore.load()
@@ -1109,6 +1112,9 @@ class HealthKitManager: ObservableObject {
             self.todaysDistance = totalMiles
             #endif
             self.todaysWorkouts = todaysWorkouts
+            // Same block as the data it vouches for: observers that fire on
+            // this flag must see the values it describes (see fetchTodaysDistance).
+            self.hasFreshTodaysDistance = true
             #if !os(watchOS)
             // Get current goal from widget store or default to 1.0
             let widgetData = WidgetDataStore.load()

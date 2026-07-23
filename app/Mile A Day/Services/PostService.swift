@@ -185,6 +185,10 @@ struct FeedEntry: Codable, Identifiable {
     /// Server withheld this post's photo (viewer hasn't run today) — carried
     /// into the rendered PostItem so the card draws a lock.
     let photo_locked: Bool?
+    /// Post shared inside the author's 10-minute fresh window (server truth) —
+    /// the FRESH chip every viewer sees, not just the poster. Optional: older
+    /// servers omit it.
+    var is_fresh: Bool?
     var comment_count: Int?
     // Collab post fields (post entries only; nil while pending unless viewer
     // is one of the two authors).
@@ -201,7 +205,7 @@ struct FeedEntry: Codable, Identifiable {
         case sort_ts, user_id, username, first_name, last_name, profile_image_url
         case media_url, caption, stats_snapshot, story_photo_url, is_auto
         case workout_id, workout_type, distance, total_duration, calories, steps, route
-        case is_self, is_hyped, hype_count, comment_count, photo_locked
+        case is_self, is_hyped, hype_count, comment_count, photo_locked, is_fresh
         case coauthor_user_id, coauthor_status, coauthor_username
         case coauthor_first_name, coauthor_last_name, coauthor_profile_image_url
     }
@@ -406,7 +410,8 @@ enum PostService {
         stats: PostStats?,
         isAuto: Bool = false,
         includeRoute: Bool = true,
-        coauthorUserId: String? = nil
+        coauthorUserId: String? = nil,
+        postedLive: Bool = false
     ) async throws -> PostItem {
         struct Body: Encodable {
             let media_url: String
@@ -418,6 +423,7 @@ enum PostService {
             let is_auto: Bool
             let include_route: Bool
             let coauthor_user_id: String?
+            let posted_live: Bool
         }
         let bodyData = try JSONEncoder().encode(
             Body(
@@ -429,7 +435,8 @@ enum PostService {
                 stats_snapshot: stats,
                 is_auto: isAuto,
                 include_route: includeRoute,
-                coauthor_user_id: coauthorUserId
+                coauthor_user_id: coauthorUserId,
+                posted_live: postedLive
             )
         )
         return try await APIClient.fancyFetch(
@@ -518,6 +525,16 @@ enum PostService {
     ) async throws -> FeedResponse {
         var endpoint = "/posts/user/\(userId)?limit=24" + beforeSuffix(before)
         if includeStories { endpoint += "&include_stories=true" }
+        return try await APIClient.fancyFetch(endpoint: endpoint, responseType: FeedResponse.self)
+    }
+
+    /// Posts a user is TAGGED in — accepted collabs + caption @mentions —
+    /// for the profile's Instagram-style "Tagged" tab.
+    static func fetchUserTaggedPosts(
+        userId: String,
+        before: String? = nil
+    ) async throws -> FeedResponse {
+        let endpoint = "/posts/user/\(userId)/tagged?limit=24" + beforeSuffix(before)
         return try await APIClient.fancyFetch(endpoint: endpoint, responseType: FeedResponse.self)
     }
 

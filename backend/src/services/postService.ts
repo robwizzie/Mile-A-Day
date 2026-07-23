@@ -199,6 +199,11 @@ export interface CreatePostInput {
   // Collab post: invite this accepted friend as coauthor (status 'pending'
   // until they accept). Ignored for auto posts.
   coauthorUserId?: string | null;
+  // The author shared this inside their 10-minute fresh window (client-owned:
+  // the window anchors to when the app SAW the finished workout). Drives the
+  // FRESH chip for every viewer. Ignored for auto posts; legacy clients that
+  // omit it get a server-side derivation in the feed query instead.
+  postedLive?: boolean;
 }
 
 // Shape the freshly inserted/updated row like a PostRow (is_self=true).
@@ -304,12 +309,14 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 			INSERT INTO posts (
 				user_id, media_url, caption, workout_id, stats_snapshot,
 				local_date, share_to_feed, share_to_story, story_expires_at,
-				is_auto, include_route, coauthor_user_id, coauthor_status
+				is_auto, include_route, coauthor_user_id, coauthor_status,
+				posted_fresh
 			)
 			VALUES (
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
 				CASE WHEN $8 THEN NOW() + INTERVAL '24 hours' ELSE NULL END,
-				$9, $10, $11, CASE WHEN $11::text IS NULL THEN NULL ELSE 'pending' END
+				$9, $10, $11, CASE WHEN $11::text IS NULL THEN NULL ELSE 'pending' END,
+				$12
 			)
 				ON CONFLICT ${conflictTarget}
 				DO UPDATE SET
@@ -322,7 +329,8 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 					-- The update guard only ever overwrites an AUTO post, which never
 					-- carries a coauthor — so taking EXCLUDED wholesale is safe.
 					coauthor_user_id = EXCLUDED.coauthor_user_id,
-					coauthor_status = EXCLUDED.coauthor_status${flagUpdates}
+					coauthor_status = EXCLUDED.coauthor_status,
+					posted_fresh = EXCLUDED.posted_fresh${flagUpdates}
 				${updateGuard}
 			RETURNING *
 		)
@@ -342,6 +350,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       isAutoValue,
       input.includeRoute !== false,
       coauthorId,
+      !isAutoValue && input.postedLive === true,
     ],
   );
   if (rows[0]) return rows[0];
@@ -859,6 +868,10 @@ export interface FeedEntryRow {
   local_date: string | null;
   // Set by lockUnearnedPhotos when this post's photo is withheld.
   photo_locked?: boolean;
+  // Post entries only: shared inside the author's 10-minute fresh window and
+  // still same-day — drives the FRESH chip for EVERY viewer (it used to be
+  // client-local, so only the poster ever saw their own badge).
+  is_fresh: boolean;
   // The entry's workout: the linked workout for posts (null when unlinked),
   // the workout itself for workout entries. Lets the client know which of
   // today's runs already carry a deliberate post.
@@ -1058,6 +1071,24 @@ export async function getUnifiedFeed(
 				SELECT COUNT(*)::int FROM post_comments pc
 				WHERE pc.post_id = p.post_id AND pc.deleted_at IS NULL
 			) ELSE 0 END AS comment_count,
+			-- FRESH chip, for every viewer. Truth order: the client's own claim
+			-- (posted_fresh, stamped at create when the author's 10-min window
+			-- was open) wins; legacy builds that never sent it fall back to a
+			-- server derivation — posted within 10 min of the workout reaching
+			-- the backend. Display capped to 24h so old posts don't wear it.
+			(
+				page.kind = 'post'
+				AND p.created_at > NOW() - INTERVAL '24 hours'
+				AND (
+					p.posted_fresh
+					OR (
+						NOT p.is_auto
+						AND p.workout_id IS NOT NULL
+						AND wt.created_at IS NOT NULL
+						AND p.created_at <= wt.created_at + INTERVAL '10 minutes'
+					)
+				)
+			) AS is_fresh,
 			${COAUTHOR_COLUMNS},
 			${URL_SAFE_CURSOR("page.sort_ts")} AS cursor
 		FROM page
@@ -1152,6 +1183,90 @@ export async function getUserPosts(
 		LIMIT $4
 		`,
     [viewerId, authorId, before ?? null, limit, includeStoryOnly],
+  );
+  return rows;
+}
+
+/**
+ * Posts a user is TAGGED in, for the Instagram-style profile "Tagged" tab:
+ * feed posts by OTHER people that either carry them as an ACCEPTED collab
+ * coauthor or @mention their username in the caption. Mention matching
+ * mirrors mentionService.extractMentionUsernames (token charset
+ * [A-Za-z0-9._-], trailing dots stripped, case-insensitive) in SQL so the
+ * tab agrees with who mention pushes went to.
+ *
+ * Visibility mirrors getUserPosts' collab-row reach: the viewer needn't be
+ * the author's friend (a tag deliberately shares the post with the tagged
+ * user's audience), but a private or blocked author still disappears, and
+ * the whole tab is gated on the viewer being allowed to see the tagged
+ * user's content at all. Blocks between the TAGGED user and the author also
+ * hide the row — a block ends the tag in both directions.
+ */
+export async function getUserTaggedPosts(
+  viewerId: string,
+  taggedUserId: string,
+  limit: number,
+  before?: string | null,
+): Promise<PostRow[]> {
+  const users = await db.query<{ username: string | null }>(
+    `SELECT username FROM users WHERE user_id = $1`,
+    [taggedUserId],
+  );
+  const username = users[0]?.username ?? null;
+  // Caption-mention pattern, matching extractMentionUsernames: the token
+  // after '@' is [A-Za-z0-9._-]+ with trailing dots stripped — so after the
+  // escaped username only dots may follow before a non-token char or the end.
+  const mentionPattern = username
+    ? `@${username.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.*([^a-zA-Z0-9._-]|$)`
+    : null;
+  const rows = await db.query<PostRow>(
+    `
+		SELECT ${POST_SELECT},
+			${URL_SAFE_CURSOR("p.created_at")} AS cursor,
+			-- Same story-photo lead as the profile grid, so tagged cards match.
+			(
+				SELECT p3.media_url FROM posts p3
+				WHERE p.workout_id IS NOT NULL
+					AND p3.workout_id = p.workout_id
+					AND p3.user_id = p.user_id
+					AND p3.post_id <> p.post_id
+					AND p3.deleted_at IS NULL
+					AND p3.share_to_story AND NOT p3.share_to_feed
+				ORDER BY p3.created_at DESC
+				LIMIT 1
+			) AS story_photo_url
+		FROM posts p
+		JOIN users u ON u.user_id = p.user_id
+		WHERE p.deleted_at IS NULL
+			AND p.share_to_feed
+			AND p.user_id <> $2
+			AND (
+				(p.coauthor_user_id = $2 AND p.coauthor_status = 'accepted')
+				OR ($5::text IS NOT NULL AND p.caption IS NOT NULL AND p.caption ~* $5)
+			)
+			-- Profile gate: may the viewer see the tagged user's content at all?
+			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$2", "$1")}
+			-- Author gate (mirrors getUserPosts' collab reach): the viewer's own
+			-- posts always show; others' need not-private + no blocks either way.
+			AND (p.user_id = $1 OR (
+				${OWNER_NOT_PRIVATE_SQL("p.user_id")}
+				AND NOT EXISTS (
+					SELECT 1 FROM user_blocks b
+					WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
+						OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
+				)
+			))
+			-- Blocks between the tagged user and the author end the tag.
+			AND NOT EXISTS (
+				SELECT 1 FROM user_blocks tb
+				WHERE (tb.blocker_id = $2 AND tb.blocked_id = p.user_id)
+					OR (tb.blocker_id = p.user_id AND tb.blocked_id = $2)
+			)
+			AND ($3::timestamptz IS NULL OR p.created_at < $3::timestamptz)
+		ORDER BY p.created_at DESC
+		LIMIT $4
+		`,
+    [viewerId, taggedUserId, before ?? null, limit, mentionPattern],
   );
   return rows;
 }

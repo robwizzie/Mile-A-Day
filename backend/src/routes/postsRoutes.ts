@@ -13,6 +13,7 @@ import {
   getFeedController,
   getUnifiedFeedController,
   getUserPostsController,
+  getUserTaggedPostsController,
   deletePostController,
   updatePostController,
   reportPostController,
@@ -65,7 +66,9 @@ router.get("/memories", getPostMemoriesController);
 router.get("/feed", getFeedController);
 router.get("/feed/unified", getUnifiedFeedController);
 
-// A user's posts for the Instagram-style profile grid.
+// A user's posts for the Instagram-style profile grid, and the posts they're
+// tagged in (accepted collabs + caption @mentions) for the "Tagged" tab.
+router.get("/user/:userId/tagged", getUserTaggedPostsController);
 router.get("/user/:userId", getUserPostsController);
 
 // Comments (Instagram-style, one level of replies).

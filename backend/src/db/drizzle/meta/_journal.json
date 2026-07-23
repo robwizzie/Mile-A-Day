@@ -162,6 +162,20 @@
       "when": 1784598194533,
       "tag": "0022_parallel_sway",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784765470051,
+      "tag": "0023_right_ultragirl",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784766655686,
+      "tag": "0024_flat_the_fury",
+      "breakpoints": true
     }
   ]
 }

@@ -568,6 +568,20 @@ struct NotificationInboxView: View {
                 userInfo: ["tab": 2]
             )
             NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
+        case "coauthor_invite", "coauthor_accepted", "mention", "post_comment":
+            // Collab invites/accepts, @mentions, and comment activity all live
+            // on one specific post — land the feed there (the invite's
+            // Accept/Decline banner sits right on that card).
+            FeedDeepLink.pending = FeedDeepLink.Target(
+                userId: notification.data?["user_id"],
+                postId: notification.data?["post_id"]
+            )
+            NotificationCenter.default.post(
+                name: NSNotification.Name("MAD_SwitchTab"),
+                object: nil,
+                userInfo: ["tab": 2]
+            )
+            NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
         case "friend_activity" where isWorkoutActivity(notification):
             // A friend's completed walk/run/mile lives on the FEED — land on
             // its entry, not the Friends list. The target is parked statically

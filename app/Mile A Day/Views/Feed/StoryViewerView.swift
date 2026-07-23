@@ -1,28 +1,302 @@
 import Combine
 import SwiftUI
 
-/// Full-screen story playback for a single author: segmented progress bars,
-/// ~5s auto-advance, tap left/right to step, swipe down to dismiss, inline hype,
-/// and a report/block (or delete-own) overflow.
+/// Full-screen story playback across ALL viewable authors, Instagram-style:
+/// swipe horizontally to cube-rotate between authors' story groups, finishing
+/// an author's last story slides straight into the next author, tap left/right
+/// steps within an author, hold to pause, swipe down to dismiss.
+///
+/// The cube: each page rotates about the screen edge it shares with its
+/// neighbor (90° at a full page width) with perspective, receding faces dim —
+/// the exact grammar Instagram trained everyone on, so the gesture needs no
+/// explanation. Adjacent authors' stories are premounted (edge-on, invisible)
+/// so their images are usually loaded before the swipe lands; they never mark
+/// themselves viewed or run timers until they actually become the front face.
 struct StoryViewerView: View {
+    /// Viewable story groups in rail order — the deck the cube pages through.
+    let groups: [StoryGroup]
+    let currentUserId: String?
+    /// Per-group earned story days ("yyyy-MM-dd"); nil = no filtering (own).
+    let allowedDaysFor: (StoryGroup) -> Set<String>?
+    /// Called exactly once when the viewer closes, with whether anything
+    /// changed (a story deleted/expired, an author blocked) so the parent can
+    /// refresh the rail.
+    let onClose: (_ changed: Bool) -> Void
+
+    @State private var currentIndex: Int
+    /// Live horizontal drag translation (also driven programmatically for the
+    /// auto-advance cube). 0 when settled.
+    @State private var dragX: CGFloat = 0
+    /// Live downward drag for the dismiss gesture. 0 when settled.
+    @State private var dragY: CGFloat = 0
+    /// Locked on the first moved points so a diagonal finger can't fight both
+    /// axes at once — horizontal cubes, vertical dismisses, never both.
+    @State private var dragAxis: DragAxis?
+    /// A commit/cancel animation is in flight — input is ignored until the
+    /// cube settles so a mid-flight tap can't tear the transition.
+    @State private var isTransitioning = false
+    @State private var changed = false
+    private enum DragAxis { case horizontal, vertical }
+
+    init(
+        groups: [StoryGroup],
+        initialGroupId: String,
+        currentUserId: String?,
+        allowedDaysFor: @escaping (StoryGroup) -> Set<String>?,
+        onClose: @escaping (_ changed: Bool) -> Void
+    ) {
+        self.groups = groups
+        self.currentUserId = currentUserId
+        self.allowedDaysFor = allowedDaysFor
+        self.onClose = onClose
+        _currentIndex = State(
+            initialValue: groups.firstIndex { $0.user_id == initialGroupId } ?? 0
+        )
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            ZStack {
+                // Backdrop behind the rotating faces (and the shrunken card
+                // while dragging down to dismiss).
+                Color.black.ignoresSafeArea()
+
+                if groups.isEmpty {
+                    Color.clear.onAppear { close() }
+                } else {
+                    ZStack {
+                        ForEach(visibleIndices, id: \.self) { i in
+                            page(i, width: width)
+                        }
+                    }
+                    // Drag-down dismiss: the whole deck follows the finger and
+                    // shrinks slightly — releasing high springs it back. (No
+                    // clip shape here: clipping would letterbox the stories'
+                    // edge-to-edge backgrounds at the safe-area bounds.)
+                    .offset(y: dragY)
+                    .scaleEffect(max(0.82, 1 - dragY / 1400))
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(pagerGesture(width: width))
+        }
+        .background(Color.black.ignoresSafeArea())
+        .statusBarHidden(true)
+    }
+
+    /// Current page plus premounted neighbors (edge-on at ±90°, so invisible
+    /// until a swipe starts revealing them).
+    private var visibleIndices: [Int] {
+        [currentIndex - 1, currentIndex, currentIndex + 1].filter(groups.indices.contains)
+    }
+
+    @ViewBuilder
+    private func page(_ i: Int, width: CGFloat) -> some View {
+        let offset = slotOffset(i, width: width)
+        // −1…1 across the visible travel; clamped so premounted faces park
+        // exactly edge-on instead of over-rotating.
+        let progress = max(-1, min(1, offset / max(width, 1)))
+        StoryGroupPlayerView(
+            group: groups[i],
+            currentUserId: currentUserId,
+            allowedDays: allowedDaysFor(groups[i]),
+            isActive: i == currentIndex && !isTransitioning,
+            isGesturing: dragAxis != nil || isTransitioning,
+            onAdvancePastEnd: { advance(from: i, width: width) },
+            onBackPastStart: { goBack(from: i, width: width) },
+            onGroupEmpty: { skipEmptyGroup(i, width: width) },
+            onRequestClose: { close() },
+            onChanged: { changed = true }
+        )
+        .frame(width: width, height: nil)
+        // Receding cube faces fall into shadow, like Instagram's.
+        .overlay(
+            Color.black.opacity(Double(abs(progress)) * 0.55)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+        )
+        .rotation3DEffect(
+            .degrees(Double(progress) * 90),
+            axis: (x: 0, y: 1, z: 0),
+            // Hinge on the edge shared with the neighbor: pages to the right
+            // fold about their leading edge, pages to the left (and the
+            // outgoing current page) about their trailing edge.
+            anchor: offset > 0 ? .leading : .trailing,
+            anchorZ: 0,
+            perspective: 2.5
+        )
+        .offset(x: offset)
+        .zIndex(i == currentIndex ? 1 : 0)
+        .allowsHitTesting(i == currentIndex && !isTransitioning)
+    }
+
+    private func slotOffset(_ i: Int, width: CGFloat) -> CGFloat {
+        CGFloat(i - currentIndex) * width + dragX
+    }
+
+    // MARK: - Gesture
+
+    private func pagerGesture(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 12, coordinateSpace: .local)
+            .onChanged { value in
+                guard !isTransitioning else { return }
+                if dragAxis == nil {
+                    dragAxis = abs(value.translation.width) > abs(value.translation.height)
+                        ? .horizontal : .vertical
+                }
+                switch dragAxis {
+                case .horizontal:
+                    var translation = value.translation.width
+                    // No page to the right of the first group — rubber-band
+                    // instead of tearing open an empty face.
+                    if currentIndex == 0 && translation > 0 { translation /= 3 }
+                    dragX = translation
+                case .vertical:
+                    dragY = max(0, value.translation.height)
+                case nil:
+                    break
+                }
+            }
+            .onEnded { value in
+                let axis = dragAxis
+                dragAxis = nil
+                guard !isTransitioning else { return }
+                switch axis {
+                case .horizontal: settleHorizontal(value, width: width)
+                case .vertical: settleVertical(value)
+                case nil: break
+                }
+            }
+    }
+
+    private func settleHorizontal(_ value: DragGesture.Value, width: CGFloat) {
+        let translation = value.translation.width
+        let flick = value.predictedEndTranslation.width
+        let goNext = translation < -width / 3 || flick < -width * 0.6
+        let goPrev = translation > width / 3 || flick > width * 0.6
+
+        if goNext {
+            if currentIndex < groups.count - 1 {
+                animate(to: currentIndex + 1, width: width)
+            } else {
+                // Cubing past the last author ends the show, like Instagram.
+                close()
+            }
+        } else if goPrev, currentIndex > 0 {
+            animate(to: currentIndex - 1, width: width)
+        } else {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.86)) { dragX = 0 }
+        }
+    }
+
+    private func settleVertical(_ value: DragGesture.Value) {
+        if value.translation.height > 140 || value.predictedEndTranslation.height > 320 {
+            close()
+        } else {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { dragY = 0 }
+        }
+    }
+
+    // MARK: - Navigation
+
+    /// Cube to a neighboring group: animate the drag the rest of the way, then
+    /// commit the index and zero the translation in one animation-free
+    /// transaction — the settled frame is pixel-identical, so there's no jump.
+    private func animate(to target: Int, width: CGFloat) {
+        guard groups.indices.contains(target), target != currentIndex else { return }
+        isTransitioning = true
+        MADHaptics.action()
+        withAnimation(
+            .spring(response: 0.38, dampingFraction: 0.92),
+            completionCriteria: .logicallyComplete
+        ) {
+            dragX = -CGFloat(target - currentIndex) * width
+        } completion: {
+            var settle = Transaction()
+            settle.disablesAnimations = true
+            withTransaction(settle) {
+                currentIndex = target
+                dragX = 0
+            }
+            isTransitioning = false
+        }
+    }
+
+    /// A group's last story finished (timer or tap) — flow straight into the
+    /// next author, or end the show after the last one.
+    private func advance(from i: Int, width: CGFloat) {
+        guard i == currentIndex, !isTransitioning else { return }
+        if currentIndex < groups.count - 1 {
+            animate(to: currentIndex + 1, width: width)
+        } else {
+            close()
+        }
+    }
+
+    /// Tapping back past a group's first story returns to the previous author
+    /// (the first group just replays its first story — the player already
+    /// reset its progress).
+    private func goBack(from i: Int, width: CGFloat) {
+        guard i == currentIndex, !isTransitioning, currentIndex > 0 else { return }
+        animate(to: currentIndex - 1, width: width)
+    }
+
+    /// A group turned out to have nothing viewable (expired mid-session, all
+    /// stories deleted, or a failed load) — skip past it without breaking the
+    /// flow; closing only when there's nowhere left to go.
+    private func skipEmptyGroup(_ i: Int, width: CGFloat) {
+        changed = true
+        guard i == currentIndex, !isTransitioning else { return }
+        if currentIndex < groups.count - 1 {
+            animate(to: currentIndex + 1, width: width)
+        } else if currentIndex > 0 {
+            animate(to: currentIndex - 1, width: width)
+        } else {
+            close()
+        }
+    }
+
+    private func close() {
+        onClose(changed)
+    }
+}
+
+/// One author's stories inside the pager: segmented progress bars, ~5s
+/// auto-advance, tap left/right to step, hold to pause (chrome fades away),
+/// inline reactions, and a report/block (or delete-own) overflow. Runs its
+/// timers and marks stories viewed ONLY while it is the pager's front face.
+private struct StoryGroupPlayerView: View {
     let group: StoryGroup
     let currentUserId: String?
     /// Story days ("yyyy-MM-dd") the viewer has EARNED (completed that day).
-    /// nil = no filtering (own stories). Items outside these days are hidden:
-    /// yesterday's stories play for a viewer who completed yesterday while a
-    /// not-yet-earned today story stays out of the deck.
+    /// nil = no filtering (own stories). Items outside these days are hidden.
     var allowedDays: Set<String>? = nil
-    /// Called when the viewer dismisses, with whether anything changed (a story
-    /// was deleted) so the parent can refresh the rail.
-    let onClose: (_ changed: Bool) -> Void
+    /// This page is front-and-center: timers run, views get marked.
+    let isActive: Bool
+    /// The pager is mid-drag or mid-cube — hold playback so a story can't
+    /// advance underneath a transition.
+    let isGesturing: Bool
+    /// The group's last story finished (tap or timer) — the pager decides
+    /// whether that cubes onward or closes.
+    let onAdvancePastEnd: () -> Void
+    /// Tapped back past the first story.
+    let onBackPastStart: () -> Void
+    /// Nothing viewable in this group (expired/deleted/failed) — skip me.
+    let onGroupEmpty: () -> Void
+    /// The X button (and other explicit exits).
+    let onRequestClose: () -> Void
+    /// Something changed that the feed should refresh for (delete/block/…).
+    let onChanged: () -> Void
 
     @State private var stories: [PostItem] = []
     @State private var index: Int = 0
     @State private var progress: CGFloat = 0
     @State private var isLoading = true
-    @State private var dragOffset: CGFloat = 0
-    @State private var changed = false
     @State private var paused = false
+    /// Finger held down on the photo — playback pauses and the chrome fades,
+    /// Instagram's "let me look at this" gesture.
+    @State private var holdPaused = false
     /// The current photo has rendered (or failed) — the 5s timer holds until
     /// then so a slow connection can't advance past an image nobody saw.
     @State private var imageReady = false
@@ -74,6 +348,7 @@ struct StoryViewerView: View {
                 }
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
+                .opacity(holdPaused ? 0 : 1)
 
                 VStack(spacing: 0) {
                     progressBars
@@ -82,20 +357,19 @@ struct StoryViewerView: View {
                     footer(post)
                 }
                 .padding(.top, 8)
+                // Holding to look at the photo fades the chrome away.
+                .opacity(holdPaused ? 0 : 1)
+                .animation(.easeInOut(duration: 0.2), value: holdPaused)
             } else {
-                Color.clear.onAppear { close() }
+                // Deck emptied (deleted the last story / everything expired).
+                Color.clear.onAppear { if isActive { onGroupEmpty() } }
             }
         }
-        .offset(y: max(0, dragOffset))
-        .gesture(
-            DragGesture()
-                .onChanged { v in if v.translation.height > 0 { dragOffset = v.translation.height } }
-                .onEnded { v in
-                    if v.translation.height > 120 { close() } else { withAnimation { dragOffset = 0 } }
-                }
-        )
         .task { await load() }
         .onReceive(tick) { _ in advanceProgress() }
+        .onChange(of: isActive) { _, active in
+            if active { activate() }
+        }
         // onDismiss also covers swiping the sheet away, which would otherwise
         // leave `paused` stuck true and freeze the story.
         .sheet(isPresented: $showReport, onDismiss: { paused = false }) {
@@ -158,7 +432,6 @@ struct StoryViewerView: View {
                 paused = false
             }
         }
-        .statusBarHidden(true)
     }
 
     // MARK: - Pieces
@@ -210,6 +483,13 @@ struct StoryViewerView: View {
             Color.clear.contentShape(Rectangle()).onTapGesture { step(1) }
         }
         .ignoresSafeArea()
+        // Hold to pause and take the photo in — chrome fades, releasing (or
+        // starting a swipe, which cancels the press) resumes.
+        .onLongPressGesture(minimumDuration: 0.25) {
+            holdPaused = true
+        } onPressingChanged: { pressing in
+            if !pressing { holdPaused = false }
+        }
     }
 
     private var progressBars: some View {
@@ -248,7 +528,7 @@ struct StoryViewerView: View {
             }
             Spacer()
             overflowMenu(post)
-            Button { close() } label: {
+            Button { onRequestClose() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundColor(.white)
@@ -444,7 +724,8 @@ struct StoryViewerView: View {
     }
 
     private func advanceProgress() {
-        guard !isLoading, !paused, !showReport, !showOptions, !promoting,
+        guard isActive, !isGesturing, !holdPaused,
+              !isLoading, !paused, !showReport, !showOptions, !promoting,
               imageReady, current != nil else { return }
         progress += 0.05 / stepDuration
         if progress >= 1 { step(1) }
@@ -453,20 +734,37 @@ struct StoryViewerView: View {
     private func step(_ dir: Int) {
         progress = 0
         let next = index + dir
-        if next < 0 { return }
-        if next >= stories.count { close(); return }
+        if next < 0 {
+            // First story replays (progress just reset); the pager may cube
+            // back to the previous author.
+            onBackPastStart()
+            return
+        }
+        if next >= stories.count {
+            onAdvancePastEnd()
+            return
+        }
         imageReady = false
         index = next
         markViewed()
     }
 
-    private func markViewed() {
-        guard let post = current else { return }
-        Task { try? await PostService.markStoryViewed(postId: post.post_id) }
+    /// This page just became the pager's front face: restart the current bar
+    /// and record the view. Premounted neighbor pages never reach this until
+    /// the user actually lands on them.
+    private func activate() {
+        guard !isLoading else { return }
+        if stories.isEmpty {
+            onGroupEmpty()
+        } else {
+            progress = 0
+            markViewed()
+        }
     }
 
-    private func close() {
-        onClose(changed)
+    private func markViewed() {
+        guard isActive, let post = current else { return }
+        Task { try? await PostService.markStoryViewed(postId: post.post_id) }
     }
 
     // MARK: - Actions
@@ -494,17 +792,21 @@ struct StoryViewerView: View {
                 isLoading = false
                 if loaded.isEmpty {
                     // The group's stories expired/vanished since the rail
-                    // loaded (or none are viewable yet) — report changed so
-                    // the parent refreshes instead of re-presenting a black
-                    // flash forever.
-                    changed = true
-                    close()
-                } else {
+                    // loaded (or none are viewable yet) — tell the pager to
+                    // skip past instead of flashing black.
+                    onChanged()
+                    if isActive { onGroupEmpty() }
+                } else if isActive {
                     markViewed()
                 }
             }
         } catch {
-            await MainActor.run { isLoading = false; close() }
+            // A failed load behaves like an empty group: skipped when (or if)
+            // the user reaches it — one bad fetch must not kill the whole show.
+            await MainActor.run {
+                isLoading = false
+                if isActive { onGroupEmpty() }
+            }
         }
     }
 
@@ -537,11 +839,14 @@ struct StoryViewerView: View {
                 shareToFeed: true,
                 shareToStory: false,
                 stats: post.stats_snapshot,
-                isAuto: false
+                isAuto: false,
+                // Promoting while the run's 10-min window is still open counts
+                // as posting live — the FRESH chip follows onto the feed.
+                postedLive: FreshPostWindowManager.shared.isOpen
             )
             await MainActor.run {
                 promotedIds.insert(post.post_id)
-                changed = true
+                onChanged()
                 MADHaptics.success()
             }
         } catch APIError.conflict {
@@ -557,13 +862,13 @@ struct StoryViewerView: View {
     private func deleteOwn(_ post: PostItem) async {
         do {
             try await PostService.deletePost(postId: post.post_id)
-            changed = true
             await MainActor.run {
+                onChanged()
                 stories.removeAll { $0.post_id == post.post_id }
                 if index >= stories.count { index = max(0, stories.count - 1) }
                 progress = 0
                 imageReady = false
-                if stories.isEmpty { close() }
+                if stories.isEmpty { onGroupEmpty() }
             }
         } catch {}
     }
@@ -571,8 +876,10 @@ struct StoryViewerView: View {
     private func block(_ post: PostItem) async {
         do {
             try await BlockService.block(userId: post.user_id)
-            changed = true
-            await MainActor.run { close() }
+            await MainActor.run {
+                onChanged()
+                onRequestClose()
+            }
         } catch {}
     }
 }
