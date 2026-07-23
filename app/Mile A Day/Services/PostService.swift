@@ -360,13 +360,37 @@ enum PostService {
         return "&before=\(encoded)"
     }
 
+    /// JPEG-encode a post image for upload, normalizing away formats that
+    /// `UIImage.jpegData` silently rejects. Composer flattens (SwiftUI
+    /// `ImageRenderer`) and modern iPhone camera captures are frequently
+    /// wide-gamut / extended-range (Display P3, 16-bit float) bitmaps — and
+    /// ImageIO's JPEG encoder can't write those, so `jpegData` returns nil and
+    /// a perfectly valid photo dies with "Couldn't prepare that photo". Only
+    /// HDR/wide-gamut source photos trip it, which is why it hit some users and
+    /// not others. Redrawing into an opaque, standard-range sRGB bitmap first
+    /// guarantees an encodable image without touching the happy path.
+    private static func jpegDataForUpload(_ image: UIImage, quality: CGFloat = 0.85) -> Data? {
+        if let data = image.jpegData(compressionQuality: quality) { return data }
+
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.opaque = true
+        format.scale = image.scale > 0 ? image.scale : 1
+        // Force an 8-bit sRGB context; the source's P3/extended-range colors are
+        // converted down as it draws, yielding a bitmap JPEG always accepts.
+        format.preferredRange = .standard
+        let renderer = UIGraphicsImageRenderer(size: image.size, format: format)
+        return renderer.jpegData(withCompressionQuality: quality) { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+        }
+    }
+
     /// Upload a flattened post photo (overlay already composited). Returns the
     /// server `media_url` to reference when creating the post.
     static func uploadMedia(_ image: UIImage) async throws -> String {
         guard let url = URL(string: "\(AppConfig.baseURL)/posts/media") else {
             throw PostError.invalidURL
         }
-        guard let imageData = image.jpegData(compressionQuality: 0.85) else {
+        guard let imageData = jpegDataForUpload(image) else {
             throw PostError.compressionFailed
         }
         guard let accessToken = TokenStore.accessToken else {
