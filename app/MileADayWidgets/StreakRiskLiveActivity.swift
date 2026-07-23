@@ -19,6 +19,33 @@ struct StreakRiskActivityAttributes: ActivityAttributes {
     /// The number on the line.
     var streak: Int
     var goalMiles: Double
+    var funStyle: Bool
+
+    init(streak: Int, goalMiles: Double, funStyle: Bool = false) {
+        self.streak = streak
+        self.goalMiles = goalMiles
+        self.funStyle = funStyle
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case streak
+        case goalMiles
+        case funStyle
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        streak = try container.decode(Int.self, forKey: .streak)
+        goalMiles = try container.decode(Double.self, forKey: .goalMiles)
+        funStyle = try container.decodeIfPresent(Bool.self, forKey: .funStyle) ?? false
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(streak, forKey: .streak)
+        try container.encode(goalMiles, forKey: .goalMiles)
+        try container.encode(funStyle, forKey: .funStyle)
+    }
 }
 
 // MARK: - Live Activity
@@ -30,23 +57,41 @@ struct StreakRiskLiveActivity: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "flame.fill")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(.red)
-                            Text("DAY \(context.attributes.streak)")
-                                .font(.system(size: 12, weight: .heavy, design: .rounded))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.75)
+                    if context.attributes.funStyle {
+                        HStack(spacing: 6) {
+                            FlameBuddyFigure(health: .critical, size: 42)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("DAY \(context.attributes.streak)")
+                                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.75)
+                                Text("on the line")
+                                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.6))
+                                    .lineLimit(1)
+                            }
                         }
-                        Text("on the line")
-                            .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .foregroundColor(.white.opacity(0.6))
-                            .lineLimit(1)
+                        .frame(maxWidth: 126, alignment: .leading)
+                    } else {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "flame.fill")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(.red)
+                                Text("DAY \(context.attributes.streak)")
+                                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.75)
+                            }
+                            Text("on the line")
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                .foregroundColor(.white.opacity(0.6))
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: 126, alignment: .leading)
                     }
-                    .frame(maxWidth: 126, alignment: .leading)
                 }
 
                 DynamicIslandExpandedRegion(.trailing) {
@@ -122,14 +167,21 @@ private struct StreakRiskLockScreenView: View {
 
     var body: some View {
         HStack(spacing: 14) {
+            if context.attributes.funStyle {
+                FlameBuddyFigure(health: .critical, size: 62)
+                    .frame(width: 64, height: 64)
+            }
+
             // The number on the line.
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Image(systemName: "flame.fill")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(
-                            LinearGradient(colors: [.orange, .red], startPoint: .top, endPoint: .bottom)
-                        )
+                    if !context.attributes.funStyle {
+                        Image(systemName: "flame.fill")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(
+                                LinearGradient(colors: [.orange, .red], startPoint: .top, endPoint: .bottom)
+                            )
+                    }
                     Text("Day \(context.attributes.streak) on the line")
                         .font(.system(size: 15, weight: .heavy, design: .rounded))
                         .foregroundColor(.white)

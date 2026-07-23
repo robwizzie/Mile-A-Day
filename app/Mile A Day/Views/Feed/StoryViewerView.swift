@@ -7,11 +7,10 @@ import SwiftUI
 /// steps within an author, hold to pause, swipe down to dismiss.
 ///
 /// The cube: each page rotates about the screen edge it shares with its
-/// neighbor (90° at a full page width) with perspective, receding faces dim —
-/// the exact grammar Instagram trained everyone on, so the gesture needs no
-/// explanation. Adjacent authors' stories are premounted (edge-on, invisible)
-/// so their images are usually loaded before the swipe lands; they never mark
-/// themselves viewed or run timers until they actually become the front face.
+/// neighbor with perspective. Adjacent authors'
+/// stories are premounted just offscreen so their images are usually
+/// loaded before the swipe lands; they never mark themselves viewed or run
+/// timers until they actually become the front face.
 struct StoryViewerView: View {
     /// Viewable story groups in rail order — the deck the cube pages through.
     let groups: [StoryGroup]
@@ -36,6 +35,10 @@ struct StoryViewerView: View {
     /// cube settles so a mid-flight tap can't tear the transition.
     @State private var isTransitioning = false
     @State private var changed = false
+    /// Keep cube faces just shy of edge-on. At an exact 90° SwiftUI can emit
+    /// "ignoring singular matrix" and the image view visibly reprojects before
+    /// landing.
+    private let maxCubeAngle = 88.0
     private enum DragAxis { case horizontal, vertical }
 
     init(
@@ -85,8 +88,8 @@ struct StoryViewerView: View {
         .statusBarHidden(true)
     }
 
-    /// Current page plus premounted neighbors (edge-on at ±90°, so invisible
-    /// until a swipe starts revealing them).
+    /// Current page plus premounted neighbors, parked just shy of edge-on so
+    /// SwiftUI never produces a singular 3D projection.
     private var visibleIndices: [Int] {
         [currentIndex - 1, currentIndex, currentIndex + 1].filter(groups.indices.contains)
     }
@@ -110,14 +113,8 @@ struct StoryViewerView: View {
             onChanged: { changed = true }
         )
         .frame(width: width, height: nil)
-        // Receding cube faces fall into shadow, like Instagram's.
-        .overlay(
-            Color.black.opacity(Double(abs(progress)) * 0.55)
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-        )
         .rotation3DEffect(
-            .degrees(Double(progress) * 90),
+            .degrees(Double(progress) * maxCubeAngle),
             axis: (x: 0, y: 1, z: 0),
             // Hinge on the edge shared with the neighbor: pages to the right
             // fold about their leading edge, pages to the left (and the
@@ -126,6 +123,7 @@ struct StoryViewerView: View {
             anchorZ: 0,
             perspective: 2.5
         )
+        .opacity(abs(progress) >= 0.995 ? 0 : 1)
         .offset(x: offset)
         .zIndex(i == currentIndex ? 1 : 0)
         .allowsHitTesting(i == currentIndex && !isTransitioning)
@@ -202,13 +200,14 @@ struct StoryViewerView: View {
 
     /// Cube to a neighboring group: animate the drag the rest of the way, then
     /// commit the index and zero the translation in one animation-free
-    /// transaction — the settled frame is pixel-identical, so there's no jump.
+    /// transaction. The transition flag flips in that same pass so the landed
+    /// page never renders one inactive frame.
     private func animate(to target: Int, width: CGFloat) {
         guard groups.indices.contains(target), target != currentIndex else { return }
         isTransitioning = true
         MADHaptics.action()
         withAnimation(
-            .spring(response: 0.38, dampingFraction: 0.92),
+            .easeOut(duration: 0.24),
             completionCriteria: .logicallyComplete
         ) {
             dragX = -CGFloat(target - currentIndex) * width
@@ -218,8 +217,8 @@ struct StoryViewerView: View {
             withTransaction(settle) {
                 currentIndex = target
                 dragX = 0
+                isTransitioning = false
             }
-            isTransitioning = false
         }
     }
 

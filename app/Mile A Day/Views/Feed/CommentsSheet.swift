@@ -5,9 +5,9 @@ import SwiftUI
 /// input bar with a "Replying to" state, and @friend autocomplete. Long-press
 /// a comment to delete (yours, or any on your own/co-authored post) or report.
 struct CommentsSheet: View {
-    let post: PostItem
-    /// True when the current user authors or co-authors the post (may delete
-    /// any comment on it).
+    let target: CommentTarget
+    /// True when the current user authors/co-authors this feed item (may
+    /// delete any comment on it).
     let canModerate: Bool
     /// Reports the latest comment count back to the feed card.
     var onCountChange: ((Int) -> Void)? = nil
@@ -28,6 +28,26 @@ struct CommentsSheet: View {
     @State private var profileUser: BackendUser?
     @StateObject private var friendService = FriendService()
     @FocusState private var inputFocused: Bool
+
+    init(
+        post: PostItem,
+        canModerate: Bool,
+        onCountChange: ((Int) -> Void)? = nil
+    ) {
+        self.target = .post(post.post_id)
+        self.canModerate = canModerate
+        self.onCountChange = onCountChange
+    }
+
+    init(
+        target: CommentTarget,
+        canModerate: Bool,
+        onCountChange: ((Int) -> Void)? = nil
+    ) {
+        self.target = target
+        self.canModerate = canModerate
+        self.onCountChange = onCountChange
+    }
 
     private var topLevel: [PostComment] { comments.filter { $0.parent_comment_id == nil } }
     private func replies(to comment: PostComment) -> [PostComment] {
@@ -347,7 +367,7 @@ struct CommentsSheet: View {
 
     private func load() async {
         do {
-            comments = try await CommentService.list(postId: post.post_id)
+            comments = try await CommentService.list(target: target)
             isLoading = false
             onCountChange?(comments.count)
         } catch {
@@ -392,7 +412,7 @@ struct CommentsSheet: View {
         defer { isSending = false }
         do {
             let created = try await CommentService.add(
-                postId: post.post_id,
+                target: target,
                 content: content,
                 parentCommentId: replyingTo.map { $0.parent_comment_id ?? $0.comment_id }
             )

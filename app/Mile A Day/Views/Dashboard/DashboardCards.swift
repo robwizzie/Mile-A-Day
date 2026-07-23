@@ -46,8 +46,6 @@ struct DashboardHeroCard: View {
         return f
     }()
 
-    private let milestones = [3, 5, 7, 10, 14, 21, 30, 50, 60, 75, 90, 100, 150, 200, 250, 365, 500, 1000]
-
     /// Backend (workout_splits) is authoritative; HealthKit is fallback only.
     private var bestFastestPace: TimeInterval {
         if fastestPace > 0 { return fastestPace }
@@ -55,10 +53,7 @@ struct DashboardHeroCard: View {
     }
 
     private var nextMilestone: (value: Int, progress: Double, daysToGo: Int)? {
-        for milestone in milestones where streak < milestone {
-            return (milestone, Double(streak) / Double(milestone), milestone - streak)
-        }
-        return nil
+        StreakMilestone.next(after: streak)
     }
 
     /// Completion the card is allowed to CLAIM: never assert "done" off a

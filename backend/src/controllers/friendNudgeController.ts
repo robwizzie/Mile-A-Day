@@ -14,31 +14,31 @@ import {
   getTodayMiles,
   DAILY_GOAL_TOLERANCE,
 } from "../services/workoutService.js";
+import { refreshCurrentStreak } from "../services/leaderboardService.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import { PostgresService } from "../services/DbService.js";
 
 const db = PostgresService.getInstance();
 
-/// Returns a map of user_id -> current_streak for the given users. Falls back
-/// to an empty map if the schema is pre-leaderboard (column doesn't exist) so
-/// the nudge endpoints stay forward-compatible with un-migrated environments.
+/// Returns a map of user_id -> fresh current_streak for the given users.
+/// Streaks decay when the calendar rolls over, even if the user has not
+/// uploaded anything, so nudge/status reads reconcile before answering.
 async function fetchStreaks(
   userIds: string[],
 ): Promise<Record<string, number>> {
   if (userIds.length === 0) return {};
+  const uniqueIds = [...new Set(userIds)];
   try {
-    const rows = await db.query(
-      `SELECT user_id, current_streak FROM users WHERE user_id = ANY($1::text[])`,
-      [userIds],
-    );
     const map: Record<string, number> = {};
-    for (const row of rows) {
-      map[row.user_id] = Number(row.current_streak) || 0;
-    }
+    await Promise.all(
+      uniqueIds.map(async (userId) => {
+        map[userId] = await refreshCurrentStreak(userId);
+      }),
+    );
     return map;
   } catch (err: any) {
     console.error(
-      "fetchStreaks failed (likely pre-leaderboard schema):",
+      "fetchStreaks failed:",
       err.message,
     );
     return {};

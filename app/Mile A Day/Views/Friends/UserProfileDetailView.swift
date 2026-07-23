@@ -640,7 +640,7 @@ struct UserProfileDetailView: View {
                             .font(.system(size: 15, weight: .bold, design: .rounded))
                             .foregroundColor(isComplete ? .green : .white)
                             .lineLimit(1)
-                        if streak > 0 {
+                        if isComplete && streak > 0 {
                             HStack(spacing: 2) {
                                 Image(systemName: "flame.fill")
                                     .font(.system(size: 10, weight: .bold))

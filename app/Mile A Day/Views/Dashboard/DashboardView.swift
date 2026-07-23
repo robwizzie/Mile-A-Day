@@ -79,6 +79,9 @@ struct DashboardView: View {
     /// Collapsible section state
     @AppStorage("statsCollapsed") private var statsCollapsed: Bool = true
     @AppStorage("workoutsCollapsed") private var workoutsCollapsed: Bool = true
+    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStyle.modern.rawValue
+    @State private var showDashboardStyleChooser = false
+    @State private var showInsights = false
 
 
     /// Navigation state for badges view from celebration
@@ -241,8 +244,8 @@ struct DashboardView: View {
         // and photo prompt for yesterday's already-posted mile every morning until a
         // second launch refreshed it. The onChange(of: hasFreshTodaysDistance) below
         // re-runs this once the real fetch lands.
-        guard healthManager.hasFreshTodaysDistance else {
-            print("[Dashboard] ⏳ Skipping celebration check - today's distance not freshly fetched yet")
+        guard healthManager.hasFreshTodaysDistanceForCurrentDay else {
+            print("[Dashboard] ⏳ Skipping celebration check - today's distance is not fresh for the current day")
             return
         }
         // Defer while the workout tracker covers the dashboard — the celebration
@@ -283,7 +286,8 @@ struct DashboardView: View {
 
             // Re-validate after the await — state may have changed, or another trigger
             // may have shown the celebration while we were fetching.
-            guard currentState.isCompleted,
+            guard healthManager.hasFreshTodaysDistanceForCurrentDay,
+                  currentState.isCompleted,
                   healthManager.todaysDistance > 0,
                   !celebrationManager.hasShownGoalCelebrationToday else {
                 return
@@ -342,6 +346,7 @@ struct DashboardView: View {
     private func checkAndShowPostGoalEncouragement() {
         // Same deferral as the goal celebration: don't play it behind the cover.
         guard !showWorkoutView,
+              healthManager.hasFreshTodaysDistanceForCurrentDay,
               currentState.isCompleted,
               celebrationManager.hasShownGoalCelebrationToday,
               healthManager.todaysDistance > 0,
@@ -391,6 +396,10 @@ struct DashboardView: View {
         InProgressWorkoutStore.load()
     }
 
+    private var dashboardStyle: DashboardStyle {
+        DashboardStyle(rawValue: dashboardStyleRaw) ?? .modern
+    }
+
     var body: some View {
         // iOS 26: Simple ScrollView with background - no ZStack needed
         // NavigationStack is provided by MainTabView
@@ -398,6 +407,7 @@ struct DashboardView: View {
             MADTabHeader(
                 title: "Mile A Day",
                 subtitle: headerSubtitle,
+                subtitleHighlight: headerSubtitleHighlight,
                 actions: dashboardHeaderActions
             )
 
@@ -417,23 +427,11 @@ struct DashboardView: View {
                     // of independently-styled banners.
                     attentionSection
 
-                    // THE hero: today's ring + streak + Start Mile, state-
-                    // aware (action-first before the goal, celebration-first
-                    // after). Always the first card.
-                    heroSection
+                    gettingStartedSection
                         .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                        .padding(.bottom, 16)
+                        .padding(.top, 12)
 
-                    // Streak Tokens — its own card, ALWAYS on the dashboard
-                    // when the feature is active (it must never depend on
-                    // which week-view tab is selected). Renders nothing when
-                    // the server gate is off.
-                    StreakTokensCard()
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 22)
-
-                    dashboardContent
+                    dashboardExperienceSection
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -448,7 +446,7 @@ struct DashboardView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollBounceBehavior(.basedOnSize)
-        .background(MADTheme.Colors.appBackgroundGradient)
+        .background(dashboardBackground)
         // First-run welcome tour — a full-screen, paged walkthrough of every
         // feature and mode. Replaces the old spotlight overlay, which
         // mis-highlighted dashboard elements that were scrolled off-screen.
@@ -475,6 +473,13 @@ struct DashboardView: View {
         }
         .navigationDestination(isPresented: $showWorkouts) {
             WorkoutsView(healthManager: healthManager)
+        }
+        .navigationDestination(isPresented: $showInsights) {
+            InsightsView(
+                healthManager: healthManager,
+                userManager: userManager,
+                showWorkouts: $showWorkouts
+            )
         }
             .sheet(isPresented: $showManualWorkoutEntry) {
                 ManualWorkoutEntryView()
@@ -592,6 +597,7 @@ struct DashboardView: View {
                 // priority of all auto-surfaces; if anything else claims
                 // this visit, it simply takes the next one.
                 maybePresentMonthlyRecap()
+                maybePresentDashboardStyleChooser()
             }
             // Self-cleaning replacements for the old NotificationCenter.addObserver
             // calls in onAppear — those registered a fresh observer on every
@@ -619,7 +625,33 @@ struct DashboardView: View {
             // Each stands down for goal celebrations; all state persists until
             // dismissed, so no moment is ever lost — just queued.
             .overlay {
-                if showStreakReveal,
+                if showDashboardStyleChooser,
+                   !celebrationManager.isShowingCelebration,
+                   !showWelcomeTour,
+                   !showWorkoutView,
+                   !showPendingSheet,
+                   !showMonthlyRecap,
+                   tokensState.storyEvent == nil,
+                   tokensState.newlyEarned.isEmpty {
+                    DashboardStyleChooserView(
+                        onChoose: { style in
+                            DashboardStylePreference.choose(style)
+                            dashboardStyleRaw = style.rawValue
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                showDashboardStyleChooser = false
+                            }
+                        },
+                        onDismiss: {
+                            DashboardStylePreference.markChosen()
+                            dashboardStyleRaw = DashboardStyle.modern.rawValue
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                showDashboardStyleChooser = false
+                            }
+                        }
+                    )
+                    .transition(.opacity)
+                    .zIndex(53)
+                } else if showStreakReveal,
                    !celebrationManager.isShowingCelebration,
                    !showWelcomeTour, !showWorkoutView {
                     StreakRevealOverlay(
@@ -983,6 +1015,28 @@ struct DashboardView: View {
         }
     }
 
+    private func maybePresentDashboardStyleChooser() {
+        guard !DashboardStylePreference.hasChosen,
+              !showDashboardStyleChooser else { return }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            guard !DashboardStylePreference.hasChosen,
+                  !celebrationManager.isShowingCelebration,
+                  !showWorkoutView,
+                  !showWelcomeTour,
+                  !showWhatsNew,
+                  !showPendingSheet,
+                  !showMonthlyRecap,
+                  !showStreakReveal,
+                  tokensState.storyEvent == nil,
+                  tokensState.newlyEarned.isEmpty
+            else { return }
+            withAnimation(.easeInOut(duration: 0.22)) {
+                showDashboardStyleChooser = true
+            }
+        }
+    }
+
     /// Idempotent — safe to call on every relevant state change.
     private func syncStreakRiskActivity() {
         StreakRiskActivityManager.sync(
@@ -1047,13 +1101,16 @@ struct DashboardView: View {
 
     // MARK: - Header Actions
 
-    /// Curated 3-action header — bell (with unread count badge), + (manual
+    /// Curated header — insights, bell (with unread count badge), + (manual
     /// workout), gear (goal/settings). Trophy / sparkles / admin / info
-    /// were moved out of the header to match Friends/Compete/Profile (which
-    /// each have 2-3 actions). Replay is now an inline card in the body
+    /// were moved out of the header. Replay is now an inline card in the body
     /// when applicable; admin/info will get re-surfaced in Profile later.
     private var dashboardHeaderActions: [MADHeaderAction] {
         [
+            MADHeaderAction(
+                id: "insights",
+                systemImage: "chart.line.uptrend.xyaxis"
+            ) { showInsights = true },
             MADHeaderAction(
                 id: "bell",
                 systemImage: "bell.fill",
@@ -1259,6 +1316,39 @@ struct DashboardView: View {
         .clipped() // Prevent content overflow from causing horizontal jitter
     }
 
+    @ViewBuilder
+    private var dashboardExperienceSection: some View {
+        switch dashboardStyle {
+        case .fun:
+            FunDashboardBody(
+                healthManager: healthManager,
+                userManager: userManager,
+                friendService: friendService,
+                hasActiveWorkout: hasActiveWorkout,
+                showWorkoutView: $showWorkoutView
+            )
+        case .modern:
+            ModernDashboardBody(
+                healthManager: healthManager,
+                userManager: userManager,
+                hasActiveWorkout: hasActiveWorkout,
+                showWorkoutView: $showWorkoutView
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var dashboardBackground: some View {
+        switch dashboardStyle {
+        case .fun:
+            MADTheme.Colors.appBackgroundGradient
+                .ignoresSafeArea()
+        case .modern:
+            Color(red: 0.05, green: 0.05, blue: 0.06)
+                .ignoresSafeArea()
+        }
+    }
+
     // MARK: - Hero
 
     private var heroSection: some View {
@@ -1391,6 +1481,11 @@ struct DashboardView: View {
         let date = Self.headerDateFormatter.string(from: Date())
         let streak = userManager.currentUser.streak
         return streak > 0 ? "\(date) · Day \(streak)" : date
+    }
+
+    private var headerSubtitleHighlight: String? {
+        let streak = userManager.currentUser.streak
+        return streak > 0 ? "Day \(streak)" : nil
     }
 
 

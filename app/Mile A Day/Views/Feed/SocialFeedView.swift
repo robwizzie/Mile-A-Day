@@ -23,6 +23,12 @@ enum FeedDeepLink {
     static let poke = NSNotification.Name("MAD_OpenFeedWorkout")
 }
 
+private struct WorkoutCommentsTarget: Identifiable {
+    let entry: FeedEntry
+
+    var id: String { entry.id }
+}
+
 /// The single social surface inside the Friends tab: a stories rail, an optional
 /// "On this day" memories card, then one unified, infinitely-scrollable feed of
 /// photo posts AND raw walk/run activity. Posting and viewing friends' stories
@@ -95,6 +101,7 @@ struct SocialFeedView: View {
     /// Tapped hype tally — presents the "who hyped this" sheet.
     @State private var hypersContext: HypersListContext?
     @State private var commentsPost: PostItem?
+    @State private var workoutCommentsTarget: WorkoutCommentsTarget?
     /// Profile tapped INSIDE the hypers sheet — presented after that sheet
     /// fully dismisses (sheet-over-sheet races drop the second presentation).
     @State private var pendingProfileUser: BackendUser?
@@ -437,6 +444,16 @@ struct SocialFeedView: View {
                 }
             }
         }
+        .sheet(item: $workoutCommentsTarget) { target in
+            CommentsSheet(
+                target: .workout(target.entry.entryId),
+                canModerate: target.entry.is_self
+            ) { newCount in
+                if let index = feed.firstIndex(where: { $0.id == target.entry.id }) {
+                    feed[index].comment_count = newCount
+                }
+            }
+        }
         .sheet(item: $editingPost) { post in
             EditCaptionSheet(post: post) { newCaption in
                 if let idx = feed.firstIndex(where: { $0.isPost && $0.entryId == post.post_id }) {
@@ -641,6 +658,7 @@ struct SocialFeedView: View {
                 onHype: { Task { await hype(entry) } },
                 onTapAuthor: openProfile,
                 onTapHypeCount: openHypers,
+                onOpenComments: { workoutCommentsTarget = WorkoutCommentsTarget(entry: entry) },
                 onBlock: entry.is_self ? nil : { Task { await block(entry) } }
             )
         }

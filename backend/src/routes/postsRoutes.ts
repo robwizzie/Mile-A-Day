@@ -23,7 +23,9 @@ import {
 } from "../controllers/postsController.js";
 import {
   listCommentsController,
+  listWorkoutCommentsController,
   addCommentController,
+  addWorkoutCommentController,
   deleteCommentController,
   reportCommentController,
 } from "../controllers/commentsController.js";
@@ -72,6 +74,8 @@ router.get("/user/:userId/tagged", getUserTaggedPostsController);
 router.get("/user/:userId", getUserPostsController);
 
 // Comments (Instagram-style, one level of replies).
+router.get("/workouts/:workoutId/comments", listWorkoutCommentsController);
+router.post("/workouts/:workoutId/comments", addWorkoutCommentController);
 router.get("/:postId/comments", listCommentsController);
 router.post("/:postId/comments", addCommentController);
 router.delete("/comments/:commentId", deleteCommentController);

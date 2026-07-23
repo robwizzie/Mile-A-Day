@@ -570,9 +570,10 @@ struct NotificationInboxView: View {
             NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
         case "coauthor_invite", "coauthor_accepted", "mention", "post_comment":
             // Collab invites/accepts, @mentions, and comment activity all live
-            // on one specific post — land the feed there (the invite's
-            // Accept/Decline banner sits right on that card).
+            // on one specific feed item — post_id for posts, workout_id for
+            // raw workout comments.
             FeedDeepLink.pending = FeedDeepLink.Target(
+                workoutId: notification.data?["workout_id"],
                 userId: notification.data?["user_id"],
                 postId: notification.data?["post_id"]
             )

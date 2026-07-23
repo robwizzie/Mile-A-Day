@@ -535,7 +535,7 @@ export async function getUserPostsController(
 }
 
 /**
- * GET /posts/user/:userId/tagged — posts the user is tagged in (accepted
+ * GET /posts/user/:userId/tagged — posts the user is tagged in (visible
  * collabs + caption @mentions), the Instagram-style profile "Tagged" tab.
  */
 export async function getUserTaggedPostsController(

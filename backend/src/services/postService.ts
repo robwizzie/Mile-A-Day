@@ -178,7 +178,11 @@ const POST_SELECT = `${POST_COLUMNS},
 	) AS hype_count,
 	(
 		SELECT COUNT(*)::int FROM post_comments pc
-		WHERE pc.post_id = p.post_id AND pc.deleted_at IS NULL
+		WHERE pc.deleted_at IS NULL
+			AND (
+				pc.post_id = p.post_id
+				OR (p.workout_id IS NOT NULL AND pc.workout_id = p.workout_id)
+			)
 	) AS comment_count,
 	${COAUTHOR_COLUMNS}`;
 
@@ -1067,10 +1071,20 @@ export async function getUnifiedFeed(
 						AND ${runHypeMatchSql("hc", "wt")}
 				)
 			END AS hype_count,
-			CASE WHEN page.kind = 'post' THEN (
-				SELECT COUNT(*)::int FROM post_comments pc
-				WHERE pc.post_id = p.post_id AND pc.deleted_at IS NULL
-			) ELSE 0 END AS comment_count,
+			CASE
+				WHEN page.kind = 'post' THEN (
+					SELECT COUNT(*)::int FROM post_comments pc
+					WHERE pc.deleted_at IS NULL
+						AND (
+							pc.post_id = p.post_id
+							OR (page.workout_id IS NOT NULL AND pc.workout_id = page.workout_id)
+						)
+				)
+				ELSE (
+					SELECT COUNT(*)::int FROM post_comments pc
+					WHERE pc.workout_id = wt.workout_id AND pc.deleted_at IS NULL
+				)
+			END AS comment_count,
 			-- FRESH chip, for every viewer. Truth order: the client's own claim
 			-- (posted_fresh, stamped at create when the author's 10-min window
 			-- was open) wins; legacy builds that never sent it fall back to a
@@ -1189,8 +1203,10 @@ export async function getUserPosts(
 
 /**
  * Posts a user is TAGGED in, for the Instagram-style profile "Tagged" tab:
- * feed posts by OTHER people that either carry them as an ACCEPTED collab
- * coauthor or @mention their username in the caption. Mention matching
+ * feed posts by OTHER people that either carry them as a collab coauthor
+ * (pending is visible only to the author/invitee; accepted is visible to
+ * anyone who may view the tagged profile) or @mention their username in the
+ * caption. Mention matching
  * mirrors mentionService.extractMentionUsernames (token charset
  * [A-Za-z0-9._-], trailing dots stripped, case-insensitive) in SQL so the
  * tab agrees with who mention pushes went to.
@@ -1241,7 +1257,11 @@ export async function getUserTaggedPosts(
 			AND p.share_to_feed
 			AND p.user_id <> $2
 			AND (
-				(p.coauthor_user_id = $2 AND p.coauthor_status = 'accepted')
+				(p.coauthor_user_id = $2 AND (
+					p.coauthor_status = 'accepted'
+					OR p.user_id = $1
+					OR p.coauthor_user_id = $1
+				))
 				OR ($5::text IS NOT NULL AND p.caption IS NOT NULL AND p.caption ~* $5)
 			)
 			-- Profile gate: may the viewer see the tagged user's content at all?
@@ -1444,6 +1464,38 @@ export async function visiblePostAuthor(
 						))
 			 )`,
     [viewerId, postId],
+  );
+  return rows[0]?.user_id ?? null;
+}
+
+/**
+ * The workout's author IF the viewer may see that raw workout activity in the
+ * unified feed. Null when not visible — callers map that to 404 so workout
+ * existence is not leaked.
+ */
+export async function visibleWorkoutAuthor(
+  viewerId: string,
+  workoutId: string,
+): Promise<string | null> {
+  const rows = await db.query<{ user_id: string }>(
+    `SELECT w.user_id FROM workouts w
+		 LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
+		 WHERE w.workout_id = $2
+			 AND w.deleted_at IS NULL
+			 AND w.exclusion_reason IS NULL
+			 AND (w.user_id = $1 OR COALESCE(ns.share_workouts_to_feed, true) = true)
+			 AND (w.user_id = $1 OR ${OWNER_NOT_PRIVATE_SQL("w.user_id")})
+			 AND (w.user_id = $1 OR EXISTS (
+				 SELECT 1 FROM friendships f
+				 WHERE f.user_id = $1 AND f.friend_id = w.user_id
+					 AND f.status = 'accepted'
+			 ))
+			 AND NOT EXISTS (
+				 SELECT 1 FROM user_blocks b
+				 WHERE (b.blocker_id = $1 AND b.blocked_id = w.user_id)
+						OR (b.blocker_id = w.user_id AND b.blocked_id = $1)
+			 )`,
+    [viewerId, workoutId],
   );
   return rows[0]?.user_id ?? null;
 }

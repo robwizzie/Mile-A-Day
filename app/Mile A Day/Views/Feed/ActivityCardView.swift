@@ -7,9 +7,9 @@ import CoreLocation
 /// time, type chip, menu), a full 4:5 media slide — the GPS route with the
 /// standard stats band, or the branded workout card when there's no route
 /// (the exact face an auto post bakes into its image) — the same stat strip,
-/// and the same hype footer. The functional difference stays honest: no
-/// photo, no caption, and no comments — those belong to posts the author
-/// chose to make. Double-tapping anywhere on the body hypes, like posts.
+/// and the same hype/comment footer. The functional difference stays honest:
+/// no photo or caption — those belong to posts the author chose to make.
+/// Double-tapping anywhere on the body hypes, like posts.
 struct ActivityCardView: View {
     let entry: FeedEntry
     var isHyping: Bool = false
@@ -21,6 +21,8 @@ struct ActivityCardView: View {
     var onTapAuthor: (() -> Void)? = nil
     /// Tap the hype tally to see who hyped (Instagram-likes style).
     var onTapHypeCount: (() -> Void)? = nil
+    /// Open the Instagram-style comments sheet.
+    var onOpenComments: (() -> Void)? = nil
     /// Block the author — the "…" menu, matching post cards (others' only).
     var onBlock: (() -> Void)? = nil
 
@@ -264,6 +266,21 @@ struct ActivityCardView: View {
                 .buttonStyle(.plain)
                 .disabled(onTapHypeCount == nil)
             }
+            Button { onOpenComments?() } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "bubble.right")
+                        .font(.system(size: 15, weight: .semibold))
+                    if let count = entry.comment_count, count > 0 {
+                        Text("\(count)")
+                            .font(.system(size: 13, weight: .bold, design: .rounded))
+                    }
+                }
+                .foregroundColor(.white.opacity(0.7))
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(onOpenComments == nil)
             Spacer()
             if !entry.is_self {
                 HypeButton(

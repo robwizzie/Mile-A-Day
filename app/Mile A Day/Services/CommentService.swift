@@ -1,5 +1,32 @@
 import SwiftUI
 
+enum CommentTarget: Equatable, Identifiable {
+    case post(String)
+    case workout(String)
+
+    var id: String {
+        switch self {
+        case .post(let id): return "post-\(id)"
+        case .workout(let id): return "workout-\(id)"
+        }
+    }
+
+    fileprivate var endpoint: String {
+        switch self {
+        case .post(let id):
+            return "/posts/\(Self.pathSegment(id))/comments"
+        case .workout(let id):
+            return "/posts/workouts/\(Self.pathSegment(id))/comments"
+        }
+    }
+
+    private static func pathSegment(_ raw: String) -> String {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/?#[]@!$&'()*+,;=")
+        return raw.addingPercentEncoding(withAllowedCharacters: allowed) ?? raw
+    }
+}
+
 /// One comment on a feed post. Replies carry the parent (top-level) comment's
 /// id — the backend keeps threads one level deep, Instagram-style.
 struct PostComment: Decodable, Identifiable, Equatable {
@@ -31,19 +58,23 @@ enum CommentService {
     /// Mirrors MAX_COMMENT in backend/src/controllers/commentsController.ts.
     static let maxLength = 1000
 
-    static func list(postId: String) async throws -> [PostComment] {
+    static func list(target: CommentTarget) async throws -> [PostComment] {
         struct ListResponse: Decodable { let comments: [PostComment] }
         return try await APIClient.fancyFetch(
-            endpoint: "/posts/\(postId)/comments",
+            endpoint: target.endpoint,
             responseType: ListResponse.self
         ).comments
+    }
+
+    static func list(postId: String) async throws -> [PostComment] {
+        try await list(target: .post(postId))
     }
 
     /// Add a comment; pass `parentCommentId` to reply to a top-level comment
     /// (the backend re-roots replies-to-replies automatically). Throws
     /// APIError.apiError("terms_not_accepted") before first-time terms consent.
     static func add(
-        postId: String,
+        target: CommentTarget,
         content: String,
         parentCommentId: String? = nil
     ) async throws -> PostComment {
@@ -56,11 +87,19 @@ enum CommentService {
             Body(content: content, parent_comment_id: parentCommentId)
         )
         return try await APIClient.fancyFetch(
-            endpoint: "/posts/\(postId)/comments",
+            endpoint: target.endpoint,
             method: .POST,
             body: bodyData,
             responseType: AddResponse.self
         ).comment
+    }
+
+    static func add(
+        postId: String,
+        content: String,
+        parentCommentId: String? = nil
+    ) async throws -> PostComment {
+        try await add(target: .post(postId), content: content, parentCommentId: parentCommentId)
     }
 
     /// Delete a comment (yours, or any comment on a post you author/co-author).

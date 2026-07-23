@@ -70,7 +70,11 @@ enum StreakRiskActivityManager {
 
         do {
             _ = try Activity.request(
-                attributes: StreakRiskActivityAttributes(streak: streak, goalMiles: goalMiles),
+                attributes: StreakRiskActivityAttributes(
+                    streak: streak,
+                    goalMiles: goalMiles,
+                    funStyle: DashboardStylePreference.current == .fun
+                ),
                 content: content
             )
             print("[StreakRiskActivity] started — day \(streak), \(String(format: "%.2f", state.milesToGo)) mi to go")

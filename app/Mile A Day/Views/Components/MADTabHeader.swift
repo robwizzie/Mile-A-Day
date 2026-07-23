@@ -43,11 +43,13 @@ struct MADTabHeader: View {
     /// 412"). Only Dashboard uses it today; other tabs pass nothing and
     /// render exactly as before.
     let subtitle: String?
+    let subtitleHighlight: String?
     let actions: [MADHeaderAction]
 
-    init(title: String, subtitle: String? = nil, actions: [MADHeaderAction] = []) {
+    init(title: String, subtitle: String? = nil, subtitleHighlight: String? = nil, actions: [MADHeaderAction] = []) {
         self.title = title
         self.subtitle = subtitle
+        self.subtitleHighlight = subtitleHighlight
         self.actions = actions
     }
 
@@ -64,9 +66,8 @@ struct MADTabHeader: View {
                     .minimumScaleFactor(0.65)
 
                 if let subtitle {
-                    Text(subtitle)
+                    highlightedSubtitle(subtitle)
                         .font(.system(size: 12, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.55))
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
@@ -86,6 +87,27 @@ struct MADTabHeader: View {
         .padding(.horizontal, MADTheme.Spacing.md)
         .padding(.top, MADTheme.Spacing.sm)
         .padding(.bottom, 4)
+    }
+
+    private func highlightedSubtitle(_ subtitle: String) -> Text {
+        guard
+            let subtitleHighlight,
+            let range = subtitle.range(of: subtitleHighlight)
+        else {
+            return Text(subtitle)
+                .foregroundColor(.white.opacity(0.55))
+        }
+
+        let prefix = String(subtitle[..<range.lowerBound])
+        let highlighted = String(subtitle[range])
+        let suffix = String(subtitle[range.upperBound...])
+
+        return Text(prefix)
+            .foregroundColor(.white.opacity(0.55))
+        + Text(highlighted)
+            .foregroundColor(MADTheme.Colors.madRed)
+        + Text(suffix)
+            .foregroundColor(.white.opacity(0.55))
     }
 
     @ViewBuilder

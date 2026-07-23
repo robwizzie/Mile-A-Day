@@ -1,6 +1,7 @@
 import { Friendship, User } from "../types/user.js";
 import { PostgresService } from "./DbService.js";
 import { runHypeMatchSql, runHypedByViewerMatchSql } from "./hypeService.js";
+import { refreshCurrentStreak } from "./leaderboardService.js";
 
 const db = PostgresService.getInstance();
 
@@ -66,7 +67,20 @@ export async function getFriends(user: string): Promise<User[]> {
     [user],
   );
 
-  return friends;
+  return refreshFriendStreaks(friends);
+}
+
+async function refreshFriendStreaks<T extends { user_id: string; current_streak?: number | null }>(
+  friends: T[],
+): Promise<T[]> {
+  if (friends.length === 0) return friends;
+  const refreshed = await Promise.all(
+    friends.map(async (friend) => ({
+      ...friend,
+      current_streak: await refreshCurrentStreak(friend.user_id),
+    })),
+  );
+  return refreshed;
 }
 
 export async function getSentRequests(user: string): Promise<User[]> {

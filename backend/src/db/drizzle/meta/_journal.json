@@ -176,6 +176,13 @@
       "when": 1784766655686,
       "tag": "0024_flat_the_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1784770657896,
+      "tag": "0025_chilly_baron_strucker",
+      "breakpoints": true
     }
   ]
 }

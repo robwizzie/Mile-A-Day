@@ -11,6 +11,7 @@ struct DashboardSettingsView: View {
     /// Reopenable What's New — lives here next to the App Tour so both
     /// "show me around" surfaces share one home.
     @State private var showWhatsNew = false
+    @AppStorage(DashboardStylePreference.key) private var dashboardStyleRaw = DashboardStyle.modern.rawValue
 
     var body: some View {
         ScrollView {
@@ -36,6 +37,30 @@ struct DashboardSettingsView: View {
                 )
             }
             .buttonStyle(.plain)
+
+            settingsDivider
+
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                MADSettingsRow(
+                    icon: "paintbrush.pointed.fill",
+                    title: "Dashboard Style",
+                    subtitle: selectedStyle.subtitle,
+                    iconColor: .orange
+                )
+
+                Picker("Dashboard Style", selection: $dashboardStyleRaw) {
+                    ForEach(DashboardStyle.allCases) { style in
+                        Text(style.title).tag(style.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: dashboardStyleRaw) { _, newValue in
+                    DashboardStylePreference.current = DashboardStyle(rawValue: newValue) ?? .modern
+                    DashboardStylePreference.markChosen()
+                    MADHaptics.tap()
+                }
+            }
+            .padding(.bottom, MADTheme.Spacing.xs)
 
             settingsDivider
 
@@ -84,5 +109,9 @@ struct DashboardSettingsView: View {
         Divider()
             .overlay(Color.white.opacity(0.06))
             .padding(.vertical, MADTheme.Spacing.xs)
+    }
+
+    private var selectedStyle: DashboardStyle {
+        DashboardStyle(rawValue: dashboardStyleRaw) ?? .modern
     }
 }

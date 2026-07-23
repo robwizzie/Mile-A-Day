@@ -300,12 +300,12 @@ extension APIError {
 /// where the older `[String: String]` decode would silently fail.
 private struct ErrorEnvelope: Decodable {
     let error: String?
+    let detail: String?
 }
 
 private func extractErrorMessage(from data: Data) -> String? {
     if let envelope = try? JSONDecoder().decode(ErrorEnvelope.self, from: data) {
-        return envelope.error
+        return envelope.error ?? envelope.detail
     }
     return nil
 }
-

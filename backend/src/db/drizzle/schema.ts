@@ -1409,7 +1409,8 @@ export const postComments = pgTable(
   "post_comments",
   {
     commentId: uuid("comment_id").defaultRandom().primaryKey().notNull(),
-    postId: uuid("post_id").notNull(),
+    postId: uuid("post_id"),
+    workoutId: varchar("workout_id", { length: 255 }),
     userId: text("user_id").notNull(),
     parentCommentId: uuid("parent_comment_id"),
     content: text().notNull(),
@@ -1425,11 +1426,23 @@ export const postComments = pgTable(
         table.postId.asc().nullsLast(),
         table.createdAt.asc().nullsLast(),
       )
-      .where(sql`(deleted_at IS NULL)`),
+      .where(sql`(deleted_at IS NULL AND post_id IS NOT NULL)`),
+    index("idx_post_comments_workout")
+      .using(
+        "btree",
+        table.workoutId.asc().nullsLast(),
+        table.createdAt.asc().nullsLast(),
+      )
+      .where(sql`(deleted_at IS NULL AND workout_id IS NOT NULL)`),
     foreignKey({
       columns: [table.postId],
       foreignColumns: [posts.postId],
       name: "post_comments_post_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.workoutId],
+      foreignColumns: [workouts.workoutId],
+      name: "post_comments_workout_id_fkey",
     }).onDelete("cascade"),
     foreignKey({
       columns: [table.userId],
@@ -1444,6 +1457,10 @@ export const postComments = pgTable(
     check(
       "post_comments_content_check",
       sql`char_length(content) >= 1 AND char_length(content) <= 1000`,
+    ),
+    check(
+      "post_comments_one_target_check",
+      sql`((post_id IS NOT NULL)::int + (workout_id IS NOT NULL)::int) = 1`,
     ),
   ],
 );

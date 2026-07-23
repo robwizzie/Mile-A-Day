@@ -528,7 +528,7 @@ enum PostService {
         return try await APIClient.fancyFetch(endpoint: endpoint, responseType: FeedResponse.self)
     }
 
-    /// Posts a user is TAGGED in — accepted collabs + caption @mentions —
+    /// Posts a user is TAGGED in — visible collabs + caption @mentions —
     /// for the profile's Instagram-style "Tagged" tab.
     static func fetchUserTaggedPosts(
         userId: String,

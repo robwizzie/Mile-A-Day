@@ -539,8 +539,11 @@ export async function giveStreakAssist(
      ORDER BY local_date DESC LIMIT 1`,
     [friendId, dateStrMinus(friendToday, ASSIST_RESCUE_WINDOW_DAYS + 1)],
   );
-  if (events.length === 0) return { status: "no_recent_break" };
-  const missedDay = events[0].local_date;
+  const liveBreak =
+    events[0] ??
+    (await getLiveAssistableBreak(friendId, friendToday, friendRow));
+  if (!liveBreak) return { status: "no_recent_break" };
+  const missedDay = liveBreak.local_date;
   if (missedDay < dateStrMinus(friendToday, ASSIST_RESCUE_WINDOW_DAYS)) {
     return { status: "window_passed" };
   }
@@ -698,7 +701,7 @@ export interface AssistableFriend {
 export async function getAssistableFriends(
   userId: string,
 ): Promise<AssistableFriend[]> {
-  return db.query<AssistableFriend>(
+  const eventRows = await db.query<AssistableFriend>(
     `SELECT e.user_id, u.username, u.first_name, u.last_name,
             u.profile_image_url,
             to_char(e.local_date, 'YYYY-MM-DD') AS broke_date,
@@ -726,4 +729,78 @@ export async function getAssistableFriends(
      LIMIT 20`,
     [userId],
   );
+
+  const seen = new Set(eventRows.map((row) => row.user_id));
+  const friendRows = await db.query<{
+    user_id: string;
+    username: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    profile_image_url: string | null;
+  }>(
+    `SELECT u.user_id, u.username, u.first_name, u.last_name, u.profile_image_url
+     FROM friendships f
+     JOIN users u ON u.user_id = f.friend_id
+     WHERE f.user_id = $1 AND f.status = 'accepted'
+       AND u.streak_features_at IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM user_blocks b
+         WHERE (b.blocker_id = $1 AND b.blocked_id = u.user_id)
+            OR (b.blocker_id = u.user_id AND b.blocked_id = $1)
+       )
+     LIMIT 50`,
+    [userId],
+  );
+
+  const liveRows: AssistableFriend[] = [];
+  for (const friend of friendRows) {
+    if (seen.has(friend.user_id)) continue;
+    const row = await getStreakFeatureRow(friend.user_id);
+    if (!row?.streak_features_at) continue;
+    const friendToday = await getUserLocalToday(friend.user_id);
+    const liveBreak = await getLiveAssistableBreak(
+      friend.user_id,
+      friendToday,
+      row,
+    );
+    if (!liveBreak) continue;
+    liveRows.push({
+      ...friend,
+      broke_date: liveBreak.local_date,
+      prior_streak: liveBreak.prior_streak,
+    });
+  }
+
+  return [...eventRows, ...liveRows].slice(0, 20);
+}
+
+async function getLiveAssistableBreak(
+  userId: string,
+  userToday: string,
+  row: StreakFeatureUserRow,
+): Promise<{ local_date: string; prior_streak: number } | null> {
+  const d1 = dateStrMinus(userToday, 1);
+  const d2 = dateStrMinus(userToday, 2);
+  const d3 = dateStrMinus(userToday, 3);
+  const facts = await recentDayFacts(userId, dateStrMinus(userToday, 4));
+  const ok = (d: string) => facts.qualified.has(d) || facts.covered.has(d);
+
+  let missedDay: string | null = null;
+  let ddWindowOpen = false;
+  if (!ok(d1) && ok(d2)) {
+    missedDay = d1;
+    ddWindowOpen = true;
+  } else if (ok(d1) && !ok(d2) && ok(d3)) {
+    missedDay = d2;
+  } else {
+    return null;
+  }
+
+  const meters = await getMeters(userId, row, userToday);
+  if (ddWindowOpen && meters.double_down.held) return null;
+  if (meters.streak_save.held) return null;
+
+  const prior = await streakEndingAt(userId, dateStrMinus(missedDay, 1));
+  if (prior < 1) return null;
+  return { local_date: missedDay, prior_streak: prior };
 }

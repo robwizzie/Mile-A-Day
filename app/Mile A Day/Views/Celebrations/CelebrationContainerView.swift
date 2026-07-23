@@ -26,7 +26,11 @@ struct CelebrationContainerView: View {
     private func celebrationView(for celebration: CelebrationType) -> some View {
         switch celebration {
         case .goalCompleted(let stats):
-            GoalCompletedCelebrationView(stats: stats)
+            if DashboardStylePreference.current == .fun {
+                FunGoalCompletedCelebrationView(stats: stats)
+            } else {
+                ModernGoalCompletedCelebrationView(stats: stats)
+            }
 
         case .leaderboardMoveUp(let stats):
             LeaderboardMoveUpView(stats: stats)

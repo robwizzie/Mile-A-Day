@@ -4,28 +4,12 @@ globs: app/**
 
 # iOS App Conventions
 
-## Architecture
-- MVVM with SwiftUI
-- `Views/` - SwiftUI views, organized by feature in subdirectories
-- `Models/` - Data models, managers (UserManager, HealthKitManager, etc.)
-- `Services/` - API service layer (network calls to backend)
-- `Core/State/` - App-level state management (AppStateManager)
-- `Core/Theme/` - `MADTheme` for colors and styling constants
-- `Widgets/` - WidgetKit widgets (streak count, today progress)
-
-## API Client
-- All network calls go through `APIClient.fancyFetch()` - handles token refresh automatically.
-- Base URL hardcoded to `https://mad.mindgoblin.tech` in `APIClient.swift`.
-- Tokens stored in UserDefaults, managed by TokenRefreshService.
-
 ## HealthKit
-- `HealthKitManager` is split across multiple files via extensions:
-  - `HealthKitManager.swift` (core)
-  - `+DataFetching.swift`, `+PersonalRecords.swift`, `+StreakCalculation.swift`, `+WorkoutIndex.swift`
 - Workout sync: HealthKit -> WorkoutProcessor -> WorkoutSyncService -> Backend API
 - HealthKit queries ERROR when the device is locked (protected data). Never treat a query error as "0 miles" — only a successful empty result is a real zero. Writing 0 on error randomly reset widgets.
 - Feed route maps are read from HKWorkoutRoute at sync time. In-app tracked workouts must write their GPS trace via `HKWorkoutRouteBuilder.finishRoute` after `finishWorkout` (and `HKSeriesType.workoutRoute()` must be in the SHARE auth set) — points buffered in InProgressWorkoutStore alone never reach the backend.
 - WidgetKit renders statically: `.onAppear`-driven `@State` animations never play in widget views — render entry values directly. `WidgetDataStore` data is day-stamped; `load()` returns zeros for a stale day, and saves skip no-op writes (widget reloads are budgeted per day).
+- Dashboard style uses `dashboardStyleV1` / `dashboardStyleChosenV1`: Modern is the default, Fun owns the animated flame buddy, and static buddy code must stay copied in both widget locations when Live Activity visuals change.
 - Widget timeline policies are fallbacks (the app reloads on every data write). Never request sub-15-min refreshes: a 60s policy drained the ~40-70/day budget by morning and iOS then silently dropped ALL reloads — widgets froze on stale data while the app was correct.
 - Background HealthKit reads must gate on `hasLoadedInitialData`, not a fixed sleep — on a locked device queries error, `retroactiveStreak` reads 0, and `updateFromHealthKit` persists it unconditionally (streak 0 stuck in widgets).
 - WorkoutIndex incremental updates need the 48h lookback + record-id dedup: querying strictly from `lastUpdated` permanently drops workouts that reached HealthKit late (Watch sync), leaving a `qualifyingDays` hole — `activeStreak()` stops there and the dashboard flashes a tiny streak until the backend rescue lands. Backend-streak ≫ local triggers a debounced rebuild (`repairWorkoutIndexIfStale`).

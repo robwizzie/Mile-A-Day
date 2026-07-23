@@ -1,7 +1,7 @@
 import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { shouldSendNotification } from "./notificationSettingsService.js";
-import { visiblePostAuthor } from "./postService.js";
+import { visiblePostAuthor, visibleWorkoutAuthor } from "./postService.js";
 
 const db = PostgresService.getInstance();
 
@@ -43,15 +43,16 @@ export async function resolveMentions(
 
 /**
  * Push "X mentioned you" to each mentioned user who can actually view the
- * post (author or accepted friend of the author, no blocks). Fire-and-forget;
- * gated on the shared social-interactions pref like hypes/story reactions.
+ * target feed item. Fire-and-forget; gated on the shared social-interactions
+ * pref like hypes/story reactions.
  */
 export async function notifyMentions(
   senderId: string,
   recipients: MentionedUser[],
-  postId: string,
+  targetId: string,
   content: string,
   where: "comment" | "post",
+  targetKind: "post" | "workout" = "post",
 ): Promise<void> {
   if (recipients.length === 0) return;
   const sender = await db.query<{ username: string | null }>(
@@ -63,13 +64,22 @@ export async function notifyMentions(
 
   for (const r of recipients) {
     if (r.user_id === senderId) continue;
-    if (!(await visiblePostAuthor(r.user_id, postId))) continue;
+    const visible =
+      targetKind === "workout"
+        ? await visibleWorkoutAuthor(r.user_id, targetId)
+        : await visiblePostAuthor(r.user_id, targetId);
+    if (!visible) continue;
     if (!(await shouldSendNotification(r.user_id, senderId, "hype"))) continue;
     sendPush(r.user_id, {
       title: `${name} mentioned you in a ${where === "comment" ? "comment" : "post"} 💬`,
       body,
       type: "mention",
-      data: { user_id: senderId, post_id: postId },
+      data: {
+        user_id: senderId,
+        ...(targetKind === "workout"
+          ? { workout_id: targetId, comment_target_kind: "workout" }
+          : { post_id: targetId, comment_target_kind: "post" }),
+      },
     }).catch((e: any) =>
       console.error("[notifyMentions] push failed:", e?.message ?? e),
     );

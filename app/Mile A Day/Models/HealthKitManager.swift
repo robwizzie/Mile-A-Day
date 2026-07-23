@@ -375,11 +375,24 @@ class HealthKitManager: ObservableObject {
     /// safe" + the photo prompt for yesterday's already-posted mile until a second
     /// launch refreshed the cache.
     @Published var hasFreshTodaysDistance: Bool = false
+    @Published private(set) var todaysDistanceDayStamp: String?
+
+    var hasFreshTodaysDistanceForCurrentDay: Bool {
+        hasFreshTodaysDistance && todaysDistanceDayStamp == Self.localDayStamp()
+    }
 
     /// True once fetchRecentWorkouts() has SUCCEEDED at least once this session.
     /// Lets the UI tell "still loading / query erroring" apart from a genuine
     /// empty list, so a locked-device launch stops flashing "No recent workouts".
     @Published var hasLoadedRecentWorkoutsOnce: Bool = false
+
+    private static func localDayStamp(for date: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.calendar = Calendar.current
+        formatter.timeZone = TimeZone.current
+        return formatter.string(from: date)
+    }
 
     func checkInitialDataReady() {
         if hasTodaysDistanceLoaded && hasIndexOrStreakLoaded && !hasLoadedInitialData {
@@ -763,6 +776,7 @@ class HealthKitManager: ObservableObject {
         guard isAuthorized else { return }
         
         let now = Date()
+        let fetchDayStamp = Self.localDayStamp(for: now)
         
         // Get all recent workouts to filter by local timezone
         let runningPredicate = HKQuery.predicateForWorkouts(with: .running)
@@ -819,6 +833,7 @@ class HealthKitManager: ObservableObject {
                 DispatchQueue.main.async {
                     self.todaysDistance = 0.0
                     self.todaysWorkouts = []
+                    self.todaysDistanceDayStamp = fetchDayStamp
                     self.hasFreshTodaysDistance = true
                     #if !os(watchOS)
                     // Get current goal from widget store or default to 1.0
@@ -838,7 +853,7 @@ class HealthKitManager: ObservableObject {
             }
 
             let todaysWorkouts = self.filterWorkoutsByDeviceToday(workouts: workouts)
-            self.processTodaysWorkouts(todaysWorkouts)
+            self.processTodaysWorkouts(todaysWorkouts, dayStamp: fetchDayStamp)
         }
         
         healthStore.execute(query)
@@ -1086,7 +1101,7 @@ class HealthKitManager: ObservableObject {
     }
     
     /// Processes today's filtered workouts to calculate distance and update UI
-    func processTodaysWorkouts(_ todaysWorkouts: [HKWorkout]) {
+    func processTodaysWorkouts(_ todaysWorkouts: [HKWorkout], dayStamp: String? = nil) {
         var totalMiles: Double = 0.0
 
         for workout in todaysWorkouts {
@@ -1112,6 +1127,7 @@ class HealthKitManager: ObservableObject {
             self.todaysDistance = totalMiles
             #endif
             self.todaysWorkouts = todaysWorkouts
+            self.todaysDistanceDayStamp = dayStamp ?? Self.localDayStamp()
             // Same block as the data it vouches for: observers that fire on
             // this flag must see the values it describes (see fetchTodaysDistance).
             self.hasFreshTodaysDistance = true

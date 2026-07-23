@@ -265,7 +265,7 @@ struct StreakTokensCard: View {
                             .foregroundColor(.white.opacity(0.4))
                     }
 
-                    HStack(alignment: .top, spacing: 0) {
+                    HStack(alignment: .top, spacing: 12) {
                         medallionCell(
                             kind: .doubleDown,
                             held: payload.double_down.held,
@@ -307,8 +307,8 @@ struct StreakTokensCard: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 18)
-                .background(tokenCardBackground(readyCount: readyCount(for: payload)))
-                .contentShape(Rectangle())
+            .background(tokenCardBackground(readyCount: readyCount(for: payload)))
+            .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .sheet(isPresented: $showDetail) {
@@ -327,7 +327,7 @@ struct StreakTokensCard: View {
 
     private func tokenCardBackground(readyCount: Int) -> some View {
         RoundedRectangle(cornerRadius: 24, style: .continuous)
-            .fill(.ultraThinMaterial)
+            .fill(Color(red: 0.055, green: 0.050, blue: 0.058))
             .overlay(
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(
@@ -363,13 +363,13 @@ struct StreakTokensCard: View {
     private func medallionCell(
         kind: StreakTokenKind, held: Bool, progress: Double, caption: String
     ) -> some View {
-        VStack(spacing: 7) {
-            TokenMedallion(kind: kind, held: held, progress: progress, size: 46)
+        VStack(spacing: 9) {
+            TokenMedallion(kind: kind, held: held, progress: progress, size: 58)
                 // Earned tokens breathe gently — alive, not static.
-                .scaleEffect(held && pulse ? 1.025 : 1.0)
+                .scaleEffect(held && pulse ? 1.014 : 1.0)
                 .animation(
                     held
-                        ? .easeInOut(duration: 1.5).repeatForever(autoreverses: true)
+                        ? .easeInOut(duration: 2.2).repeatForever(autoreverses: true)
                         : .default,
                     value: pulse
                 )
@@ -396,16 +396,55 @@ struct StreakTokensCard: View {
                     value: tokensState.meterGains
                 )
             Text(kind.title)
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .font(.system(size: 12, weight: .black, design: .rounded))
                 .foregroundColor(.white.opacity(held ? 0.95 : 0.6))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-            Text(caption)
-                .font(.system(size: 11, weight: .heavy, design: .rounded))
+            Text(tokenSubtitle(kind))
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(held ? 0.70 : 0.46))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.78)
+                .frame(minHeight: 28)
+            Text(caption.uppercased())
+                .font(.system(size: 10, weight: .black, design: .rounded))
                 .monospacedDigit()
-                .foregroundColor(held ? .white.opacity(0.72) : .white.opacity(0.45))
+                .foregroundColor(held ? kind.tint : .white.opacity(0.42))
+                .lineLimit(1)
+                .minimumScaleFactor(0.70)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity)
+                .background(Capsule().fill(Color.black.opacity(0.22)))
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 14)
         .frame(maxWidth: .infinity)
+        .frame(minHeight: 190)
+        .background(tokenTileBackground(kind: kind, held: held))
+    }
+
+    private func tokenSubtitle(_ kind: StreakTokenKind) -> String {
+        switch kind {
+        case .doubleDown: return "Protect your streak if you miss a day."
+        case .save: return "Save your streak when life happens."
+        case .assist: return "Get a boost when you need it most."
+        }
+    }
+
+    private func tokenTileBackground(kind: StreakTokenKind, held: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(Color(red: 0.060, green: 0.055, blue: 0.066))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(kind.tint.opacity(held ? 0.12 : 0.045))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(kind.tint.opacity(held ? 0.46 : 0.18), lineWidth: 1)
+            )
+            .shadow(color: held ? kind.tint.opacity(0.24) : .clear, radius: 16, x: 0, y: 8)
     }
 }
 
@@ -503,7 +542,7 @@ struct StreakTokensDetailView: View {
                     kind: kind,
                     held: meter.held,
                     progress: meter.fraction,
-                    size: 54
+                    size: 68
                 )
                 VStack(alignment: .leading, spacing: 3) {
                     Text(kind.title)
@@ -518,10 +557,10 @@ struct StreakTokensDetailView: View {
                 if meter.held {
                     Text("Available")
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundColor(.primary.opacity(0.82))
+                        .foregroundColor(kind.tint)
                         .padding(.horizontal, 9)
                         .padding(.vertical, 4)
-                        .background(Capsule().fill(Color.primary.opacity(0.08)))
+                        .background(Capsule().fill(Color.black.opacity(0.22)))
                 }
             }
 
@@ -538,7 +577,21 @@ struct StreakTokensDetailView: View {
             TokenMeterBar(kind: kind, meter: meter, unit: unit)
         }
         .padding(MADTheme.Spacing.md)
-        .madLiquidGlass()
+        .background(detailTokenBackground(kind: kind, held: meter.held))
+    }
+
+    private func detailTokenBackground(kind: StreakTokenKind, held: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 20, style: .continuous)
+            .fill(Color(red: 0.060, green: 0.055, blue: 0.066))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(kind.tint.opacity(held ? 0.12 : 0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(kind.tint.opacity(held ? 0.42 : 0.18), lineWidth: 1)
+            )
+            .shadow(color: held ? kind.tint.opacity(0.20) : Color.black.opacity(0.12), radius: 14, x: 0, y: 8)
     }
 
     /// Pure Flame explainer — deliberately an INFO PANEL, not another card in

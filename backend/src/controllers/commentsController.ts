@@ -2,7 +2,9 @@ import { Response } from "express";
 import { AuthenticatedRequest } from "../middleware/auth.js";
 import {
   listComments,
+  listWorkoutComments,
   addComment,
+  addWorkoutComment,
   deleteComment,
 } from "../services/commentService.js";
 import { hasAcceptedTerms } from "../services/postService.js";
@@ -31,6 +33,28 @@ export async function listCommentsController(
     res.json({ comments });
   } catch (error: any) {
     console.error("Error listing comments:", error.message);
+    res.status(500).json({ error: "Error listing comments" });
+  }
+}
+
+/** GET /posts/workouts/:workoutId/comments — comments on a raw feed workout. */
+export async function listWorkoutCommentsController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const workoutId =
+      typeof req.params.workoutId === "string" ? req.params.workoutId : "";
+    if (!workoutId) {
+      return res.status(404).json({ error: "workout_not_found" });
+    }
+    const comments = await listWorkoutComments(req.userId!, workoutId);
+    if (comments === null) {
+      return res.status(404).json({ error: "workout_not_found" });
+    }
+    res.json({ comments });
+  } catch (error: any) {
+    console.error("Error listing workout comments:", error.message);
     res.status(500).json({ error: "Error listing comments" });
   }
 }
@@ -74,6 +98,50 @@ export async function addCommentController(
     res.status(201).json({ comment: result });
   } catch (error: any) {
     console.error("Error adding comment:", error.message);
+    res.status(500).json({ error: "Error adding comment" });
+  }
+}
+
+/** POST /posts/workouts/:workoutId/comments — { content, parent_comment_id? } */
+export async function addWorkoutCommentController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const workoutId =
+      typeof req.params.workoutId === "string" ? req.params.workoutId : "";
+    if (!workoutId) {
+      return res.status(404).json({ error: "workout_not_found" });
+    }
+    const content =
+      typeof req.body?.content === "string" ? req.body.content.trim() : "";
+    if (content.length === 0 || content.length > MAX_COMMENT) {
+      return res
+        .status(400)
+        .json({ error: `content must be 1-${MAX_COMMENT} characters` });
+    }
+    const parentCommentId = req.body?.parent_comment_id;
+    if (parentCommentId != null && !isUuid(parentCommentId)) {
+      return res.status(400).json({ error: "invalid_parent_comment_id" });
+    }
+    if (!(await hasAcceptedTerms(req.userId!))) {
+      return res.status(403).json({ error: "terms_not_accepted" });
+    }
+    const result = await addWorkoutComment(
+      req.userId!,
+      workoutId,
+      content,
+      parentCommentId ?? null,
+    );
+    if (result === "not_found") {
+      return res.status(404).json({ error: "workout_not_found" });
+    }
+    if (result === "parent_not_found") {
+      return res.status(404).json({ error: "comment_not_found" });
+    }
+    res.status(201).json({ comment: result });
+  } catch (error: any) {
+    console.error("Error adding workout comment:", error.message);
     res.status(500).json({ error: "Error adding comment" });
   }
 }
