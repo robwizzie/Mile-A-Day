@@ -224,7 +224,10 @@ final class PostComposerViewModel: ObservableObject {
                 isAuto: false,
                 includeRoute: includeRoute,
                 // Feed posts only — the server ignores it otherwise anyway.
-                coauthorUserId: destination.toFeed ? coauthor?.user_id : nil
+                coauthorUserId: destination.toFeed ? coauthor?.user_id : nil,
+                // Server-side FRESH: the claim rides with the post so EVERY
+                // viewer sees the badge, not just this device.
+                postedLive: FreshPostWindowManager.shared.isOpen
             )
             // Reward posts shared inside the run's 10-min fresh window with a
             // "Fresh" badge. No-op when the window is closed.

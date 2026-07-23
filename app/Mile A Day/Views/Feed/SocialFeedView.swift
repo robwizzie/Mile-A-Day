@@ -608,8 +608,12 @@ struct SocialFeedView: View {
             PostCardView(
                 post: post,
                 storyPhotoURL: entry.storyPhotoURL,
-                isFresh: entry.is_self
-                    && freshWindow.wasPostedLive(postId: post.post_id, workoutId: post.workout_id),
+                // Server truth first (every viewer sees a friend's fresh post);
+                // the local window keeps the poster's OWN badge instant while
+                // the next refresh catches up.
+                isFresh: (entry.is_fresh ?? false)
+                    || (entry.is_self
+                        && freshWindow.wasPostedLive(postId: post.post_id, workoutId: post.workout_id)),
                 isHyping: hypingIds.contains(entry.id),
                 isOutOfHypes: isOutOfHypes,
                 onHype: { Task { await hype(entry) } },
@@ -633,7 +637,8 @@ struct SocialFeedView: View {
                 isOutOfHypes: isOutOfHypes,
                 onHype: { Task { await hype(entry) } },
                 onTapAuthor: openProfile,
-                onTapHypeCount: openHypers
+                onTapHypeCount: openHypers,
+                onBlock: entry.is_self ? nil : { Task { await block(entry) } }
             )
         }
     }

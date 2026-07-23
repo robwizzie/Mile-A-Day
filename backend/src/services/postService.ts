@@ -199,6 +199,11 @@ export interface CreatePostInput {
   // Collab post: invite this accepted friend as coauthor (status 'pending'
   // until they accept). Ignored for auto posts.
   coauthorUserId?: string | null;
+  // The author shared this inside their 10-minute fresh window (client-owned:
+  // the window anchors to when the app SAW the finished workout). Drives the
+  // FRESH chip for every viewer. Ignored for auto posts; legacy clients that
+  // omit it get a server-side derivation in the feed query instead.
+  postedLive?: boolean;
 }
 
 // Shape the freshly inserted/updated row like a PostRow (is_self=true).
@@ -304,12 +309,14 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 			INSERT INTO posts (
 				user_id, media_url, caption, workout_id, stats_snapshot,
 				local_date, share_to_feed, share_to_story, story_expires_at,
-				is_auto, include_route, coauthor_user_id, coauthor_status
+				is_auto, include_route, coauthor_user_id, coauthor_status,
+				posted_fresh
 			)
 			VALUES (
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
 				CASE WHEN $8 THEN NOW() + INTERVAL '24 hours' ELSE NULL END,
-				$9, $10, $11, CASE WHEN $11::text IS NULL THEN NULL ELSE 'pending' END
+				$9, $10, $11, CASE WHEN $11::text IS NULL THEN NULL ELSE 'pending' END,
+				$12
 			)
 				ON CONFLICT ${conflictTarget}
 				DO UPDATE SET
@@ -322,7 +329,8 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 					-- The update guard only ever overwrites an AUTO post, which never
 					-- carries a coauthor — so taking EXCLUDED wholesale is safe.
 					coauthor_user_id = EXCLUDED.coauthor_user_id,
-					coauthor_status = EXCLUDED.coauthor_status${flagUpdates}
+					coauthor_status = EXCLUDED.coauthor_status,
+					posted_fresh = EXCLUDED.posted_fresh${flagUpdates}
 				${updateGuard}
 			RETURNING *
 		)
@@ -342,6 +350,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       isAutoValue,
       input.includeRoute !== false,
       coauthorId,
+      !isAutoValue && input.postedLive === true,
     ],
   );
   if (rows[0]) return rows[0];
@@ -859,6 +868,10 @@ export interface FeedEntryRow {
   local_date: string | null;
   // Set by lockUnearnedPhotos when this post's photo is withheld.
   photo_locked?: boolean;
+  // Post entries only: shared inside the author's 10-minute fresh window and
+  // still same-day — drives the FRESH chip for EVERY viewer (it used to be
+  // client-local, so only the poster ever saw their own badge).
+  is_fresh: boolean;
   // The entry's workout: the linked workout for posts (null when unlinked),
   // the workout itself for workout entries. Lets the client know which of
   // today's runs already carry a deliberate post.
@@ -1058,6 +1071,24 @@ export async function getUnifiedFeed(
 				SELECT COUNT(*)::int FROM post_comments pc
 				WHERE pc.post_id = p.post_id AND pc.deleted_at IS NULL
 			) ELSE 0 END AS comment_count,
+			-- FRESH chip, for every viewer. Truth order: the client's own claim
+			-- (posted_fresh, stamped at create when the author's 10-min window
+			-- was open) wins; legacy builds that never sent it fall back to a
+			-- server derivation — posted within 10 min of the workout reaching
+			-- the backend. Display capped to 24h so old posts don't wear it.
+			(
+				page.kind = 'post'
+				AND p.created_at > NOW() - INTERVAL '24 hours'
+				AND (
+					p.posted_fresh
+					OR (
+						NOT p.is_auto
+						AND p.workout_id IS NOT NULL
+						AND wt.created_at IS NOT NULL
+						AND p.created_at <= wt.created_at + INTERVAL '10 minutes'
+					)
+				)
+			) AS is_fresh,
 			${COAUTHOR_COLUMNS},
 			${URL_SAFE_CURSOR("page.sort_ts")} AS cursor
 		FROM page

@@ -131,6 +131,14 @@ assert.ok(
   feed.some((r) => r.route != null),
   "route data attached to a feed row (include_route + share_route_maps)",
 );
+// FRESH is server truth now, visible to OTHER viewers (it used to be a
+// client-local badge only the poster saw). Bob's post was created moments
+// after his workout reached the backend → the legacy derivation marks it.
+assert.equal(
+  feedPost.is_fresh,
+  true,
+  "post created right after its workout arrived reads fresh to other viewers",
+);
 
 // Stories rail as Alice: Bob's fresh story must appear.
 const rail = await getStoriesRail(ALICE);
@@ -148,7 +156,12 @@ assert.ok(
 
 // Tagged tab (getUserTaggedPosts): caption @mentions use exact-token matching,
 // and a collab invite only counts once ACCEPTED.
-const alicePost = (caption, mediaUrl, coauthorUserId = null) =>
+const alicePost = (
+  caption,
+  mediaUrl,
+  coauthorUserId = null,
+  postedLive = false,
+) =>
   createPost({
     userId: ALICE,
     mediaUrl,
@@ -161,6 +174,7 @@ const alicePost = (caption, mediaUrl, coauthorUserId = null) =>
     isAuto: false,
     includeRoute: false,
     coauthorUserId,
+    postedLive,
   });
 const mentionPost = await alicePost(
   "post-run coffee with @ci_bob",
@@ -174,6 +188,7 @@ const collabPost = await alicePost(
   "ran it together",
   "/uploads/posts/ci-alice-collab.jpg",
   BOB,
+  true, // posted_live claim — the client-owned FRESH path
 );
 assert.equal(
   collabPost.coauthor_status,
@@ -215,6 +230,25 @@ assert.ok(
     (p) => p.post_id === mentionPost.post_id,
   ),
   "your own posts never show in your own tagged tab",
+);
+// FRESH both paths, as seen by Bob: the posted_live claim marks a post with
+// no linked workout; a plain post with no claim and no workout stays unfresh.
+const bobFeed = await getUnifiedFeed(BOB, 20, null);
+const collabInFeed = bobFeed.find(
+  (r) => r.kind === "post" && r.id === collabPost.post_id,
+);
+const mentionInFeed = bobFeed.find(
+  (r) => r.kind === "post" && r.id === mentionPost.post_id,
+);
+assert.equal(
+  collabInFeed?.is_fresh,
+  true,
+  "posted_live claim marks the post fresh for other viewers",
+);
+assert.equal(
+  mentionInFeed?.is_fresh,
+  false,
+  "no claim + no linked workout stays unfresh",
 );
 
 // Heatmap endpoint query.

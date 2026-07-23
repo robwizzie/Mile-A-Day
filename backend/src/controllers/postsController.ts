@@ -120,6 +120,7 @@ export async function createPostController(
     is_auto,
     include_route,
     coauthor_user_id,
+    posted_live,
   } = req.body ?? {};
 
   try {
@@ -213,6 +214,10 @@ export async function createPostController(
         typeof include_route === "boolean" ? include_route : undefined,
       coauthorUserId:
         typeof coauthor_user_id === "string" ? coauthor_user_id : null,
+      // Client-owned FRESH claim (its 10-min window anchors to when the app
+      // saw the run). Cosmetic; legacy clients omit it and get the feed
+      // query's server-side derivation instead.
+      postedLive: posted_live === true,
     });
 
     // Collab invite — fire-and-forget push to the invited coauthor.

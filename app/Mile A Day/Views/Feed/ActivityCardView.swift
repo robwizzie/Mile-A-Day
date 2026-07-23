@@ -1,10 +1,15 @@
 import SwiftUI
+import CoreLocation
 
-/// A raw walk/run in the unified feed (no photo) — the auto activity card.
-/// Shares the visual language of PostCardView: author header, a big
-/// distance hero line, the GPS route map when the workout has one, a stat
-/// strip, and a hype affordance. Double-tapping anywhere on the card body
-/// hypes, same as photo posts.
+/// A raw walk/run in the unified feed — a run its author DIDN'T post. Renders
+/// in the same visual language as PostCardView so the feed reads uniformly no
+/// matter what a friend's device did: identical author header (avatar, name,
+/// time, type chip, menu), a full 4:5 media slide — the GPS route with the
+/// standard stats band, or the branded workout card when there's no route
+/// (the exact face an auto post bakes into its image) — the same stat strip,
+/// and the same hype footer. The functional difference stays honest: no
+/// photo, no caption, and no comments — those belong to posts the author
+/// chose to make. Double-tapping anywhere on the body hypes, like posts.
 struct ActivityCardView: View {
     let entry: FeedEntry
     var isHyping: Bool = false
@@ -16,6 +21,8 @@ struct ActivityCardView: View {
     var onTapAuthor: (() -> Void)? = nil
     /// Tap the hype tally to see who hyped (Instagram-likes style).
     var onTapHypeCount: (() -> Void)? = nil
+    /// Block the author — the "…" menu, matching post cards (others' only).
+    var onBlock: (() -> Void)? = nil
 
     @State private var hypeBurst = 0
     /// Collapses duplicate reports of one physical double-tap (see
@@ -25,46 +32,64 @@ struct ActivityCardView: View {
     @State private var routeSnapshot: UIImage?
 
     private var distance: Double { entry.distance ?? 0 }
-    private var completedMile: Bool { distance >= ProgressCalculator.dailyGoalTolerance }
     private var accent: Color { Self.color(entry.workout_type) }
+
+    /// The run's stats shaped exactly like a post's snapshot, so the shared
+    /// components (stats band, workout card, stat strip) render identically
+    /// to a posted run.
+    private var stats: PostStats {
+        PostStats(
+            distance: distance > 0 ? distance : nil,
+            pace: pace,
+            duration: entry.total_duration,
+            streak: nil,
+            date: dateText,
+            calories: entry.calories,
+            steps: entry.steps
+        )
+    }
+
+    private var pace: Double? {
+        guard let duration = entry.total_duration, duration > 0, distance > 0 else { return nil }
+        return duration / distance
+    }
+
+    /// Stats band input for the route slide — same band the auto post bakes
+    /// into its image, so a raw run's map reads identically to a posted one.
+    private var overlayStats: RunStatsInput? {
+        guard distance > 0 else { return nil }
+        return RunStatsInput(
+            distance: distance,
+            paceSecondsPerMile: pace,
+            durationSeconds: entry.total_duration,
+            streak: nil,
+            calories: entry.calories,
+            steps: entry.steps,
+            workoutId: nil,
+            dateText: dateText
+        )
+    }
+
+    private var dateText: String? {
+        guard let date = RelativeTime.date(from: entry.sort_ts) else { return nil }
+        return Self.cardDateFormatter.string(from: date)
+    }
+
+    private static let cardDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
             header
-            // Instagram behavior: double-tap ANYWHERE on the card body (hero
-            // line, map, stat chips, spacing) hypes. Header/footer buttons
-            // stay out so double-tapping them can't hype by accident.
+            // Instagram behavior: double-tap ANYWHERE on the card body hypes.
+            // Header/footer buttons stay out so double-tapping them can't
+            // hype by accident.
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-                heroLine
-                if let coords = entry.routeCoordinates {
-                    WorkoutRouteMapView(coordinates: coords, routeColor: accent,
-                                        onSnapshot: { routeSnapshot = $0 })
-                        .frame(maxWidth: .infinity)
-                        // Proportional, not a fixed 160pt: the map scales with the
-                        // card on every screen size instead of shrinking to a strip.
-                        .aspectRatio(16.0 / 10.0, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
-                                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-                        )
-                        // Pinch-zooms like a photo; the floating copy is
-                        // composed on demand at the card's own 16:10 aspect
-                        // so the lift matches the on-screen slide exactly.
-                        .instagramZoomable(
-                            imageProvider: {
-                                guard let snapshot = routeSnapshot else { return nil }
-                                return WorkoutRouteMapView.zoomComposite(
-                                    snapshot: snapshot,
-                                    coordinates: coords,
-                                    routeColor: accent,
-                                    size: CGSize(width: 720, height: 450)
-                                ) { EmptyView() }
-                            },
-                            onDoubleTap: entry.is_self ? nil : doubleTapHype
-                        )
-                }
-                statStrip
+                media
+                PostStatStrip(stats: stats).padding(.horizontal, 2)
             }
             .contentShape(Rectangle())
             .simultaneousGesture(
@@ -99,6 +124,8 @@ struct ActivityCardView: View {
         celebrateAndHype()
     }
 
+    /// Same header as PostCardView: avatar + name + time on the left, the
+    /// workout-type chip and (for others) the "…" menu on the right.
     private var header: some View {
         HStack(spacing: 10) {
             Button {
@@ -107,17 +134,10 @@ struct ActivityCardView: View {
                 HStack(spacing: 10) {
                     AvatarView(name: entry.displayName, imageURL: entry.profile_image_url, size: 40)
                     VStack(alignment: .leading, spacing: 1) {
-                        HStack(spacing: 5) {
-                            Text(entry.displayName)
-                                .font(.system(size: 15, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                            if completedMile {
-                                Image(systemName: "checkmark.seal.fill")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(.green)
-                            }
-                        }
+                        Text(entry.displayName)
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
                         Text(entry.relativeTime)
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.5))
@@ -132,52 +152,106 @@ struct ActivityCardView: View {
                 .foregroundColor(accent)
                 .frame(width: 30, height: 30)
                 .background(Circle().fill(accent.opacity(0.15)))
-        }
-    }
-
-    /// The workout headline: what they did, with the distance as the hero
-    /// number instead of a body-text line.
-    private var heroLine: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(Self.verb(entry.workout_type))
-                .font(.system(size: 16, weight: .bold, design: .rounded))
-                .foregroundColor(.white.opacity(0.7))
-            Text(String(format: "%.2f", distance))
-                .font(.system(size: 30, weight: .black, design: .rounded))
-                .monospacedDigit()
-                .foregroundColor(.white)
-            Text("mi")
-                .font(.system(size: 16, weight: .heavy, design: .rounded))
-                .foregroundColor(.white.opacity(0.7))
-        }
-        .padding(.horizontal, 2)
-    }
-
-    @ViewBuilder
-    private var statStrip: some View {
-        let items = statItems
-        if !items.isEmpty {
-            // Scrollable so four chips with long values (1:02:15, 10:30 /mi, …)
-            // can never overflow the card on smaller screens.
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(items, id: \.0) { item in
-                        HStack(spacing: 5) {
-                            Image(systemName: item.1)
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(.orange)
-                            Text(item.2)
-                                .font(.system(size: 13, weight: .heavy, design: .rounded))
-                                .monospacedDigit()
-                                .foregroundColor(.white.opacity(0.9))
-                        }
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(Capsule().fill(Color.white.opacity(0.07)))
+            if !entry.is_self, onBlock != nil {
+                Menu {
+                    Button(role: .destructive) { onBlock?() } label: {
+                        Label("Block \(entry.displayName)", systemImage: "hand.raised")
                     }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.white.opacity(0.6))
+                        .padding(6)
+                        .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 2)
             }
         }
+    }
+
+    /// The run as a full 4:5 slide, exactly like a post's media: the route
+    /// map with the standard stats band when a GPS trace exists, otherwise
+    /// the branded workout card (the same face auto posts bake).
+    @ViewBuilder
+    private var media: some View {
+        if let coords = entry.routeCoordinates {
+            routeSlide(coords)
+        } else {
+            workoutCardSlide
+        }
+    }
+
+    private func routeSlide(_ coords: [CLLocationCoordinate2D]) -> some View {
+        WorkoutRouteMapView(
+            coordinates: coords,
+            routeColor: accent,
+            onSnapshot: { routeSnapshot = $0 }
+        )
+        .frame(maxWidth: .infinity)
+        .aspectRatio(4.0 / 5.0, contentMode: .fit)
+        .overlay {
+            if let stats = overlayStats {
+                // Lays out at the baked card's 360×450 design size; the slide
+                // is the same 4:5, so scaling by width alone reproduces the
+                // auto post's look pixel-for-pixel (see PostCardView).
+                GeometryReader { geo in
+                    RouteStatsOverlayView(stats: stats, workoutType: entry.workout_type ?? "running")
+                        .scaleEffect(geo.size.width / RunStatsCardView.designSize.width,
+                                     anchor: .topLeading)
+                }
+                .allowsHitTesting(false)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous))
+        // Same pinch-zoom as post slides; the floating copy is composed on
+        // demand from the retained snapshot.
+        .instagramZoomable(
+            imageProvider: { routeZoomComposite(coords) },
+            onDoubleTap: entry.is_self ? nil : doubleTapHype
+        )
+    }
+
+    /// The route slide's floating zoom copy, on demand — 720×900 keeps the
+    /// post slides' 4:5 so the lift is pixel-identical.
+    private func routeZoomComposite(_ coords: [CLLocationCoordinate2D]) -> UIImage? {
+        guard let snapshot = routeSnapshot else { return nil }
+        let type = entry.workout_type ?? "running"
+        let stats = overlayStats
+        return WorkoutRouteMapView.zoomComposite(
+            snapshot: snapshot,
+            coordinates: coords,
+            routeColor: accent,
+            size: CGSize(width: 720, height: 900)
+        ) {
+            if let stats {
+                RouteStatsOverlayView(stats: stats, workoutType: type)
+                    .frame(width: RunStatsCardView.designSize.width,
+                           height: RunStatsCardView.designSize.height,
+                           alignment: .topLeading)
+                    .scaleEffect(720 / RunStatsCardView.designSize.width, anchor: .topLeading)
+            }
+        }
+    }
+
+    /// Routeless runs: the branded stats card, live-rendered — identical to
+    /// the image an auto post would have baked, so posted and unposted runs
+    /// are indistinguishable at a glance.
+    private var workoutCardSlide: some View {
+        FeedWorkoutCard(stats: stats, workoutType: entry.workout_type)
+            .frame(maxWidth: .infinity)
+            .aspectRatio(4.0 / 5.0, contentMode: .fit)
+            .instagramZoomable(
+                imageProvider: {
+                    let renderer = ImageRenderer(content:
+                        FeedWorkoutCard(stats: stats, workoutType: entry.workout_type)
+                            .frame(width: RunStatsCardView.designSize.width,
+                                   height: RunStatsCardView.designSize.height)
+                    )
+                    renderer.scale = 2
+                    renderer.isOpaque = true
+                    return renderer.uiImage
+                },
+                onDoubleTap: entry.is_self ? nil : doubleTapHype
+            )
     }
 
     private var footer: some View {
@@ -202,24 +276,6 @@ struct ActivityCardView: View {
         }
         .padding(.horizontal, 2)
         .padding(.bottom, 2)
-    }
-
-    // (label-key, icon, value) for time / pace / calories / steps when present.
-    private var statItems: [(String, String, String)] {
-        var out: [(String, String, String)] = []
-        if let d = entry.total_duration, d > 0 {
-            out.append(("time", "clock.fill", RunStatsStickerView.durationText(d)))
-            if distance > 0 {
-                out.append(("pace", "speedometer", "\(RunStatsStickerView.paceText(d / distance)) /mi"))
-            }
-        }
-        if let c = entry.calories, c > 0 {
-            out.append(("cal", "bolt.fill", "\(Int(c.rounded())) cal"))
-        }
-        if let s = entry.steps, s > 0 {
-            out.append(("steps", "shoeprints.fill", s.formatted(.number.grouping(.automatic))))
-        }
-        return out
     }
 
     // MARK: workout type styling

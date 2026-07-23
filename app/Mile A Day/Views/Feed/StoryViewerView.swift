@@ -537,7 +537,10 @@ struct StoryViewerView: View {
                 shareToFeed: true,
                 shareToStory: false,
                 stats: post.stats_snapshot,
-                isAuto: false
+                isAuto: false,
+                // Promoting while the run's 10-min window is still open counts
+                // as posting live — the FRESH chip follows onto the feed.
+                postedLive: FreshPostWindowManager.shared.isOpen
             )
             await MainActor.run {
                 promotedIds.insert(post.post_id)

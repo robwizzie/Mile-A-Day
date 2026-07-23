@@ -14,8 +14,9 @@ struct PostCardView: View {
     let post: PostItem
     /// The run's story-only photo, when different from the post media.
     var storyPhotoURL: URL? = nil
-    /// The viewer's OWN post that went out during the 10-min fresh window —
-    /// wears a "Fresh" chip. Client-derived, so it shows only to the poster.
+    /// Post shared during the run's 10-min fresh window — wears a "Fresh"
+    /// chip. Server truth (`is_fresh`) so EVERY viewer sees it; the poster's
+    /// own device also derives it locally for instant feedback.
     var isFresh: Bool = false
     var isHyping: Bool = false
     /// Daily hype allowance spent (never true for unlimited roles) — dims the

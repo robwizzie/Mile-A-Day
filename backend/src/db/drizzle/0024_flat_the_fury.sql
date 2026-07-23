@@ -1,0 +1,1 @@
+ALTER TABLE "posts" ADD COLUMN "posted_fresh" boolean DEFAULT false NOT NULL;

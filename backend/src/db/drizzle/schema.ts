@@ -1220,6 +1220,12 @@ export const posts = pgTable(
     coauthorUserId: text("coauthor_user_id"),
     coauthorStatus: text("coauthor_status"),
     coauthorWorkoutId: varchar("coauthor_workout_id", { length: 255 }),
+    // "Posted live": the author shared this inside the 10-minute fresh window
+    // after finishing the run. Client-claimed at create time (the client owns
+    // the window — it's anchored to when the app SAW the finished workout);
+    // legacy builds that don't send it get a server-side derivation in the
+    // feed query. Cosmetic only: drives the FRESH chip every viewer sees.
+    postedFresh: boolean("posted_fresh").default(false).notNull(),
   },
   (table) => [
     index("idx_posts_user_created").using(
