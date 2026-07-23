@@ -21,6 +21,10 @@ struct FlameBuddyView: View {
     var dayEnd: Date? = nil
     /// Today's partial mile progress (0-1) — pre-warms the coal's ember cracks.
     var coalWarmth: Double = 0
+    /// Grounded (Fun buddy) sits on the ground and shrinks toward its base with
+    /// an ember bed; non-grounded (Modern ring) shrinks toward center to stay
+    /// framed in the circle.
+    var grounded: Bool = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var ignitionDate: Date?
@@ -109,7 +113,7 @@ struct FlameBuddyView: View {
             let bodyScale = vigorNow.map { StreakFlameClock.flameScale(vigor: $0) } ?? 1
 
             ZStack {
-                if let vigorNow, vigorNow < 0.45 {
+                if grounded, let vigorNow, vigorNow < 0.45 {
                     EmberBaseGlow(size: size, intensity: min(1, (0.45 - vigorNow) / 0.45))
                 }
 
@@ -126,7 +130,7 @@ struct FlameBuddyView: View {
     private var staticFlame: some View {
         let vigorNow = currentVigor(at: Date())
         return ZStack {
-            if let vigorNow, vigorNow < 0.45 {
+            if grounded, let vigorNow, vigorNow < 0.45 {
                 EmberBaseGlow(size: size, intensity: min(1, (0.45 - vigorNow) / 0.45))
             }
             figure(vigor: vigorNow, flicker: 0, blink: false)
@@ -140,7 +144,8 @@ struct FlameBuddyView: View {
             blink: blink,
             size: size,
             showsFace: showsFace,
-            vigor: vigor.map { CGFloat($0) }
+            vigor: vigor.map { CGFloat($0) },
+            grounded: grounded
         )
     }
 

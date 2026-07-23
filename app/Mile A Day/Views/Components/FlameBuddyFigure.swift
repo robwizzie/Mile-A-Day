@@ -60,6 +60,10 @@ struct FlameBuddyFigure: View {
     /// day — always vivid, never washed out. When nil the figure keeps its
     /// legacy stage-based look (widgets, Live Activity, previews).
     var vigor: CGFloat? = nil
+    /// Grounded flames (the Fun buddy) sit on the ground: they shrink toward
+    /// their base and cast a ground shadow. A non-grounded flame (the Modern
+    /// ring) shrinks toward its center so it stays framed in the circle.
+    var grounded: Bool = true
 
     var body: some View {
         ZStack {
@@ -81,13 +85,13 @@ struct FlameBuddyFigure: View {
                     .offset(y: size * 0.13)
                     .opacity(health == .dead ? 0 : innerOpacity)
 
-                if showsFace && faceIsVisible {
+                if showsFace {
                     face
                         .offset(y: size * 0.18)
                 }
             }
             .frame(width: size * 0.82, height: size)
-            .scaleEffect(effectiveBodyScale, anchor: .bottom)
+            .scaleEffect(effectiveBodyScale, anchor: grounded ? .bottom : .center)
             .offset(y: health == .dead ? size * 0.16 : 0)
         }
         .frame(width: size, height: size)
@@ -104,12 +108,6 @@ struct FlameBuddyFigure: View {
     private var effectiveBodyScale: CGFloat {
         if let v = vigorValue { return StreakFlameClock.flameScale(vigor: Double(v)) }
         return health.bodyScale
-    }
-
-    /// The face stays readable down to about a third of full size, then hides
-    /// so a guttering flame is a wisp rather than a smudged expression.
-    private var faceIsVisible: Bool {
-        vigorValue == nil || effectiveBodyScale >= 0.34
     }
 
     private var effectiveGlowOpacity: Double {
@@ -202,29 +200,39 @@ struct FlameBuddyFigure: View {
         vigorValue == nil ? 1 : 0.45 + effectiveBodyScale * 0.55
     }
 
+    /// How far the glow sinks toward the base as the flame shrinks. A grounded
+    /// flame's light pool follows it down to the ground; a centered flame (the
+    /// Modern ring) keeps its glow centered on the flame instead.
+    private var glowSink: CGFloat {
+        grounded ? (1 - lightSpread) : 0
+    }
+
     private var glowLayer: some View {
         ZStack {
             Circle()
                 .fill(glowColor.opacity(effectiveGlowOpacity * 0.45))
                 .blur(radius: size * 0.18 * lightSpread)
                 .frame(width: size * 1.1 * lightSpread, height: size * 0.92 * lightSpread)
-                .offset(y: size * 0.46 * (1 - lightSpread))
+                .offset(y: size * 0.46 * glowSink)
             Circle()
                 .fill(Color.yellow.opacity(health == .dead ? 0 : 0.16 * Double(lightSpread)))
                 .blur(radius: size * 0.09)
                 .frame(width: size * 0.62 * lightSpread, height: size * 0.62 * lightSpread)
-                .offset(y: size * 0.12 + size * 0.30 * (1 - lightSpread))
+                .offset(y: size * (grounded ? 0.12 : 0) + size * 0.30 * glowSink)
         }
     }
 
+    @ViewBuilder
     private var groundLayer: some View {
-        VStack {
-            Spacer()
-            Ellipse()
-                .fill(Color.black.opacity(0.24))
-                .frame(width: size * 0.78 * lightSpread, height: size * 0.16 * lightSpread)
-                .blur(radius: 3)
-                .offset(y: size * 0.02)
+        if grounded {
+            VStack {
+                Spacer()
+                Ellipse()
+                    .fill(Color.black.opacity(0.24))
+                    .frame(width: size * 0.78 * lightSpread, height: size * 0.16 * lightSpread)
+                    .blur(radius: 3)
+                    .offset(y: size * 0.02)
+            }
         }
     }
 
