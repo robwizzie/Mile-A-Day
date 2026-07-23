@@ -41,14 +41,18 @@ enum StreakFlameClock {
         return min(max(end.timeIntervalSince(date) / dayLength, 0), 1)
     }
 
-    /// Perceptual size of a burning flame. Eases so the flame barely shrinks
-    /// through the morning, visibly dwindles through the evening, and gutters
-    /// to almost nothing before midnight. A 5% wisp survives until the final
-    /// second so the flame never looks broken while the day is still alive.
+    /// Perceptual size of a burning flame — tracks the time left in the day as
+    /// directly as possible. A near-linear descent (gentle 0.9 ease for a touch
+    /// more body up top) so the flame shrinks a little every hour: full at the
+    /// day's start, roughly half by midday, a thin wisp as the next midnight
+    /// nears. It never hugs full size and then drops late — that read as a jump
+    /// from normal to small. The flame keeps a small floor while burning so it
+    /// never looks broken; the phase transition to coal renders the true "out"
+    /// state at midnight.
     static func flameScale(vigor: Double) -> CGFloat {
         let v = min(max(vigor, 0), 1)
-        guard v > 0 else { return 0 }
-        return CGFloat(max(1 - pow(1 - v, 1.7), 0.05))
+        let minScale = 0.08
+        return CGFloat(minScale + (1 - minScale) * pow(v, 0.9))
     }
 }
 
