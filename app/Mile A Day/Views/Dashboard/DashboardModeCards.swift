@@ -330,6 +330,14 @@ private struct ModernHeroCard: View {
         )
     }
 
+    private var flamePhase: StreakFlamePhase {
+        StreakFlamePhase.forState(
+            isCompleted: isGoalCompleted,
+            distanceIsFresh: distanceIsFresh,
+            streak: userManager.currentUser.streak
+        )
+    }
+
     private var statusColor: Color {
         if trustedDone { return .green }
         if userManager.currentUser.isStreakAtRisk { return MADTheme.Colors.madRed }
@@ -341,9 +349,12 @@ private struct ModernHeroCard: View {
             HStack(alignment: .center, spacing: 18) {
                 ZStack {
                     ProfessionalFlameView(
+                        phase: flamePhase,
                         health: flameHealth,
                         size: 166,
-                        ringProgress: timeLeftRingProgress
+                        ringProgress: timeLeftRingProgress,
+                        dayEnd: StreakFlameClock.nextLocalMidnight(),
+                        coalWarmth: min(progress, 1)
                     )
 
                     VStack(spacing: 0) {
@@ -1067,6 +1078,14 @@ private struct FlameBuddyHeroCard: View {
         )
     }
 
+    private var flamePhase: StreakFlamePhase {
+        StreakFlamePhase.forState(
+            isCompleted: isGoalCompleted,
+            distanceIsFresh: distanceIsFresh,
+            streak: userManager.currentUser.streak
+        )
+    }
+
     private var statusColor: Color {
         if trustedDone { return .green }
         if userManager.currentUser.isStreakAtRisk { return MADTheme.Colors.madRed }
@@ -1082,9 +1101,15 @@ private struct FlameBuddyHeroCard: View {
 
                 HStack(alignment: .top, spacing: 12) {
                     ZStack(alignment: .top) {
-                        FlameBuddyView(health: health, size: buddySize)
-                            .frame(width: buddySize * 1.50, height: buddySize * 1.34)
-                            .offset(y: -28)
+                        FlameBuddyView(
+                            health: health,
+                            size: buddySize,
+                            phase: flamePhase,
+                            dayEnd: StreakFlameClock.nextLocalMidnight(),
+                            coalWarmth: min(progress, 1)
+                        )
+                        .frame(width: buddySize * 1.50, height: buddySize * 1.34)
+                        .offset(y: -28)
 
                         FunHeroGround()
                             .frame(width: buddySize * 1.26, height: 28)

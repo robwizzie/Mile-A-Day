@@ -55,6 +55,11 @@ struct FlameBuddyFigure: View {
     var blink: Bool = false
     var size: CGFloat = 170
     var showsFace: Bool = true
+    /// Continuous time-left driver (1 = full day ahead, 0 = midnight). When set,
+    /// the flame's size, palette, glow and flicker burn down smoothly with the
+    /// day — always vivid, never washed out. When nil the figure keeps its
+    /// legacy stage-based look (widgets, Live Activity, previews).
+    var vigor: CGFloat? = nil
 
     var body: some View {
         ZStack {
@@ -64,7 +69,7 @@ struct FlameBuddyFigure: View {
             ZStack {
                 FlameBuddyOuterShape(wobble: wobble)
                     .fill(outerFill)
-                    .shadow(color: glowColor.opacity(health.glowOpacity), radius: size * 0.16)
+                    .shadow(color: glowColor.opacity(effectiveGlowOpacity), radius: size * 0.16)
                     .overlay(
                         FlameBuddyOuterShape(wobble: wobble)
                             .stroke(Color.white.opacity(health == .dead ? 0.10 : 0.28), lineWidth: max(1.5, size * 0.012))
@@ -76,13 +81,13 @@ struct FlameBuddyFigure: View {
                     .offset(y: size * 0.13)
                     .opacity(health == .dead ? 0 : innerOpacity)
 
-                if showsFace {
+                if showsFace && faceIsVisible {
                     face
                         .offset(y: size * 0.18)
                 }
             }
             .frame(width: size * 0.82, height: size)
-            .scaleEffect(health.bodyScale, anchor: .bottom)
+            .scaleEffect(effectiveBodyScale, anchor: .bottom)
             .offset(y: health == .dead ? size * 0.16 : 0)
         }
         .frame(width: size, height: size)
@@ -90,9 +95,36 @@ struct FlameBuddyFigure: View {
         .accessibilityLabel(accessibilityText)
     }
 
+    /// Clamped vigor, only honored for states that represent a live flame.
+    private var vigorValue: CGFloat? {
+        guard let vigor, health != .dead, health != .blazing else { return nil }
+        return min(max(vigor, 0), 1)
+    }
+
+    private var effectiveBodyScale: CGFloat {
+        if let v = vigorValue { return StreakFlameClock.flameScale(vigor: Double(v)) }
+        return health.bodyScale
+    }
+
+    /// The face stays readable down to about a third of full size, then hides
+    /// so a guttering flame is a wisp rather than a smudged expression.
+    private var faceIsVisible: Bool {
+        vigorValue == nil || effectiveBodyScale >= 0.34
+    }
+
+    private var effectiveGlowOpacity: Double {
+        if let v = vigorValue, health != .critical { return 0.16 + Double(v) * 0.36 }
+        return health.glowOpacity
+    }
+
     private var wobble: CGFloat {
         guard health != .dead else { return 0 }
-        return sin(flickerPhase) * (health == .critical ? 0.07 : 0.045)
+        let base: CGFloat = health == .critical ? 0.07 : 0.045
+        guard let v = vigorValue else { return sin(flickerPhase) * base }
+        // A starving flame gutters: bigger, more erratic flicker as the day drains.
+        let gutter = min(1 + (1 - v) * 1.5, 2.2)
+        let organic = sin(flickerPhase) + 0.45 * sin(flickerPhase * 2.3 + 1.7)
+        return organic * min(base * gutter, 0.11)
     }
 
     private var outerFill: LinearGradient {
@@ -104,6 +136,9 @@ struct FlameBuddyFigure: View {
     }
 
     private var outerColors: [Color] {
+        if let v = vigorValue, health != .critical {
+            return FlamePalette.outer(vigor: v)
+        }
         switch health {
         case .blazing:
             return [.white, Color(red: 1, green: 0.88, blue: 0.28), .orange, Color(red: 1, green: 0.20, blue: 0.10)]
@@ -121,6 +156,9 @@ struct FlameBuddyFigure: View {
     }
 
     private var innerColors: [Color] {
+        if let v = vigorValue, health != .critical {
+            return FlamePalette.inner(vigor: v)
+        }
         switch health {
         case .blazing:
             return [.white, Color(red: 1, green: 0.92, blue: 0.30), Color(red: 1, green: 0.50, blue: 0.08)]
@@ -136,6 +174,9 @@ struct FlameBuddyFigure: View {
     }
 
     private var innerOpacity: Double {
+        if let v = vigorValue, health != .critical {
+            return 0.36 + Double(v) * 0.52
+        }
         switch health {
         case .blazing: return 0.95
         case .healthy: return 0.82
@@ -155,17 +196,24 @@ struct FlameBuddyFigure: View {
         }
     }
 
+    /// Light and shadow follow the flame's real size so a guttering wisp casts
+    /// a small pool of light, not a full-size halo.
+    private var lightSpread: CGFloat {
+        vigorValue == nil ? 1 : 0.45 + effectiveBodyScale * 0.55
+    }
+
     private var glowLayer: some View {
         ZStack {
             Circle()
-                .fill(glowColor.opacity(health.glowOpacity * 0.45))
-                .blur(radius: size * 0.18)
-                .frame(width: size * 1.1, height: size * 0.92)
+                .fill(glowColor.opacity(effectiveGlowOpacity * 0.45))
+                .blur(radius: size * 0.18 * lightSpread)
+                .frame(width: size * 1.1 * lightSpread, height: size * 0.92 * lightSpread)
+                .offset(y: size * 0.46 * (1 - lightSpread))
             Circle()
-                .fill(Color.yellow.opacity(health == .dead ? 0 : 0.16))
+                .fill(Color.yellow.opacity(health == .dead ? 0 : 0.16 * Double(lightSpread)))
                 .blur(radius: size * 0.09)
-                .frame(width: size * 0.62, height: size * 0.62)
-                .offset(y: size * 0.12)
+                .frame(width: size * 0.62 * lightSpread, height: size * 0.62 * lightSpread)
+                .offset(y: size * 0.12 + size * 0.30 * (1 - lightSpread))
         }
     }
 
@@ -174,7 +222,7 @@ struct FlameBuddyFigure: View {
             Spacer()
             Ellipse()
                 .fill(Color.black.opacity(0.24))
-                .frame(width: size * 0.78, height: size * 0.16)
+                .frame(width: size * 0.78 * lightSpread, height: size * 0.16 * lightSpread)
                 .blur(radius: 3)
                 .offset(y: size * 0.02)
         }
