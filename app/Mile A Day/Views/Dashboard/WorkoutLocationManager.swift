@@ -22,12 +22,35 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
 
     private let locationManager = CLLocationManager()
     private let pedometer = CMPedometer()
+    /// Anchor fix for distance accrual. Deliberately NOT advanced on sub-noise
+    /// displacements — see accrueDistance.
     private var lastLocation: CLLocation?
     /// Last fix ACCEPTED into the route trace (stricter bar than distance).
     private var lastRoutePoint: CLLocation?
     private var isUsingPedometer = false
     /// Published so the app-wide "workout in progress" banner can appear/hide.
     @Published private(set) var isTracking = false
+
+    /// Doppler speed below this = standing still. GPS jitter while stopped
+    /// must never accrue: distance is a sum of segment LENGTHS, so noise is
+    /// strictly additive and every phone inflates by a different amount —
+    /// which is exactly how friends on the SAME walk end up out of sync.
+    private static let stationarySpeed: CLLocationSpeed = 0.3
+    /// Max plausible on-foot speed (m/s) — matches the route trace's teleport
+    /// cap. A segment implying more is a multipath jump/GPS re-lock: accept
+    /// the new position, never the jump.
+    private static let maxPlausibleSpeed: Double = 12
+
+    /// OUTDOOR cross-check odometer: the phone's per-user-calibrated pedometer
+    /// distance across this tracking session (miles). The pedometer measures
+    /// the WALKER (steps × calibrated stride), not satellite geometry, so it
+    /// agrees across people walking together far better than raw GPS sums.
+    /// Read at finish via reconciledFinalDistance(); nil when unavailable.
+    private(set) var outdoorPedometerMiles: Double?
+    /// Distance carried into this session by a recovery (miles). The pedometer
+    /// cross-check starts at resume time, so reconciliation only compares the
+    /// span BOTH instruments actually measured.
+    private var sessionStartDistance: Double = 0
 
     // For indoor pedometer mode: the pedometer reports cumulative distance from its
     // start date. When recovering a workout, we set this offset to the previously
@@ -72,6 +95,8 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         isTracking = true
 
         currentDistance = initialDistance
+        sessionStartDistance = initialDistance
+        outdoorPedometerMiles = nil
         lastLocation = nil
         lastRoutePoint = nil
         isUsingPedometer = (locationType == .indoor)
@@ -105,6 +130,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             }
         } else {
             startGPSTracking()
+            startOutdoorPedometerCrossCheck()
         }
     }
 
@@ -116,18 +142,69 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         locationManager.startUpdatingLocation()
     }
 
+    /// Run the pedometer ALONGSIDE outdoor GPS as a cross-check odometer.
+    /// Costs nothing (same motion coprocessor indoor mode uses) and gives
+    /// finish-time reconciliation a per-user-calibrated second opinion.
+    private func startOutdoorPedometerCrossCheck() {
+        guard CMPedometer.isDistanceAvailable() else { return }
+        outdoorPedometerMiles = 0
+        pedometer.startUpdates(from: Date()) { [weak self] pedometerData, error in
+            guard let self, let distance = pedometerData?.distance, error == nil else { return }
+            DispatchQueue.main.async {
+                self.outdoorPedometerMiles = distance.doubleValue * 0.000621371
+            }
+        }
+    }
+
     func stopTracking() {
         guard isTracking else { return }
         isTracking = false
 
-        if isUsingPedometer {
-            pedometer.stopUpdates()
-        }
+        // Pedometer runs in BOTH modes now (distance source indoors, cross-
+        // check odometer outdoors) — always stop it.
+        pedometer.stopUpdates()
         // Location runs in both modes (distance source for GPS, keep-alive
         // for pedometer) — always stop it.
         locationManager.stopUpdatingLocation()
         lastLocation = nil
         lastRoutePoint = nil
+    }
+
+    /// The distance a finished workout should SAVE (miles). Raw GPS sums
+    /// inflate differently on every phone — jitter is additive — while each
+    /// person's pedometer is calibrated to their own stride. So for WALKS,
+    /// meaningful disagreement resolves toward the pedometer and a group
+    /// walking together converges on (nearly) the same number. RUNS keep GPS
+    /// (pace/route fidelity at speed) unless it clearly starved under cover —
+    /// lost fixes measure SHORT, never long. Falls back to the live figure
+    /// whenever the cross-check has nothing (indoor mode, no motion
+    /// permission, sub-noise sample).
+    func reconciledFinalDistance(isWalk: Bool) -> Double {
+        guard !isUsingPedometer,
+              let pedometerSpan = outdoorPedometerMiles,
+              pedometerSpan > 0.05 else {
+            return currentDistance
+        }
+        let gpsSpan = max(0, currentDistance - sessionStartDistance)
+        guard gpsSpan > 0 else { return sessionStartDistance + pedometerSpan }
+
+        let ratio = pedometerSpan / gpsSpan
+        let disagreement = abs(gpsSpan - pedometerSpan) / max(pedometerSpan, 0.01)
+        let chosenSpan: Double
+        if isWalk {
+            // Walks: >10% apart — and the pedometer isn't itself pathological
+            // (phone riding a stroller/cart barely steps) — the calibrated
+            // odometer wins.
+            chosenSpan = (disagreement > 0.10 && ratio > 0.6 && ratio < 1.4)
+                ? pedometerSpan : gpsSpan
+        } else {
+            // Runs: rescue only clear GPS starvation.
+            chosenSpan = gpsSpan < pedometerSpan * 0.75 ? pedometerSpan : gpsSpan
+        }
+        if chosenSpan != gpsSpan {
+            print("[WorkoutLocationManager] 📏 Outdoor distance reconciled: GPS \(String(format: "%.3f", gpsSpan)) mi → pedometer \(String(format: "%.3f", pedometerSpan)) mi")
+        }
+        return sessionStartDistance + chosenSpan
     }
 
     // MARK: - CLLocationManagerDelegate
@@ -137,40 +214,70 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // distance comes from CMPedometer and there's no meaningful route.
         guard !isUsingPedometer else { return }
 
-        guard let newLocation = locations.last else { return }
+        // Process EVERY delivered fix in order — background delivery batches
+        // several fixes per callback, and taking only the last one flattened
+        // curves into chords whenever the app was backgrounded.
+        for newLocation in locations {
+            // Quality gates shared by distance + route: plausible accuracy and
+            // FRESH (cold-start replays deliver cached fixes seconds old whose
+            // jump to the first real fix used to be counted as walked).
+            guard newLocation.horizontalAccuracy > 0,
+                  newLocation.horizontalAccuracy < 50,
+                  abs(newLocation.timestamp.timeIntervalSinceNow) < 15 else {
+                continue
+            }
 
-        // Only use accurate locations
-        guard newLocation.horizontalAccuracy > 0 && newLocation.horizontalAccuracy < 50 else {
-            return
-        }
+            accrueDistance(to: newLocation)
 
-        // Calculate distance if we have a previous location
-        if let lastLocation = lastLocation {
-            let distance = newLocation.distance(from: lastLocation) // meters
-            let distanceInMiles = distance * 0.000621371
-
-            // Only add distance if it's reasonable (not a GPS jump)
-            if distanceInMiles < 0.1 {
-                DispatchQueue.main.async {
-                    self.currentDistance += distanceInMiles
-                    self.persistDistanceThrottled()
-                }
+            // Route trace: a STRICTER quality bar than distance accrual —
+            // waterside multipath yields 25-50m fixes that sit well off the
+            // real path, and standing still sprays jitter clusters. Skipping a
+            // bad fix here only straightens the drawn line between neighbors.
+            if isRoutePointWorthKeeping(newLocation) {
+                InProgressWorkoutStore.addRoutePoint(newLocation)
+                lastRoutePoint = newLocation
             }
         }
+    }
 
-        lastLocation = newLocation
-
-        // Route trace: a STRICTER quality bar than distance accrual. Distance
-        // tolerates 50m-accuracy fixes fine (deltas average out, and its
-        // semantics feed streaks — untouched). But drawing those same fixes
-        // sent the line wandering into lakes: waterside multipath yields
-        // 25-50m fixes that sit well off the real path, and standing still
-        // sprays jitter clusters. Skipping a bad fix here only straightens
-        // the drawn line between good neighbors.
-        if isRoutePointWorthKeeping(newLocation) {
-            InProgressWorkoutStore.addRoutePoint(newLocation)
-            lastRoutePoint = newLocation
+    /// Add a fix's contribution to `currentDistance` — with the noise floor
+    /// raw delta-summing lacked. Distance is a sum of segment lengths, so GPS
+    /// jitter only ever ADDS (it never averages out); un-floored accrual is
+    /// why phones on the same walk read different miles. Rules:
+    ///   - Doppler says standing still → ignore the fix entirely (red lights,
+    ///     mid-walk chats: jitter while stopped was the biggest inflater).
+    ///   - Implied speed over the on-foot cap → multipath jump / GPS re-lock:
+    ///     take the new position, never count the jump.
+    ///   - Displacement under the fix's own noise floor → hold the anchor and
+    ///     wait for real movement to accumulate past it (a walker's 1.4 m/s
+    ///     still accrues every ~3s; the chord under-counts corners by far
+    ///     less than jitter over-counted everything).
+    private func accrueDistance(to newLocation: CLLocation) {
+        if newLocation.speed >= 0, newLocation.speed < Self.stationarySpeed {
+            return
         }
+        guard let anchor = lastLocation else {
+            lastLocation = newLocation
+            return
+        }
+        let meters = newLocation.distance(from: anchor)
+        let dt = newLocation.timestamp.timeIntervalSince(anchor.timestamp)
+        if dt > 0, meters / dt > Self.maxPlausibleSpeed {
+            lastLocation = newLocation
+            return
+        }
+        guard meters >= max(4, newLocation.horizontalAccuracy * 0.35) else {
+            return
+        }
+        let distanceInMiles = meters * 0.000621371
+        // Backstop against anything the speed cap missed (e.g. huge dt gaps).
+        if distanceInMiles < 0.1 {
+            DispatchQueue.main.async {
+                self.currentDistance += distanceInMiles
+                self.persistDistanceThrottled()
+            }
+        }
+        lastLocation = newLocation
     }
 
     private func isRoutePointWorthKeeping(_ location: CLLocation) -> Bool {

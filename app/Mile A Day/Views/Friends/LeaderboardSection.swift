@@ -18,8 +18,24 @@ final class LeaderboardViewModel {
     private(set) var isLoading: Bool = false
     private(set) var isLoadingMore: Bool = false
     private(set) var errorMessage: String?
+    /// When the board last loaded successfully — drives refreshIfStale so tab
+    /// re-entries and friend-activity pushes re-pull without hammering.
+    private(set) var lastLoadedAt: Date?
 
     private var loadTask: Task<Void, Never>?
+
+    /// Silent re-pull when the data is older than `maxAge` (or absent). The
+    /// board used to load once and then only change on manual pull-to-refresh,
+    /// so a friend finishing their mile never appeared until you remembered to
+    /// drag — "we're all out of sync". Existing rows stay on screen while the
+    /// fresh page swaps in.
+    func refreshIfStale(maxAge: TimeInterval = 60) {
+        if let loaded = lastLoadedAt, Date().timeIntervalSince(loaded) < maxAge,
+           !entries.isEmpty || currentUserEntry != nil {
+            return
+        }
+        refresh()
+    }
 
     func refresh() {
         loadTask?.cancel()
@@ -43,6 +59,7 @@ final class LeaderboardViewModel {
                 self.currentUserEntry = page.current_user_entry
                 self.totalCount = page.total_count
                 self.hasMore = page.has_more
+                self.lastLoadedAt = Date()
             } catch {
                 if !Task.isCancelled {
                     print("[Leaderboard] fetch failed: \(error)")
@@ -126,7 +143,17 @@ struct LeaderboardSection: View {
         .scrollIndicators(.hidden)
         .refreshable { vm.refresh() }
         .onAppear {
-            if vm.entries.isEmpty && vm.errorMessage == nil { vm.refresh() }
+            // Tab re-entry: silently re-pull when the board is stale, so a
+            // friend's just-finished mile shows without a manual drag.
+            if vm.errorMessage == nil { vm.refreshIfStale() }
+        }
+        // A friend's activity push landing while the app is open is the exact
+        // moment the board is wrong — re-pull it (10s floor absorbs bursts).
+        .onReceive(NotificationCenter.default.publisher(for: .didReceivePushNotification)) { notification in
+            guard let type = notification.userInfo?["type"] as? String,
+                  ["friend_activity", "friend_post", "mile_completed", "personal_best"].contains(type)
+            else { return }
+            vm.refreshIfStale(maxAge: 10)
         }
         .sheet(item: $selectedUser) { user in
             NavigationStack {
