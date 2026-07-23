@@ -28,7 +28,8 @@ struct ProfessionalFlameView: View {
                 showsFace: false,
                 phase: phase,
                 dayEnd: dayEnd,
-                coalWarmth: coalWarmth
+                coalWarmth: coalWarmth,
+                grounded: false
             )
             .offset(y: -size * 0.035)
         }
