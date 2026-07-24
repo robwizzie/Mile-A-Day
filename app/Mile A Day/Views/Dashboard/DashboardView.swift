@@ -91,6 +91,21 @@ struct DashboardView: View {
     /// observers trigger the goal-celebration check at the same time.
     @State private var isPreparingGoalCelebration = false
 
+    /// The `yyyy-MM-dd` for which the goal-celebration SEQUENCE (flame →
+    /// leaderboard → photo prompt) has already been enqueued this session.
+    /// The goal check is now LEVEL-triggered — it re-runs on every fresh
+    /// today's-distance / workout-count update, not just the isCompleted
+    /// false→true edge, so a mile that lands after the edge already passed
+    /// (deferred behind the workout cover, or a re-fetch that keeps isCompleted
+    /// true) still fires. That means the check can run many times per day, and
+    /// the persistent `hasShownGoalCelebrationToday` flag only flips when the
+    /// user DISMISSES the flame — so between enqueue and dismissal it can't stop
+    /// a data update from re-adding the leaderboard + photo prompt. This
+    /// in-memory day stamp closes that window. It's `@State` (not persisted) so
+    /// it resets on relaunch: a celebration the user never actually saw still
+    /// replays next launch.
+    @State private var goalCelebrationEnqueuedDay = ""
+
     // Ask-mode pending friend notifications (stash sheet). The celebration
     // embed handles the mile-completed pending; this sheet catches everything
     // else (walks, extra workouts, background syncs).
@@ -226,6 +241,16 @@ struct DashboardView: View {
         }
     }
 
+    /// Today as a `yyyy-MM-dd` string in the device timezone — matches
+    /// CelebrationManager's date keying so the session/persistent dedup gates agree.
+    private static func celebrationDayStamp(_ date: Date = Date()) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.calendar = Calendar.current
+        formatter.timeZone = TimeZone.current
+        return formatter.string(from: date)
+    }
+
     /// Check if goal is completed and show celebration if appropriate
     private func checkAndShowGoalCelebration() {
         // Only show if:
@@ -265,6 +290,13 @@ struct DashboardView: View {
             return
         }
 
+        // Already enqueued this session for today → nothing to do. The check is
+        // level-triggered (see goalCelebrationEnqueuedDay), so it can be called
+        // repeatedly between enqueue and the user dismissing the flame; without
+        // this guard those repeat calls would stack duplicate leaderboard/photo
+        // celebrations (hasShownGoalCelebrationToday only flips at dismissal).
+        guard goalCelebrationEnqueuedDay != Self.celebrationDayStamp() else { return }
+
         // Avoid stacking redundant streak fetches when several observers fire at once.
         guard !isPreparingGoalCelebration else { return }
         isPreparingGoalCelebration = true
@@ -292,6 +324,11 @@ struct DashboardView: View {
                   !celebrationManager.hasShownGoalCelebrationToday else {
                 return
             }
+
+            // Stamp NOW, before enqueuing, so the level-triggered re-checks
+            // that fire while this sequence is on screen bail at the guard above
+            // instead of re-adding the leaderboard + photo prompt.
+            goalCelebrationEnqueuedDay = Self.celebrationDayStamp()
 
             // Baseline for extra-mile detection = workout count at goal completion.
             // Scoped to today (see CelebrationManager.lastPostGoalWorkoutCount) so it
@@ -770,12 +807,24 @@ struct DashboardView: View {
                 syncStreakRiskActivity()
             }
             .onChange(of: healthManager.todaysDistance) { oldValue, newValue in
+                // Level-triggered: re-evaluate the goal celebration on EVERY fresh
+                // distance update, not only the isCompleted false→true edge. The
+                // mile often lands after that edge already fired (deferred behind
+                // the workout cover, or a re-fetch that keeps isCompleted true) —
+                // with no re-trigger, the flame + photo prompt were silently lost.
+                // The check is idempotent and self-guarded (once per day/session),
+                // so calling it here is safe.
+                checkAndShowGoalCelebration()
                 // Check for extra mile when distance increases after goal already celebrated
                 if newValue > oldValue && newValue > 0 && celebrationManager.hasShownGoalCelebrationToday {
                     checkAndShowPostGoalEncouragement()
                 }
             }
             .onChange(of: healthManager.todaysWorkouts.count) { oldValue, newValue in
+                // Same level-triggered safety net as todaysDistance above: a newly
+                // synced workout (Watch, Apple Workout, in-app finish) that crosses
+                // the goal must fire the flame even when no isCompleted edge does.
+                checkAndShowGoalCelebration()
                 // When a new workout finishes (from Watch, Apple Workout, etc.), check for extra mile
                 if newValue > oldValue && celebrationManager.hasShownGoalCelebrationToday {
                     checkAndShowPostGoalEncouragement()
