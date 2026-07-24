@@ -11,6 +11,12 @@ type ErrorReturn = {
 
 type MessageReturn = {
   message: string;
+  /**
+   * True when the call actually created a row. Only sendFriendRequest sets it;
+   * everything else leaves it undefined. Additive on the wire — the iOS client
+   * decodes into `struct Response { let message: String }` and ignores it.
+   */
+  created?: boolean;
 };
 
 export async function areFriends(
@@ -70,9 +76,9 @@ export async function getFriends(user: string): Promise<User[]> {
   return refreshFriendStreaks(friends);
 }
 
-async function refreshFriendStreaks<T extends { user_id: string; current_streak?: number | null }>(
-  friends: T[],
-): Promise<T[]> {
+async function refreshFriendStreaks<
+  T extends { user_id: string; current_streak?: number | null },
+>(friends: T[]): Promise<T[]> {
   if (friends.length === 0) return friends;
   const refreshed = await Promise.all(
     friends.map(async (friend) => ({
@@ -131,21 +137,50 @@ export async function getFriendRequests(
   return { requests, ignored_requests };
 }
 
+/**
+ * Count requests awaiting THIS user's answer — the number the app icon badge
+ * shows.
+ *
+ * 'pending' only, never 'ignored'. getFriendRequests splits the two and the
+ * client consumes only `.requests`, so counting ignored rows here would badge
+ * the user for requests they've already dismissed. Covered exactly by
+ * idx_friendships_friend_status.
+ */
+export async function countPendingFriendRequests(
+  userId: string,
+): Promise<number> {
+  const rows = await db.query(
+    `SELECT COUNT(*) AS count FROM friendships
+		WHERE friend_id = $1 AND status = 'pending'`,
+    [userId],
+  );
+  return parseInt(rows[0]?.count ?? "0");
+}
+
 export async function sendFriendRequest(
   user1: string,
   user2: string,
 ): Promise<MessageReturn | ErrorReturn> {
   try {
-    await db.query(
+    // RETURNING tells us whether a row was actually created. The insert is
+    // idempotent but the push was not: callers fired it unconditionally, so
+    // re-POSTing the same request produced unlimited friend_request pushes —
+    // and that type is in HIGH_PRIORITY_TYPES, so each one pierced quiet hours
+    // and skipped the daily cap. `created` lets the controller push once.
+    const inserted = await db.query(
       `
 			INSERT INTO friendships (user_id, friend_id, status)
 			VALUES ($1, $2, 'pending')
 			ON CONFLICT (user_id, friend_id) DO NOTHING
+			RETURNING user_id
 			`,
       [user1, user2],
     );
 
-    return { message: "Successfully sent friend request" };
+    return {
+      message: "Successfully sent friend request",
+      created: inserted.length > 0,
+    };
   } catch (err: any) {
     return { error: err.message };
   }

@@ -106,6 +106,10 @@ function getApnsToken(): string | null {
 
 export type NotificationType =
   | "friend_request"
+  // Deliberately NOT in HIGH_PRIORITY_TYPES, unlike friend_request itself: this
+  // one is a nudge about something already sitting in the app, so quiet hours
+  // and the daily cap must both apply to it.
+  | "friend_request_reminder"
   | "friend_request_accepted"
   | "friend_nudge"
   | "friend_activity"
@@ -148,6 +152,16 @@ interface PushPayload {
   type: NotificationType;
   data?: Record<string, string>;
   category?: string;
+  /**
+   * App icon badge count. OMIT to leave the user's badge untouched — APNs
+   * treats an absent badge as "no change", which is why every other push type
+   * here can stay badge-free without stomping the count.
+   *
+   * Never send 0 on an unrelated type for the same reason: it would clear a
+   * badge the user still needs to act on. Only friend_request sets this, and
+   * only behind friendRequestClientV2Enabled().
+   */
+  badge?: number;
 }
 
 // Send a push notification to a single device token via HTTP/2
@@ -172,6 +186,7 @@ function sendToDevice(
       "mutable-content": 1,
     };
     if (payload.category) aps.category = payload.category;
+    if (payload.badge !== undefined) aps.badge = payload.badge;
 
     const apnsPayload = JSON.stringify({
       aps,

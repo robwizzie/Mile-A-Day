@@ -9,7 +9,9 @@ import {
   getFriendSuggestions,
   getMutualFriendCount,
   getFriendsWorkoutFeed,
+  countPendingFriendRequests,
 } from "../services/friendshipService.js";
+import { friendRequestClientV2Enabled } from "../services/friendRequestFeatures.js";
 import { AuthenticatedRequest } from "../middleware/auth.js";
 import hasRequiredKeys from "../utils/hasRequiredKeys.js";
 import { getUser, getUsers } from "../services/userService.js";
@@ -92,20 +94,36 @@ export async function sendRequest(req: Request, res: Response) {
     throw new Error(friendResult.error);
   }
 
-  // Send push notification to the recipient
-  const sender = users.find((u) => u.user_id === fromUser);
-  const senderName = sender?.username || "Someone";
-  sendPush(toUser, {
-    title: "New friend request",
-    body: `${senderName} wants to be friends`,
-    type: "friend_request",
-    data: { user_id: fromUser },
-  }).catch((err) =>
-    console.error(
-      "[Push] Error sending friend request notification:",
-      err.message,
-    ),
-  );
+  // Push ONLY when a row was actually created. The insert is ON CONFLICT DO
+  // NOTHING, but this push used to fire unconditionally — so re-POSTing the
+  // same request sent unlimited pushes, and friend_request is in
+  // HIGH_PRIORITY_TYPES, meaning every one of them pierced quiet hours and
+  // skipped the daily cap. There is no rate limit on this route.
+  if (friendResult.created) {
+    const sender = users.find((u) => u.user_id === fromUser);
+    const senderName = sender?.username || "Someone";
+
+    // Badge + category are inert until the matching app build ships; see
+    // friendRequestFeatures.ts for why they must not reach older clients.
+    const clientV2 = friendRequestClientV2Enabled();
+    const badge = clientV2
+      ? await countPendingFriendRequests(toUser).catch(() => undefined)
+      : undefined;
+
+    sendPush(toUser, {
+      title: "New friend request",
+      body: `${senderName} wants to be friends`,
+      type: "friend_request",
+      data: { user_id: fromUser },
+      ...(clientV2 ? { category: "FRIEND_REQUEST" } : {}),
+      ...(badge !== undefined ? { badge } : {}),
+    }).catch((err) =>
+      console.error(
+        "[Push] Error sending friend request notification:",
+        err.message,
+      ),
+    );
+  }
 
   res.send(friendResult);
 }

@@ -14,6 +14,7 @@ import {
 import { sendPendingDailyReminders } from "../services/dailyReminderService.js";
 import { reconcileStaleStreaks } from "../services/leaderboardService.js";
 import { expireStalePendingNotifications } from "../services/pendingNotificationService.js";
+import { sendPendingFriendRequestReminders } from "../services/friendRequestReminderService.js";
 
 export function startNotificationCron(): void {
   // All "overnight result" notifications fire together at 9 AM ET so users
@@ -113,6 +114,22 @@ export function startNotificationCron(): void {
     } catch (error: any) {
       console.error(
         "[CRON] Error expiring stale pending notifications:",
+        error.message,
+      );
+    }
+  });
+
+  // Every hour at :35 — remind users about friend requests they've left
+  // unanswered for >24h. Off unless FRIEND_REQUEST_REMINDERS=true (the service
+  // returns immediately otherwise); see friendRequestFeatures.ts. Minute 35 is
+  // clear of the other hourly jobs (:00 daily reminders, :10 streak features,
+  // :20 h2h, :50 weekly recap). Per-user TZ + cooldown filtering is in the SQL.
+  cron.schedule("35 * * * *", async () => {
+    try {
+      await sendPendingFriendRequestReminders();
+    } catch (error: any) {
+      console.error(
+        "[CRON] Error sending friend request reminders:",
         error.message,
       );
     }

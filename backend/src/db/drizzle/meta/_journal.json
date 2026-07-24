@@ -183,6 +183,13 @@
       "when": 1784770657896,
       "tag": "0025_chilly_baron_strucker",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1784933225220,
+      "tag": "0026_harsh_molly_hayes",
+      "breakpoints": true
     }
   ]
 }
