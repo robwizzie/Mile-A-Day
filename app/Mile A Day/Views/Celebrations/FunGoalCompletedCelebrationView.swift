@@ -351,31 +351,43 @@ struct FunGoalCompletedCelebrationView: View {
             overlayOpacity = 1
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
-            MADHaptics.emphasis()
-            withAnimation(.timingCurve(0.16, 0.90, 0.18, 1.0, duration: 1.18)) {
+        // Reignite in readable beats instead of one front-loaded rush: the coal
+        // glows and LINGERS, then visibly CATCHES into open flame, then the flame
+        // swells to full and settles. An ease-in-out curve keeps the ember on
+        // screen long enough to read (the old curve shot past it in a blink) and
+        // eases into the settle — the ReignitingFlameView crossfade + catch-flash
+        // are timed to this shape (catch peaks around progress 0.34).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
+            MADHaptics.tap() // the coal begins to catch
+            withAnimation(.timingCurve(0.66, 0.0, 0.34, 1.0, duration: 1.5)) {
                 ignitionProgress = 1
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.12) {
+        // Emphasis right as it ignites into open flame…
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.92) {
+            MADHaptics.emphasis()
+        }
+
+        // …and a success tick as the full flame settles.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.74) {
             MADHaptics.success()
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.28) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.86) {
             withAnimation(.spring(response: 0.40, dampingFraction: 0.72)) {
                 showStreak = true
             }
             animateStreakCounter()
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.68) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.24) {
             withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
                 showDetails = true
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.96) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.52) {
             withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
                 showButtons = true
             }
