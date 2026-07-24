@@ -205,6 +205,7 @@ struct TodayProgressWidgetEntryView: View {
                 )
             }
         }
+        .widgetURL(URL(string: "mileaday://dashboard"))
     }
     
     @Environment(\.widgetFamily) var widgetFamily

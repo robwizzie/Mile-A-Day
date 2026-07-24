@@ -58,7 +58,7 @@ struct ModernGoalCompletedCelebrationView: View {
 
     private var hero: some View {
         VStack(spacing: 10) {
-            ReignitingFlameView(showsFace: false, size: 168, progress: ignitionProgress, intensity: 0.85)
+            ReignitingFlameView(showsFace: false, size: 168, progress: ignitionProgress, intensity: 0.85, startsSad: true)
                 .frame(height: 184)
 
             if showStreak {
@@ -332,31 +332,35 @@ struct ModernGoalCompletedCelebrationView: View {
             overlayOpacity = 1
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            MADHaptics.emphasis()
-            withAnimation(.timingCurve(0.18, 0.86, 0.24, 1.0, duration: 1.02)) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+            MADHaptics.tap()
+            withAnimation(.timingCurve(0.66, 0.0, 0.34, 1.0, duration: 1.35)) {
                 ignitionProgress = 1
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.82) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.88) {
+            MADHaptics.emphasis()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.56) {
             MADHaptics.success()
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.96) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.68) {
             withAnimation(.spring(response: 0.38, dampingFraction: 0.76)) {
                 showStreak = true
             }
             animateStreakCounter()
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.38) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.04) {
             withAnimation(.spring(response: 0.40, dampingFraction: 0.82)) {
                 showDetails = true
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.66) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.34) {
             withAnimation(.spring(response: 0.40, dampingFraction: 0.82)) {
                 showButtons = true
             }

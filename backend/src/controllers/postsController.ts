@@ -24,7 +24,7 @@ import {
   getStoryReactors,
   reactToStory,
   getOwnPostMemories,
-  userOwnsWorkout,
+  getOwnedWorkoutDistance,
   lockUnearnedPhotos,
   ALLOWED_STORY_REACTIONS,
   PostStatsSnapshot,
@@ -191,11 +191,41 @@ export async function createPostController(
     // and hiding their workout card). Unknown/foreign ids also FK-fail, so an
     // unlinked post beats a 500 either way.
     let workoutId = typeof workout_id === "string" ? workout_id : null;
-    if (workoutId && !(await userOwnsWorkout(userId, workoutId))) {
+    let linkedWorkoutDistance: number | null = null;
+    if (workoutId) {
+      linkedWorkoutDistance = await getOwnedWorkoutDistance(userId, workoutId);
+    }
+    if (workoutId && linkedWorkoutDistance == null) {
+      if (is_auto === true) {
+        return res.status(400).json({ error: "auto_post_workout_unavailable" });
+      }
       console.warn(
         `[createPost] Ignoring workout_id not owned by poster ${userId}`,
       );
       workoutId = null;
+    }
+
+    // Defensive guard for already-shipped clients: older auto-card builders
+    // baked the author's whole-day distance into a card linked to one workout.
+    // Rejecting the bad auto post leaves the raw workout feed card visible
+    // instead of hiding it behind a misleading generated image.
+    if (
+      workoutId &&
+      is_auto === true &&
+      linkedWorkoutDistance != null &&
+      stats_snapshot != null &&
+      typeof stats_snapshot === "object" &&
+      !Array.isArray(stats_snapshot)
+    ) {
+      const claimedDistance = Number(
+        (stats_snapshot as PostStatsSnapshot).distance,
+      );
+      if (
+        Number.isFinite(claimedDistance) &&
+        Math.abs(claimedDistance - linkedWorkoutDistance) > 0.05
+      ) {
+        return res.status(400).json({ error: "auto_post_stats_mismatch" });
+      }
     }
 
     const post = await createPost({

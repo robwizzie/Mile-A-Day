@@ -10,11 +10,58 @@ import CoreLocation
 /// per run (a later photo replaces this image in place).
 enum RunPostService {
 
-    /// Build today's run stats for the composer/auto-post, with the workout id set
-    /// so the resulting post links to the run (enabling the one-post-per-workout
-    /// upsert + feed dedup).
+    /// Build stats for the linked workout so one day's extra walks/runs don't
+    /// collapse into a single all-day post. Uses the local WorkoutIndex when
+    /// the HKWorkout object is still lagging, then falls back to day totals.
     @MainActor
     static func todayStats(workoutId: String) -> RunStatsInput {
+        if let stats = exactStats(workoutId: workoutId) {
+            return stats
+        }
+
+        return todayFallbackStats(workoutId: workoutId)
+    }
+
+    @MainActor
+    private static func exactStats(workoutId: String) -> RunStatsInput? {
+        let hk = HealthKitManager.shared
+        let user = UserManager.shared.currentUser
+
+        if let workout = hk.todaysWorkouts.first(where: { $0.uuid.uuidString == workoutId }) {
+            let distance = workout.totalDistance?.doubleValue(for: .mile()) ?? 0
+            let pace = workoutPaceSecondsPerMile(distance: distance, duration: workout.duration)
+            let calories = workoutCalories(workout)
+            return RunStatsInput(
+                distance: distance,
+                paceSecondsPerMile: pace,
+                durationSeconds: workout.duration > 0 ? workout.duration : nil,
+                streak: user.streak,
+                calories: calories > 0 ? calories : nil,
+                steps: nil,
+                workoutId: workoutId,
+                dateText: dateText(for: workout.startDate)
+            )
+        }
+
+        if let record = hk.workoutIndex?.workouts(for: Date()).first(where: { $0.id == workoutId }) {
+            let pace = workoutPaceSecondsPerMile(distance: record.distance, duration: record.duration)
+            return RunStatsInput(
+                distance: record.distance,
+                paceSecondsPerMile: pace,
+                durationSeconds: record.duration > 0 ? record.duration : nil,
+                streak: user.streak,
+                calories: nil,
+                steps: nil,
+                workoutId: workoutId,
+                dateText: dateText(for: record.localDate)
+            )
+        }
+
+        return nil
+    }
+
+    @MainActor
+    private static func todayFallbackStats(workoutId: String) -> RunStatsInput {
         let hk = HealthKitManager.shared
         let user = UserManager.shared.currentUser
         let paceSecPerMile = hk.todaysAveragePace.map { $0 * 60 }
@@ -28,6 +75,28 @@ enum RunPostService {
             workoutId: workoutId,
             dateText: todayText()
         )
+    }
+
+    private static func workoutPaceSecondsPerMile(distance: Double, duration: TimeInterval) -> TimeInterval? {
+        guard distance > 0, duration > 0 else { return nil }
+        let paceMinutes = (duration / 60.0) / distance
+        guard paceMinutes >= 2.0, paceMinutes <= 30.0 else { return nil }
+        return duration / distance
+    }
+
+    private static func workoutCalories(_ workout: HKWorkout) -> Double {
+        if #available(iOS 18.0, *),
+           let statistics = workout.statistics(for: HKQuantityType(.activeEnergyBurned)),
+           let energy = statistics.sumQuantity() {
+            return energy.doubleValue(for: .kilocalorie())
+        }
+        return workout.totalEnergyBurned?.doubleValue(for: .kilocalorie()) ?? 0
+    }
+
+    private static func dateText(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: date)
     }
 
     /// The workout that pushed today's total past the daily goal — the same one
@@ -77,17 +146,21 @@ enum RunPostService {
 
         do {
             let mediaUrl = try await PostService.uploadMedia(finalImage)
-            // isAuto — the server may replace this card in place with a later
-            // photo post, but it never counts as the user's one post per workout.
-            let created = try await PostService.createPost(
-                mediaUrl: mediaUrl,
-                caption: nil,
-                workoutId: workoutId,
-                shareToFeed: true,
-                shareToStory: false,
-                stats: stats.snapshot,
-                isAuto: true
-            )
+            let created: PostItem
+            do {
+                // isAuto — the server may replace this card in place with a
+                // later photo post, but it never counts as the user's one post
+                // per workout.
+                created = try await createAutoPost(mediaUrl: mediaUrl, workoutId: workoutId, stats: stats)
+            } catch let APIError.badRequest(message)
+                        where message == "auto_post_workout_unavailable" || message == "auto_post_stats_mismatch" {
+                // HealthKit/backend sync can lag the prompt by a beat. Keep the
+                // skip action reliable: publish the rendered card unlinked
+                // instead of making "Skip" look broken. The raw workout card can
+                // still appear later if the sync catches up.
+                print("[RunPostService] linked auto post rejected (\(message)); retrying unlinked")
+                created = try await createAutoPost(mediaUrl: mediaUrl, workoutId: nil, stats: stats)
+            }
             // Skipping the photo still counts as posting this run live if it's
             // within the fresh window (no-op otherwise).
             FreshPostWindowManager.shared.markPostedLive(
@@ -97,6 +170,19 @@ enum RunPostService {
         } catch {
             print("[RunPostService] autoPostMile failed: \(error)")
         }
+    }
+
+    @MainActor
+    private static func createAutoPost(mediaUrl: String, workoutId: String?, stats: RunStatsInput) async throws -> PostItem {
+        try await PostService.createPost(
+            mediaUrl: mediaUrl,
+            caption: nil,
+            workoutId: workoutId,
+            shareToFeed: true,
+            shareToStory: false,
+            stats: stats.snapshot,
+            isAuto: true
+        )
     }
 
     // MARK: - Rendering

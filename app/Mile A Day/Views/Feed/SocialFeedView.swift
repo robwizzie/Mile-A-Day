@@ -233,6 +233,11 @@ struct SocialFeedView: View {
     }
 
     private var statsInput: RunStatsInput {
+        if mileDone,
+           let workoutId = nextShareableWorkoutId ?? RunPostService.dailyMileWorkoutId() {
+            return RunPostService.todayStats(workoutId: workoutId)
+        }
+
         let user = userManager.currentUser
         let duration = healthManager.todaysTotalDuration
         // todaysAveragePace is MINUTES per mile; sticker/snapshot use SECONDS.

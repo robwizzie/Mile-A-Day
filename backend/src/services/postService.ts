@@ -551,6 +551,19 @@ export async function userOwnsWorkout(
   return rows.length > 0;
 }
 
+/** Distance for a workout that exists and belongs to the user (post-link guard). */
+export async function getOwnedWorkoutDistance(
+  userId: string,
+  workoutId: string,
+): Promise<number | null> {
+  const rows = await db.query<{ distance: number | string | null }>(
+    `SELECT distance FROM workouts WHERE workout_id = $1 AND user_id = $2`,
+    [workoutId, userId],
+  );
+  const distance = Number(rows[0]?.distance);
+  return Number.isFinite(distance) ? distance : null;
+}
+
 /** One row in a story's "seen by" list, with any emoji reaction. */
 export interface StoryViewerRow {
   user_id: string;

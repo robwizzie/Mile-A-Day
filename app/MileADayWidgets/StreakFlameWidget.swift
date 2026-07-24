@@ -137,8 +137,8 @@ private func flameStatusColor(_ entry: StreakFlameEntry) -> Color {
     return MADWidgetStyle.orange
 }
 
-private func flameDeepLink(_ entry: StreakFlameEntry) -> URL? {
-    entry.isGoalCompleted ? nil : URL(string: "mileaday://workout/start")
+private func flameDeepLink(_: StreakFlameEntry) -> URL? {
+    URL(string: "mileaday://dashboard")
 }
 
 /// The flame art itself — Fun buddy or Modern flame in the progress ring, both

@@ -244,6 +244,6 @@ private struct StreakRiskLockScreenView: View {
         )
         .activityBackgroundTint(Color.clear)
         .activitySystemActionForegroundColor(.white)
-        .widgetURL(URL(string: "mileaday://workout/start"))
+        .widgetURL(URL(string: "mileaday://dashboard"))
     }
 }

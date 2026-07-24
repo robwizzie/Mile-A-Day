@@ -65,6 +65,13 @@ struct Mile_A_DayApp: App {
                     // Handle deep links from Live Activities / widgets
                     guard url.scheme == "mileaday" else { return }
                     switch url.host {
+                    case "dashboard":
+                        // mileaday://dashboard — passive widget tap
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("MAD_SwitchTab"),
+                            object: nil,
+                            userInfo: ["tab": 0]
+                        )
                     case "workout":
                         // Covers mileaday://workout (Live Activity tap) and
                         // mileaday://workout/start (widget Start Mile button)
