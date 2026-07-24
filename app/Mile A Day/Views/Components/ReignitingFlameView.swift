@@ -30,6 +30,13 @@ struct ReignitingFlameView: View {
                 }
             }
 
+            // The moment the coal catches: a bright burst of light that peaks as
+            // the ember ignites, then fades. This is the "it caught fire" beat the
+            // plain grow was missing. Only the reignite (sad) path has an ember.
+            if startsSad {
+                catchFlash
+            }
+
             ignitionSparks
         }
         .frame(width: size * 1.34, height: size * 1.24)
@@ -39,28 +46,91 @@ struct ReignitingFlameView: View {
 
     @ViewBuilder
     private func flame(phase: CGFloat, blink: Bool) -> some View {
-        if startsSad && clampedProgress < 0.26 {
-            SadEmberBuddy(size: size * 0.46, progress: clampedProgress / 0.26)
-                .scaleEffect(0.86 + clampedProgress * 0.42, anchor: .bottom)
-                .offset(y: size * 0.24)
-                .opacity(1 - Double(max(0, clampedProgress - 0.18) / 0.08) * 0.35)
-        } else {
-            FlameBuddyFigure(
-                health: revivalHealth,
-                flickerPhase: phase,
-                blink: blink,
-                size: size,
-                showsFace: showsFace && (startsSad || clampedProgress > 0.58)
-            )
-            .scaleEffect(
-                x: flameScale * (1 + sin(phase * 0.42) * 0.014 * effectiveFlameProgress),
-                y: flameScale * (1 + cos(phase * 0.34) * 0.010 * effectiveFlameProgress),
-                anchor: .bottom
-            )
-            .opacity(flameOpacity)
-            .offset(y: (1 - easedFlameProgress) * size * 0.22 + sin(phase * 0.38) * 1.2 * effectiveFlameProgress)
-            .shadow(color: Color.orange.opacity(Double(effectiveFlameProgress) * Double(0.28 * intensity)), radius: size * 0.10 * intensity, x: 0, y: size * 0.04)
+        ZStack {
+            // The dying coal lingers, then hands off to the flame that catches
+            // over it — a crossfade instead of a hard swap, so the ember visibly
+            // BECOMES fire rather than popping into it. Only the reignite path
+            // has an ember; the plain (Modern) path renders the flame alone.
+            if startsSad {
+                SadEmberBuddy(size: size * 0.46, progress: min(1, clampedProgress / 0.24))
+                    .scaleEffect(0.86 + clampedProgress * 0.42, anchor: .bottom)
+                    .offset(y: size * 0.24)
+                    .opacity(emberOpacity)
+            }
+
+            flameFigure(phase: phase, blink: blink)
+                .opacity(flameFadeIn)
         }
+    }
+
+    private func flameFigure(phase: CGFloat, blink: Bool) -> some View {
+        FlameBuddyFigure(
+            health: revivalHealth,
+            flickerPhase: phase,
+            blink: blink,
+            size: size,
+            showsFace: showsFace && (startsSad || clampedProgress > 0.58)
+        )
+        .scaleEffect(
+            x: flameScale * (1 + sin(phase * 0.42) * 0.014 * effectiveFlameProgress),
+            y: flameScale * (1 + cos(phase * 0.34) * 0.010 * effectiveFlameProgress),
+            anchor: .bottom
+        )
+        .opacity(flameOpacity)
+        .offset(y: (1 - easedFlameProgress) * size * 0.22 + sin(phase * 0.38) * 1.2 * effectiveFlameProgress)
+        .shadow(color: Color.orange.opacity(Double(effectiveFlameProgress) * Double(0.28 * intensity)), radius: size * 0.10 * intensity, x: 0, y: size * 0.04)
+    }
+
+    /// Coal opacity: full while it lingers, gone once the flame has caught over
+    /// it. Crossfaded against `flameFadeIn` across the same window for a smooth
+    /// hand-off. Reignite (sad) path only.
+    private var emberOpacity: Double {
+        guard startsSad else { return 0 }
+        return Double(1 - smoothstep(0.16, 0.40, clampedProgress))
+    }
+
+    /// Flame fade-in as it catches over the ember. The plain (Modern) path shows
+    /// the flame at full opacity throughout — it IS the whole animation.
+    private var flameFadeIn: Double {
+        guard startsSad else { return 1 }
+        return Double(smoothstep(0.16, 0.40, clampedProgress))
+    }
+
+    /// Triangular pulse that peaks as the coal ignites (~progress 0.34), driving
+    /// the catch-flash burst. Squared for a sharper, more ignition-like peak.
+    private var catchIntensity: Double {
+        let center: CGFloat = 0.34
+        let halfWidth: CGFloat = 0.22
+        let raw = max(0, 1 - abs(clampedProgress - center) / halfWidth)
+        return Double(raw * raw)
+    }
+
+    private var catchFlash: some View {
+        let scale = 0.44 + CGFloat(catchIntensity) * 1.05
+        return RadialGradient(
+            gradient: Gradient(colors: [
+                Color.white.opacity(0.92),
+                Color(red: 1.0, green: 0.80, blue: 0.34).opacity(0.58),
+                Color.orange.opacity(0)
+            ]),
+            center: .center,
+            startRadius: 0,
+            endRadius: size * 0.5
+        )
+        .frame(width: size * scale, height: size * scale)
+        .offset(y: size * 0.08)
+        .opacity(catchIntensity)
+        .blur(radius: size * 0.02)
+        .blendMode(.screen)
+        .allowsHitTesting(false)
+    }
+
+    /// Hermite smoothstep — eases a linear ramp between two edges into an
+    /// S-curve so crossfades start and end gently instead of clipping.
+    private func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ x: CGFloat) -> CGFloat {
+        guard edge1 > edge0 else { return x < edge0 ? 0 : 1 }
+        let t = min(max((x - edge0) / (edge1 - edge0), 0), 1)
+        return t * t * (3 - 2 * t)
     }
 
     private var easedProgress: CGFloat {
