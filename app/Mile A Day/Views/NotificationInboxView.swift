@@ -602,7 +602,18 @@ struct NotificationInboxView: View {
                 userInfo: ["tab": 2]
             )
             NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
-        case "friend_request", "friend_request_accepted", "friend_nudge", "friend_activity":
+        case "friend_request", "friend_request_reminder":
+            // Ask the Friends tab to open the requests sheet. Switching tabs
+            // alone dropped the user on the friends list with the sheet closed
+            // and no hint where the request went — the row looked broken.
+            DeepLinkRouter.shared.requestOpenFriendRequests()
+            NotificationCenter.default.post(
+                name: NSNotification.Name("MAD_SwitchTab"),
+                object: nil,
+                userInfo: ["tab": 3]
+            )
+        case "friend_request_accepted", "friend_nudge", "friend_activity":
+            // No sheet to open — these are about an existing friendship.
             NotificationCenter.default.post(
                 name: NSNotification.Name("MAD_SwitchTab"),
                 object: nil,
@@ -750,7 +761,7 @@ struct NotificationInboxView: View {
     /// `iconForType` casing so users see "FRIEND · 5m ago" at a glance.
     private func typeLabel(for type: String) -> String {
         switch type {
-        case "friend_request": return "FRIEND REQUEST"
+        case "friend_request", "friend_request_reminder": return "FRIEND REQUEST"
         case "friend_request_accepted": return "FRIEND"
         case "friend_nudge": return "NUDGE"
         case "friend_activity": return "FRIEND"
@@ -787,7 +798,7 @@ struct NotificationInboxView: View {
 
     private func iconForType(_ type: String) -> (String, Color) {
         switch type {
-        case "friend_request": return ("person.badge.plus", .blue)
+        case "friend_request", "friend_request_reminder": return ("person.badge.plus", .blue)
         case "friend_request_accepted": return ("person.2.fill", .green)
         case "friend_nudge": return ("bell.badge", .orange)
         case "friend_activity": return ("figure.run", .green)

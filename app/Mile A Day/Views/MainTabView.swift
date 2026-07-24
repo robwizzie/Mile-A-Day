@@ -118,6 +118,11 @@ struct MainTabView: View {
             await competitionService.refreshAllData()
             await friendService.refreshAllData()
             await refreshUnreadCount()
+            // Sync explicitly, not just via onChange: if the badge is stale
+            // from a previous session and the user has since resolved every
+            // request elsewhere, the count stays 0 the whole launch, onChange
+            // never fires, and the old number would sit there forever.
+            await notificationService.setAppBadge(friendService.friendRequests.count)
             // Existing users already past a streak milestone get asked on this
             // first calm pass — the retroactive path.
             scheduleReviewEvaluation()
@@ -126,7 +131,7 @@ struct MainTabView: View {
             guard let type = notification.userInfo?["type"] as? String else { return }
             Task {
                 switch type {
-                case "friend_request":
+                case "friend_request", "friend_request_reminder":
                     await friendService.refreshAllData()
                 case "competition_invite":
                     await competitionService.refreshAllData()
@@ -139,7 +144,13 @@ struct MainTabView: View {
             guard let type = notification.userInfo?["type"] as? String else { return }
             Task {
                 switch type {
-                case "friend_request", "friend_request_accepted":
+                case "friend_request", "friend_request_reminder":
+                    await friendService.refreshAllData()
+                    // Park the intent so FriendsListView opens the sheet even
+                    // if the Friends tab has never been visited this launch.
+                    DeepLinkRouter.shared.requestOpenFriendRequests()
+                    selectedTab = 3
+                case "friend_request_accepted":
                     await friendService.refreshAllData()
                     selectedTab = 3
                 case "competition_invite", "competition_accepted", "competition_started",
@@ -180,6 +191,13 @@ struct MainTabView: View {
         .onReceive(competitionService.$competitions) { competitions in
             syncCompetitionWidget(competitions)
         }
+        // Single source of truth for the app icon badge. Every path that can
+        // change the pending count — refreshAllData on launch/foreground/tab
+        // switch/push, and the local array mutations in accept/decline — lands
+        // here, so the badge can't drift the way four scattered call sites would.
+        .onChange(of: friendService.friendRequests.count) { _, count in
+            Task { await notificationService.setAppBadge(count) }
+        }
         .onChange(of: selectedTab) { _, newTab in
             // TabView keeps tab views alive, so their onAppear/.task don't re-fire
             // on tab switches — without this, Compete/Friends showed whatever was
@@ -202,6 +220,9 @@ struct MainTabView: View {
                     await competitionService.refreshAllData()
                     await friendService.refreshAllData()
                     await refreshUnreadCount()
+                    // Same reason as the launch sync above — covers a request
+                    // resolved on another device while this one was backgrounded.
+                    await notificationService.setAppBadge(friendService.friendRequests.count)
                     await syncLeaderboardWidget()
                 }
                 // Refresh health data and re-evaluate the daily reminder

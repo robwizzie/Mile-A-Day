@@ -13,7 +13,25 @@ final class DeepLinkRouter: ObservableObject {
     /// the Friends tab to resolve it and present the profile.
     @Published var pendingProfileUsername: String?
 
+    /// Set when something elsewhere in the app means "go deal with friend
+    /// requests" — the Dashboard attention row, a notification-inbox row.
+    ///
+    /// Parked here rather than posted through NotificationCenter for the same
+    /// reason `pendingProfileUsername` is: `FriendsListView` only exists once
+    /// the Friends tab has been visited, so a fire-and-forget post races tab
+    /// instantiation and is silently dropped on a cold launch. FriendsListView
+    /// consumes this in both `.task` (first mount) and `.onReceive` (already
+    /// mounted), which covers either ordering.
+    @Published var pendingOpenFriendRequests = false
+
     private init() {}
+
+    /// Asks the Friends tab to present the friend-requests sheet. Callers should
+    /// also switch to the Friends tab (`MAD_SwitchTab`, tab 3) — this only parks
+    /// the intent to open the sheet once that view is alive.
+    func requestOpenFriendRequests() {
+        pendingOpenFriendRequests = true
+    }
 
     /// Extracts a username from a profile link in either form:
     /// - in-app scheme: mileaday://u/<username>  (what our QR codes encode)

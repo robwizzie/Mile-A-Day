@@ -158,6 +158,9 @@ class AppStateManager: ObservableObject {
         // Unregister device token before signing out
         Task {
             await MADNotificationService.shared.unregisterDeviceToken()
+            // Clear the friend-request badge — otherwise the previous account's
+            // count sits on the icon through sign-in as the next user.
+            await MADNotificationService.shared.setAppBadge(0)
         }
 
         userDefaults.set(false, forKey: isAuthenticatedKey)

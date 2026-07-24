@@ -56,6 +56,12 @@ struct NotificationPreferences: Codable {
     /// Notify when a friend request results in a new friendship.
     var friendRequestAcceptedEnabled: Bool = true
 
+    /// Remind me about friend requests I've left unanswered for over a day.
+    /// Unlike the other flags here, this one is synced to the backend — the
+    /// reminder is sent server-side, so a purely local switch could not turn it
+    /// off (App Review 4.5.4 requires a working opt-out).
+    var friendRequestReminderEnabled: Bool = true
+
     // Competition notifications
     var competitionInviteEnabled: Bool = true
     var competitionAcceptedEnabled: Bool = true
