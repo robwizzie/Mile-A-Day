@@ -145,6 +145,13 @@ struct FriendsListView: View {
                 showingRequestsSheet = true
                 MADNotificationService.shared.pendingNotificationType = nil
             }
+            // Cold path for in-app entry points (Dashboard attention row,
+            // notification-inbox row): the flag was parked before this view
+            // existed. The onReceive below covers the already-mounted case.
+            if DeepLinkRouter.shared.pendingOpenFriendRequests {
+                showingRequestsSheet = true
+                DeepLinkRouter.shared.pendingOpenFriendRequests = false
+            }
             // Cold-launch profile link: the username was parked before this
             // view existed. (Warm launches arrive via the onReceive below.)
             if let pending = DeepLinkRouter.shared.pendingProfileUsername {
@@ -160,6 +167,12 @@ struct FriendsListView: View {
         .onReceive(DeepLinkRouter.shared.$pendingProfileUsername) { username in
             guard let username else { return }
             openProfileFromDeepLink(username: username)
+        }
+        // Warm path for the parked open-requests intent (see .task above).
+        .onReceive(DeepLinkRouter.shared.$pendingOpenFriendRequests) { shouldOpen in
+            guard shouldOpen else { return }
+            showingRequestsSheet = true
+            DeepLinkRouter.shared.pendingOpenFriendRequests = false
         }
         .refreshable {
             // refreshAllData re-fetches nudge statuses internally.
@@ -1439,33 +1452,41 @@ struct FriendsListView: View {
     }
 
     // MARK: - Helper Methods
-    private func handleAcceptRequest(_ user: BackendUser) {
-        Task {
-            do {
-                try await friendService.acceptFriendRequest(from: user)
-            } catch {
-                // Handle error
-            }
+
+    // The request handlers are async and return an error message (nil on
+    // success) rather than swallowing failures. They're called from INSIDE
+    // FriendRequestsSheet, which covers this view — so the sheet renders the
+    // resulting toast itself. Posting it here would put it behind the sheet,
+    // where nobody would ever see it.
+    //
+    // FriendService mutates its published arrays only after the request
+    // succeeds, so a failure leaves the row correctly in place; the only thing
+    // missing was telling the user it failed.
+
+    private func handleAcceptRequest(_ user: BackendUser) async -> String? {
+        do {
+            try await friendService.acceptFriendRequest(from: user)
+            return nil
+        } catch {
+            return "Couldn't accept \(user.displayName)'s request. Try again."
         }
     }
 
-    private func handleDeclineRequest(_ user: BackendUser) {
-        Task {
-            do {
-                try await friendService.declineFriendRequest(from: user)
-            } catch {
-                // Handle error
-            }
+    private func handleDeclineRequest(_ user: BackendUser) async -> String? {
+        do {
+            try await friendService.declineFriendRequest(from: user)
+            return nil
+        } catch {
+            return "Couldn't decline that request. Try again."
         }
     }
 
-    private func handleCancelRequest(_ user: BackendUser) {
-        Task {
-            do {
-                try await friendService.cancelFriendRequest(to: user)
-            } catch {
-                // Handle error
-            }
+    private func handleCancelRequest(_ user: BackendUser) async -> String? {
+        do {
+            try await friendService.cancelFriendRequest(to: user)
+            return nil
+        } catch {
+            return "Couldn't cancel that request. Try again."
         }
     }
 
@@ -1474,7 +1495,15 @@ struct FriendsListView: View {
             do {
                 try await friendService.removeFriend(user)
             } catch {
-                // Handle error
+                // Called from the list itself, not the sheet, so this toast is
+                // visible where it's posted.
+                showNudgeFeedback(
+                    NudgeFeedback(
+                        icon: "xmark.circle",
+                        message: "Couldn't remove \(user.displayName). Try again.",
+                        isError: true
+                    )
+                )
             }
         }
     }

@@ -22,6 +22,31 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
+// One row per friend_request push actually SENT. Deliberately not derived from
+// `friendships`: decline and cancel DELETE the row, so counting friendships
+// would let a send/cancel/send loop re-trigger pushes for free and would
+// under-count a mass-add sweep. Mirrors friend_nudge_log.
+export const friendRequestLog = pgTable(
+  "friend_request_log",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    senderId: text("sender_id").notNull(),
+    targetId: text("target_id").notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "string",
+    }).defaultNow(),
+  },
+  (table) => [
+    index("idx_friend_request_log_lookup").using(
+      "btree",
+      table.senderId.asc().nullsLast(),
+      table.targetId.asc().nullsLast(),
+      table.createdAt.desc().nullsFirst(),
+    ),
+  ],
+);
+
 export const friendNudgeLog = pgTable(
   "friend_nudge_log",
   {
@@ -319,6 +344,13 @@ export const notificationSettings = pgTable(
     // visibility decides WHO, share_route_maps decides WHETHER routes are part
     // of what they get. Both must pass.
     workoutVisibility: text("workout_visibility").default("friends").notNull(),
+    // friend_request_reminder_enabled: the once-per-week "N people are waiting
+    // to be your friend" nudge for requests left unanswered >24h. Separate from
+    // the friend_request push itself so muting the reminder never mutes the
+    // original request.
+    friendRequestReminderEnabled: boolean(
+      "friend_request_reminder_enabled",
+    ).default(true),
   },
   (table) => [
     check(
@@ -913,6 +945,20 @@ export const friendships = pgTable(
     userId: text("user_id").notNull(),
     friendId: text("friend_id").notNull(),
     status: text().default("pending").notNull(),
+    // Nullable on purpose: ADD COLUMN without NOT NULL stays a metadata-only
+    // operation on a live table. Note Postgres evaluates the DEFAULT once at
+    // DDL time, so every pre-existing row shares the deploy timestamp — which
+    // is why migration 0026 pre-claims legacy rows via reminder_sent_at.
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "string",
+    }).defaultNow(),
+    // Atomic claim column for the pending-request reminder, mirroring
+    // h2h_matchups.notified_at. Claim-then-send keeps the nudge exactly-once.
+    reminderSentAt: timestamp("reminder_sent_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
   (table) => [
     index("idx_friendships_friend_status").using(

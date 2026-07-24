@@ -50,6 +50,7 @@ final class MADNotificationService: NSObject, ObservableObject {
 
     /// Registers UNNotificationCategories for actionable pushes.
     /// FRIEND_ACTIVITY: a friend completed their mile — recipient can tap "🔥 Hype".
+    /// FRIEND_REQUEST: incoming request — recipient can Accept/Decline in place.
     private func registerCategories() {
         let hypeAction = UNNotificationAction(
             identifier: "HYPE_ACTION",
@@ -62,7 +63,30 @@ final class MADNotificationService: NSObject, ObservableObject {
             intentIdentifiers: [],
             options: []
         )
-        center.setNotificationCategories([friendActivity])
+
+        // Neither action is .foreground: resolving the request without opening
+        // the app is the whole point. A request the user answers from the
+        // banner can't get lost behind a missed notification.
+        let acceptAction = UNNotificationAction(
+            identifier: "FRIEND_ACCEPT_ACTION",
+            title: "Accept",
+            options: []
+        )
+        let declineAction = UNNotificationAction(
+            identifier: "FRIEND_DECLINE_ACTION",
+            title: "Decline",
+            options: [.destructive]
+        )
+        let friendRequest = UNNotificationCategory(
+            identifier: "FRIEND_REQUEST",
+            actions: [acceptAction, declineAction],
+            intentIdentifiers: [],
+            options: []
+        )
+
+        // setNotificationCategories REPLACES the whole set — FRIEND_ACTIVITY
+        // must stay in this array or the Hype button silently disappears.
+        center.setNotificationCategories([friendActivity, friendRequest])
     }
 
     // MARK: - Public API
@@ -315,6 +339,7 @@ final class MADNotificationService: NSObject, ObservableObject {
         let prefs = NotificationPreferences.load()
         switch type {
         case "friend_request": return prefs.friendRequestReceivedEnabled
+        case "friend_request_reminder": return prefs.friendRequestReminderEnabled
         case "friend_request_accepted": return prefs.friendRequestAcceptedEnabled
         case "friend_nudge": return prefs.friendNudgeEnabled
         case "friend_activity": return prefs.friendCompletedEnabled
@@ -441,6 +466,14 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             await handleHypeAction(userInfo: userInfo)
             return
         }
+        if response.actionIdentifier == "FRIEND_ACCEPT_ACTION" {
+            await handleFriendRequestAction(userInfo: userInfo, accept: true)
+            return
+        }
+        if response.actionIdentifier == "FRIEND_DECLINE_ACTION" {
+            await handleFriendRequestAction(userInfo: userInfo, accept: false)
+            return
+        }
 
         guard let type = userInfo["type"] as? String else { return }
         let data = userInfo["data"] as? [String: String] ?? [:]
@@ -509,6 +542,76 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         } catch {
             await postLocalToast(title: "Couldn't send hype", body: "Try opening the app.")
         }
+    }
+
+    /// Handles the Accept / Decline buttons on a friend_request push.
+    ///
+    /// Runs while the app may be suspended, so it must NOT reach for the
+    /// FriendService owned by MainTabView — that view may not exist. A throwaway
+    /// instance is safe and cheap: its init only reads the auth token out of
+    /// UserDefaults, no network.
+    @MainActor
+    private func handleFriendRequestAction(
+        userInfo: [AnyHashable: Any],
+        accept: Bool
+    ) async {
+        let data = userInfo["data"] as? [String: String]
+        guard let requesterId = data?["user_id"], !requesterId.isEmpty else {
+            await postLocalToast(
+                title: "Couldn't respond",
+                body: "Open the app to answer this request."
+            )
+            return
+        }
+
+        let service = FriendService()
+        // Only the id travels in the push payload, so resolve the row to get a
+        // BackendUser for the service call. If it's already gone, the request
+        // was answered elsewhere (another device, or in-app).
+        await service.loadFriendRequests()
+        guard let user = service.friendRequests.first(where: { $0.user_id == requesterId }) else {
+            await postLocalToast(
+                title: "Already handled",
+                body: "That request was already answered."
+            )
+            await setAppBadge(service.friendRequests.count)
+            return
+        }
+
+        do {
+            if accept {
+                // acceptFriendRequest posts its own "You're now friends!" local
+                // notification, so adding a toast here would double-notify.
+                try await service.acceptFriendRequest(from: user)
+            } else {
+                try await service.declineFriendRequest(from: user)
+                await postLocalToast(
+                    title: "Request declined",
+                    body: "You won't hear about this one again."
+                )
+            }
+            await setAppBadge(service.friendRequests.count)
+        } catch {
+            await postLocalToast(
+                title: accept ? "Couldn't accept" : "Couldn't decline",
+                body: "Try opening the app."
+            )
+        }
+    }
+
+    /// Sets the app icon badge.
+    ///
+    /// The badge counts PENDING FRIEND REQUESTS ONLY. That keeps its meaning
+    /// unambiguous — "something is blocked on you" — and it self-clears the
+    /// moment the user accepts or declines. Folding in inbox unread would make
+    /// it permanently red (every hype, friend post and activity push feeds that
+    /// count), which trains the user to ignore it.
+    ///
+    /// `.badge` is already part of the authorization request, so this needs no
+    /// new permission prompt. It silently no-ops if badges were denied, which
+    /// is the correct behavior — don't try to detect it.
+    func setAppBadge(_ count: Int) async {
+        try? await center.setBadgeCount(max(0, count))
     }
 
     /// Schedules an immediate local notification used as a lightweight toast

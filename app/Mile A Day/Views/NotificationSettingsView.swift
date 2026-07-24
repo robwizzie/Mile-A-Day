@@ -158,6 +158,9 @@ struct NotificationSettingsView: View {
                     settingsSection(title: "SOCIAL", icon: "person.2.fill", iconColor: .blue) {
                         settingsToggle("Friend requests", isOn: $prefs.friendRequestReceivedEnabled)
                         settingsDivider
+                        settingsToggle("Friend request reminders", isOn: $prefs.friendRequestReminderEnabled,
+                            description: "An occasional nudge about requests you haven't answered")
+                        settingsDivider
                         settingsToggle("Friend request accepted", isOn: $prefs.friendRequestAcceptedEnabled)
                         settingsDivider
                         settingsToggle("Friend nudges", isOn: $prefs.friendNudgeEnabled)
@@ -540,6 +543,9 @@ struct NotificationSettingsView: View {
                     "friend_posts_enabled": prefs.friendPostsEnabled,
                     "share_route_maps": prefs.shareRouteMaps,
                     "weekly_recap_enabled": prefs.weeklyRecapEnabled,
+                    // Must reach the server: the reminder is sent by a cron, so
+                    // a local-only flag could never actually silence it.
+                    "friend_request_reminder_enabled": prefs.friendRequestReminderEnabled,
                     "workout_visibility": prefs.workoutVisibility.rawValue,
                 ]
                 _ = try await friendService.updateNotificationSettings(backendSettings)

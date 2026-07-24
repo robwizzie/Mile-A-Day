@@ -6,12 +6,21 @@ import SwiftUI
 struct FriendRequestsSheet: View {
     @ObservedObject var friendService: FriendService
     let onSelectUser: (BackendUser) -> Void
-    let onAccept: (BackendUser) -> Void
-    let onDecline: (BackendUser) -> Void
-    let onCancel: (BackendUser) -> Void
+    // Async and returning an error message (nil on success). These used to be
+    // fire-and-forget `(BackendUser) -> Void` whose callers swallowed every
+    // error, so a failed accept looked like a dead button. The toast has to be
+    // rendered HERE — this sheet covers FriendsListView, so feedback posted on
+    // that view would be hidden behind this one.
+    let onAccept: (BackendUser) async -> String?
+    let onDecline: (BackendUser) async -> String?
+    let onCancel: (BackendUser) async -> String?
 
     @Environment(\.dismiss) private var dismiss
     @State private var tab: Tab = .incoming
+    @State private var feedback: NudgeFeedback?
+    /// User ids with a request in flight — disables their buttons so a double
+    /// tap can't fire two calls for the same person.
+    @State private var inFlight: Set<String> = []
 
     private enum Tab: String, CaseIterable, Identifiable {
         case incoming, sent
@@ -33,6 +42,17 @@ struct FriendRequestsSheet: View {
                     case .sent: sentList
                     }
                 }
+            }
+
+            if let feedback {
+                VStack {
+                    FriendRequestFeedbackBanner(feedback: feedback)
+                        .padding(.horizontal, MADTheme.Spacing.md)
+                        .padding(.top, MADTheme.Spacing.sm)
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(100)
             }
         }
         .navigationTitle("Friend Requests")
@@ -99,6 +119,33 @@ struct FriendRequestsSheet: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: Actions
+
+    /// Runs one request action, showing a toast if it fails. Success needs no
+    /// toast — the row disappearing is the confirmation.
+    private func run(
+        _ user: BackendUser,
+        _ action: @escaping (BackendUser) async -> String?
+    ) {
+        guard !inFlight.contains(user.user_id) else { return }
+        inFlight.insert(user.user_id)
+        Task {
+            let errorMessage = await action(user)
+            inFlight.remove(user.user_id)
+            guard let errorMessage else { return }
+            MADHaptics.error()
+            withAnimation(.easeInOut(duration: 0.2)) {
+                feedback = NudgeFeedback(
+                    icon: "xmark.circle",
+                    message: errorMessage,
+                    isError: true
+                )
+            }
+            try? await Task.sleep(nanoseconds: 2_800_000_000)
+            withAnimation(.easeInOut(duration: 0.2)) { feedback = nil }
+        }
+    }
+
     // MARK: Incoming requests
 
     @ViewBuilder
@@ -119,7 +166,7 @@ struct FriendRequestsSheet: View {
                             onTap: { onSelectUser(request) },
                             actionButton: AnyView(
                                 VStack(spacing: MADTheme.Spacing.sm) {
-                                    Button(action: { onAccept(request) }) {
+                                    Button(action: { run(request, onAccept) }) {
                                         HStack(spacing: MADTheme.Spacing.xs) {
                                             Image(systemName: "checkmark")
                                                 .font(.system(size: 12, weight: .semibold))
@@ -136,7 +183,7 @@ struct FriendRequestsSheet: View {
                                     }
                                     .buttonStyle(.plain)
 
-                                    Button(action: { onDecline(request) }) {
+                                    Button(action: { run(request, onDecline) }) {
                                         HStack(spacing: MADTheme.Spacing.xs) {
                                             Image(systemName: "xmark")
                                                 .font(.system(size: 12, weight: .semibold))
@@ -158,6 +205,8 @@ struct FriendRequestsSheet: View {
                                     .buttonStyle(.plain)
                                 }
                                 .frame(width: 90)
+                                .disabled(inFlight.contains(request.user_id))
+                                .opacity(inFlight.contains(request.user_id) ? 0.5 : 1)
                             )
                         )
                     }
@@ -188,7 +237,7 @@ struct FriendRequestsSheet: View {
                                 FriendActionButton(
                                     title: "Cancel",
                                     style: .secondary,
-                                    action: { onCancel(request) }
+                                    action: { run(request, onCancel) }
                                 )
                             )
                         )
@@ -197,5 +246,40 @@ struct FriendRequestsSheet: View {
                 .padding(MADTheme.Spacing.md)
             }
         }
+    }
+}
+
+/// Failure toast for the requests sheet. Mirrors the treatment of
+/// FriendsListView's nudge banner (colored leading stripe over an
+/// ultraThinMaterial card) so the two read as the same system toast — that one
+/// is a private func on a view that this sheet covers, so it can't be reused
+/// directly.
+private struct FriendRequestFeedbackBanner: View {
+    let feedback: NudgeFeedback
+
+    var body: some View {
+        let accent: Color = feedback.isError ? .red : .green
+        return HStack(spacing: MADTheme.Spacing.sm) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(accent)
+                .frame(width: 3, height: 28)
+            Image(systemName: feedback.icon)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(accent)
+            Text(feedback.message)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundColor(.white)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(MADTheme.Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                        .strokeBorder(accent.opacity(0.35), lineWidth: 1)
+                )
+        )
     }
 }

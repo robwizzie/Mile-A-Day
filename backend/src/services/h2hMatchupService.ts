@@ -1,5 +1,6 @@
 import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
+import { localNowSql } from "./dailyResetTime.js";
 import {
   ChallengeRow,
   SOCIAL_CHALLENGE_KEYS,
@@ -439,18 +440,9 @@ async function computeAndInsertMatchups(
 
 // ─── End-of-day resolution (cron) ───────────────────────────────────
 
-/**
- * A user's local "now" as a tz-less timestamp, preferring the app-reported
- * notification offset and falling back to the last workout's offset (same
- * precedence as the weekly recap cron). `col` is a code-controlled column
- * reference, never user input.
- */
-function localNowSql(col: string): string {
-  return `((NOW() AT TIME ZONE 'UTC') + (COALESCE(
-		(SELECT ns.timezone_offset_minutes FROM notification_settings ns WHERE ns.user_id = ${col}),
-		(SELECT w.timezone_offset FROM workouts w WHERE w.user_id = ${col} ORDER BY w.device_end_date DESC LIMIT 1),
-		0) || ' minutes')::interval)`;
-}
+// localNowSql now lives in dailyResetTime.ts alongside the other shared SQL
+// time fragments — the friend-request reminder needs the identical offset
+// precedence, and two copies would drift.
 
 /**
  * Hours past local midnight before a day's duel is scored. Late HealthKit

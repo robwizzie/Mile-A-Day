@@ -933,6 +933,9 @@ struct DashboardView: View {
         isRefreshing = true
         healthManager.fetchAllWorkoutData()
         fetchFastestPaceFromBackend()
+        // Pull-to-refresh only touched HealthKit + pace, so the friend-request
+        // attention row would go stale under the very gesture used to clear it.
+        await friendService.refreshAllData()
         // The HealthKit fetches above are fire-and-forget; hold the
         // pull-to-refresh spinner briefly so fresh values have a chance to
         // land before it dismisses — previously it vanished instantly and
@@ -1443,7 +1446,7 @@ struct DashboardView: View {
     // MARK: - Attention slot
 
     private enum AttentionItem: Hashable {
-        case activeWorkout, invites, photoWaiting, replay
+        case activeWorkout, invites, friendRequests, photoWaiting, replay
     }
 
     /// The two most important things needing the user, in strict priority:
@@ -1455,6 +1458,13 @@ struct DashboardView: View {
         }
         if !competitionService.invites.isEmpty {
             items.append(.invites)
+        }
+        // Sits just below invites: both are "a person is waiting on your
+        // answer", but a competition invite has a start date and can expire
+        // while a friend request cannot. Requests used to have no presence on
+        // the Dashboard at all — the tab-bar badge was the only passive signal.
+        if !friendService.friendRequests.isEmpty {
+            items.append(.friendRequests)
         }
         if midRunPhotoWaiting {
             items.append(.photoWaiting)
@@ -1486,9 +1496,66 @@ struct DashboardView: View {
         switch item {
         case .activeWorkout: inProgressBannerSection
         case .invites: invitesAttentionRow
+        case .friendRequests: friendRequestsAttentionRow
         case .photoWaiting: photoWaitingBanner
         case .replay: replayTodaysCelebrationCard
         }
+    }
+
+    /// Pending friend requests, in the attention slot's shared grammar.
+    private var friendRequestsAttentionRow: some View {
+        let count = friendService.friendRequests.count
+        // Precomputed rather than inlined as ternaries in the ViewBuilder —
+        // this file already carries sections split out to help Swift type-check.
+        let title = count == 1 ? "Friend request" : "\(count) friend requests"
+        let subtitle: String = {
+            guard count == 1, let name = friendService.friendRequests.first?.displayName else {
+                return "Tap to respond"
+            }
+            return "\(name) wants to be friends — tap to respond"
+        }()
+        return Button {
+            // Park the intent BEFORE switching tabs: FriendsListView may not
+            // exist yet, and reads the flag in .task when it first mounts.
+            DeepLinkRouter.shared.requestOpenFriendRequests()
+            NotificationCenter.default.post(
+                name: NSNotification.Name("MAD_SwitchTab"),
+                object: nil,
+                userInfo: ["tab": 3]
+            )
+        } label: {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                // Deliberately an SF Symbols 1 name. The deployment target is
+                // iOS 17, where symbols added after SF Symbols 5 render as a
+                // blank box rather than falling back.
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(MADTheme.Colors.madRed)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text(subtitle)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.55))
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .padding(MADTheme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
+                            .strokeBorder(MADTheme.Colors.madRed.opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     /// Competition invites in the attention slot's shared grammar (the old
