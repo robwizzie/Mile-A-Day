@@ -33,6 +33,11 @@ enum RunStatKind: String, CaseIterable, Identifiable, Codable {
 }
 
 /// Visual templates for the overlay. The user can flip between them live.
+///
+/// These deliberately have no `icon`: the picker used to be text chips with
+/// abstract SF Symbols (`rectangle.fill`, `minus.rectangle.fill`, …), which told
+/// you nothing about what a style actually looked like. `StickerTrayView` renders
+/// a live miniature of each style instead, so the name is the only label needed.
 enum StickerStyle: String, CaseIterable, Identifiable, Codable {
     case card, minimal, stacked, streak
     var id: String { rawValue }
@@ -42,14 +47,6 @@ enum StickerStyle: String, CaseIterable, Identifiable, Codable {
         case .minimal: return "Minimal"
         case .stacked: return "Stacked"
         case .streak: return "Streak"
-        }
-    }
-    var icon: String {
-        switch self {
-        case .card: return "rectangle.fill"
-        case .minimal: return "minus.rectangle.fill"
-        case .stacked: return "list.bullet.rectangle.fill"
-        case .streak: return "flame.fill"
         }
     }
 }
@@ -207,6 +204,12 @@ struct RunStatsStickerView: View, Equatable {
 
     private var minimalStyle: some View {
         HStack(spacing: 8) {
+            // Every other style carries `brandLine`; without this one, Minimal was
+            // just a generic stats pill and didn't read as a Mile A Day sticker.
+            MADLogoMark(size: 15, opacity: 0.85, shadow: false)
+            Capsule()
+                .fill(Color.white.opacity(0.25))
+                .frame(width: 1, height: 12)
             ForEach(Array(data.enumerated()), id: \.element.id) { idx, datum in
                 if idx > 0 {
                     Circle().fill(Color.white.opacity(0.4)).frame(width: 3, height: 3)

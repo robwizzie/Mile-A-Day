@@ -135,6 +135,12 @@ final class PostComposerViewModel: ObservableObject {
     /// Publish was rejected server-side for unaccepted guidelines — the view
     /// re-presents the gate when this flips true.
     @Published var needsTermsGate = false
+    /// Display-only composite for the share step's thumbnail. Rendered from the
+    /// SAME `flatten()` the upload uses, so the thumbnail is literally the image
+    /// that ships — sticker baked in, cropped 4:5 exactly as the feed shows it.
+    /// Never read by `publish()`: that re-flattens, so the upload path stays
+    /// byte-for-byte what it has always been.
+    @Published var previewComposite: UIImage?
 
     let stats: RunStatsInput
     /// Captured on-screen canvas size (points), reused to render the composite.
@@ -161,6 +167,25 @@ final class PostComposerViewModel: ObservableObject {
 
     var canPublish: Bool {
         pickedImage != nil && destination != nil && !isPublishing
+    }
+
+    /// A photo on the canvas IS the draft — the caption and sticker ride with it.
+    /// Gates the discard confirmation.
+    var hasDraft: Bool { pickedImage != nil }
+
+    /// The sticker has been moved/resized/tilted off its default placement.
+    /// Epsilon-compared because pinch and twist land on irrational values.
+    var isStickerTransformed: Bool {
+        abs(stickerPos.x - 0.5) > 0.001
+            || abs(stickerPos.y - 0.82) > 0.001
+            || abs(stickerScale - 1) > 0.001
+            || abs(stickerRotation.degrees) > 0.001
+    }
+
+    func resetStickerPlacement() {
+        stickerPos = CGPoint(x: 0.5, y: 0.82)
+        stickerScale = 1
+        stickerRotation = .zero
     }
 
     /// Check whether the linked workout has GPS route data, enabling the
@@ -319,6 +344,10 @@ struct PostCanvas: View {
 /// The sticker is wrapped in `.equatable()` (outside the transforms) so its own
 /// body — drop shadow, number formatting — is rendered once and only its cheap
 /// transform matrix changes per frame.
+///
+/// Placement aids (centre snap, guides, selection ring) live ENTIRELY in here for
+/// the same reason: routing snap state up through a `@Binding` would re-render the
+/// whole composer mid-drag and undo the isolation this layer exists to provide.
 private struct StickerEditorLayer: View {
     let input: RunStatsInput
     let config: StickerConfig
@@ -335,10 +364,47 @@ private struct StickerEditorLayer: View {
     @GestureState private var dragTranslation: CGSize = .zero
     @GestureState private var magnifyFactor: CGFloat = 1
     @GestureState private var twist: Angle = .zero
+    @GestureState private var isManipulating = false
+
+    /// Natural, untransformed sticker size. Measured under the transforms, so it
+    /// only changes when the style / enabled stats change — never per frame.
+    @State private var natural: CGSize = .zero
+    /// One-shot latch so the snap haptic fires on ENTERING the centre zone rather
+    /// than on every frame spent inside it.
+    @State private var snappedX = false
+    @State private var snappedY = false
+
+    /// Finger travel (points) within which the sticker locks to a centre line.
+    private static let snapThreshold: CGFloat = 8
 
     var body: some View {
+        ZStack {
+            centerGuides
+            sticker
+        }
+        .frame(width: canvas.width, height: canvas.height)
+        // Corrects a position persisted by an older build (which clamped only the
+        // centre), and re-corrects whenever the sticker's own size changes — a
+        // style switch from the tray, a stat toggled on, or the branded Minimal
+        // pill growing. `reclamp()` writes only on a real change, so this is a
+        // no-op at rest and can't fire mid-gesture (`natural` is constant then).
+        .onChange(of: natural, initial: true) { _, _ in reclamp() }
+        .onChange(of: canvas) { _, _ in reclamp() }
+    }
+
+    private var sticker: some View {
         RunStatsStickerView(input: input, config: config)
             .equatable()                       // MUST stay OUTSIDE the transforms
+            // Probe sits OUTSIDE .equatable() but UNDER the transforms, so it
+            // reports the NATURAL size and settles instead of firing per frame.
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: StickerNaturalSizeKey.self, value: geo.size)
+                }
+            )
+            // INSIDE the transforms so the ring tracks the sticker exactly; its
+            // stroke divides by liveScale to stay visually constant.
+            .overlay { selectionRing }
             .scaleEffect(liveScale)
             .rotationEffect(liveRotation)
             // Generous, invisible hit margin so a shrunk-down sticker stays easy
@@ -347,24 +413,118 @@ private struct StickerEditorLayer: View {
             .contentShape(Rectangle())
             .gesture(manipulation)             // BEFORE .position → grab the sticker itself
             .position(liveCenter)
+            .onPreferenceChange(StickerNaturalSizeKey.self) { natural = $0 }
+    }
+
+    /// Dashed outline while a gesture is in flight, so it's obvious the sticker —
+    /// not the photo — is what's being moved. It sits inside the transforms (so it
+    /// tracks scale and rotation) and divides its stroke and dash by `liveScale`,
+    /// which cancels the scale back out and keeps the outline visually constant at
+    /// any sticker size. Sized by the overlay itself, so it needs no measurement.
+    @ViewBuilder
+    private var selectionRing: some View {
+        if isManipulating {
+            let s = max(liveScale, 0.01)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(
+                    Color.white.opacity(0.85),
+                    style: StrokeStyle(lineWidth: 1.5 / s, dash: [5 / s, 4 / s])
+                )
+                .padding(-5)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Thin centre lines that appear only while the sticker is locked to them.
+    @ViewBuilder
+    private var centerGuides: some View {
+        if isManipulating {
+            ZStack {
+                if isSnappedX {
+                    Rectangle()
+                        .fill(MADTheme.Colors.madRed)
+                        .frame(width: 1)
+                        .frame(maxHeight: .infinity)
+                }
+                if isSnappedY {
+                    Rectangle()
+                        .fill(MADTheme.Colors.madRed)
+                        .frame(height: 1)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .opacity(0.9)
+            .allowsHitTesting(false)
+            .transition(.opacity)
+        }
     }
 
     // Live = committed ∘ transient, clamped IDENTICALLY to the `.onEnded` commit
     // so releasing never snaps the sticker to a different spot/size.
     private var liveScale: CGFloat {
-        (scale * magnifyFactor).clamped(to: StickerConfig.scaleRange)
+        (scale * magnifyFactor).clamped(to: fittedScaleRange)
     }
     private var liveRotation: Angle { rotation + twist }
+
+    /// `StickerConfig.scaleRange` narrowed to what actually fits the canvas, so a
+    /// pinch can't grow the sticker past the photo's edges.
+    private var fittedScaleRange: ClosedRange<CGFloat> {
+        StickerBounds.scaleRange(natural: natural, canvas: canvas)
+    }
     private var liveCenter: CGPoint {
         CGPoint(x: committedX(addingDrag: dragTranslation.width) * canvas.width,
                 y: committedY(addingDrag: dragTranslation.height) * canvas.height)
     }
 
+    /// Size-aware legal ranges, recomputed from the LIVE scale/rotation so an
+    /// in-flight pinch or twist is bounded exactly the way the release will be.
+    private var liveRanges: (x: ClosedRange<CGFloat>, y: ClosedRange<CGFloat>) {
+        StickerBounds.ranges(natural: natural, scale: liveScale,
+                             rotation: liveRotation, canvas: canvas)
+    }
+
+    private var isSnappedX: Bool { committedX(addingDrag: dragTranslation.width) == 0.5 }
+    private var isSnappedY: Bool { committedY(addingDrag: dragTranslation.height) == 0.5 }
+
+    // Snap BEFORE the clamp, in both the live value and the commit, so the
+    // sticker never jumps on release.
     private func committedX(addingDrag dx: CGFloat) -> CGFloat {
-        (pos.x + dx / max(canvas.width, 1)).clamped(to: StickerConfig.posXRange)
+        let raw = pos.x + dx / max(canvas.width, 1)
+        let snapped = abs(raw - 0.5) * canvas.width < Self.snapThreshold ? 0.5 : raw
+        return snapped.clamped(to: liveRanges.x)
     }
     private func committedY(addingDrag dy: CGFloat) -> CGFloat {
-        (pos.y + dy / max(canvas.height, 1)).clamped(to: StickerConfig.posYRange)
+        let raw = pos.y + dy / max(canvas.height, 1)
+        let snapped = abs(raw - 0.5) * canvas.height < Self.snapThreshold ? 0.5 : raw
+        return snapped.clamped(to: liveRanges.y)
+    }
+
+    /// Pull the committed scale and position back inside the current legal ranges.
+    /// Only writes when something actually moves, so it's inert at rest.
+    ///
+    /// Scale first, then position — the legal position range depends on the size,
+    /// so clamping in the other order would bound against a size that's about to
+    /// change. This is also what repairs a transform persisted by an older build,
+    /// which clamped the centre only and had no size cap at all.
+    private func reclamp() {
+        let fittedScale = scale.clamped(to: fittedScaleRange)
+        if fittedScale != scale { scale = fittedScale }
+
+        let r = StickerBounds.ranges(natural: natural, scale: fittedScale,
+                                     rotation: rotation, canvas: canvas)
+        let fixed = CGPoint(x: pos.x.clamped(to: r.x), y: pos.y.clamped(to: r.y))
+        if fixed != pos { pos = fixed }
+    }
+
+    /// Fire once per snap-line entry, not once per frame spent on it. Reads the
+    /// translation straight off the gesture value rather than `dragTranslation` —
+    /// `updating` and `onChanged` fire for the same event with no guaranteed
+    /// ordering, so the transient could still be a frame behind here.
+    private func updateSnapHaptics(for translation: CGSize) {
+        let x = committedX(addingDrag: translation.width) == 0.5
+        let y = committedY(addingDrag: translation.height) == 0.5
+        if x != snappedX { snappedX = x; if x { MADHaptics.tap() } }
+        if y != snappedY { snappedY = y; if y { MADHaptics.tap() } }
     }
 
     private var manipulation: some Gesture {
@@ -377,19 +537,29 @@ private struct StickerEditorLayer: View {
         // delta: smooth, straight, and rotation-independent.
         let drag = DragGesture(coordinateSpace: .global)
             .updating($dragTranslation) { value, state, _ in state = value.translation }
+            .updating($isManipulating) { _, state, _ in state = true }
+            .onChanged { value in updateSnapHaptics(for: value.translation) }
             .onEnded { value in
                 pos = CGPoint(x: committedX(addingDrag: value.translation.width),
                               y: committedY(addingDrag: value.translation.height))
+                snappedX = false
+                snappedY = false
             }
         let magnify = MagnifyGesture()
             .updating($magnifyFactor) { value, state, _ in state = value.magnification }
+            .updating($isManipulating) { _, state, _ in state = true }
             .onEnded { value in
-                scale = (scale * value.magnification).clamped(to: StickerConfig.scaleRange)
+                scale = (scale * value.magnification).clamped(to: fittedScaleRange)
+                // Growing while parked against an edge would otherwise leave the
+                // committed centre outside the (now tighter) legal range.
+                reclamp()
             }
         let rotate = RotateGesture()
             .updating($twist) { value, state, _ in state = value.rotation }
+            .updating($isManipulating) { _, state, _ in state = true }
             .onEnded { value in
                 rotation = rotation + value.rotation
+                reclamp()
             }
         return drag.simultaneously(with: magnify).simultaneously(with: rotate)
     }
@@ -403,14 +573,17 @@ struct PostComposerView: View {
     /// user's camera roll) — only composing/sharing waits for acceptance.
     private enum TermsState { case unknown, accepted, needsAcceptance }
 
+    /// The composer's second screen. Edit is the stack ROOT, so this enum only
+    /// needs the one case: `path` is `[]` on edit and `[.share]` on share.
+    private enum ComposerStep: Hashable { case share }
+
     @StateObject private var vm: PostComposerViewModel
     @StateObject private var friendService = FriendService()
-    @State private var showCoauthorPicker = false
     @State private var showCamera = false
     // Library import of a photo captured DURING this walk/run (window-filtered
     // for authenticity, same as the post-run prompt). Its cover rides the
-    // `canvasSection` node — a third cover on the ScrollView or the ZStack
-    // (which already own the terms + camera covers) would silently drop one.
+    // `canvasSection` node — a third cover on the ZStack or the background Color
+    // (which already own the camera + terms covers) would silently drop one.
     @State private var showLibraryImport = false
     /// Seeded from the local cache so a returning poster never waits on (or
     /// races) the network check in `resolveTermsIfNeeded`.
@@ -427,7 +600,10 @@ struct PostComposerView: View {
     @State private var didAutoOpenCamera = false
     /// "Saved to Photos" confirmation for the canvas Save button.
     @State private var showSavedToPhotos = false
-    @FocusState private var captionFocused: Bool
+    /// Guards against silently destroying a composed draft on Cancel.
+    @State private var showDiscardConfirm = false
+    /// Empty on the edit step, `[.share]` on the share step.
+    @State private var path: [ComposerStep] = []
     /// Launch straight into the camera on first appear (post-run prompt flow) —
     /// the user already tapped "Take a photo" once to get here.
     let autoOpenCamera: Bool
@@ -453,14 +629,16 @@ struct PostComposerView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ZStack {
                 Color.black.ignoresSafeArea()
+
                 ScrollView {
                     VStack(spacing: MADTheme.Spacing.lg) {
                         canvasSection
-                            // Distinct node from the ScrollView (terms gate) and
-                            // the ZStack (camera) — see showLibraryImport.
+                            // Distinct node from the NavigationStack (terms gate),
+                            // the ZStack (camera) and the ScrollView (discard
+                            // dialog) — see showLibraryImport.
                             .fullScreenCover(isPresented: $showLibraryImport) {
                                 WorkoutPhotoImportPicker(window: importWindow) { result in
                                     showLibraryImport = false
@@ -482,14 +660,16 @@ struct PostComposerView: View {
                             chooseFromLibraryButton
                         }
                         if vm.pickedImage != nil {
-                            overlayEditor
-                            if vm.hasRoute { routeToggle }
-                            captionField
-                            // Collabs are a feed concept — shown once the user
-                            // picks a destination that includes the feed
-                            // (destination starts nil until they choose).
-                            if vm.destination?.toFeed == true { coauthorRow }
-                            destinationToggles
+                            StickerTrayView(
+                                input: vm.stats,
+                                config: $vm.config,
+                                isEnabled: $vm.stickerEnabled,
+                                isTransformed: vm.isStickerTransformed
+                            ) {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    vm.resetStickerPlacement()
+                                }
+                            }
                         }
                         if let error = vm.errorMessage {
                             Text(error)
@@ -501,31 +681,27 @@ struct PostComposerView: View {
                     .padding(MADTheme.Spacing.md)
                 }
                 .scrollDismissesKeyboard(.interactively)
-                // The guidelines gate rides on the ScrollView so it never
-                // collides with the camera cover attached to the ZStack —
-                // two covers on one node drop one of the presentations.
-                .fullScreenCover(isPresented: $showTermsGate, onDismiss: {
-                    if gateAccepted {
-                        gateAccepted = false
-                        termsState = .accepted
-                        vm.errorMessage = nil
-                    } else if vm.pickedImage == nil {
-                        // Declined with nothing composed — nothing to lose;
-                        // back out so the post-run prompt / feed takes over.
-                        onFinished(.cancelled)
-                        dismiss()
-                    } else {
-                        // Declined with a draft on screen: NEVER destroy it.
-                        // Share stays locked (tapping it re-opens the gate);
-                        // Cancel remains the deliberate way out.
-                        vm.errorMessage = "Accept the community guidelines to share your post."
-                    }
-                }) {
-                    PostTermsGateView { gateAccepted = true }
+                // The ScrollView's own presentation slot — the terms gate that used
+                // to live here moved up to the NavigationStack.
+                .confirmationDialog("Discard this post?", isPresented: $showDiscardConfirm,
+                                    titleVisibility: .visible) {
+                    Button("Discard", role: .destructive) { onFinished(.cancelled); dismiss() }
+                    Button("Keep editing", role: .cancel) { }
+                } message: {
+                    Text("Your photo and caption won't be saved.")
                 }
             }
             .navigationTitle("New Post")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(for: ComposerStep.self) { _ in
+                PostShareStepView(
+                    vm: vm,
+                    friendService: friendService,
+                    shareEnabled: vm.canPublish && termsState == .accepted,
+                    onShare: share,
+                    onEditMedia: { if !path.isEmpty { path.removeLast() } }
+                )
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     // Disabled while publishing: publish() has no cancellation
@@ -533,7 +709,7 @@ struct PostComposerView: View {
                     // onFinished twice with contradictory outcomes (the
                     // post-run prompt would auto-post the route card AND the
                     // photo post would land server-side).
-                    Button { onFinished(.cancelled); dismiss() } label: {
+                    Button(action: cancelTapped) {
                         if backNavigation {
                             HStack(spacing: 3) {
                                 Image(systemName: "chevron.left")
@@ -548,43 +724,21 @@ struct PostComposerView: View {
                     .disabled(vm.isPublishing)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    if vm.isPublishing {
-                        ProgressView().tint(.white)
-                    } else {
-                        Button("Share") {
-                            switch termsState {
-                            case .accepted:
-                                Task {
-                                    let ok = await vm.publish()
-                                    if ok, let dest = vm.destination {
-                                        onFinished(.published(
-                                            toFeed: dest.toFeed,
-                                            toStory: dest.toStory
-                                        ))
-                                        dismiss()
-                                    }
-                                }
-                            case .needsAcceptance:
-                                // Not allowed to post yet — the button routes
-                                // to the guidelines instead of a dead upload.
-                                presentGateIfNeeded()
-                            case .unknown:
-                                // Still resolving; the gate auto-presents if
-                                // the answer comes back unaccepted.
-                                break
-                            }
-                        }
-                        .fontWeight(.bold)
-                        .foregroundColor(vm.canPublish && termsState == .accepted
+                    Button("Next", action: goToShareStep)
+                        .fontWeight(.semibold)
+                        .foregroundColor(vm.pickedImage != nil
                             ? MADTheme.Colors.madRed : .white.opacity(0.3))
-                        .disabled(!vm.canPublish)
-                    }
+                        .disabled(vm.pickedImage == nil)
                 }
             }
             .toolbarBackground(.black, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .fullScreenCover(isPresented: $showCamera) {
                 MADCameraView(image: $vm.pickedImage)
+            }
+            // A stale composite must never survive a trip back to the editor.
+            .onChange(of: path) { _, newPath in
+                if newPath.isEmpty { vm.previewComposite = nil }
             }
             .onAppear {
                 if autoOpenCamera, !didAutoOpenCamera, vm.pickedImage == nil {
@@ -616,6 +770,85 @@ struct PostComposerView: View {
                 presentGateIfNeeded()
             }
         }
+        // The guidelines gate hangs off the NavigationStack ITSELF, not the root
+        // content. Share can trigger it from the pushed share step, and a cover
+        // presented from a view that's been navigated away from is unreliable —
+        // the stack is the one node that's current on both steps. It's also a
+        // node of its own, which matters: the ZStack owns the camera cover, the
+        // ScrollView owns the discard dialog, and the canvas owns the library
+        // import. Two presentations on one node silently drop one.
+        .fullScreenCover(isPresented: $showTermsGate, onDismiss: {
+            if gateAccepted {
+                gateAccepted = false
+                termsState = .accepted
+                vm.errorMessage = nil
+            } else if vm.pickedImage == nil {
+                // Declined with nothing composed — nothing to lose;
+                // back out so the post-run prompt / feed takes over.
+                onFinished(.cancelled)
+                dismiss()
+            } else {
+                // Declined with a draft on screen: NEVER destroy it.
+                // Share stays locked (tapping it re-opens the gate);
+                // Cancel remains the deliberate way out.
+                vm.errorMessage = "Accept the community guidelines to share your post."
+            }
+        }) {
+            PostTermsGateView { gateAccepted = true }
+        }
+    }
+
+    // MARK: - Step actions
+
+    /// Advance to the share step, baking the thumbnail from the CURRENT canvas.
+    /// Guarded on `canvasSize` so a composite is never rendered before the canvas
+    /// has been laid out (which would produce a differently-scaled sticker than
+    /// the one that ultimately uploads).
+    private func goToShareStep() {
+        guard vm.pickedImage != nil, vm.canvasSize.width > 0 else { return }
+        MADHaptics.tap()
+        vm.previewComposite = vm.flatten()
+        path.append(.share)
+    }
+
+    /// The one terminal action. Lives HERE, never in `PostShareStepView`: inside a
+    /// `navigationDestination`, `dismiss()` pops the push instead of dismissing the
+    /// composer, so publishing from there would leave the user on the edit step with
+    /// a post already live.
+    private func share() {
+        switch termsState {
+        case .accepted:
+            Task {
+                let ok = await vm.publish()
+                if ok, let dest = vm.destination {
+                    onFinished(.published(toFeed: dest.toFeed, toStory: dest.toStory))
+                    dismiss()
+                }
+            }
+        case .needsAcceptance:
+            // Not allowed to post yet — the button routes to the guidelines
+            // instead of a dead upload.
+            presentGateIfNeeded()
+        case .unknown:
+            // Still resolving; the gate auto-presents if the answer comes back
+            // unaccepted.
+            break
+        }
+    }
+
+    /// Cancel with a draft asks first. `backNavigation` deliberately skips the
+    /// dialog: that button reads "‹ Back", a navigational affordance, and it returns
+    /// to the post-run prompt which still holds the mid-run snaps and re-offers them
+    /// — nothing is actually lost. "Cancel" was renamed to "Back" on that path
+    /// precisely because people feared losing photos; a destructive dialog there
+    /// would undo that fix.
+    private func cancelTapped() {
+        if backNavigation || !vm.hasDraft {
+            onFinished(.cancelled)
+            dismiss()
+        } else {
+            showDiscardConfirm = true
+        }
     }
 
     // MARK: - Guidelines gate
@@ -645,29 +878,6 @@ struct PostComposerView: View {
     private func presentGateIfNeeded() {
         guard termsState == .needsAcceptance, !showCamera, !showTermsGate else { return }
         showTermsGate = true
-    }
-
-    /// Offer to ride the run's GPS route along with the photo (shown as a
-    /// second, swipeable slide on the feed card). Only offered when the linked
-    /// workout actually has route data.
-    private var routeToggle: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Toggle(isOn: $vm.includeRoute.animation(.easeInOut)) {
-                Label("Include route map", systemImage: "map.fill")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
-            }
-            .tint(MADTheme.Colors.madRed)
-            Text("Friends can swipe to see your mile's path next to the photo.")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.5))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(Color.white.opacity(0.04))
-        )
     }
 
     // MARK: - Canvas
@@ -716,19 +926,7 @@ struct PostComposerView: View {
                         vm.canvasSize = size
                     }
                     .overlay(alignment: .topTrailing) {
-                        Button { requestCamera() } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: "camera.fill")
-                                    .font(.system(size: 12, weight: .bold))
-                                Text("Retake")
-                                    .font(.system(size: 12, weight: .bold, design: .rounded))
-                            }
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(Capsule().fill(.black.opacity(0.5)))
-                        }
-                        .padding(10)
+                        changePhotoControl.padding(10)
                     }
                     // Keep a copy exactly as composed — stats sticker baked
                     // in (the camera already saved the RAW shot at capture).
@@ -775,6 +973,43 @@ struct PostComposerView: View {
             }
         }
         .aspectRatio(4.0 / 5.0, contentMode: .fit)
+    }
+
+    /// Swapping the photo used to mean "Retake" and nothing else — the library
+    /// option vanished the moment a photo existed, so a user who'd picked the wrong
+    /// mid-run snap had to go through the camera to get back. A `Menu` offers both.
+    ///
+    /// `Menu` rides UIKit's context-menu machinery rather than the sheet/cover
+    /// presentation slot, so it costs no cover node (see the cover comments above).
+    @ViewBuilder
+    private var changePhotoControl: some View {
+        if vm.stats.workoutId != nil {
+            Menu {
+                Button { requestCamera() } label: {
+                    Label("Take a new photo", systemImage: "camera.fill")
+                }
+                Button { showLibraryImport = true } label: {
+                    Label("Choose from this walk or run", systemImage: "photo.on.rectangle")
+                }
+            } label: {
+                changePhotoPill
+            }
+        } else {
+            Button { requestCamera() } label: { changePhotoPill }
+        }
+    }
+
+    private var changePhotoPill: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "camera.fill")
+                .font(.system(size: 12, weight: .bold))
+            Text("Change")
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Capsule().fill(.black.opacity(0.5)))
     }
 
     private var photoPlaceholder: some View {
@@ -868,314 +1103,6 @@ struct PostComposerView: View {
         return start...max(start, end)
     }
 
-    // MARK: - Overlay editor
-
-    private var overlayEditor: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
-            Toggle(isOn: $vm.stickerEnabled.animation(.easeInOut)) {
-                Label("Show run stats", systemImage: "chart.bar.doc.horizontal")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
-            }
-            .tint(MADTheme.Colors.madRed)
-
-            if vm.stickerEnabled {
-                editorLabel("STYLE")
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: MADTheme.Spacing.sm) {
-                        ForEach(StickerStyle.allCases) { style in
-                            chip(
-                                title: style.title, icon: style.icon,
-                                selected: vm.config.style == style
-                            ) { vm.config.style = style }
-                        }
-                    }
-                }
-
-                editorLabel("SHOW")
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: MADTheme.Spacing.sm) {
-                        ForEach(vm.stats.availableStats()) { kind in
-                            chip(
-                                title: kind.label, icon: kind.icon,
-                                selected: vm.config.isOn(kind)
-                            ) { vm.config.toggle(kind) }
-                        }
-                    }
-                }
-
-                editorLabel("COLOR")
-                HStack(spacing: MADTheme.Spacing.md) {
-                    ForEach(StickerAccent.allCases) { accent in
-                        Button { vm.config.accent = accent } label: {
-                            Circle()
-                                .fill(accent.color)
-                                .frame(width: 26, height: 26)
-                                .overlay(
-                                    Circle().strokeBorder(
-                                        Color.white,
-                                        lineWidth: vm.config.accent == accent ? 2.5 : 0
-                                    )
-                                )
-                                .overlay(
-                                    Circle().strokeBorder(Color.white.opacity(0.2), lineWidth: 1)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    Spacer()
-                }
-            }
-        }
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(Color.white.opacity(0.04))
-        )
-    }
-
-    private func editorLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 10, weight: .heavy, design: .rounded))
-            .tracking(1.2)
-            .foregroundColor(.white.opacity(0.4))
-    }
-
-    private func chip(title: String, icon: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: icon).font(.system(size: 11, weight: .bold))
-                Text(title).font(.system(size: 13, weight: .bold, design: .rounded))
-            }
-            .foregroundColor(selected ? .white : .white.opacity(0.6))
-            .padding(.horizontal, 12).padding(.vertical, 7)
-            .background(
-                Capsule().fill(selected ? AnyShapeStyle(MADTheme.Colors.redGradient) : AnyShapeStyle(Color.white.opacity(0.07)))
-            )
-            .overlay(
-                Capsule().strokeBorder(Color.white.opacity(selected ? 0 : 0.12), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Friends matching an @token being typed at the end of the caption.
-    /// Explicit types — inference across filter/prefix chains slows the
-    /// type checker to a crawl.
-    private var captionMentionCandidates: [BackendUser] {
-        guard let token = vm.caption.split(separator: " ").last, token.hasPrefix("@") else { return [] }
-        let query: String = String(token.dropFirst()).lowercased()
-        let matches: [BackendUser] = friendService.friends.filter { friend in
-            guard let name = friend.username?.lowercased() else { return false }
-            return query.isEmpty || name.hasPrefix(query)
-        }
-        return Array(matches.prefix(8))
-    }
-
-    private func completeCaptionMention(_ friend: BackendUser) {
-        var parts = vm.caption.split(separator: " ", omittingEmptySubsequences: false)
-        if let last = parts.last, last.hasPrefix("@") { parts.removeLast() }
-        vm.caption = (parts + ["@\(friend.username ?? "") "]).joined(separator: " ")
-    }
-
-    private func mentionChip(_ friend: BackendUser) -> some View {
-        Button {
-            completeCaptionMention(friend)
-        } label: {
-            HStack(spacing: 6) {
-                AvatarView(name: friend.username ?? "?",
-                           imageURL: friend.profile_image_url, size: 22)
-                Text("@\(friend.username ?? "")")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(Color.white.opacity(0.08)))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var captionField: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            TextField("", text: $vm.caption, prompt: Text("Add a caption… (@ to tag a friend)").foregroundColor(.white.opacity(0.4)), axis: .vertical)
-                .lineLimit(1...4)
-                .focused($captionFocused)
-                .font(.system(size: 15, weight: .medium, design: .rounded))
-                .foregroundColor(.white)
-                .padding(MADTheme.Spacing.md)
-                .background(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                        .fill(Color.white.opacity(0.06))
-                )
-            if !captionMentionCandidates.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(captionMentionCandidates, id: \.user_id) { friend in
-                            mentionChip(friend)
-                        }
-                    }
-                }
-            }
-            HStack {
-                // Anchored to the field it dismisses (a keyboard-toolbar Done
-                // floated as a detached pill over the counter on iOS 26) —
-                // Return adds newlines in this multi-line field, so this is
-                // THE way to put the keyboard away.
-                if captionFocused {
-                    Button {
-                        captionFocused = false
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "keyboard.chevron.compact.down")
-                                .font(.system(size: 11, weight: .bold))
-                            Text("Done")
-                                .font(.system(size: 12, weight: .bold, design: .rounded))
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(MADTheme.Colors.redGradient))
-                    }
-                    .buttonStyle(.plain)
-                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
-                }
-                Spacer()
-                Text("\(vm.caption.count)/280")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundColor(vm.caption.count > 280 ? MADTheme.Colors.error : .white.opacity(0.4))
-            }
-            .animation(.easeInOut(duration: 0.15), value: captionFocused)
-        }
-        .onChange(of: vm.caption) { _, newValue in
-            if newValue.count > 280 { vm.caption = String(newValue.prefix(280)) }
-        }
-    }
-
-    /// "Ran it together?" — pick ONE friend to co-post with. They're invited
-    /// on share and the post goes dual-author once they accept.
-    private var coauthorRow: some View {
-        Button { showCoauthorPicker = true } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "person.2.fill")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(MADTheme.Colors.madRed)
-                if let coauthor = vm.coauthor {
-                    AvatarView(name: coauthor.username ?? "?",
-                               imageURL: coauthor.profile_image_url, size: 26)
-                    Text("Co-posting with @\(coauthor.username ?? "")")
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                    Spacer()
-                    Button {
-                        vm.coauthor = nil
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 16))
-                            .foregroundColor(.white.opacity(0.4))
-                    }
-                } else {
-                    Text("Ran it together? Add a co-poster")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.7))
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.white.opacity(0.4))
-                }
-            }
-            .padding(MADTheme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                    .fill(Color.white.opacity(0.06))
-            )
-        }
-        .buttonStyle(.plain)
-        .sheet(isPresented: $showCoauthorPicker) {
-            CoauthorPickerSheet(friends: friendService.friends) { picked in
-                vm.coauthor = picked
-            }
-        }
-    }
-
-    /// Story / Feed / Both — a single deliberate destination choice, so the
-    /// story stays the ephemeral moment and the feed stays the curated record.
-    /// Nothing is preselected: Share stays disabled until the user picks, and
-    /// the picked card is unmistakable (gradient fill + checkmark badge).
-    private var destinationToggles: some View {
-        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
-            editorLabel("SHARE TO")
-            HStack(spacing: MADTheme.Spacing.sm) {
-                ForEach(PostDestination.allCases) { dest in
-                    destinationCard(dest, selected: vm.destination == dest)
-                }
-            }
-            if let dest = vm.destination {
-                Text(dest.footnote)
-                    .font(.system(size: 12, weight: .medium, design: .rounded))
-                    .foregroundColor(.white.opacity(0.5))
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Label("Pick where this goes — Share unlocks once you choose.",
-                      systemImage: "hand.tap.fill")
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(MADTheme.Colors.madRed.opacity(0.9))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(MADTheme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .fill(Color.white.opacity(0.04))
-        )
-        // Until a destination is chosen this section is the one thing left to
-        // do — a soft accent border pulls the eye to it.
-        .overlay(
-            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
-                .strokeBorder(
-                    MADTheme.Colors.madRed.opacity(vm.destination == nil ? 0.45 : 0),
-                    lineWidth: 1.5
-                )
-        )
-        .animation(.easeInOut(duration: 0.2), value: vm.destination)
-    }
-
-    private func destinationCard(_ dest: PostDestination, selected: Bool) -> some View {
-        Button {
-            MADHaptics.tap()
-            withAnimation(.easeInOut(duration: 0.15)) { vm.destination = dest }
-        } label: {
-            VStack(spacing: 4) {
-                Image(systemName: dest.icon)
-                    .font(.system(size: 16, weight: .bold))
-                Text(dest.title)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-            }
-            .foregroundColor(selected ? .white : .white.opacity(0.55))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
-                    .fill(selected
-                        ? AnyShapeStyle(MADTheme.Colors.redGradient)
-                        : AnyShapeStyle(Color.white.opacity(0.06)))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
-                    .strokeBorder(Color.white.opacity(selected ? 0 : 0.1), lineWidth: 1)
-            )
-            .overlay(alignment: .topTrailing) {
-                if selected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white, .black.opacity(0.35))
-                        .padding(5)
-                        .transition(.scale.combined(with: .opacity))
-                }
-            }
-        }
-        .buttonStyle(.plain)
-    }
 }
 
 /// Pick one accepted friend as the post's co-author (Instagram collab style).
