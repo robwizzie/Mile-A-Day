@@ -60,5 +60,8 @@ Service (`services/`) → controller (`controllers/`) → route (`routes/`) → 
 
 - Hype daily limit did double duty as anti-abuse: dedupe only guards VALIDATED contexts (post, resolvable mile). badge/pr/challenge context_ids and context-less push "hype back" are unvalidated, and `shouldSendNotification` has no rate throttle — so `HYPE_DAILY_ABUSE_CEILING` (hypeService) is their only spam backstop. Keep a ceiling if you make hypes "unlimited".
 
+- `ADD COLUMN ts timestamptz DEFAULT now()` does NOT rewrite the table (PG 11+): the default is stored once as a missing-value, so EVERY pre-existing row reads back the same DDL-time timestamp. Any cron gating on "older than N" therefore stays silent for N and then fires on the entire historical backlog within one tick. Backfill a claim column in the same migration (see 0026's `reminder_sent_at` pre-claim). Also: evaluate per-USER eligibility, not per-row — a new child row with a NULL claim re-qualifies a user who is mid-cooldown.
+- Server deploys land well before an App Store release. Anything a current shipped client can't handle goes behind an opt-in env flag (`friendRequestFeatures.ts`), never a kill switch defaulting on. An APNs `badge` is the sharp edge: an older build has no code that clears it, so a server-set badge is a permanently stuck red dot.
+
 ## ESM Reminder
 All imports MUST end with `.js` extension, e.g. `import { foo } from './services/fooService.js';`
