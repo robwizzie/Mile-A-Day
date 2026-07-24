@@ -18,12 +18,39 @@ const bebasNeue = Bebas_Neue({
 })
 
 export const metadata: Metadata = {
-  title: 'Mile A Day - Walk or Run a Mile Every Single Day',
-  description: 'Build an unbreakable habit. Track your streak, compete with friends, and Go the Extra Mile. Available on iOS and Apple Watch.',
-  keywords: ['mile a day', 'running app', 'walking app', 'fitness tracker', 'streak tracker', 'daily mile'],
+  metadataBase: new URL('https://mileaday.run'),
+  title: {
+    default: 'Mile A Day - Walk or Run a Mile Every Single Day',
+    template: '%s | Mile A Day',
+  },
+  description:
+    'Mile A Day is the free iOS & Apple Watch app that turns one mile a day into an unbreakable habit. Track your streak, compete with friends, earn badges, and go the extra mile.',
+  applicationName: 'Mile A Day',
+  keywords: [
+    'mile a day',
+    'mile a day app',
+    'run a mile a day',
+    'walk a mile a day',
+    'daily mile',
+    'running app',
+    'walking app',
+    'fitness tracker',
+    'streak tracker',
+    'habit tracker',
+    'apple watch running app',
+    'run streak',
+  ],
+  authors: [{ name: 'Rob Wiscount' }, { name: 'David Simmerman' }],
+  creator: 'Mile A Day',
+  publisher: 'Mile A Day',
+  category: 'health',
+  alternates: {
+    canonical: '/',
+  },
   openGraph: {
     title: 'Mile A Day - Walk or Run a Mile Every Single Day',
     description: 'Build an unbreakable habit. Track your streak, compete with friends, and Go the Extra Mile.',
+    url: '/',
     type: 'website',
     siteName: 'Mile A Day',
     locale: 'en_US',
@@ -33,10 +60,25 @@ export const metadata: Metadata = {
     title: 'Mile A Day - Walk or Run a Mile Every Single Day',
     description: 'Build an unbreakable habit. Track your streak, compete with friends, and Go the Extra Mile.',
   },
-  metadataBase: new URL('https://mileaday.run'),
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+      'max-video-preview': -1,
+    },
+  },
   icons: {
     icon: '/images/mad-circle-icon.png',
     apple: '/images/mad-circle-icon.png',
+  },
+  // Set NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION in the Vercel project env to the
+  // token from Search Console and the tag renders automatically. Omitted when unset.
+  verification: {
+    google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION,
   },
 }
 

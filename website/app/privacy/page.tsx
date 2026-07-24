@@ -2,8 +2,9 @@ import type { Metadata } from 'next';
 import { LegalPage, Section } from '@/components/legal-page';
 
 export const metadata: Metadata = {
-	title: 'Privacy Policy - Mile A Day',
-	description: 'How Mile A Day collects, uses, and protects your data.'
+	title: 'Privacy Policy',
+	description: 'How Mile A Day collects, uses, and protects your data.',
+	alternates: { canonical: '/privacy' }
 };
 
 export default function PrivacyPage() {

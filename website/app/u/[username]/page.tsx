@@ -45,19 +45,21 @@ export async function generateMetadata({
   const profile = await getProfile(username)
 
   if (!profile) {
-    return { title: 'Mile A Day' }
+    return { title: { absolute: 'Mile A Day' } }
   }
 
-  const title = `@${profile.username} on Mile A Day`
+  const socialTitle = `@${profile.username} on Mile A Day`
   const description = `${displayName(profile)} is building a daily mile habit${
     profile.current_streak > 0 ? ` — ${profile.current_streak} day streak and counting` : ''
   }. Add them on Mile A Day and keep each other moving.`
 
   return {
-    title,
+    // Document <title> gets the '| Mile A Day' template suffix; the social
+    // cards use the fuller phrasing.
+    title: `@${profile.username}`,
     description,
-    openGraph: { title, description, type: 'profile', siteName: 'Mile A Day' },
-    twitter: { card: 'summary', title, description },
+    openGraph: { title: socialTitle, description, type: 'profile', siteName: 'Mile A Day' },
+    twitter: { card: 'summary', title: socialTitle, description },
     // Smart App Banner: iOS Safari shows an "Open in app" banner, which is
     // the fallback path when the universal link opens in the browser.
     itunes: { appId: '6746970905' },
