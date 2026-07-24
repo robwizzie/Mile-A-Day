@@ -268,6 +268,30 @@ struct SocialFeedView: View {
     var body: some View {
         VStack(spacing: 0) {
             MADTabHeader(title: "Feed")
+                // The composer is a fullScreenCover, not a sheet: a sheet's
+                // swipe-down flipped this binding without ever calling
+                // onFinished, so a fully composed draft evaporated AND the
+                // shared-workout bookkeeping below never ran.
+                //
+                // It hangs off the header rather than the VStack because the
+                // VStack chain already owns the story-viewer cover — two covers
+                // on one node silently drop a presentation. The header is
+                // unconditional and always mounted, unlike composeButton, which
+                // disappears the moment a workout is shared and would take the
+                // cover down with it mid-dismissal.
+                .fullScreenCover(isPresented: $presentingComposer) {
+                    PostComposerView(stats: statsInput) { outcome in
+                        if case .published = outcome {
+                            // Lock this run's share slot immediately — refresh() is async
+                            // and its window previously let the composer re-open for the
+                            // same workout. (The backend also 409s a second share now.)
+                            if let wid = statsInput.workoutId {
+                                optimisticSharedWorkoutIds.insert(wid)
+                            }
+                            Task { await refresh() }
+                        }
+                    }
+                }
 
             ScrollViewReader { proxy in
             ScrollView {
@@ -418,19 +442,6 @@ struct SocialFeedView: View {
                     // Even a plain watch-through changes rail state (viewed
                     // rings) — refresh just the rail so rings gray out.
                     Task { await refreshRail() }
-                }
-            }
-        }
-        .sheet(isPresented: $presentingComposer) {
-            PostComposerView(stats: statsInput) { outcome in
-                if case .published = outcome {
-                    // Lock this run's share slot immediately — refresh() is async
-                    // and its window previously let the composer re-open for the
-                    // same workout. (The backend also 409s a second share now.)
-                    if let wid = statsInput.workoutId {
-                        optimisticSharedWorkoutIds.insert(wid)
-                    }
-                    Task { await refresh() }
                 }
             }
         }
