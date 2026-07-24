@@ -2,6 +2,7 @@ import { Friendship, User } from "../types/user.js";
 import { PostgresService } from "./DbService.js";
 import { runHypeMatchSql, runHypedByViewerMatchSql } from "./hypeService.js";
 import { refreshCurrentStreak } from "./leaderboardService.js";
+import { START_OF_TODAY_ET_SQL } from "./dailyResetTime.js";
 
 const db = PostgresService.getInstance();
 
@@ -53,18 +54,23 @@ export async function getFriendship(
   }
 }
 
+/**
+ * Safe column set for any user record returned to SOMEONE ELSE — friends,
+ * incoming requests, sent requests. Never `u.*`: that table carries email,
+ * apple_sub and the rest, and these lists are read by other users.
+ *
+ * BACKWARDS COMPAT: the shipped App Store app decodes these into a BackendUser
+ * whose `email` is a NON-optional String, so an absent key hard-fails Codable
+ * and empties the list. The empty-string email is present for the old client
+ * and leaks nothing. Drop it once the email-optional build has fully rolled out.
+ */
+const FRIEND_SAFE_USER_COLUMNS = `u.user_id, u.username, u.first_name, u.last_name, u.bio,
+			u.profile_image_url, u.current_streak, '' AS email`;
+
 export async function getFriends(user: string): Promise<User[]> {
-  // Safe column set only — never expose a real email through friend lists
-  // (these are viewable by other users, not just the owner).
-  // BACKWARDS COMPAT: the shipped App Store app decodes friends into a
-  // BackendUser whose `email` is a NON-optional String, so a missing key
-  // hard-fails Codable and breaks the friends list. Return an empty-string
-  // email — present for the old client, leaks nothing. Drop it once the
-  // email-optional app build has fully rolled out.
   const friends = await db.query(
     `
-		SELECT u.user_id, u.username, u.first_name, u.last_name, u.bio,
-			u.profile_image_url, u.current_streak, '' AS email
+		SELECT ${FRIEND_SAFE_USER_COLUMNS}
 		FROM friendships f
 		JOIN users u ON u.user_id = f.friend_id
 		WHERE f.user_id = $1
@@ -92,10 +98,10 @@ async function refreshFriendStreaks<
 export async function getSentRequests(user: string): Promise<User[]> {
   const sentRequests = await db.query(
     `
-		SELECT u.* FROM friendships f
+		SELECT ${FRIEND_SAFE_USER_COLUMNS} FROM friendships f
 		JOIN users u ON u.user_id = f.friend_id
 		WHERE f.user_id = $1
-			AND f.status in ( 'pending', 'ignored' ) 
+			AND f.status in ( 'pending', 'ignored' )
 		`,
     [user],
   );
@@ -113,10 +119,10 @@ export async function getFriendRequests(
 ): Promise<FriendRequestsReturn> {
   const friendRequests = await db.query(
     `
-		SELECT u.*, f.status FROM friendships f
+		SELECT ${FRIEND_SAFE_USER_COLUMNS}, f.status FROM friendships f
 		JOIN users u ON u.user_id = f.user_id
 		WHERE f.friend_id = $1
-			AND f.status in ( 'pending', 'ignored' ) 
+			AND f.status in ( 'pending', 'ignored' )
 		`,
     [user],
   );
@@ -135,6 +141,52 @@ export async function getFriendRequests(
   });
 
   return { requests, ignored_requests };
+}
+
+/**
+ * Distinct friend requests one user may send per ET day.
+ *
+ * Set high enough that no real person adding friends will ever see it — this
+ * exists to bound a scripted sweep across the user base, not to ration normal
+ * use. `POST /friends/request` has no rate limiting of any kind otherwise.
+ */
+export const FRIEND_REQUEST_DAILY_CEILING = 50;
+
+/** Has this sender already had a push delivered to this target today (ET day)? */
+export async function hasRequestedFriendToday(
+  senderId: string,
+  targetId: string,
+): Promise<boolean> {
+  const rows = await db.query(
+    `SELECT id FROM friend_request_log
+		WHERE sender_id = $1 AND target_id = $2
+			AND created_at >= ${START_OF_TODAY_ET_SQL}
+		LIMIT 1`,
+    [senderId, targetId],
+  );
+  return rows.length > 0;
+}
+
+/** Requests this sender has had pushed today, for the daily ceiling. */
+export async function countRequestsSentToday(
+  senderId: string,
+): Promise<number> {
+  const rows = await db.query(
+    `SELECT COUNT(*) AS count FROM friend_request_log
+		WHERE sender_id = $1 AND created_at >= ${START_OF_TODAY_ET_SQL}`,
+    [senderId],
+  );
+  return parseInt(rows[0]?.count ?? "0");
+}
+
+export async function logFriendRequest(
+  senderId: string,
+  targetId: string,
+): Promise<void> {
+  await db.query(
+    `INSERT INTO friend_request_log (sender_id, target_id) VALUES ($1, $2)`,
+    [senderId, targetId],
+  );
 }
 
 /**

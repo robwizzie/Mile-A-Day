@@ -1184,6 +1184,9 @@ export async function cleanupNotificationLogs(): Promise<void> {
       `DELETE FROM friend_nudge_log WHERE created_at < NOW() - INTERVAL '7 days'`,
     ),
     db.query(
+      `DELETE FROM friend_request_log WHERE created_at < NOW() - INTERVAL '7 days'`,
+    ),
+    db.query(
       `DELETE FROM flex_log WHERE created_at < NOW() - INTERVAL '30 days'`,
     ),
   ]);

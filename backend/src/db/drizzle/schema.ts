@@ -22,6 +22,31 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
+// One row per friend_request push actually SENT. Deliberately not derived from
+// `friendships`: decline and cancel DELETE the row, so counting friendships
+// would let a send/cancel/send loop re-trigger pushes for free and would
+// under-count a mass-add sweep. Mirrors friend_nudge_log.
+export const friendRequestLog = pgTable(
+  "friend_request_log",
+  {
+    id: uuid().defaultRandom().primaryKey().notNull(),
+    senderId: text("sender_id").notNull(),
+    targetId: text("target_id").notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "string",
+    }).defaultNow(),
+  },
+  (table) => [
+    index("idx_friend_request_log_lookup").using(
+      "btree",
+      table.senderId.asc().nullsLast(),
+      table.targetId.asc().nullsLast(),
+      table.createdAt.desc().nullsFirst(),
+    ),
+  ],
+);
+
 export const friendNudgeLog = pgTable(
   "friend_nudge_log",
   {
