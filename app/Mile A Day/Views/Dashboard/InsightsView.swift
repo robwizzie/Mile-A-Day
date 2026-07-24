@@ -29,6 +29,13 @@ struct InsightsView: View {
     }
 }
 
+// MARK: - Road to milestone
+
+/// A vertical "journey" up the streak ladder. Conquered clubs sit at the top,
+/// the glowing "You're here" hero card marks the runner's live position with a
+/// progress bar to the next club, and every milestone still ahead descends
+/// below — locked, with a countdown to unlock — ending at the ultimate goal.
+/// The card grows with the ladder and scrolls as part of the Insights page.
 private struct RoadToMilestoneCard: View {
     let streak: Int
 
@@ -36,272 +43,247 @@ private struct RoadToMilestoneCard: View {
         StreakMilestone.nextMajor(after: streak)
     }
 
+    /// Highest major milestone the runner has already passed (0 if none yet).
+    private var prevReachedDay: Int {
+        StreakMilestone.allCases
+            .filter { $0.isMajor && $0.days <= streak }
+            .map(\.days)
+            .max() ?? 0
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 20) {
             header
-            RoadTrail(stops: stops)
-                .frame(height: RoadTrail.trailHeight)
+            VStack(spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { pair in
+                    RoadRow(
+                        row: pair.element,
+                        streak: streak,
+                        isFirst: pair.offset == 0,
+                        isLast: pair.offset == rows.count - 1
+                    )
+                }
+            }
         }
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(Color(red: 0.07, green: 0.055, blue: 0.085))
                 .overlay(
-                    RadialGradient(colors: [Color.orange.opacity(0.16), Color.clear], center: .bottomLeading, startRadius: 30, endRadius: 300)
+                    RadialGradient(colors: [Color.orange.opacity(0.16), Color.clear], center: .topTrailing, startRadius: 20, endRadius: 320)
                         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 )
                 .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
         )
     }
 
+    // MARK: Header
+
     private var header: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(alignment: .center, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text("The Road to \(goal?.days ?? streak)")
                     .font(.system(size: 22, weight: .black, design: .rounded))
                     .foregroundColor(.white)
-                Text(roadSubtitle)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.58))
+                Text(headerSubtitle)
+                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer()
-            Image(systemName: "flag.checkered")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(.orange)
-                .frame(width: 44, height: 44)
-                .background(Circle().fill(Color.orange.opacity(0.14)))
+            Spacer(minLength: 8)
+            progressRing
         }
     }
 
-    private var roadSubtitle: String {
-        guard let goal else { return "Legendary territory" }
+    private var headerSubtitle: String {
+        guard let goal else { return "Every club conquered — you're in legendary territory." }
         let daysToGo = max(goal.days - streak, 0)
-        if daysToGo == 0 { return "Goal reached — keep the fire alive" }
-        return "\(daysToGo) day\(daysToGo == 1 ? "" : "s") to go · \(streak) done"
+        if daysToGo == 0 { return "You just hit the \(goal.days) Club — keep the fire alive." }
+        return "\(daysToGo) day\(daysToGo == 1 ? "" : "s") to the \(goal.days) Club"
     }
 
-    /// The full ladder of major milestones with the runner's live position woven in.
-    /// Everything up to `streak` reads as reached; everything past it is locked.
-    private var stops: [RoadStop] {
+    private var progressRing: some View {
+        ZStack {
+            Circle().stroke(Color.white.opacity(0.10), lineWidth: 5)
+            Circle()
+                .trim(from: 0, to: goalProgress)
+                .stroke(
+                    LinearGradient(colors: [MADTheme.Colors.madRed, .orange], startPoint: .top, endPoint: .bottomTrailing),
+                    style: StrokeStyle(lineWidth: 5, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .shadow(color: MADTheme.Colors.madRed.opacity(0.4), radius: 5)
+            Image(systemName: "flag.checkered")
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(.orange)
+        }
+        .frame(width: 48, height: 48)
+    }
+
+    private var goalProgress: CGFloat {
+        guard let goal else { return 1 }
+        let span = max(goal.days - prevReachedDay, 1)
+        return CGFloat(max(0, min(Double(streak - prevReachedDay) / Double(span), 1)))
+    }
+
+    // MARK: Ladder model
+
+    /// Ascending ladder (100 at top → 1000 at bottom) with the runner's live
+    /// position woven in between the last reached and the first locked club.
+    private var rows: [RoadRowModel] {
         let majors = StreakMilestone.allCases
             .filter(\.isMajor)
             .sorted { $0.days < $1.days }
         let goalDays = goal?.days
 
-        var result: [RoadStop] = []
+        var result: [RoadRowModel] = []
         var id = 0
-        var placedCurrent = false
+        var placedYou = false
 
-        func appendCurrent() {
-            result.append(RoadStop(id: id, value: streak, caption: "You", state: .current, isGoal: false))
+        func appendYou(emoji: String) {
+            result.append(RoadRowModel(id: id, kind: .current, day: streak, emoji: emoji,
+                                       isGoal: false, subtitle: "", prevDay: prevReachedDay, nextDay: goalDays))
             id += 1
-            placedCurrent = true
+            placedYou = true
         }
 
         for milestone in majors {
-            if !placedCurrent, milestone.days > streak { appendCurrent() }
+            if !placedYou, milestone.days > streak { appendYou(emoji: "🔥") }
 
             if milestone.days == streak {
-                result.append(RoadStop(id: id, value: milestone.days, caption: "You", state: .current, isGoal: false))
-                placedCurrent = true
+                appendYou(emoji: milestone.emoji)
             } else {
-                let state: RoadStop.State = milestone.days < streak ? .reached : .locked
-                let caption = milestone.days == goalDays ? "Goal" : (state == .reached ? "Club" : "Locked")
-                result.append(RoadStop(id: id, value: milestone.days, caption: caption, state: state, isGoal: milestone.days == goalDays))
+                let kind: RoadRowModel.Kind = milestone.days < streak ? .reached : .locked
+                result.append(RoadRowModel(id: id, kind: kind, day: milestone.days, emoji: milestone.emoji,
+                                           isGoal: milestone.days == goalDays, subtitle: milestone.majorSubtitle,
+                                           prevDay: 0, nextDay: nil))
+                id += 1
             }
-            id += 1
         }
 
-        if !placedCurrent { appendCurrent() }
+        if !placedYou { appendYou(emoji: "🔥") }
         return result
     }
 }
 
-// MARK: - Road trail
-
-/// A single platform on the road: a reached milestone, the runner's current
-/// position, or a locked milestone still ahead.
-private struct RoadStop: Identifiable {
-    enum State: Equatable { case reached, current, locked }
+/// One rung of the ladder.
+private struct RoadRowModel: Identifiable {
+    enum Kind: Equatable { case reached, current, locked }
     let id: Int
-    let value: Int
-    let caption: String
-    let state: State
-    let isGoal: Bool
+    let kind: Kind
+    let day: Int          // milestone day, or the current streak for `.current`
+    let emoji: String
+    let isGoal: Bool      // the next major milestone — the flagged target
+    let subtitle: String
+    let prevDay: Int      // (current only) previous reached club
+    let nextDay: Int?     // (current only) next goal day
 }
 
-/// A horizontally-scrollable road. Milestones are evenly spaced along a gently
-/// weaving path that is drawn through the exact same node centers, so platforms
-/// always sit *on* the road. Reached segments are solid; the locked road ahead
-/// is dashed. Auto-scrolls to the runner's current position on first appear.
-private struct RoadTrail: View {
-    let stops: [RoadStop]
+// MARK: - Road row
 
-    static let trailHeight: CGFloat = 198
+/// A timeline row: a rail on the left (the road + node) and a content card on
+/// the right. The rail's road is solid/gold where the runner has travelled and
+/// dashed where the road is still locked ahead.
+private struct RoadRow: View {
+    let row: RoadRowModel
+    let streak: Int
+    let isFirst: Bool
+    let isLast: Bool
 
-    private let baseY: CGFloat = 74
-    private let amplitude: CGFloat = 15
-    private let phase: CGFloat = 0.85
-    private let spacing: CGFloat = 108
-    private let sidePad: CGFloat = 46
-    private let circleCell: CGFloat = 92
-
-    @State private var didScroll = false
-
-    private var centers: [CGPoint] {
-        stops.indices.map { i in
-            CGPoint(x: sidePad + CGFloat(i) * spacing,
-                    y: baseY + amplitude * sin(CGFloat(i) * phase))
-        }
-    }
-
-    private var contentWidth: CGFloat {
-        sidePad * 2 + CGFloat(max(stops.count - 1, 0)) * spacing
-    }
-
-    private var currentIndex: Int {
-        stops.firstIndex { $0.state == .current } ?? max(stops.count - 1, 0)
-    }
+    private static let nodeCenterY: CGFloat = 26
+    private static let railWidth: CGFloat = 46
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                ZStack(alignment: .topLeading) {
-                    roadLayer
-                    ForEach(Array(stops.enumerated()), id: \.element.id) { pair in
-                        RoadStopCircle(stop: pair.element)
-                            .frame(width: circleCell, height: circleCell)
-                            .offset(x: centers[pair.offset].x - circleCell / 2,
-                                    y: centers[pair.offset].y - circleCell / 2)
-                            .id(pair.element.id)
-                    }
-                    ForEach(Array(stops.enumerated()), id: \.element.id) { pair in
-                        caption(for: pair.element, at: centers[pair.offset])
-                    }
+        HStack(alignment: .top, spacing: 12) {
+            rail
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, isLast ? 0 : 16)
+        }
+    }
+
+    // MARK: Rail (road + node)
+
+    private var rail: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            ZStack(alignment: .top) {
+                if !isFirst {
+                    segment(from: 0, to: Self.nodeCenterY, width: w, travelled: upperTravelled)
                 }
-                .frame(width: contentWidth, height: Self.trailHeight, alignment: .topLeading)
-            }
-            .onAppear {
-                guard !didScroll, !stops.isEmpty else { return }
-                didScroll = true
-                DispatchQueue.main.async {
-                    proxy.scrollTo(stops[currentIndex].id, anchor: UnitPoint(x: 0.36, y: 0.5))
+                if !isLast {
+                    segment(from: Self.nodeCenterY, to: h, width: w, travelled: lowerTravelled)
                 }
+                node.offset(y: Self.nodeCenterY - nodeDiameter / 2)
             }
         }
+        .frame(width: Self.railWidth)
     }
 
-    private var roadLayer: some View {
-        let pts = centers
-        let reachedPts = Array(pts.prefix(currentIndex + 1))
-        let lockedPts = Array(pts.suffix(pts.count - currentIndex))
-        return ZStack {
-            smoothPath(through: pts)
-                .stroke(Color.black.opacity(0.35), style: StrokeStyle(lineWidth: 13, lineCap: .round, lineJoin: .round))
-            smoothPath(through: lockedPts)
-                .stroke(Color.white.opacity(0.20), style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [1, 11]))
-            smoothPath(through: reachedPts)
-                .stroke(
-                    LinearGradient(colors: [MADTheme.Colors.madRed, .orange], startPoint: .leading, endPoint: .trailing),
-                    style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round)
-                )
-                .shadow(color: MADTheme.Colors.madRed.opacity(0.40), radius: 8, y: 2)
+    /// A reached row has road on both sides; the current row has travelled road
+    /// only above it; a locked row is dashed on both sides.
+    private var upperTravelled: Bool { row.kind != .locked }
+    private var lowerTravelled: Bool { row.kind == .reached }
+
+    private func segment(from y0: CGFloat, to y1: CGFloat, width w: CGFloat, travelled: Bool) -> some View {
+        Path { p in
+            p.move(to: CGPoint(x: w / 2, y: y0))
+            p.addLine(to: CGPoint(x: w / 2, y: y1))
         }
-        .frame(width: contentWidth, height: Self.trailHeight, alignment: .topLeading)
+        .stroke(
+            travelled
+                ? AnyShapeStyle(LinearGradient(colors: [Color(red: 1.0, green: 0.74, blue: 0.28), MADTheme.Colors.madRed], startPoint: .top, endPoint: .bottom))
+                : AnyShapeStyle(Color.white.opacity(0.16)),
+            style: travelled
+                ? StrokeStyle(lineWidth: 4, lineCap: .round)
+                : StrokeStyle(lineWidth: 3, lineCap: .round, dash: [2, 7])
+        )
     }
 
-    private func caption(for stop: RoadStop, at center: CGPoint) -> some View {
-        let radius = RoadStopCircle.diameter(for: stop) / 2
-        return Text(stop.caption)
-            .font(.system(size: 11, weight: .heavy, design: .rounded))
-            .foregroundColor(captionColor(for: stop))
-            .lineLimit(1)
-            .frame(width: circleCell)
-            .offset(x: center.x - circleCell / 2, y: center.y + radius + 9)
-    }
-
-    private func captionColor(for stop: RoadStop) -> Color {
-        switch stop.state {
-        case .current: return MADTheme.Colors.madRed
-        case .reached: return stop.isGoal ? .orange : Color.white.opacity(0.62)
-        case .locked: return stop.isGoal ? .orange : Color.white.opacity(0.34)
+    private var nodeDiameter: CGFloat {
+        switch row.kind {
+        case .current: return 46
+        case .reached: return 38
+        case .locked: return row.isGoal ? 42 : 36
         }
     }
 
-    /// Catmull-Rom spline through the points, expressed as cubic Béziers, so the
-    /// road curves smoothly through every platform center.
-    private func smoothPath(through pts: [CGPoint]) -> Path {
-        var path = Path()
-        guard pts.count > 1 else { return path }
-        path.move(to: pts[0])
-        for i in 0 ..< pts.count - 1 {
-            let p0 = i == 0 ? pts[i] : pts[i - 1]
-            let p1 = pts[i]
-            let p2 = pts[i + 1]
-            let p3 = (i + 2 < pts.count) ? pts[i + 2] : pts[i + 1]
-            let c1 = CGPoint(x: p1.x + (p2.x - p0.x) / 6, y: p1.y + (p2.y - p0.y) / 6)
-            let c2 = CGPoint(x: p2.x - (p3.x - p1.x) / 6, y: p2.y - (p3.y - p1.y) / 6)
-            path.addCurve(to: p2, control1: c1, control2: c2)
-        }
-        return path
-    }
-}
-
-/// The platform disc: number in the middle, plus a state badge (check / flag /
-/// lock). Locked platforms beyond the runner's streak read as clearly disabled.
-private struct RoadStopCircle: View {
-    let stop: RoadStop
-
-    static func diameter(for stop: RoadStop) -> CGFloat {
-        if stop.state == .current { return 72 }
-        if stop.isGoal { return 60 }
-        if stop.state == .reached { return 56 }
-        return 48
-    }
-
-    var body: some View {
-        let d = Self.diameter(for: stop)
+    private var node: some View {
         ZStack {
-            if stop.state == .current {
+            if row.kind == .current {
                 Circle()
-                    .fill(MADTheme.Colors.madRed.opacity(0.30))
-                    .frame(width: d + 26, height: d + 26)
-                    .blur(radius: 8)
+                    .fill(MADTheme.Colors.madRed.opacity(0.32))
+                    .frame(width: nodeDiameter + 18, height: nodeDiameter + 18)
+                    .blur(radius: 7)
             }
-            ZStack {
-                Circle().fill(fillStyle)
-                    .overlay(ringOverlay)
-                label
-            }
-            .frame(width: d, height: d)
-            .shadow(color: shadowColor, radius: shadowRadius, y: 3)
-            .overlay(alignment: .topTrailing) { badge.offset(x: 5, y: -3) }
+            Circle()
+                .fill(nodeFill)
+                .overlay(nodeRing)
+                .frame(width: nodeDiameter, height: nodeDiameter)
+                .shadow(color: nodeShadow, radius: nodeShadowRadius, y: 2)
+            nodeIcon
         }
-        .frame(width: 92, height: 92)
     }
 
-    private var fillStyle: AnyShapeStyle {
-        if stop.state == .current {
-            return AnyShapeStyle(LinearGradient(
-                colors: [Color(red: 0.95, green: 0.33, blue: 0.44), MADTheme.Colors.madRed],
-                startPoint: .top, endPoint: .bottom))
+    private var nodeFill: AnyShapeStyle {
+        switch row.kind {
+        case .current:
+            return AnyShapeStyle(LinearGradient(colors: [Color(red: 0.95, green: 0.33, blue: 0.44), MADTheme.Colors.madRed], startPoint: .top, endPoint: .bottom))
+        case .reached:
+            return AnyShapeStyle(LinearGradient(colors: [Color(red: 1.0, green: 0.74, blue: 0.28), .orange], startPoint: .top, endPoint: .bottom))
+        case .locked:
+            return AnyShapeStyle(Color.white.opacity(0.05))
         }
-        if stop.state == .reached {
-            return AnyShapeStyle(LinearGradient(
-                colors: [Color(red: 1.0, green: 0.74, blue: 0.28), .orange],
-                startPoint: .top, endPoint: .bottom))
-        }
-        // locked (incl. locked goal)
-        return AnyShapeStyle(Color.white.opacity(0.05))
     }
 
-    private var ringOverlay: some View {
+    private var nodeRing: some View {
         Group {
-            if stop.isGoal {
+            if row.isGoal {
                 Circle().strokeBorder(Color.orange.opacity(0.85), style: StrokeStyle(lineWidth: 2, dash: [4, 4]))
-            } else if stop.state == .locked {
+            } else if row.kind == .locked {
                 Circle().strokeBorder(Color.white.opacity(0.16), lineWidth: 1.5)
-            } else if stop.state == .current {
+            } else if row.kind == .current {
                 Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: 2.5)
             } else {
                 Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1.5)
@@ -309,62 +291,177 @@ private struct RoadStopCircle: View {
         }
     }
 
-    private var label: some View {
-        Text("\(stop.value)")
-            .font(.system(size: numberSize, weight: .black, design: .rounded))
-            .monospacedDigit()
-            .foregroundColor(numberColor)
-            .minimumScaleFactor(0.6)
-            .lineLimit(1)
-            .padding(.horizontal, 4)
-    }
-
-    private var numberSize: CGFloat {
-        if stop.state == .current { return 23 }
-        return stop.state == .reached ? 16 : 15
-    }
-
-    private var numberColor: Color {
-        switch stop.state {
-        case .current: return .white
-        case .reached: return .white
-        case .locked: return stop.isGoal ? .orange : Color.white.opacity(0.5)
-        }
-    }
-
     @ViewBuilder
-    private var badge: some View {
-        if stop.isGoal {
-            badgeCircle(icon: "flag.checkered", background: .orange, foreground: .white)
-        } else if stop.state == .reached {
-            badgeCircle(icon: "checkmark", background: MADTheme.Colors.success, foreground: .white)
-        } else if stop.state == .locked {
-            badgeCircle(icon: "lock.fill", background: Color(white: 0.22), foreground: Color.white.opacity(0.75))
+    private var nodeIcon: some View {
+        switch row.kind {
+        case .current:
+            Image(systemName: "flame.fill")
+                .font(.system(size: 19, weight: .bold))
+                .foregroundColor(.white)
+        case .reached:
+            Text(row.emoji).font(.system(size: 17))
+        case .locked:
+            if row.isGoal {
+                Image(systemName: "flag.checkered")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.orange)
+            } else {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.45))
+            }
         }
     }
 
-    private func badgeCircle(icon: String, background: Color, foreground: Color) -> some View {
-        Image(systemName: icon)
-            .font(.system(size: 9, weight: .black))
-            .foregroundColor(foreground)
-            .frame(width: 20, height: 20)
-            .background(Circle().fill(background))
-            .overlay(Circle().strokeBorder(Color.black.opacity(0.25), lineWidth: 1))
-    }
-
-    private var shadowColor: Color {
-        switch stop.state {
+    private var nodeShadow: Color {
+        switch row.kind {
         case .current: return MADTheme.Colors.madRed.opacity(0.5)
         case .reached: return Color.orange.opacity(0.35)
         case .locked: return .clear
         }
     }
 
-    private var shadowRadius: CGFloat {
-        switch stop.state {
-        case .current: return 14
-        case .reached: return 7
+    private var nodeShadowRadius: CGFloat {
+        switch row.kind {
+        case .current: return 12
+        case .reached: return 6
         case .locked: return 0
+        }
+    }
+
+    // MARK: Content card
+
+    @ViewBuilder
+    private var content: some View {
+        switch row.kind {
+        case .reached: reachedContent
+        case .current: currentContent
+        case .locked: lockedContent
+        }
+    }
+
+    private var reachedContent: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(row.day) Club")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                Text("Unlocked")
+                    .font(.system(size: 11.5, weight: .heavy, design: .rounded))
+                    .foregroundColor(.orange.opacity(0.9))
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 18))
+                .foregroundColor(MADTheme.Colors.success)
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.orange.opacity(0.06))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.orange.opacity(0.14), lineWidth: 1))
+        )
+    }
+
+    private var currentContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("YOU'RE HERE")
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .tracking(1.4)
+                .foregroundColor(MADTheme.Colors.madRed)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(row.day)")
+                    .font(.system(size: 30, weight: .black, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.white)
+                Text("day streak")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.7))
+                Text("🔥").font(.system(size: 17))
+            }
+            if let next = row.nextDay {
+                ProgressToNext(streak: row.day, prevDay: row.prevDay, nextDay: next)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(MADTheme.Colors.madRed.opacity(0.12))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(MADTheme.Colors.madRed.opacity(0.5), lineWidth: 1.5))
+        )
+        .shadow(color: MADTheme.Colors.madRed.opacity(0.25), radius: 12, y: 4)
+    }
+
+    private var lockedContent: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text("\(row.day) Club")
+                        .font(.system(size: 15.5, weight: .bold, design: .rounded))
+                        .foregroundColor(row.isGoal ? .white : .white.opacity(0.5))
+                    if row.isGoal {
+                        Text("NEXT GOAL")
+                            .font(.system(size: 9, weight: .heavy, design: .rounded))
+                            .tracking(0.8)
+                            .foregroundColor(.orange)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.orange.opacity(0.16)))
+                    }
+                }
+                Text(lockedSubtitle)
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(row.isGoal ? .orange.opacity(0.9) : .white.opacity(0.32))
+            }
+            Spacer(minLength: 4)
+            if !row.isGoal {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.28))
+            }
+        }
+        .padding(.vertical, 11)
+        .padding(.horizontal, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(row.isGoal ? 0.04 : 0.025))
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(row.isGoal ? Color.orange.opacity(0.3) : Color.white.opacity(0.06), lineWidth: 1))
+        )
+    }
+
+    private var lockedSubtitle: String {
+        let daysAway = max(row.day - streak, 0)
+        if row.isGoal { return "\(daysAway) day\(daysAway == 1 ? "" : "s") to go" }
+        return "\(daysAway) day\(daysAway == 1 ? "" : "s") to unlock"
+    }
+}
+
+/// Progress bar from the last reached club to the next goal, shown on the hero.
+private struct ProgressToNext: View {
+    let streak: Int
+    let prevDay: Int
+    let nextDay: Int
+
+    private var fraction: CGFloat {
+        CGFloat(max(0, min(Double(streak - prevDay) / Double(max(nextDay - prevDay, 1)), 1)))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.12))
+                    Capsule()
+                        .fill(LinearGradient(colors: [MADTheme.Colors.madRed, .orange], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(geo.size.width * fraction, 8))
+                }
+            }
+            .frame(height: 8)
+            Text("\(max(nextDay - streak, 0)) days to the \(nextDay) Club")
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.65))
         }
     }
 }
