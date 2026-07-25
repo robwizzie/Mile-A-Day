@@ -15,7 +15,7 @@ import {
   logFriendRequest,
   FRIEND_REQUEST_DAILY_CEILING,
 } from "../services/friendshipService.js";
-import { friendRequestClientV2Enabled } from "../services/friendRequestFeatures.js";
+import { friendRequestClientV2EnabledFor } from "../services/friendRequestFeatures.js";
 import { getBlockedIds } from "../services/moderationService.js";
 import { hasUnlimitedActions } from "../services/privilegedUsers.js";
 import { AuthenticatedRequest } from "../middleware/auth.js";
@@ -142,9 +142,9 @@ export async function sendRequest(req: Request, res: Response) {
     const sender = users.find((u) => u.user_id === fromUser);
     const senderName = sender?.username || "Someone";
 
-    // Badge + category are inert until the matching app build ships; see
-    // friendRequestFeatures.ts for why they must not reach older clients.
-    const clientV2 = friendRequestClientV2Enabled();
+    // Badge + category go only to a device that declared it can handle them;
+    // see clientFeatures.ts for why this is per-recipient and not an env flag.
+    const clientV2 = await friendRequestClientV2EnabledFor(toUser);
     const badge = clientV2
       ? await countPendingFriendRequests(toUser).catch(() => undefined)
       : undefined;

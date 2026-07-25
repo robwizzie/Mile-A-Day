@@ -1,7 +1,8 @@
 import { PostgresService } from "./DbService.js";
 import { sendPush } from "./pushNotificationService.js";
 import { localNowSql } from "./dailyResetTime.js";
-import { friendRequestRemindersEnabled } from "./friendRequestFeatures.js";
+import { friendRequestRemindersDisabled } from "./friendRequestFeatures.js";
+import { CLIENT_FEATURES, supportsClientFeatureSql } from "./clientFeatures.js";
 
 const db = PostgresService.getInstance();
 
@@ -40,11 +41,16 @@ type ReminderCandidate = {
  * since. Every in-app surface (dashboard row, icon badge, tab badge) is
  * invisible to them by definition.
  *
+ * Restricted to devices declaring `friend_request_v2`, which replaces the
+ * plain has-a-device-token check: the opt-out toggle this push is required to
+ * honour (4.5.4) only exists in that build, so an older client must not
+ * receive it at all.
+ *
  * Runs hourly; the local-hour predicate means each user matches at most one
  * tick per day.
  */
 export async function sendPendingFriendRequestReminders(): Promise<void> {
-  if (!friendRequestRemindersEnabled()) return;
+  if (friendRequestRemindersDisabled()) return;
 
   // Eligibility is decided per USER, never per row. Grouping over ALL of the
   // user's pending rows (not just the >24h ones) is load-bearing: an unstamped
@@ -62,9 +68,7 @@ export async function sendPendingFriendRequestReminders(): Promise<void> {
 			AND COALESCE(ns.friend_request_reminder_enabled, TRUE) = TRUE
 			AND EXTRACT(HOUR FROM ${localNowSql("f.friend_id")})
 				BETWEEN ${SEND_HOUR_START} AND ${SEND_HOUR_END}
-			AND EXISTS (
-				SELECT 1 FROM device_tokens dt WHERE dt.user_id = f.friend_id
-			)
+			AND ${supportsClientFeatureSql("f.friend_id", CLIENT_FEATURES.friendRequestV2)}
 		GROUP BY f.friend_id
 		HAVING COUNT(*) FILTER (
 				WHERE f.created_at < NOW() - INTERVAL '${MIN_AGE_HOURS} hours'
