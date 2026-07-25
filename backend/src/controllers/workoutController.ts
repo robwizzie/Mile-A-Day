@@ -13,6 +13,7 @@ import {
   getBestSplit,
   getTodayMiles,
   DAILY_GOAL_TOLERANCE,
+  isFeedWorthyWorkout,
   updateWorkout as updateWorkoutDb,
   computePersonalRecords,
   computeRaceRecords,
@@ -152,7 +153,11 @@ export async function uploadWorkouts(req: Request, res: Response) {
             for (const w of req.body as Workout[]) {
               if (
                 (w.workoutType === "running" || w.workoutType === "walking") &&
-                recentWorkoutIds.has(w.workoutId)
+                recentWorkoutIds.has(w.workoutId) &&
+                // Same floor the feed uses. Without it a 3-second phantom pushes
+                // "just logged an extra workout" to every friend and then leads
+                // them to a feed with no card for it.
+                isFeedWorthyWorkout(w.distance, w.totalDuration)
               ) {
                 notifyFriendsOfExtraWorkout(userId, w.workoutId).catch((err) =>
                   console.error("Error notifying extra workout:", err.message),
@@ -167,7 +172,10 @@ export async function uploadWorkouts(req: Request, res: Response) {
           // completes the mile takes the >= 1.0 branch (mile_completed only),
           // so the two never double-fire for the same workout.
           for (const w of req.body as Workout[]) {
-            if (w.workoutType === "running" || w.workoutType === "walking") {
+            if (
+              (w.workoutType === "running" || w.workoutType === "walking") &&
+              isFeedWorthyWorkout(w.distance, w.totalDuration)
+            ) {
               notifyFriendsOfWorkout(userId, w.workoutId).catch((err) =>
                 console.error("Error notifying pre-goal workout:", err.message),
               );

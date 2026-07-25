@@ -457,11 +457,15 @@ export async function getFriendsWorkoutFeed(
 			u.last_name,
 			u.profile_image_url,
 			w.workout_type,
-			w.distance::float AS distance,
+			-- Same rollup the unified feed applies (getUnifiedFeed): on a day's
+			-- 'daily_mile' anchor these are the whole day's combined figures, not
+			-- that one workout's. Both surfaces must restate it identically or the
+			-- same run reads 1.06 mi in the feed and 0.40 mi here.
+			COALESCE(roll.distance, w.distance)::float AS distance,
 			w.device_end_date AS completed_at,
-			w.total_duration::float AS total_duration,
-			w.calories::float AS calories,
-			w.steps,
+			COALESCE(roll.total_duration, w.total_duration)::float AS total_duration,
+			COALESCE(roll.calories, w.calories)::float AS calories,
+			COALESCE(roll.steps, w.steps) AS steps,
 			(w.user_id = $1) AS is_self,
 			-- Unified RUN rule for button state (matches the feed/inbox): this
 			-- run's mile hypes (day composite OR exact workout id) and its posts'
@@ -483,8 +487,27 @@ export async function getFriendsWorkoutFeed(
 		JOIN circle c ON c.uid = w.user_id
 		JOIN users u ON u.user_id = w.user_id
 		LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
+		LEFT JOIN LATERAL (
+			SELECT
+				SUM(m.distance)::float AS distance,
+				SUM(m.total_duration)::float AS total_duration,
+				SUM(m.calories)::float AS calories,
+				SUM(m.steps)::int AS steps
+			FROM workouts m
+			WHERE w.feed_role = 'daily_mile'
+				AND m.user_id = w.user_id
+				AND m.local_date = w.local_date
+				AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
+				AND (
+					m.feed_role IN ('rolled_up', 'daily_mile')
+					OR (m.feed_role = 'hidden' AND m.device_end_date <= w.device_end_date)
+				)
+		) roll ON TRUE
 		WHERE w.device_end_date >= NOW() - INTERVAL '48 hours'
 		AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+		-- Same two roles the unified feed shows: pre-mile segments are folded into
+		-- their anchor and sub-floor junk never surfaces at all.
+		AND w.feed_role IN ('daily_mile', 'extra')
 		-- Respect the owner's share_workouts_to_feed opt-out on this legacy
 		-- feed too, not just the unified feed (the viewer still sees their own).
 		AND (COALESCE(ns.share_workouts_to_feed, true) = true OR w.user_id = $1)

@@ -137,7 +137,41 @@ const POST_COLUMNS = `
 	p.media_url,
 	p.caption,
 	p.workout_id,
-	p.stats_snapshot,
+	-- Restated in rollup terms when this post is attached to the workout that
+	-- completed a mile made of several walks — the SAME projection the unified
+	-- feed applies (getUnifiedFeed). Shared here so the profile grid, story
+	-- viewer and memories can't report 0.33 mi for a run the feed calls 1.06.
+	-- A post on a non-anchor workout keeps its own exact stats.
+	-- COALESCE, not a bare subquery: a post with no linked workout matches no
+	-- row and would otherwise come back with its stats nulled out entirely.
+	COALESCE((
+		SELECT CASE
+			WHEN w_.feed_role = 'daily_mile' AND p.stats_snapshot IS NOT NULL
+				AND roll_.segment_count > 1
+			THEN p.stats_snapshot || jsonb_build_object(
+				'distance', roll_.distance,
+				'duration', roll_.duration,
+				'pace', CASE WHEN roll_.distance > 0
+					THEN roll_.duration / roll_.distance END
+			)
+			ELSE p.stats_snapshot
+		END
+		FROM workouts w_
+		CROSS JOIN LATERAL (
+			SELECT
+				COUNT(*) FILTER (WHERE m.feed_role <> 'hidden')::int AS segment_count,
+				SUM(m.distance)::double precision AS distance,
+				SUM(m.total_duration)::double precision AS duration
+			FROM workouts m
+			WHERE m.user_id = w_.user_id AND m.local_date = w_.local_date
+				AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
+				AND (
+					m.feed_role IN ('rolled_up', 'daily_mile')
+					OR (m.feed_role = 'hidden' AND m.device_end_date <= w_.device_end_date)
+				)
+		) roll_
+		WHERE w_.workout_id = p.workout_id
+	), p.stats_snapshot) AS stats_snapshot,
 	p.local_date::text AS local_date,
 	p.share_to_feed,
 	p.share_to_story,
@@ -860,6 +894,14 @@ export async function getFeed(
   return rows;
 }
 
+/** One leg of a daily mile that was completed across several workouts. */
+export interface FeedSegment {
+  workout_id: string;
+  workout_type: string;
+  distance: number;
+  duration: number;
+}
+
 // One row of the unified feed — either a photo `post` or a raw `workout`
 // activity. Type-specific columns are null for the other kind.
 export interface FeedEntryRow {
@@ -893,12 +935,20 @@ export interface FeedEntryRow {
   // the workout itself for workout entries. Lets the client know which of
   // today's runs already carry a deliberate post.
   workout_id: string | null;
-  // workout columns (also populated for posts via their linked workout)
+  // workout columns (also populated for posts via their linked workout).
+  // On a 'daily_mile' anchor these are the DAY's rollup across every workout up
+  // to and including it, not that one workout's figures.
   workout_type: string | null;
   distance: number | null;
   total_duration: number | null;
   calories: number | null;
   steps: number | null;
+  // How many real workouts the daily mile was stitched together from. 1 (or
+  // null, on an 'extra' entry) is an ordinary single-workout day; > 1 means the
+  // user got there in several goes and `segments` breaks it down. Additive —
+  // shipped clients ignore both and still show the correct combined total.
+  segment_count: number | null;
+  segments: FeedSegment[] | null;
   // Simplified GPS trace for the entry's workout, when synced (and, for
   // posts, when the author chose to include it).
   route: [number, number][] | null;
@@ -986,6 +1036,15 @@ export async function getUnifiedFeed(
 				-- strangers in; only the tightening direction applies here.
 				AND ${OWNER_NOT_PRIVATE_SQL("w.user_id")}
 				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+				-- Only two roles ever earn a card: the workout that completed the
+				-- day's mile (which stands in for every pre-mile segment — see the
+				-- rollup lateral below) and anything logged after it. 'rolled_up'
+				-- and 'hidden' are represented by the anchor or not at all, which
+				-- is what stops three 0.33 walks becoming three cards and a 3-second
+				-- phantom becoming one. A plain indexed predicate on purpose:
+				-- idx_workouts_feed_candidates matches this WHERE exactly, and the
+				-- PERF note above rules out anything heavier inside candidates.
+				AND w.feed_role IN ('daily_mile', 'extra')
 				AND NOT EXISTS (
 					SELECT 1 FROM posts p2
 					WHERE p2.deleted_at IS NULL AND p2.share_to_feed
@@ -1012,7 +1071,26 @@ export async function getUnifiedFeed(
 			page.sort_ts,
 			page.owner_id AS user_id,
 			u.username, u.first_name, u.last_name, u.profile_image_url,
-			p.media_url, p.caption, p.stats_snapshot,
+			p.media_url, p.caption,
+			-- A photo post on the day's anchor speaks for the whole mile, so its
+			-- baked snapshot is restated in the rollup's terms. Without this a
+			-- 3 x 0.33 day whose anchor carries a post would read "0.33 mi" — the
+			-- other two segments are folded away and the day would appear to
+			-- SHRINK versus before this feature. Only when the mile actually spans
+			-- several workouts; a normal one-run day is untouched, and posts on a
+			-- non-anchor workout keep their own exact stats (the invariant in
+			-- .claude/rules/ios.md).
+			CASE
+				WHEN page.kind = 'post' AND wt.feed_role = 'daily_mile'
+					AND roll.segment_count > 1 AND p.stats_snapshot IS NOT NULL
+				THEN p.stats_snapshot || jsonb_build_object(
+					'distance', roll.distance,
+					'duration', roll.total_duration,
+					'pace', CASE WHEN roll.distance > 0
+						THEN roll.total_duration / roll.distance END
+				)
+				ELSE p.stats_snapshot
+			END AS stats_snapshot,
 			p.local_date::text AS local_date,
 			-- Owner's decision: the 24h expiry only ends the STORY (rail/viewer).
 			-- A photo riding on the run's feed card stays permanently — only
@@ -1033,10 +1111,27 @@ export async function getUnifiedFeed(
 			page.workout_id,
 			-- Populated for posts (via their linked workout) and workouts alike.
 			wt.workout_type,
-			CASE WHEN page.kind = 'workout' THEN wt.distance::double precision END AS distance,
-			CASE WHEN page.kind = 'workout' THEN wt.total_duration::double precision END AS total_duration,
-			CASE WHEN page.kind = 'workout' THEN wt.calories::double precision END AS calories,
-			CASE WHEN page.kind = 'workout' THEN wt.steps END AS steps,
+			-- On an anchor entry these carry the DAY's rollup, not the single
+			-- workout's — which is also what makes already-shipped iOS builds
+			-- correct: they render whatever numbers arrive, so a stitched-together
+			-- mile reads 1.06 mi on an old client with no update. COALESCE because
+			-- the lateral only fires for 'daily_mile' rows; 'extra' rows keep their
+			-- own figures.
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.distance, wt.distance)::double precision END AS distance,
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.total_duration, wt.total_duration)::double precision END AS total_duration,
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.calories, wt.calories)::double precision END AS calories,
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.steps, wt.steps) END AS steps,
+			-- Additive, so older clients simply ignore them. segment_count = 1 is
+			-- an ordinary single-workout day and clients render it exactly as
+			-- before. Explicitly NULL on non-anchor entries: the lateral still
+			-- produces a row for them and COUNT(*) over its empty result is 0, not
+			-- NULL, which would read as "a mile made of no workouts".
+			CASE WHEN wt.feed_role = 'daily_mile' THEN roll.segment_count END AS segment_count,
+			roll.segments,
 			-- Auto posts' media already IS the rendered route card, so shipping
 			-- the polyline too would only duplicate pixels and bloat the page.
 			-- Gated on the author's global "Share route maps" consent setting;
@@ -1052,7 +1147,13 @@ export async function getUnifiedFeed(
 				)
 				ELSE (
 					SELECT wr.route FROM workout_routes wr
-					WHERE (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
+					-- Withheld on a multi-segment rollup: the anchor's trace is only
+					-- the LAST leg, so drawing it under a combined "1.06 mi" stat
+					-- line labels a 0.40-mile loop as the whole mile. Clients fall
+					-- back to the branded stats face, which shipped builds already
+					-- handle.
+					WHERE COALESCE(roll.segment_count, 1) <= 1
+						AND (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
 						AND wr.workout_id = wt.workout_id
 				)
 			END AS route,
@@ -1123,6 +1224,43 @@ export async function getUnifiedFeed(
 		LEFT JOIN posts p ON page.kind = 'post' AND p.post_id::text = page.id
 		LEFT JOIN workouts wt ON wt.workout_id = page.workout_id
 		LEFT JOIN notification_settings nsp ON nsp.user_id = page.owner_id
+		-- The day's rollup, for entries anchored on a 'daily_mile' workout: the
+		-- combined mile that the pre-mile segments add up to, plus the segment
+		-- breakdown itself. Page-bounded (<= $3 rows), one probe each on
+		-- idx_workouts_user_local_date — the same shape as every other heavy
+		-- column here, and the reason this isn't computed inside candidates.
+		LEFT JOIN LATERAL (
+			SELECT
+				-- Only real workouts are segments; sub-floor junk is summed but
+				-- never listed, so a 3-second phantom can't appear as a leg of
+				-- someone's mile.
+				COUNT(*) FILTER (WHERE m.feed_role <> 'hidden')::int AS segment_count,
+				SUM(m.distance)::double precision AS distance,
+				SUM(m.total_duration)::double precision AS total_duration,
+				SUM(m.calories)::double precision AS calories,
+				SUM(m.steps)::int AS steps,
+				jsonb_agg(
+					jsonb_build_object(
+						'workout_id', m.workout_id,
+						'workout_type', m.workout_type,
+						'distance', m.distance,
+						'duration', m.total_duration
+					) ORDER BY m.device_end_date, m.workout_id
+				) FILTER (WHERE m.feed_role <> 'hidden') AS segments
+			FROM workouts m
+			WHERE wt.feed_role = 'daily_mile'
+				AND m.user_id = wt.user_id
+				AND m.local_date = wt.local_date
+				AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
+				-- Everything up to and including the anchor. Junk BEFORE the anchor
+				-- is counted so this card's distance equals what the profile,
+				-- leaderboard and streak all report for that stretch of the day;
+				-- junk after it belongs to the 'extra' workouts instead.
+				AND (
+					m.feed_role IN ('rolled_up', 'daily_mile')
+					OR (m.feed_role = 'hidden' AND m.device_end_date <= wt.device_end_date)
+				)
+		) roll ON TRUE
 		ORDER BY page.sort_ts DESC
 		`,
     [viewerId, before ?? null, limit],

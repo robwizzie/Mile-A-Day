@@ -145,6 +145,10 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
 				FROM workouts
 				WHERE user_id = $1 AND deleted_at IS NULL AND exclusion_reason IS NULL
 					AND device_end_date >= NOW() - INTERVAL '36 hours'
+					-- Skip workouts that never earned a card: a 3-second phantom is
+					-- the target's most recent workout surprisingly often, and it
+					-- would aim the hype at a day with no mile in it.
+					AND feed_role IN ('daily_mile', 'extra')
 				ORDER BY device_end_date DESC
 				LIMIT 1`,
         [targetUserId],

@@ -67,6 +67,15 @@ struct PostCardView: View {
                 if let stats = post.stats_snapshot {
                     PostStatStrip(stats: stats).padding(.horizontal, 2)
                 }
+                // The strip above shows the day's combined mile when this post is
+                // attached to the workout that completed one made of several
+                // walks; without the breakdown that total looks like a single run.
+                if let segments = post.segments, segments.count > 1 {
+                    MileSegmentStrip(
+                        segments: segments,
+                        accent: ActivityCardView.color(post.workout_type)
+                    )
+                }
                 if let caption = post.caption, !caption.isEmpty {
                     Text(MentionText.attributed(caption))
                         .font(.system(size: 14, weight: .medium, design: .rounded))

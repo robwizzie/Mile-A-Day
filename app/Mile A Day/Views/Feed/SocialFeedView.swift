@@ -1,4 +1,5 @@
 import SwiftUI
+import HealthKit
 
 /// One-shot handoff from the notification inbox (or any other surface) to the
 /// feed: which workout's entry to reveal. Parked statically because the Feed
@@ -202,9 +203,15 @@ struct SocialFeedView: View {
     /// The workout the composer should attach to: the LATEST of today's
     /// walks/runs without a deliberate share yet. One share per walk/run is
     /// the reward — every new workout unlocks another photo.
+    ///
+    /// Sub-floor workouts are skipped. They'd otherwise be permanently
+    /// unshareable-but-unshared, so this always returned one and the compose
+    /// affordance never locked (see `alreadySharedWorkout`) — and a photo
+    /// attached to one would post against a workout the feed never shows.
     private var nextShareableWorkoutId: String? {
         let shared = mySharedWorkoutIds
         return healthManager.todaysWorkouts
+            .filter { WorkoutFeedFloor.isSubstantive($0) }
             .sorted { $0.startDate > $1.startDate }
             .first { !shared.contains($0.uuid.uuidString) }?
             .uuid.uuidString

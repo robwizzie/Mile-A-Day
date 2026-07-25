@@ -17,16 +17,36 @@ export async function uploadWorkouts(
   // splits/route) and corrupt their data. Drop any id already owned by someone
   // else before building the transaction; the DO UPDATE below is additionally
   // guarded as a race backstop.
+  // Days whose feed roles this upload could invalidate. Seeded with the days
+  // the incoming workouts BELONG TO now (below) plus, from the lookup here, the
+  // days they used to belong to: the DO UPDATE sets local_date = EXCLUDED, so a
+  // re-upload can move a workout to another day and strand a stale anchor —
+  // possibly one whose workout no longer lives in that day at all.
+  const affectedDays = new Set<string>();
   if (workouts.length > 0) {
-    const foreign = await db.query<{ workout_id: string }>(
-      `SELECT workout_id FROM workouts
-			WHERE workout_id = ANY($1::text[]) AND user_id <> $2`,
-      [workouts.map((w) => w.workoutId), userId],
+    // Ownership guard: workout ids are visible to friends in feed payloads, so a
+    // crafted upload could otherwise ON CONFLICT into ANOTHER user's row (and its
+    // splits/route) and corrupt their data. Drop any id already owned by someone
+    // else before building the transaction; the DO UPDATE below is additionally
+    // guarded as a race backstop.
+    const existing = await db.query<{
+      workout_id: string;
+      user_id: string;
+      local_date: string;
+    }>(
+      `SELECT workout_id, user_id, local_date::text AS local_date FROM workouts
+			WHERE workout_id = ANY($1::text[])`,
+      [workouts.map((w) => w.workoutId)],
     );
-    if (foreign.length > 0) {
-      const foreignIds = new Set(foreign.map((r) => r.workout_id));
+    const foreignIds = new Set(
+      existing.filter((r) => r.user_id !== userId).map((r) => r.workout_id),
+    );
+    for (const row of existing) {
+      if (row.user_id === userId) affectedDays.add(row.local_date);
+    }
+    if (foreignIds.size > 0) {
       console.warn(
-        `[uploadWorkouts] Dropping ${foreign.length} workout(s) owned by another user (uploader ${userId})`,
+        `[uploadWorkouts] Dropping ${foreignIds.size} workout(s) owned by another user (uploader ${userId})`,
       );
       workouts = workouts.filter((w) => !foreignIds.has(w.workoutId));
       if (workouts.length === 0) return [];
@@ -92,57 +112,62 @@ export async function uploadWorkouts(
 			updated_at = NOW()
       `;
 
-  await db.transaction(
-    workouts.flatMap((workout: Workout) => {
-      const speed = classifyWorkoutSpeed(
-        workout.distance,
-        workout.totalDuration,
-      );
-      const route = sanitizeRoute(workout.route);
-      return [
-        {
-          query: workoutQuery,
-          params: [
-            userId,
-            workout.workoutId,
-            workout.distance,
-            workout.localDate,
-            workout.date,
-            workout.timezoneOffset,
-            workout.workoutType,
-            workout.deviceEndDate,
-            workout.calories,
-            workout.totalDuration,
-            workout.source || "healthkit",
-            speed.exclusionReason,
-            speed.speedFlagged,
-          ],
-        },
-        ...workout.splits.map((split) => ({
-          query: splitQuery,
-          params: [
-            workout.workoutId,
-            split.splitNumber,
-            split.duration,
-            split.distance,
-            split.pace,
-          ],
-        })),
-        ...(route
-          ? [
-              {
-                query: routeQuery,
-                params: [
-                  workout.workoutId,
-                  JSON.stringify(route),
-                  route.length,
-                ],
-              },
-            ]
-          : []),
-      ];
-    }),
-  );
+  for (const workout of workouts) affectedDays.add(workout.localDate);
+
+  const upserts = workouts.flatMap((workout: Workout) => {
+    const speed = classifyWorkoutSpeed(workout.distance, workout.totalDuration);
+    const route = sanitizeRoute(workout.route);
+    return [
+      {
+        query: workoutQuery,
+        params: [
+          userId,
+          workout.workoutId,
+          workout.distance,
+          workout.localDate,
+          workout.date,
+          workout.timezoneOffset,
+          workout.workoutType,
+          workout.deviceEndDate,
+          workout.calories,
+          workout.totalDuration,
+          workout.source || "healthkit",
+          speed.exclusionReason,
+          speed.speedFlagged,
+        ],
+      },
+      ...workout.splits.map((split) => ({
+        query: splitQuery,
+        params: [
+          workout.workoutId,
+          split.splitNumber,
+          split.duration,
+          split.distance,
+          split.pace,
+        ],
+      })),
+      ...(route
+        ? [
+            {
+              query: routeQuery,
+              params: [workout.workoutId, JSON.stringify(route), route.length],
+            },
+          ]
+        : []),
+    ];
+  });
+
+  // Upserts and reclassification go in ONE transaction, behind the per-user
+  // advisory lock. Splitting them would leave a window where new rows sit at the
+  // 'extra' default — i.e. every junk walk and every pre-mile segment visible as
+  // its own card — and if the process died in that window they'd stay that way.
+  await db.transaction([
+    advisoryLockStatement(userId),
+    ...upserts,
+    ...[...affectedDays].flatMap((localDate) =>
+      feedRoleStatements(userId, localDate),
+    ),
+  ]);
 
   return workouts.map((w) => w.workoutId);
 }
@@ -215,6 +240,207 @@ function classifyWorkoutSpeed(
     return { exclusionReason: null, speedFlagged: true };
   }
   return { exclusionReason: null, speedFlagged: false };
+}
+
+/**
+ * The floor a workout must clear to earn a feed card of its own.
+ *
+ * This is a FEED rule, not a counting rule. A 0.02-mile phantom still adds to
+ * today's miles, can still complete a streak day, and still shows on the user's
+ * own dashboard so they can delete it — it just doesn't get to post. That's why
+ * this is separate from `exclusion_reason`, which really does stop a workout
+ * counting and is read by streaks, challenges, badges and competitions.
+ *
+ * Anything below either bound is almost always an accident: a workout started
+ * and stopped by mistake, or a stray auto-detected sample. "0.00 mi in 3
+ * seconds" is the canonical case.
+ *
+ * iOS mirrors these in `WorkoutFeedFloor` (Utils/Extensions.swift) the same way
+ * it mirrors DAILY_GOAL_TOLERANCE — keep them in sync.
+ */
+export const FEED_MIN_DISTANCE = 0.05; // miles
+export const FEED_MIN_DURATION = 30; // seconds
+
+/**
+ * Miles a day must total before it earns a feed card — the same absolute 0.95
+ * the streak rule uses (`HAVING SUM(distance) >= 0.95` in getActiveStreak,
+ * refreshCurrentStreak and computeCoveredStreak), so "a card appeared" means
+ * "this day counted for your streak".
+ *
+ * Deliberately NOT `goal_miles * DAILY_GOAL_TOLERANCE`: feed_role is stored, and
+ * a per-user goal would make every stored role go stale the moment that goal
+ * changed. `goal_miles` has defaulted to 1.0 since launch and no endpoint
+ * writes it, so today the two are the same number anyway — this just doesn't
+ * inherit the staleness problem if that ever changes.
+ */
+export const FEED_QUALIFYING_DISTANCE = 0.95;
+
+/**
+ * How a workout shows up in the feed. See the `feed_role` column comment in
+ * db/drizzle/schema.ts for what each value means.
+ */
+export type FeedRole = "hidden" | "rolled_up" | "daily_mile" | "extra";
+
+/**
+ * Is this workout substantial enough to surface socially at all?
+ *
+ * The in-memory twin of the SQL predicate in `feedRoleStatements`, for callers
+ * holding an unsaved payload — notification fan-out decides before the row's
+ * feed_role has been read back. Both must agree, or friends get pushed about a
+ * workout that then has no card to land on.
+ */
+export function isFeedWorthyWorkout(
+  distance: number | null | undefined,
+  totalDuration: number | null | undefined,
+): boolean {
+  const d = Number(distance);
+  const secs = Number(totalDuration);
+  if (!isFinite(d) || !isFinite(secs)) return false;
+  return d >= FEED_MIN_DISTANCE && secs >= FEED_MIN_DURATION;
+}
+
+/**
+ * The classification itself, as statements ready to splice into a caller's
+ * transaction. `feedRoleStatements` is the ONLY place feed_role is ever
+ * written — recomputeFeedRolesForDay just runs these standalone.
+ *
+ * Always reclassifies the WHOLE day rather than patching the row that changed,
+ * because the day's shape is what decides the roles: a Watch workout that syncs
+ * late can land *before* the current anchor and take its place, and deleting a
+ * segment can drop the day back under the mile and hide it entirely.
+ *
+ * Four things this gets right that a naive running-sum doesn't:
+ *
+ *  - **Junk counts toward the day, it just can't anchor it.** The running sum
+ *    includes sub-floor workouts, so the day total here equals the SUM(distance)
+ *    every other surface reports (profile, leaderboard, streak). Excluding them
+ *    would make the feed card read 1.02 mi on a day everything else calls
+ *    1.06 mi. They're barred from being the anchor and get no segment row.
+ *  - **The anchor is always substantive.** 0.98 mi run + a 0.03 phantom means
+ *    the phantom is the row that crosses 0.95; anchoring there would headline
+ *    the day with a card for an accident. The anchor is the last real workout at
+ *    or before the crossing point.
+ *  - **Ranks, not timestamps.** Phone and Watch write identical
+ *    `device_end_date` values often enough that comparing timestamps classifies
+ *    two rows the same way. ROW_NUMBER breaks the tie on workout_id.
+ *  - **The anchor is sticky.** A backdated workout arriving later would
+ *    otherwise move the anchor to an earlier row, dragging the card's sort_ts
+ *    backwards — past the point a scrolling viewer already read, so the day
+ *    silently disappears for them. An existing anchor is kept as long as it's
+ *    still real, still present, and still at/before the crossing point.
+ *
+ * Scoped to one day, so it's a small indexed write
+ * (idx_workouts_user_local_date) — cheap enough to run on every mutation.
+ */
+function feedRoleStatements(
+  userId: string,
+  localDate: string,
+): { query: string; params: any[] }[] {
+  const params = [
+    userId,
+    localDate,
+    FEED_MIN_DISTANCE,
+    FEED_MIN_DURATION,
+    FEED_QUALIFYING_DISTANCE,
+  ];
+  return [
+    {
+      // Rows that can't be in the feed at all. Kept separate from the pass
+      // below, whose `day` CTE only sees live rows.
+      query: `
+	UPDATE workouts SET feed_role = 'hidden'
+	WHERE user_id = $1 AND local_date = $2::date
+		AND (deleted_at IS NOT NULL OR exclusion_reason IS NOT NULL)
+		AND feed_role <> 'hidden'`,
+      params: [userId, localDate],
+    },
+    {
+      query: `
+	WITH day AS (
+		SELECT
+			workout_id,
+			feed_role,
+			(distance >= $3 AND total_duration >= $4) AS substantive,
+			ROW_NUMBER() OVER (ORDER BY device_end_date, workout_id) AS rn,
+			SUM(distance) OVER (
+				ORDER BY device_end_date, workout_id ROWS UNBOUNDED PRECEDING
+			) AS cumulative
+		FROM workouts
+		WHERE user_id = $1 AND local_date = $2::date
+			AND deleted_at IS NULL AND exclusion_reason IS NULL
+	),
+	-- Where the day reached the mile. NULL means it never did.
+	crossing AS (
+		SELECT MIN(rn) AS rn FROM day WHERE cumulative + 1e-9 >= $5
+	),
+	-- Keep the anchor we already have, if it's still valid (see stickiness).
+	sticky AS (
+		SELECT MAX(rn) AS rn FROM day
+		WHERE feed_role = 'daily_mile' AND substantive
+			AND rn <= (SELECT rn FROM crossing)
+	),
+	-- Otherwise the last real workout at or before the crossing point.
+	fresh AS (
+		SELECT MAX(rn) AS rn FROM day
+		WHERE substantive AND rn <= (SELECT rn FROM crossing)
+	),
+	anchor AS (
+		SELECT COALESCE((SELECT rn FROM sticky), (SELECT rn FROM fresh)) AS rn
+	),
+	roles AS (
+		SELECT d.workout_id, CASE
+			-- Day never reached the mile, or got there only on junk: show
+			-- nothing. (The second case counts for the streak but has no real
+			-- workout to put on a card.)
+			WHEN (SELECT rn FROM anchor) IS NULL THEN 'hidden'
+			WHEN NOT d.substantive THEN 'hidden'
+			WHEN d.rn = (SELECT rn FROM anchor) THEN 'daily_mile'
+			WHEN d.rn < (SELECT rn FROM anchor) THEN 'rolled_up'
+			ELSE 'extra'
+		END AS role
+		FROM day d
+	)
+	UPDATE workouts w SET feed_role = r.role
+	FROM roles r
+	WHERE w.workout_id = r.workout_id AND w.user_id = $1
+		-- Skip no-op rewrites so a re-sync of an unchanged day costs no row
+		-- versions and no index churn.
+		AND w.feed_role IS DISTINCT FROM r.role`,
+      params,
+    },
+  ];
+}
+
+/**
+ * Lock a user's workout rows for the duration of the caller's transaction.
+ *
+ * Two devices syncing at once (phone and Watch, or a client retrying an
+ * in-flight upload) both recompute the same day. Under READ COMMITTED each
+ * statement's window functions run against its own snapshot, and row-level
+ * blocking re-checks the WHERE clause, not the value the subquery already
+ * derived — so both can settle on a different row as 'daily_mile' and the mile
+ * shows up twice in the feed. Serializing per user removes the interleaving.
+ *
+ * Locking per USER rather than per day is deliberate: a batch spanning several
+ * days would otherwise take day locks in whatever order the payload arrived,
+ * which is a deadlock waiting to happen.
+ */
+function advisoryLockStatement(userId: string) {
+  return {
+    query: `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+    params: [userId],
+  };
+}
+
+/** Reclassify one (user, local_date) in its own transaction. */
+export async function recomputeFeedRolesForDay(
+  userId: string,
+  localDate: string,
+): Promise<void> {
+  await db.transaction([
+    advisoryLockStatement(userId),
+    ...feedRoleStatements(userId, localDate),
+  ]);
 }
 
 function dateStringMinus(dateStr: string, days: number): string {
@@ -418,6 +644,11 @@ export async function getRecentWorkouts(
 		SELECT * FROM workouts
 		WHERE user_id = $1
 		AND deleted_at IS NULL
+		-- The OWNER sees everything, including sub-floor accidents and workouts
+		-- folded into a rollup — this is the list they delete bad entries from,
+		-- and it already shows auto-excluded ones for the same reason. Visitors
+		-- on someone else's profile get the same view as the feed.
+		AND ($1 = $3 OR feed_role IN ('daily_mile', 'extra'))
 		ORDER BY device_end_date DESC
 		LIMIT $2
 	),
@@ -887,6 +1118,12 @@ export async function updateWorkout(
       row.total_duration,
     ],
   );
+
+  // An edit can push a workout over or under the feed floor, or move the day
+  // across the mile — either reshapes the whole day's roles.
+  if (result[0]) {
+    await recomputeFeedRolesForDay(userId, result[0].local_date);
+  }
 
   return result[0];
 }
