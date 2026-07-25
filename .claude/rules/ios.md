@@ -16,6 +16,7 @@ globs: app/**
 - The displayed streak (`currentUser.streak`) is quarantine-gated: `UserManager.vettedHealthKitStreak` refuses 2+ day drops from local recomputes unless the backend (48h-fresh, recomputed server-side every `getUserStats`) agrees or a same-day full index rebuild confirms. Never write `hk.retroactiveStreak` raw to UI/widgets/watch — it flaps on index holes; route through `updateUserWithHealthKitData` / push `max(hk, user.streak)`.
 
 ## Key Patterns
+- Backend `timestamptz` serializes WITH fractional seconds (`…:15.600Z`) and `APIClient`'s decoder uses `.iso8601`, which CANNOT parse those — one bad date fails the WHOLE payload. Type backend timestamps as `String` in DTOs and parse with `[.withInternetDateTime, .withFractionalSeconds]` (see `BuddyDate`); only `date` columns are safe as plain strings.
 - Use `@Observable` (iOS 17+ Observation framework) for new view models.
 - Feature views live in `Views/<FeatureName>/` subdirectories.
 - Shared UI components in `Views/Components/`.
