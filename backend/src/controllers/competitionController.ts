@@ -529,7 +529,13 @@ export async function getCompTeamStats(
         .status(404)
         .json({ error: `No competition found with id: ${competitionId}` });
     }
-    if (!competition.users.some((u) => u.user_id === req.userId!)) {
+    // Accepted participants only — the stats expose recent activity history,
+    // so a pending/declined invitee must not read them before joining.
+    if (
+      !competition.users.some(
+        (u) => u.user_id === req.userId! && u.invite_status === "accepted",
+      )
+    ) {
       return res
         .status(403)
         .json({ error: "User is not a participant in this competition" });

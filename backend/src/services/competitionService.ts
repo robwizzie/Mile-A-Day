@@ -316,6 +316,71 @@ function attachTeamScores(competition: Competition): void {
   for (const team of teams) team.score = totals.get(team.id) ?? 0;
 }
 
+/**
+ * Team-aware final outcome for team competitions. Teams rank by summed member
+ * scores and ONLY teams can win — a participant without a team places after
+ * every team (the UI tells them they're competing without a team). The stored
+ * winner stays a user id for API compatibility: the winning team's best-scoring
+ * member. Every member of a team shares that team's placement, so trophies go
+ * to the whole team. Returns null when the comp has no teams (or no team has
+ * any member) — callers fall through to the individual logic.
+ */
+function teamAwareOutcome(
+  competition: Competition,
+  scores: UserData,
+): { winnerId: string; topScore: number; placements: Map<string, number> } | null {
+  const teams = competition.teams?.teams;
+  if (!teams?.length) return null;
+
+  const membersByTeam = new Map<string, string[]>(teams.map((t) => [t.id, []]));
+  const assigned = new Set<string>();
+  for (const user of competition.users) {
+    if (user.invite_status !== "accepted" || !user.team_id) continue;
+    const members = membersByTeam.get(user.team_id);
+    if (!members) continue; // orphaned team_id — treated as unassigned
+    members.push(user.user_id);
+    assigned.add(user.user_id);
+  }
+
+  const entities = teams
+    .map((t) => {
+      const members = (membersByTeam.get(t.id) ?? []).sort(
+        (a, b) => (scores[b]?.score ?? 0) - (scores[a]?.score ?? 0),
+      );
+      return {
+        members,
+        score: members.reduce((sum, m) => sum + (scores[m]?.score ?? 0), 0),
+      };
+    })
+    .filter((e) => e.members.length > 0)
+    .sort((a, b) => b.score - a.score);
+  if (entities.length === 0) return null;
+
+  const placements = new Map<string, number>();
+  let placement = 1;
+  entities.forEach((entity, i) => {
+    if (i > 0 && entity.score < entities[i - 1].score) placement = i + 1;
+    for (const member of entity.members) placements.set(member, placement);
+  });
+  // Unassigned participants follow every team, ranked by their own score.
+  const solo = Object.keys(scores)
+    .filter((id) => !assigned.has(id))
+    .sort((a, b) => (scores[b]?.score ?? 0) - (scores[a]?.score ?? 0));
+  let soloPlacement = entities.length + 1;
+  solo.forEach((id, i) => {
+    if (i > 0 && (scores[id]?.score ?? 0) < (scores[solo[i - 1]]?.score ?? 0)) {
+      soloPlacement = entities.length + i + 1;
+    }
+    placements.set(id, soloPlacement);
+  });
+
+  return {
+    winnerId: entities[0].members[0],
+    topScore: entities[0].score,
+    placements,
+  };
+}
+
 export async function getCompetitions(
   userId: string,
   {
@@ -1087,6 +1152,24 @@ export async function checkRaceCompletions(userId: string): Promise<void> {
   if (activeRaces.length === 0) return;
 
   for (const race of activeRaces) {
+    // Team races finish on combined TEAM distance — evaluate with the same
+    // team-aware outcome the cron uses, not this runner's solo total.
+    if (race.teams?.teams?.length) {
+      const fullComp = await getCompetition(race.id);
+      if (!fullComp) continue;
+      const scores = await getUserScores(fullComp);
+      const outcome = teamAwareOutcome(fullComp, scores);
+      if (outcome && outcome.topScore >= race.options.goal) {
+        await db.query(
+          `UPDATE competitions SET end_date = $1, winner = $2, ended = true WHERE id = $3 AND winner IS NULL`,
+          [getTodayET(), outcome.winnerId, race.id],
+        );
+        await resolveCompetitionPlacements(race.id, scores, fullComp);
+        evaluateSocialBadgesForUser(outcome.winnerId).catch(() => {});
+      }
+      continue;
+    }
+
     const workoutTypes = (race.workouts ?? ["running", "walking"])
       .map((t: string) => WORKOUT_TYPE_MAP[t])
       .filter(Boolean);
@@ -1223,7 +1306,12 @@ async function resolveIfComplete(
     });
     const scoreValues = Object.values(scores);
     if (scoreValues.length > 0) {
-      const maxScore = Math.max(...scoreValues.map((s) => s.score));
+      // Team comps race to first_to on TEAM totals — an individual can't
+      // trigger (or win) on their own.
+      const outcome = teamAwareOutcome(competition, scores);
+      const maxScore = outcome
+        ? outcome.topScore
+        : Math.max(...scoreValues.map((s) => s.score));
       if (maxScore >= competition.options.first_to) {
         shouldResolve = true;
         computedEndDate = lastCompletedIntervalEnd(
@@ -1256,13 +1344,18 @@ async function resolveIfComplete(
     }
   }
 
-  // Check 4: race goal reached (backup for races not caught on upload)
+  // Check 4: race goal reached (backup for races not caught on upload).
+  // Team races finish on combined TEAM distance, not any one runner's.
   if (!shouldResolve && competition.type === "race") {
     const scores = await getUserScores(competition, {
       excludeCurrentInterval: true,
     });
-    for (const data of Object.values(scores)) {
-      if (data.score >= competition.options.goal) {
+    const outcome = teamAwareOutcome(competition, scores);
+    const raceScores = outcome
+      ? [outcome.topScore]
+      : Object.values(scores).map((s) => s.score);
+    for (const score of raceScores) {
+      if (score >= competition.options.goal) {
         shouldResolve = true;
         computedEndDate = lastCompletedIntervalEnd(
           todayStr,
@@ -1293,13 +1386,17 @@ async function resolveIfComplete(
 
   if (sortedUsers.length === 0) return;
 
-  const winnerId = sortedUsers[0][0];
+  // Team comps: the winning TEAM decides the outcome — record its best member
+  // as the (user-typed) winner so the stored result matches what the app
+  // announces.
+  const outcome = teamAwareOutcome(competition, finalScores);
+  const winnerId = outcome?.winnerId ?? sortedUsers[0][0];
   await db.query(
     `UPDATE competitions SET winner = $1, ended = true WHERE id = $2 AND winner IS NULL`,
     [winnerId, competition.id],
   );
 
-  await resolveCompetitionPlacements(competition.id, finalScores);
+  await resolveCompetitionPlacements(competition.id, finalScores, competition);
   evaluateSocialBadgesForUser(winnerId).catch(() => {});
 
   // Notify all accepted participants that the competition finished
@@ -1324,12 +1421,23 @@ async function resolveIfComplete(
 async function resolveCompetitionPlacements(
   competitionId: string,
   precomputedScores?: UserData,
+  precomputedCompetition?: Competition,
 ): Promise<void> {
-  let scores = precomputedScores;
-  if (!scores) {
-    const competition = await getCompetition(competitionId);
-    if (!competition) return;
-    scores = await getUserScores(competition);
+  const competition =
+    precomputedCompetition ?? (await getCompetition(competitionId));
+  if (!competition) return;
+  const scores = precomputedScores ?? (await getUserScores(competition));
+
+  // Team comps: members share their team's placement (whole team medals).
+  const outcome = teamAwareOutcome(competition, scores);
+  if (outcome) {
+    for (const [userId, placement] of outcome.placements) {
+      await db.query(
+        `UPDATE competition_users SET placement = $1 WHERE competition_id = $2 AND user_id = $3`,
+        [placement, competitionId, userId],
+      );
+    }
+    return;
   }
 
   const sorted = Object.entries(scores).sort(
