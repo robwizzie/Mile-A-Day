@@ -121,9 +121,57 @@ struct PostCardView: View {
         .background(Capsule().fill(MADTheme.Colors.madRed))
     }
 
+    /// Buddy Walk header: a stack of avatars plus a byline that collapses past
+    /// three names. Deliberately a separate branch from the two-person collab
+    /// header below rather than a generalization of it — that one is tuned and
+    /// shipped, and a walk with one friend must keep looking exactly as it does
+    /// today.
+    private var multiCollabHeader: some View {
+        let others = post.acceptedCoauthors
+        return HStack(spacing: 10) {
+            ZStack(alignment: .leading) {
+                Button { onTapAuthor?() } label: {
+                    AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
+                }
+                .buttonStyle(.plain)
+                .disabled(onTapAuthor == nil)
+
+                // Only ever two overlap on the author; more than that and the
+                // stack reads as mush at 40pt. The count lives in the byline.
+                ForEach(Array(others.prefix(2).enumerated()), id: \.element.id) { index, coauthor in
+                    AvatarView(
+                        name: coauthor.displayName,
+                        imageURL: coauthor.profile_image_url,
+                        size: 26
+                    )
+                    .overlay(Circle().strokeBorder(Color.black.opacity(0.7), lineWidth: 2))
+                    .offset(x: 24 + CGFloat(index) * 16, y: 8)
+                }
+            }
+            .padding(.trailing, CGFloat(min(others.count, 2)) * 16)
+
+            VStack(alignment: .leading, spacing: 1) {
+                // One tap target, unlike the two-person header: with up to
+                // eight names there is no room to make each one its own
+                // button, so the whole byline routes to the author.
+                Button { onTapAuthor?() } label: {
+                    nameText(post.multiCollabByline)
+                }
+                .buttonStyle(.plain)
+                .disabled(onTapAuthor == nil)
+
+                Text(post.relativeTime)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+            }
+        }
+    }
+
     private var header: some View {
         HStack(spacing: 10) {
-            if post.hasAcceptedCoauthor {
+            if post.isMultiCollab {
+                multiCollabHeader
+            } else if post.hasAcceptedCoauthor {
                 // Collab post: overlapping avatars + "a & b", like Instagram's
                 // collab header — and like Instagram, each avatar/name is its
                 // OWN tap target routing to that person's profile.

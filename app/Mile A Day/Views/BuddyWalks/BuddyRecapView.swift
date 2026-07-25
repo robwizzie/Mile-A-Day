@@ -13,6 +13,7 @@ struct BuddyRecapView: View {
 
     @State private var recap: BuddyRecapResponse?
     @State private var isLoading = true
+    @State private var showComposer = false
 
     var body: some View {
         NavigationStack {
@@ -26,6 +27,7 @@ struct BuddyRecapView: View {
                         VStack(spacing: MADTheme.Spacing.lg) {
                             headline(session)
                             standings(session)
+                            shareButton(session)
                             Color.clear.frame(height: MADTheme.Spacing.lg)
                         }
                         .padding(MADTheme.Spacing.md)
@@ -122,6 +124,70 @@ struct BuddyRecapView: View {
                 .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.medium)
             }
         }
+    }
+
+    /// Post the walk as one collab crediting everyone who finished it.
+    ///
+    /// The participants are passed through rather than picked: the whole point
+    /// of a buddy recap is that you didn't do it alone, so making the poster
+    /// re-select the people they just walked with would be busywork. The
+    /// server still validates every id (accepted friend, no block) and quietly
+    /// drops any that fail, so a stale roster degrades instead of erroring.
+    private func shareButton(_ session: BuddySessionState) -> some View {
+        Button {
+            MADHaptics.action()
+            showComposer = true
+        } label: {
+            HStack(spacing: MADTheme.Spacing.sm) {
+                Image(systemName: "square.and.arrow.up")
+                Text("Share this walk")
+            }
+            .font(MADTheme.Typography.bodyBold)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, MADTheme.Spacing.md)
+            .background(Capsule().fill(session.accentColor))
+            .foregroundStyle(MADTheme.Colors.madWhite)
+        }
+        .buttonStyle(.plain)
+        .fullScreenCover(isPresented: $showComposer) {
+            PostComposerView(
+                stats: composerStats(session),
+                buddyCoauthorIds: coauthorIds(session),
+                buddySessionId: session.id
+            ) { _ in
+                showComposer = false
+            }
+        }
+    }
+
+    /// Everyone who finished except the poster.
+    private func coauthorIds(_ session: BuddySessionState) -> [String] {
+        session.participants
+            .filter { $0.status == .finished && $0.userId != buddy.currentUserId }
+            .map(\.userId)
+    }
+
+    /// The poster's OWN numbers — a collab post still shows one person's run,
+    /// and using the group total here would credit everyone's miles to whoever
+    /// happened to tap share.
+    private func composerStats(_ session: BuddySessionState) -> RunStatsInput {
+        let me = session.me(buddy.currentUserId)
+        let distance = me?.bestDistance ?? 0
+        let duration = Double(me?.durationSeconds ?? 0)
+        return RunStatsInput(
+            distance: distance,
+            paceSecondsPerMile: distance > 0 && duration > 0 ? duration / distance : nil,
+            durationSeconds: duration > 0 ? duration : nil,
+            streak: UserManager.shared.currentUser.streak,
+            calories: nil,
+            steps: nil,
+            // Links the post to the real workout once it has synced. Nil until
+            // then, which just means the post isn't tied to a run — better than
+            // guessing at an id and colliding with the one-post-per-workout
+            // constraint.
+            workoutId: me?.workoutId,
+            dateText: nil
+        )
     }
 
     // MARK: - Copy

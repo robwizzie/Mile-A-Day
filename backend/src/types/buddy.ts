@@ -130,6 +130,9 @@ export interface BuddyParticipantView {
   is_host: boolean;
   place: number | null;
   final_distance_miles: number | null;
+  /// The real HKWorkout, stamped by reconcileBuddySessions once it syncs. Null
+  /// until then — the client uses it to link a recap post to the run.
+  workout_id: string | null;
 }
 
 /** The full snapshot returned by GET /state and by POST /progress. */

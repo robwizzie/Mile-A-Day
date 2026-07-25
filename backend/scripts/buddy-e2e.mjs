@@ -21,6 +21,8 @@
  */
 import { SignJWT } from "jose";
 import pg from "pg";
+import fs from "node:fs";
+import path from "node:path";
 
 const BASE = process.env.BASE_URL || "http://127.0.0.1:4599";
 const SECRET = new TextEncoder().encode(process.env.APP_JWT_SECRET);
@@ -100,6 +102,9 @@ async function seed() {
     `UPDATE users SET buddy_enrolled_at = NOW()
       WHERE user_id IN ('u_host','u_pal','u_third','u_stranger')`,
   );
+  // Posting requires UGC-terms acceptance (App Review 1.2) — the real client
+  // gates on it too, so accept for everyone rather than bypassing the check.
+  await pool.query(`UPDATE users SET terms_accepted_at = NOW()`);
 }
 
 async function main() {
@@ -544,6 +549,108 @@ async function main() {
   check(
     "same viewer CAN still see the legacy post (block is scoped)",
     await canSee(fill2, legacyPostId),
+  );
+
+  console.log("\n── creating a collab post via the API ──");
+  // POST /posts requires media_url to point at a real uploaded file, so place
+  // one where the controller looks rather than bypassing the endpoint — the
+  // point of this block is to exercise the REAL client path.
+  // Upload filenames are `<userId>-<ts>-<rand>.jpg` and the controller enforces
+  // that prefix so nobody can republish a friend's photo as their own.
+  const mediaRel = "uploads/posts/u_host-1-e2ecollab.jpg";
+  fs.mkdirSync(path.join(process.cwd(), "uploads/posts"), { recursive: true });
+  fs.writeFileSync(path.join(process.cwd(), mediaRel), "not-a-real-jpeg");
+  // Posting is gated on having finished today's mile — a real product rule, so
+  // satisfy it with a real workout rather than working around the check.
+  await pool.query(
+    `INSERT INTO workouts (workout_id, user_id, distance, local_date, date,
+                           timezone_offset, workout_type, device_end_date,
+                           calories, total_duration)
+     VALUES ('w_host_collab', 'u_host', 1.4, CURRENT_DATE, CURRENT_DATE, 0,
+             'walking', NOW(), 90, 1500)
+     ON CONFLICT (workout_id) DO NOTHING`,
+  );
+  // The real client path: POST /posts with coauthor_user_ids, exactly what the
+  // buddy recap's "Share this walk" sends.
+  const collabPost = await api(host, "POST", "/posts", {
+    media_url: `/${mediaRel}`,
+    caption: "great walk",
+    share_to_feed: true,
+    share_to_story: false,
+    is_auto: false,
+    coauthor_user_ids: ["u_pal", "u_third", "u_stranger"],
+  });
+  check(
+    "collab post created",
+    collabPost.status === 200 || collabPost.status === 201,
+    `${collabPost.status} ${JSON.stringify(collabPost.body)}`,
+  );
+  const createdId = collabPost.body?.post_id;
+
+  const rowsCreated = await pool.query(
+    `SELECT user_id, status FROM post_coauthors WHERE post_id = $1 ORDER BY user_id`,
+    [createdId],
+  );
+  const createdIds = rowsCreated.rows.map((r) => r.user_id);
+  check(
+    "friends were credited as coauthors",
+    createdIds.includes("u_pal") && createdIds.includes("u_third"),
+    createdIds.join(","),
+  );
+  check(
+    "non-friend was DROPPED, not fatal",
+    !createdIds.includes("u_stranger"),
+    createdIds.join(","),
+  );
+  const legacyMirror = await pool.query(
+    `SELECT coauthor_user_id, coauthor_status FROM posts WHERE post_id = $1`,
+    [createdId],
+  );
+  const mirrorRow = legacyMirror.rows[0] ?? {};
+  check(
+    "legacy scalar columns mirror the first coauthor (old-client view)",
+    mirrorRow.coauthor_user_id != null && mirrorRow.coauthor_status === "pending",
+    JSON.stringify(mirrorRow),
+  );
+
+  // Accept from a NON-mirrored participant — the path that only exists because
+  // of post_coauthors.
+  const mirrored = mirrorRow.coauthor_user_id;
+  const nonMirrored = createdIds.find((id) => id !== mirrored);
+  const nonMirroredTok = await token(nonMirrored);
+  const acceptRes = await api(
+    nonMirroredTok,
+    "POST",
+    `/posts/${createdId}/coauthor`,
+    { accept: true },
+  );
+  check(
+    "non-mirrored coauthor can accept",
+    acceptRes.status === 200,
+    JSON.stringify(acceptRes.body),
+  );
+  const afterAccept = await pool.query(
+    `SELECT status FROM post_coauthors WHERE post_id = $1 AND user_id = $2`,
+    [createdId, nonMirrored],
+  );
+  check("their row is accepted", afterAccept.rows[0]?.status === "accepted");
+
+  // The create response itself carries the array the feed header renders from
+  // (createPost re-reads the post after attaching the coauthors).
+  check(
+    "create response carries the coauthors array",
+    Array.isArray(collabPost.body?.coauthors) &&
+      collabPost.body.coauthors.length === 2,
+    JSON.stringify(collabPost.body?.coauthors),
+  );
+  // Pre-existing posts must keep the OLD payload shape exactly: null, not [].
+  const legacyShape = await pool.query(
+    `SELECT 1 FROM post_coauthors WHERE post_id = $1`,
+    [legacyPostId],
+  );
+  check(
+    "a legacy post has no post_coauthors rows (payload shape unchanged)",
+    legacyShape.rows.length === 0,
   );
 
   console.log("\n── friends walking now (pull-only) ──");

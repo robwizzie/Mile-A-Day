@@ -139,6 +139,9 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
     let isHost: Bool
     let place: Int?
     let finalDistanceMiles: Double?
+    /// The real HKWorkout, stamped once it syncs. Nil until then — used to link
+    /// a recap post to the run.
+    let workoutId: String?
 
     var id: String { userId }
 
@@ -165,6 +168,7 @@ struct BuddyParticipant: Codable, Identifiable, Equatable {
         case isHost = "is_host"
         case place
         case finalDistanceMiles = "final_distance_miles"
+        case workoutId = "workout_id"
     }
 }
 

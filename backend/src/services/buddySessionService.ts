@@ -141,6 +141,7 @@ async function loadParticipants(
     is_stale: boolean;
     place: number | null;
     final_distance_miles: number | null;
+    workout_id: string | null;
   }>(
     // Staleness means "was reporting, then stopped" — NOT "hasn't reported
     // yet". A participant's first progress report is up to 5s out, so falling
@@ -148,7 +149,7 @@ async function loadParticipants(
     // out-of-range for the first moments of every walk.
     `SELECT p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
             p.status, p.distance_miles, p.duration_seconds, p.place,
-            p.final_distance_miles,
+            p.final_distance_miles, p.workout_id,
             (p.status = 'active'
              AND COALESCE(p.last_progress_at, s.started_at, NOW())
                    < NOW() - ($2 || ' seconds')::interval
@@ -175,6 +176,7 @@ async function loadParticipants(
     place: r.place,
     final_distance_miles:
       r.final_distance_miles === null ? null : Number(r.final_distance_miles),
+    workout_id: r.workout_id,
   }));
 }
 
