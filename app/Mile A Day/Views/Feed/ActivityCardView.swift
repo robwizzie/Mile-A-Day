@@ -92,6 +92,11 @@ struct ActivityCardView: View {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 media
                 PostStatStrip(stats: stats).padding(.horizontal, 2)
+                // Only when the mile took several goes — a normal single-workout
+                // day renders exactly as it did before.
+                if entry.isStitchedMile, let segments = entry.segments, segments.count > 1 {
+                    MileSegmentStrip(segments: segments, accent: accent)
+                }
             }
             .contentShape(Rectangle())
             .simultaneousGesture(

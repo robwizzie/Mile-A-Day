@@ -306,7 +306,12 @@ struct DashboardView: View {
         // must still count as an "extra mile", not silently raise the baseline past
         // itself and get skipped. Floor at 1 so the goal-completing effort always
         // counts even when today's distance came from a non-workout source.
-        let goalCompletionWorkoutCount = max(healthManager.todaysWorkoutCount, 1)
+        //
+        // Counts only substantive workouts, matching checkAndShowPostGoalEncouragement.
+        // Mixing the two would break extra-mile detection outright: a day with one
+        // phantom and one real walk baselines at 2 on the raw count but only ever
+        // reaches 2 on the substantive one, so the next real run never clears it.
+        let goalCompletionWorkoutCount = max(substantiveWorkoutCount, 1)
 
         Task { @MainActor in
             defer { isPreparingGoalCelebration = false }
@@ -382,13 +387,26 @@ struct DashboardView: View {
 
     /// Extra-mile prompts should target the newest finished workout, not the
     /// first workout that crossed the daily goal.
+    ///
+    /// Sub-floor workouts are skipped: the server gives them no feed card, so
+    /// prompting for a photo of one would offer to share something that can
+    /// never appear.
     private var latestFinishedPromptWorkout: (id: String, type: String)? {
-        if let workout = healthManager.todaysWorkouts.sorted(by: { $0.endDate > $1.endDate }).first {
+        if let workout = healthManager.todaysWorkouts
+            .filter({ WorkoutFeedFloor.isSubstantive($0) })
+            .sorted(by: { $0.endDate > $1.endDate }).first {
             let id = workout.uuid.uuidString
             return (id, promptWorkoutType(for: id))
         }
         guard let id = todayIndexWorkoutUUID else { return nil }
         return (id, promptWorkoutType(for: id))
+    }
+
+    /// Today's workouts that are real enough to celebrate or share. The
+    /// extra-mile celebration keys off this count rather than the raw one, so a
+    /// 3-second phantom can't trigger an "Extra Mile!" screen.
+    private var substantiveWorkoutCount: Int {
+        healthManager.todaysWorkouts.filter { WorkoutFeedFloor.isSubstantive($0) }.count
     }
 
     private func promptWorkoutType(for workoutId: String) -> String {
@@ -412,11 +430,11 @@ struct DashboardView: View {
               currentState.isCompleted,
               celebrationManager.hasShownGoalCelebrationToday,
               healthManager.todaysDistance > 0,
-              healthManager.todaysWorkoutCount > celebrationManager.lastPostGoalWorkoutCount else {
+              substantiveWorkoutCount > celebrationManager.lastPostGoalWorkoutCount else {
             return
         }
 
-        celebrationManager.lastPostGoalWorkoutCount = healthManager.todaysWorkoutCount
+        celebrationManager.lastPostGoalWorkoutCount = substantiveWorkoutCount
         let stats = buildGoalCompletionStats()
         // Every extra run/walk also re-runs the today's-miles leaderboard so you
         // see yourself climb with the added miles, then the extra-mile hype.

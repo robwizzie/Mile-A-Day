@@ -104,18 +104,42 @@ enum RunPostService {
     /// workouts in start order, first to cross the goal) so a photo shared later
     /// from the feed composer carries the same workout id and upserts into the
     /// SAME feed post instead of creating a duplicate.
+    ///
+    /// Mirrors how the server picks a day's `daily_mile` anchor
+    /// (`feedRoleStatements` in workoutService.ts), because the two must agree:
+    /// the server folds the day's other workouts into whichever one it considers
+    /// the anchor, so a post attached to a different workout wouldn't be restated
+    /// with the day's combined stats.
+    ///
+    /// Two things that used to differ from the server, and why they matter:
+    ///  - Sub-floor workouts can't be the anchor. A 0.02-mile phantom at 6am
+    ///    would otherwise decide which workout "owns" the mile and headline the
+    ///    day's card with an accident.
+    ///  - Crossing is measured against the tolerance, not the raw goal. A
+    ///    0.97-mile day passes the server's posting gate but never crosses
+    ///    `goal` here, so every workout fell through to the `last` fallback.
     @MainActor
     static func dailyMileWorkoutId() -> String? {
         let workouts = HealthKitManager.shared.todaysWorkouts
             .sorted { $0.startDate < $1.startDate }
         let goal = UserManager.shared.currentUser.goalMiles
         var total = 0.0
+        var lastSubstantive: HKWorkout?
         for workout in workouts {
             total += workout.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
-            if total >= goal { return workout.uuid.uuidString }
+            if WorkoutFeedFloor.isSubstantive(workout) { lastSubstantive = workout }
+            // The anchor is the last REAL workout at or before the crossing
+            // point — so when a phantom is what tips the day over, the run that
+            // did the work still owns the card.
+            if ProgressCalculator.isGoalCompleted(current: total, goal: goal),
+               let anchor = lastSubstantive {
+                return anchor.uuid.uuidString
+            }
         }
-        // Goal met via non-workout distance — fall back to the latest workout.
-        return workouts.last?.uuid.uuidString
+        // Goal met via non-workout distance, or only sub-floor workouts today —
+        // fall back to the latest workout so the prompt still has something to
+        // attach to.
+        return (lastSubstantive ?? workouts.last)?.uuid.uuidString
     }
 
     /// Render the auto image (route map or stats card), upload it, and create the

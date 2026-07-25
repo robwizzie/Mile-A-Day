@@ -798,6 +798,50 @@ await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
     "a sub-goal day produces no feed card",
   );
 
+  // A post attached to the anchor must read the same on the profile grid as it
+  // does in the feed — POST_COLUMNS restates it via a subquery that returns no
+  // row for an unlinked post, so this also guards against nulling stats out.
+  await createPost({
+    userId: CARL,
+    mediaUrl: "/uploads/posts/ci-carl-photo.jpg",
+    caption: "three walks",
+    workoutId: "ci-role-c",
+    localDate: roleDay,
+    shareToFeed: true,
+    shareToStory: false,
+    statsSnapshot: { distance: 0.4, duration: 500, pace: 1250 },
+    isAuto: false,
+    includeRoute: false,
+  });
+  const carlGrid = await getUserPosts(CARL, CARL, 20);
+  const anchorPost = carlGrid.find((p) => p.workout_id === "ci-role-c");
+  assert.equal(
+    Number(anchorPost.stats_snapshot.distance.toFixed(2)),
+    1.06,
+    "profile grid restates an anchor post to the day's combined mile",
+  );
+  const unlinked = await createPost({
+    userId: CARL,
+    mediaUrl: "/uploads/posts/ci-carl-unlinked.jpg",
+    caption: "no workout",
+    workoutId: null,
+    localDate: roleDay,
+    shareToFeed: false,
+    shareToStory: true,
+    statsSnapshot: { distance: 3.3 },
+    isAuto: false,
+    includeRoute: false,
+  });
+  const unlinkedRow = (await getUserPosts(CARL, CARL, 20, null, true)).find(
+    (p) => p.post_id === unlinked.post_id,
+  );
+  assert.equal(
+    unlinkedRow.stats_snapshot.distance,
+    3.3,
+    "a post with no linked workout keeps its stats (not nulled by the rollup join)",
+  );
+
+  await db.query(`DELETE FROM posts WHERE user_id = $1`, [CARL]);
   await db.query(`DELETE FROM workouts WHERE user_id = $1`, [CARL]);
   await db.query(
     `DELETE FROM friendships WHERE user_id = $1 OR friend_id = $1`,

@@ -137,7 +137,41 @@ const POST_COLUMNS = `
 	p.media_url,
 	p.caption,
 	p.workout_id,
-	p.stats_snapshot,
+	-- Restated in rollup terms when this post is attached to the workout that
+	-- completed a mile made of several walks — the SAME projection the unified
+	-- feed applies (getUnifiedFeed). Shared here so the profile grid, story
+	-- viewer and memories can't report 0.33 mi for a run the feed calls 1.06.
+	-- A post on a non-anchor workout keeps its own exact stats.
+	-- COALESCE, not a bare subquery: a post with no linked workout matches no
+	-- row and would otherwise come back with its stats nulled out entirely.
+	COALESCE((
+		SELECT CASE
+			WHEN w_.feed_role = 'daily_mile' AND p.stats_snapshot IS NOT NULL
+				AND roll_.segment_count > 1
+			THEN p.stats_snapshot || jsonb_build_object(
+				'distance', roll_.distance,
+				'duration', roll_.duration,
+				'pace', CASE WHEN roll_.distance > 0
+					THEN roll_.duration / roll_.distance END
+			)
+			ELSE p.stats_snapshot
+		END
+		FROM workouts w_
+		CROSS JOIN LATERAL (
+			SELECT
+				COUNT(*) FILTER (WHERE m.feed_role <> 'hidden')::int AS segment_count,
+				SUM(m.distance)::double precision AS distance,
+				SUM(m.total_duration)::double precision AS duration
+			FROM workouts m
+			WHERE m.user_id = w_.user_id AND m.local_date = w_.local_date
+				AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
+				AND (
+					m.feed_role IN ('rolled_up', 'daily_mile')
+					OR (m.feed_role = 'hidden' AND m.device_end_date <= w_.device_end_date)
+				)
+		) roll_
+		WHERE w_.workout_id = p.workout_id
+	), p.stats_snapshot) AS stats_snapshot,
 	p.local_date::text AS local_date,
 	p.share_to_feed,
 	p.share_to_story,

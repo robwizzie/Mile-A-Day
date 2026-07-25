@@ -4,8 +4,24 @@ import CoreLocation
 
 // MARK: - Models
 
+/// One leg of a daily mile that was completed across several walks/runs.
+/// Mirrors the backend's `FeedSegment`.
+struct RunSegment: Codable, Equatable, Identifiable {
+    let workout_id: String
+    let workout_type: String?
+    let distance: Double
+    let duration: Double?    // seconds
+
+    var id: String { workout_id }
+    var isWalk: Bool { workout_type?.lowercased() == "walking" }
+}
+
 /// Denormalized run stats captured on a post at publish time (mirrors the
 /// backend `stats_snapshot` jsonb). All optional — older/edited posts may omit.
+///
+/// On a post attached to the workout that completed a multi-part mile, the
+/// server restates `distance`/`duration`/`pace` as the whole day's rollup before
+/// sending it, so these are the combined figures rather than that one workout's.
 struct PostStats: Codable, Equatable {
     let distance: Double?
     let pace: Double?       // seconds per mile
@@ -67,6 +83,11 @@ struct PostItem: Codable, Identifiable {
     var coauthor_first_name: String?
     var coauthor_last_name: String?
     var coauthor_profile_image_url: String?
+    /// Set when this post is attached to the workout that completed a mile made
+    /// of several walks/runs — its stats are the day's combined figures and this
+    /// is the per-leg breakdown behind them. nil/1 = an ordinary single run.
+    var segment_count: Int?
+    var segments: [RunSegment]?
 
     var id: String { post_id }
 
@@ -170,12 +191,20 @@ struct FeedEntry: Codable, Identifiable {
     /// The entry's workout: the linked workout for posts (nil when unlinked
     /// or from an older backend), the workout itself for workout entries.
     let workout_id: String?
-    // workout columns (workout_type is also set for posts via their run)
+    // workout columns (workout_type is also set for posts via their run).
+    // When this entry is the anchor of a mile completed across several walks,
+    // these are the DAY's combined figures, not that one workout's.
     let workout_type: String?
     let distance: Double?
     let total_duration: Double?
     let calories: Double?
     let steps: Int?
+    /// How many walks/runs the daily mile was stitched together from. nil on an
+    /// extra workout, 1 on an ordinary single-workout day, >1 when the user got
+    /// there in several goes. Optional: older servers omit both of these.
+    let segment_count: Int?
+    /// The per-leg breakdown behind a `segment_count > 1` entry.
+    let segments: [RunSegment]?
     /// Simplified GPS trace [[lat, lng], ...] for the entry's workout.
     let route: [[Double]]?
     // shared
@@ -205,6 +234,7 @@ struct FeedEntry: Codable, Identifiable {
         case sort_ts, user_id, username, first_name, last_name, profile_image_url
         case media_url, caption, stats_snapshot, story_photo_url, is_auto
         case workout_id, workout_type, distance, total_duration, calories, steps, route
+        case segment_count, segments
         case is_self, is_hyped, hype_count, comment_count, photo_locked, is_fresh
         case coauthor_user_id, coauthor_status, coauthor_username
         case coauthor_first_name, coauthor_last_name, coauthor_profile_image_url
@@ -229,6 +259,10 @@ struct FeedEntry: Codable, Identifiable {
 
     var relativeTime: String { RelativeTime.short(from: sort_ts) }
 
+    /// True when this entry's mile was completed across several walks/runs, so
+    /// the card should explain the total rather than present it as one effort.
+    var isStitchedMile: Bool { (segment_count ?? 1) > 1 }
+
     /// Render a post-kind entry through the existing PostCardView.
     func asPostItem() -> PostItem? {
         guard kind == "post", let media = media_url else { return nil }
@@ -248,7 +282,9 @@ struct FeedEntry: Codable, Identifiable {
             coauthor_username: coauthor_username,
             coauthor_first_name: coauthor_first_name,
             coauthor_last_name: coauthor_last_name,
-            coauthor_profile_image_url: coauthor_profile_image_url
+            coauthor_profile_image_url: coauthor_profile_image_url,
+            segment_count: segment_count,
+            segments: segments
         )
     }
 }
