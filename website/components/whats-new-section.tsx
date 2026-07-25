@@ -22,7 +22,7 @@ import {
 // Bump on every App Store release, alongside the app's What's New entry in
 // app/Mile A Day/Views/Components/WhatsNewView.swift. The previous release's
 // headliners drop into PREVIOUS below rather than disappearing.
-const VERSION = "1.3.0";
+const VERSION = "1.2.03";
 
 // Headliners for this release. Copy tracks what the app actually does —
 // Streak Tokens are StreakSave/DoubleDown/StreakAssist, the flame lifecycle is
