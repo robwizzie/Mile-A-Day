@@ -1,0 +1,1 @@
+ALTER TABLE "device_tokens" ADD COLUMN "client_features" text[] DEFAULT '{}'::text[] NOT NULL;
