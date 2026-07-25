@@ -237,7 +237,7 @@ struct BuddySessionState: Codable, Identifiable, Equatable {
             let leader = activeParticipants.map(\.distanceMiles).max() ?? 0
             return min(leader / goal, 1)
         case .raceTime:
-            guard let start = startedAt, let end = endsAt else { return 0 }
+            guard let start = startedAtDate, let end = endsAtDate else { return 0 }
             let total = end.timeIntervalSince(start)
             guard total > 0 else { return 0 }
             return min(max(Date().timeIntervalSince(start) / total, 0), 1)
