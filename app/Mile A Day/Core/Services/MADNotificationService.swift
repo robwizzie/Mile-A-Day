@@ -313,10 +313,12 @@ final class MADNotificationService: NSObject, ObservableObject {
             struct RegisterRequest: Codable {
                 let device_token: String
                 let environment: String
+                let client_features: [String]
             }
             let body = try JSONEncoder().encode(RegisterRequest(
                 device_token: token,
-                environment: AppEnvironment.apnsEnvironment
+                environment: AppEnvironment.apnsEnvironment,
+                client_features: ClientFeatures.supported
             ))
             let _: [String: String] = try await APIClient.fancyFetch(
                 endpoint: "/devices/register",
@@ -604,20 +606,20 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         }
 
         let service = FriendService()
-        // Only the id travels in the push payload, so resolve the row to get a
-        // BackendUser for the service call. If it's already gone, the request
-        // was answered elsewhere (another device, or in-app).
-        await service.loadFriendRequests()
-        guard let user = service.friendRequests.first(where: { $0.user_id == requesterId }) else {
-            await postLocalToast(
-                title: "Already handled",
-                body: "That request was already answered."
-            )
-            await setAppBadge(service.friendRequests.count)
-            return
-        }
-
         do {
+            // Only the id travels in the push payload, so resolve the row to get a
+            // BackendUser for the service call. If it's already gone, the request
+            // was answered elsewhere (another device, or in-app).
+            try await service.loadFriendRequests()
+            guard let user = service.friendRequests.first(where: { $0.user_id == requesterId }) else {
+                await postLocalToast(
+                    title: "Already handled",
+                    body: "That request was already answered."
+                )
+                await setAppBadge(service.friendRequests.count)
+                return
+            }
+
             if accept {
                 // acceptFriendRequest posts its own "You're now friends!" local
                 // notification, so adding a toast here would double-notify.

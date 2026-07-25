@@ -27,45 +27,69 @@ enum WhatsNewCatalog {
     /// names, no "beta"), one short line per feature.
     static let releases: [WhatsNewRelease] = [
         WhatsNewRelease(
-            id: 2,
+            id: 3,
             versionLabel: "Summer 2026 Update",
             headline: "The biggest update yet",
             features: [
                 WhatsNewFeature(
                     icon: "square.grid.2x2.fill",
                     title: "A brand-new Dashboard",
-                    blurb: "Your mile, your streak, and your tokens in one clean view — and it greets you with the day of your streak.",
+                    blurb: "Your mile, your streak, and your tokens in one clean view — pick Modern for calm and focused, or Fun for the animated flame buddy.",
                     tint: MADTheme.Colors.madRed
+                ),
+                WhatsNewFeature(
+                    icon: "flame.fill",
+                    title: "A flame that really burns",
+                    blurb: "A coal at midnight, shrinking as your day runs out, and a full blaze the moment you bank your mile — on your dashboard and the new Streak Flame widget.",
+                    tint: .orange
+                ),
+                WhatsNewFeature(
+                    icon: "shield.lefthalf.filled",
+                    title: "Streak Tokens",
+                    blurb: "Earn Double Down, Streak Save, and Streak Assist by running — then use them to protect your streak, or rescue a friend's.",
+                    tint: Color(red: 1.0, green: 0.84, blue: 0.35)
                 ),
                 WhatsNewFeature(
                     icon: "clock.badge.exclamationmark",
                     title: "Lock Screen countdown",
                     blurb: "Streak at risk in the evening? A live countdown appears on your Lock Screen with one-tap Start Mile.",
-                    tint: .orange
-                ),
-                WhatsNewFeature(
-                    icon: "snowflake",
-                    title: "Streak stories",
-                    blurb: "When a token saves a day — yours or a friend's — the app tells you the story, not just the math.",
                     tint: MADTheme.Colors.walkBlue
                 ),
                 WhatsNewFeature(
-                    icon: "shield.lefthalf.filled",
-                    title: "Tokens everywhere",
-                    blurb: "On your dashboard, profile, widget, and watch — with meters that visibly tick as you run.",
-                    tint: Color(red: 1.0, green: 0.84, blue: 0.35)
+                    icon: "text.bubble.fill",
+                    title: "Comments, mentions & collabs",
+                    blurb: "Comment on friends' posts, @mention anyone, and share a run together as a collab — plus a Tagged tab for posts you're in.",
+                    tint: .purple
+                ),
+                WhatsNewFeature(
+                    icon: "rectangle.stack.fill",
+                    title: "A faster Feed",
+                    blurb: "Swipe between friends' stories, spot fresh miles at a glance, and come back to a feed that's already refreshed.",
+                    tint: .pink
+                ),
+                WhatsNewFeature(
+                    icon: "camera.fill",
+                    title: "Camera & composer",
+                    blurb: "Pinch to zoom, a 0.5x ultra-wide lens, and a two-step composer that finally puts your caption first.",
+                    tint: .teal
+                ),
+                WhatsNewFeature(
+                    icon: "figure.walk",
+                    title: "Walks that agree",
+                    blurb: "In-app tracking now filters GPS noise and cross-checks your steps, so everyone on the same walk gets the same miles.",
+                    tint: .mint
+                ),
+                WhatsNewFeature(
+                    icon: "flag.checkered",
+                    title: "Road to your next club",
+                    blurb: "Insights maps your streak as a journey: milestones you've conquered, where you stand, and days to the next one.",
+                    tint: .indigo
                 ),
                 WhatsNewFeature(
                     icon: "chart.bar.fill",
                     title: "Your month, wrapped",
                     blurb: "When the calendar flips, see your miles, your best day, and a card worth sharing.",
                     tint: .green
-                ),
-                WhatsNewFeature(
-                    icon: "hand.tap",
-                    title: "Start from your widget",
-                    blurb: "Tap the streak widget and you're already in the tracker.",
-                    tint: .purple
                 ),
             ]
         ),

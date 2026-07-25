@@ -496,6 +496,15 @@ export const deviceTokens = pgTable(
     userId: text("user_id").notNull(),
     deviceToken: text("device_token").notNull(),
     environment: text().default("production").notNull(),
+    // What the app build behind this token can handle, self-declared at
+    // registration (see clientFeatures.ts). Empty for every client that
+    // predates the field, which is the whole point: a server deploy lands
+    // weeks before an App Store release, so "is this feature safe to send
+    // to this device" is a per-device question, not an env var.
+    clientFeatures: text("client_features")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "string",

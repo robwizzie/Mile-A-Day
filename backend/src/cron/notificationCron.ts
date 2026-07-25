@@ -120,8 +120,9 @@ export function startNotificationCron(): void {
   });
 
   // Every hour at :35 — remind users about friend requests they've left
-  // unanswered for >24h. Off unless FRIEND_REQUEST_REMINDERS=true (the service
-  // returns immediately otherwise); see friendRequestFeatures.ts. Minute 35 is
+  // unanswered for >24h. Reaches only devices declaring `friend_request_v2`,
+  // and stops entirely on FRIEND_REQUEST_REMINDERS_DISABLED=true; see
+  // friendRequestFeatures.ts and clientFeatures.ts. Minute 35 is
   // clear of the other hourly jobs (:00 daily reminders, :10 streak features,
   // :20 h2h, :50 weekly recap). Per-user TZ + cooldown filtering is in the SQL.
   cron.schedule("35 * * * *", async () => {

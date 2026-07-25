@@ -11,6 +11,7 @@ import {
   AudienceEventType,
 } from "./audienceSettingsService.js";
 import { hasUnlimitedActions } from "./privilegedUsers.js";
+import { normalizeClientFeatures } from "./clientFeatures.js";
 import { logError } from "./errorLogService.js";
 import { START_OF_TODAY_ET_SQL } from "./dailyResetTime.js";
 import fs from "fs";
@@ -476,14 +477,21 @@ export async function registerDeviceToken(
   userId: string,
   deviceToken: string,
   environment?: string | null,
+  clientFeatures?: unknown,
 ): Promise<void> {
   const tokenEnvironment = normalizeTokenEnvironment(environment);
+  // Overwritten on every registration, never merged: capabilities belong to
+  // the build currently installed, and a downgrade (or a reinstall of an
+  // older TestFlight build) has to be able to take them away again.
+  const features = normalizeClientFeatures(clientFeatures);
   await db.query(
-    `INSERT INTO device_tokens (user_id, device_token, environment)
-		VALUES ($1, $2, $3)
+    `INSERT INTO device_tokens (user_id, device_token, environment, client_features)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (user_id, device_token)
-		DO UPDATE SET environment = EXCLUDED.environment, updated_at = NOW()`,
-    [userId, deviceToken, tokenEnvironment],
+		DO UPDATE SET environment = EXCLUDED.environment,
+			client_features = EXCLUDED.client_features,
+			updated_at = NOW()`,
+    [userId, deviceToken, tokenEnvironment, features],
   );
 }
 
