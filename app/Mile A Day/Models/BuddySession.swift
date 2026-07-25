@@ -99,6 +99,15 @@ enum BuddyMode: String, Codable, CaseIterable, Identifiable {
 
 enum BuddySessionStatus: String, Codable {
     case lobby, active, completed, cancelled
+
+    /// An unrecognized future status decodes as `.completed` rather than
+    /// failing the whole payload. Completed is the safe landing spot: it stops
+    /// polling and shows a recap, where an unknown status treated as `.active`
+    /// would leave the client stuck in a session it can't reason about.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = BuddySessionStatus(rawValue: raw) ?? .completed
+    }
 }
 
 enum BuddyParticipantStatus: String, Codable {
