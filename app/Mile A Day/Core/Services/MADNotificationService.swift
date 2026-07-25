@@ -84,9 +84,29 @@ final class MADNotificationService: NSObject, ObservableObject {
             options: []
         )
 
+        // Buddy Walk invite. "Join" IS .foreground, unlike the friend-request
+        // actions above: joining a walk means picking up the lobby and then
+        // actually moving, so the app has to come forward either way.
+        let buddyJoinAction = UNNotificationAction(
+            identifier: "BUDDY_JOIN_ACTION",
+            title: "Join",
+            options: [.foreground]
+        )
+        let buddyDeclineAction = UNNotificationAction(
+            identifier: "BUDDY_DECLINE_ACTION",
+            title: "Not now",
+            options: []
+        )
+        let buddyInvite = UNNotificationCategory(
+            identifier: "BUDDY_INVITE",
+            actions: [buddyJoinAction, buddyDeclineAction],
+            intentIdentifiers: [],
+            options: []
+        )
+
         // setNotificationCategories REPLACES the whole set — FRIEND_ACTIVITY
         // must stay in this array or the Hype button silently disappears.
-        center.setNotificationCategories([friendActivity, friendRequest])
+        center.setNotificationCategories([friendActivity, friendRequest, buddyInvite])
     }
 
     // MARK: - Public API
@@ -474,6 +494,13 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             await handleFriendRequestAction(userInfo: userInfo, accept: false)
             return
         }
+        if response.actionIdentifier == "BUDDY_DECLINE_ACTION" {
+            await handleBuddyDeclineAction(userInfo: userInfo)
+            return
+        }
+        // BUDDY_JOIN_ACTION is .foreground and deliberately falls through to the
+        // generic routing below — joining means landing in the lobby, which is
+        // exactly what a normal tap on this push already does.
 
         guard let type = userInfo["type"] as? String else { return }
         let data = userInfo["data"] as? [String: String] ?? [:]
@@ -487,6 +514,18 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             object: nil,
             userInfo: ["type": type, "data": data]
         )
+    }
+
+    /// Handles "Not now" on a buddy_invite push.
+    ///
+    /// Runs while the app may be suspended, so it deliberately does NOT touch a
+    /// view-owned service — `BuddySessionService.shared` is a standalone
+    /// singleton with no view dependency, which is the same constraint that
+    /// forced the friend-request handler to avoid MainTabView's FriendService.
+    private func handleBuddyDeclineAction(userInfo: [AnyHashable: Any]) async {
+        let data = userInfo["data"] as? [String: String]
+        guard let sessionId = data?["session_id"], !sessionId.isEmpty else { return }
+        await BuddySessionService.shared.decline(sessionId: sessionId)
     }
 
     /// Handles the 🔥 Hype action button on a friend_activity push.

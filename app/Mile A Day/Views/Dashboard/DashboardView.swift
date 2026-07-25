@@ -36,6 +36,8 @@ struct DashboardView: View {
     @State private var showWhatsNew = false
     /// Streak tokens — drives the tokens card + the unlock celebration.
     @ObservedObject private var tokensState = StreakTokensState.shared
+    @ObservedObject private var deepLinkRouter = DeepLinkRouter.shared
+    @ObservedObject private var buddyService = BuddySessionService.shared
     /// One-time streak reveal: fires the first time HealthKit history yields
     /// a streak worth announcing (≥ 3 days), for new installs and upgraders
     /// alike. Persisted so it can only ever play once.
@@ -52,6 +54,15 @@ struct DashboardView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// Controls presentation of the in‑progress workout tracking UI.
     @State private var showWorkoutView = false
+    // Buddy Walks. `activeBuddySessionId` is what turns the SAME tracker into a
+    // buddy session — see WorkoutTrackingView.buddySessionId. It is deliberately
+    // a plain String? passed to the one existing initializer rather than a
+    // second WorkoutTrackingView call site: branching between two initializers
+    // is what previously destroyed the tracker's structural identity mid-run.
+    @State private var showBuddyStartSheet = false
+    @State private var showBuddyLobby = false
+    @State private var activeBuddySessionId: String?
+    @State private var buddyRecapSessionId: String?
     /// Whether to show a compact "Resume workout" banner when an in‑progress workout exists
     /// but the full‑screen tracker is not currently visible.
     @State private var showInProgressBanner = false
@@ -548,6 +559,14 @@ struct DashboardView: View {
                 hasActiveWorkout = hasActive
                 showInProgressBanner = hasActive
 
+                // Buddy Walk just ended — show the group result. Only when the
+                // workout is genuinely over: dismissing the tracker mid-walk to
+                // check the dashboard must not close out the session.
+                if let buddyId = activeBuddySessionId, !hasActive {
+                    activeBuddySessionId = nil
+                    buddyRecapSessionId = buddyId
+                }
+
                 // Surface any celebration earned during the workout now that the
                 // dashboard is visible again (checks are deferred while covered):
                 // goal completion first, then the extra-mile encouragement.
@@ -574,8 +593,84 @@ struct DashboardView: View {
                     healthManager: healthManager,
                     userManager: userManager,
                     goalDistance: activeState?.goalDistance ?? currentState.goal,
-                    startingDistance: activeState?.startingDistance ?? currentState.distance
+                    startingDistance: activeState?.startingDistance ?? currentState.distance,
+                    buddySessionId: activeBuddySessionId
                 )
+            }
+            // Buddy Walks flow: pill → start sheet → lobby (synced countdown) →
+            // the normal tracker → recap.
+            //
+            // Each presentation hangs off its OWN invisible node. This node
+            // already carries a .sheet (manual entry) and a .fullScreenCover
+            // (the tracker); stacking more of either on the same node makes
+            // SwiftUI silently drop one.
+            .background(
+                Color.clear
+                    .sheet(isPresented: $showBuddyStartSheet) {
+                        BuddyStartSheet { _ in
+                            showBuddyStartSheet = false
+                            showBuddyLobby = true
+                        }
+                    }
+            )
+            .background(
+                Color.clear
+                    .fullScreenCover(isPresented: $showBuddyLobby) {
+                        BuddyLobbyView { session in
+                            // Hand the session to the ordinary tracker. This is
+                            // the whole integration: one flag, same tracker.
+                            activeBuddySessionId = session.id
+                            showBuddyLobby = false
+                            showWorkoutView = true
+                        }
+                    }
+            )
+            .background(
+                Color.clear
+                    .sheet(
+                        isPresented: Binding(
+                            get: { buddyRecapSessionId != nil },
+                            set: { if !$0 { buddyRecapSessionId = nil } }
+                        )
+                    ) {
+                        if let id = buddyRecapSessionId {
+                            BuddyRecapView(sessionId: id)
+                        }
+                    }
+            )
+            .onReceive(NotificationCenter.default.publisher(for: .madStartBuddyWalk)) { _ in
+                // An invite already waiting goes straight to the lobby; there is
+                // nothing left to configure.
+                if BuddySessionService.shared.hasLiveSession {
+                    showBuddyLobby = true
+                } else {
+                    showBuddyStartSheet = true
+                }
+            }
+            // A buddy deep link or push can land before this view exists (cold
+            // launch), so the intent is parked on DeepLinkRouter and consumed
+            // BOTH here and in .task below — whichever runs first wins.
+            .onReceive(deepLinkRouter.$pendingBuddyCode.compactMap { $0 }) { code in
+                consumePendingBuddyLink(code: code, sessionId: nil)
+            }
+            .onReceive(deepLinkRouter.$pendingBuddySessionId.compactMap { $0 }) { sessionId in
+                consumePendingBuddyLink(code: nil, sessionId: sessionId)
+            }
+            .task {
+                // Enrollment stamp: tells the backend this install has the Buddy
+                // Walks UI, which is what makes the user eligible to be invited
+                // at all. Idempotent, so it's safe on every appearance.
+                await buddyService.enrollIfNeeded()
+                await buddyService.refreshMySessions()
+
+                // The `.onReceive` above only fires for values published AFTER
+                // this view mounts. On a cold launch the link is already parked,
+                // so it has to be drained here too.
+                if let code = deepLinkRouter.pendingBuddyCode {
+                    consumePendingBuddyLink(code: code, sessionId: nil)
+                } else if let sessionId = deepLinkRouter.pendingBuddySessionId {
+                    consumePendingBuddyLink(code: nil, sessionId: sessionId)
+                }
             }
             .onAppear {
                 refreshData()
@@ -1291,6 +1386,33 @@ struct DashboardView: View {
     /// Cache whether a mid-run photo is waiting to be shared while today's goal
     /// is still unmet, so `photoWaitingBanner` never enumerates the sandbox dir
     /// from within `body`.
+    /// Join and open a Buddy Walk arriving from a deep link or a push tap.
+    ///
+    /// Clears the parked intent first so the pair of consumers (`.onReceive`
+    /// here and `.task`) can't both act on the same link.
+    private func consumePendingBuddyLink(code: String?, sessionId: String?) {
+        guard code != nil || sessionId != nil else { return }
+        deepLinkRouter.pendingBuddyCode = nil
+        deepLinkRouter.pendingBuddySessionId = nil
+
+        Task { @MainActor in
+            do {
+                if let code {
+                    try await buddyService.join(code: code)
+                } else if let sessionId {
+                    try await buddyService.join(sessionId: sessionId)
+                }
+                if buddyService.hasLiveSession {
+                    showBuddyLobby = true
+                }
+            } catch {
+                buddyService.errorMessage =
+                    (error as? LocalizedError)?.errorDescription
+                    ?? "Couldn't open that buddy walk."
+            }
+        }
+    }
+
     private func refreshMidRunPhotoWaiting() {
         // Scope to snaps taken TODAY: a leftover from yesterday's workout (its
         // prompt never resolved, app reopened next day) must not nag "finish

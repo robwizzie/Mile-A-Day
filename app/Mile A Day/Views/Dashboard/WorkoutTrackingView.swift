@@ -12,6 +12,16 @@ struct WorkoutTrackingView: View {
     @ObservedObject var userManager: UserManager
     let goalDistance: Double
     let startingDistance: Double
+    /// Non-nil when this workout is part of a Buddy Walk.
+    ///
+    /// A buddy session DECORATES this tracker — it does not replace it. There is
+    /// no second tracker, no second workout lock, and no second HealthKit save
+    /// path, which is exactly why streaks, competitions and badges keep working
+    /// untouched. When set, three things change: the activity/location pickers
+    /// and the local 3-2-1 are skipped (the lobby already ran a server-synced
+    /// countdown), the roster strip appears above the metrics, and the existing
+    /// 1 Hz tick also reports progress to the backend.
+    var buddySessionId: String? = nil
     @Environment(\.dismiss) var dismiss
 
     // Shared singleton — tracking keeps running when this view is dismissed
@@ -51,6 +61,11 @@ struct WorkoutTrackingView: View {
     /// system started deferring updates (frozen activity on the lock screen).
     @State private var lastActivityPushDate: Date = .distantPast
     @State private var lastPushedDistance: Double = -1
+    /// Live buddy roster, when this workout is part of a Buddy Walk.
+    @ObservedObject private var buddyService = BuddySessionService.shared
+    /// One-shot guard so the buddy auto-start can't fire twice if the view's
+    /// onAppear runs again (it does when a sheet over it dismisses).
+    @State private var hasAutoStartedBuddyWorkout = false
     @State private var showEndWorkoutError = false // Show error alert when starting fails (workout lock)
     @State private var endWorkoutErrorMessage = "" // Error message for the start-failure alert
     /// Health WRITE access is off — the save fails every time until re-enabled,
@@ -303,6 +318,16 @@ struct WorkoutTrackingView: View {
                 ScrollView {
                     VStack(spacing: metricSpacing(for: screen.size.height)) {
                         Spacer(minLength: 0)
+
+                        // Buddy Walk roster sits ABOVE your own metrics: the
+                        // crew is context, your distance is still the subject.
+                        if buddySessionId != nil, let session = buddyService.session {
+                            BuddyRosterStrip(
+                                session: session,
+                                currentUserId: buddyService.currentUserId
+                            )
+                            .padding(.horizontal, 20)
+                        }
 
                         distanceDisplay
 
@@ -973,6 +998,29 @@ struct WorkoutTrackingView: View {
             // Workout recovery: if there's a persisted in-progress workout, restore it.
             // Guard: skip if we're currently ending a workout or already tracking.
             guard !isStopping, !isTracking else { return }
+
+            // Buddy Walk hand-off. The lobby already ran the server-synced
+            // countdown, so there is nothing left to pick and nothing left to
+            // count down — start moving immediately.
+            //
+            // Deliberately checked BEFORE the recovery branch's early return but
+            // AFTER its guards: a recoverable workout on disk always wins, since
+            // that's a workout already in progress and starting a second one
+            // would fail the lock anyway.
+            if buddySessionId != nil, !hasAutoStartedBuddyWorkout,
+               InProgressWorkoutStore.load()?.isActive != true {
+                hasAutoStartedBuddyWorkout = true
+                selectedActivityType =
+                    (buddyService.session?.isRunning ?? false) ? .running : .walking
+                selectedLocationType = .outdoor
+                showActivitySelection = false
+                showLocationTypeSelection = false
+                showCountdown = false
+                isTracking = true
+                startWorkout()
+                return
+            }
+
             guard let saved = InProgressWorkoutStore.load(), saved.isActive else { return }
 
             // Restore core state
@@ -1157,6 +1205,21 @@ struct WorkoutTrackingView: View {
             guard !isStopping else { return }
             elapsedTime = Date().timeIntervalSince(startDate)
             updateLiveActivity()
+
+            // Buddy Walk: piggyback on the tick that already exists rather than
+            // adding a second timer. The service throttles this to one network
+            // call every 5s, and that call's response carries the whole roster
+            // back — so an actively-tracking client never polls separately.
+            if buddySessionId != nil {
+                let distance = currentDistance
+                let elapsed = elapsedTime
+                Task { @MainActor in
+                    await BuddySessionService.shared.reportProgress(
+                        distanceMiles: distance,
+                        durationSeconds: elapsed
+                    )
+                }
+            }
         }
     }
 
@@ -1178,6 +1241,21 @@ struct WorkoutTrackingView: View {
         recapDuration = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
         recapStartingDistance = startingDistance
         recapGoalDistance = goalDistance
+
+        // Buddy Walk: report the RECONCILED final distance (not the raw live
+        // sum) and mark this participant done, so the standings everyone sees
+        // match the number this phone is about to save to HealthKit. The
+        // server later replaces even this with the synced HKWorkout.
+        if buddySessionId != nil {
+            let reportedDistance = finalDistance
+            let reportedDuration = recapDuration
+            Task { @MainActor in
+                await BuddySessionService.shared.finish(
+                    finalDistanceMiles: reportedDistance,
+                    durationSeconds: reportedDuration
+                )
+            }
+        }
 
         // Flush any buffered route points
         InProgressWorkoutStore.flushRoutePoints()

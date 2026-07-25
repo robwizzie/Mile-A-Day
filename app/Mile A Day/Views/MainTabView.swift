@@ -157,6 +157,19 @@ struct MainTabView: View {
                      "competition_finished", "competition_updates", "competition_nudge":
                     await competitionService.refreshAllData()
                     selectedTab = 1
+                case "buddy_invite", "buddy_joined", "buddy_started":
+                    // Park the session id so the Dashboard opens the lobby even
+                    // on a cold launch, where DashboardView doesn't exist yet.
+                    let data = notification.userInfo?["data"] as? [String: String]
+                    if let sessionId = data?["session_id"], !sessionId.isEmpty {
+                        DeepLinkRouter.shared.requestOpenBuddySession(sessionId: sessionId)
+                    }
+                    selectedTab = 0
+                case "buddy_finished":
+                    // The walk is already over — there's no lobby to return to,
+                    // so the inbox row is the right landing spot.
+                    selectedTab = 0
+                    showNotificationInbox = true
                 case "competition_flex", "competition_milestone", "friend_nudge",
                      "friend_activity", "streak_broken", "personal_best",
                      "lead_change", "clash_tie",
@@ -358,10 +371,17 @@ struct MainTabView: View {
                  "competition_finished", "competition_updates", "competition_nudge":
                 await competitionService.refreshAllData()
                 selectedTab = 1
+            case "buddy_invite", "buddy_joined", "buddy_started":
+                // Only the type survives a cold launch — the session id isn't
+                // stored — so land on the Dashboard and let its
+                // refreshMySessions() surface the invite on the buddy pill.
+                selectedTab = 0
+                notificationService.pendingNotificationType = nil
             case "competition_flex", "competition_milestone", "friend_nudge",
                  "friend_activity", "streak_broken", "personal_best",
                  "lead_change", "clash_tie",
                  "friend_post", "story_reaction",
+                 "buddy_finished",
                  "coauthor_invite", "coauthor_accepted", "mention", "post_comment":
                 selectedTab = 0
                 showNotificationInbox = true

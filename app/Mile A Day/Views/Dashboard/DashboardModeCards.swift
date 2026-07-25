@@ -219,6 +219,8 @@ struct ModernDashboardBody: View {
 
             DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
 
+            BuddyWalkPill(hasActiveWorkout: hasActiveWorkout)
+
             HStack(alignment: .top, spacing: 12) {
                 ModernStepsTile(healthManager: healthManager, userManager: userManager)
                 ModernBadgesTile(userManager: userManager, healthManager: healthManager)
@@ -1462,6 +1464,9 @@ private struct FunStartCard: View {
     @Binding var showWorkoutView: Bool
 
     var body: some View {
-        DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
+        VStack(spacing: 10) {
+            DashboardStartMileButton(hasActiveWorkout: hasActiveWorkout, prominent: true, showWorkoutView: $showWorkoutView)
+            BuddyWalkPill(hasActiveWorkout: hasActiveWorkout)
+        }
     }
 }

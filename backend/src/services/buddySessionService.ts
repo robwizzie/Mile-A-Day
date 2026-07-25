@@ -142,15 +142,20 @@ async function loadParticipants(
     place: number | null;
     final_distance_miles: number | null;
   }>(
+    // Staleness means "was reporting, then stopped" — NOT "hasn't reported
+    // yet". A participant's first progress report is up to 5s out, so falling
+    // back to the session start keeps the whole roster from rendering as
+    // out-of-range for the first moments of every walk.
     `SELECT p.user_id, u.username, u.first_name, u.last_name, u.profile_image_url,
             p.status, p.distance_miles, p.duration_seconds, p.place,
             p.final_distance_miles,
             (p.status = 'active'
-             AND (p.last_progress_at IS NULL
-                  OR p.last_progress_at < NOW() - ($2 || ' seconds')::interval)
+             AND COALESCE(p.last_progress_at, s.started_at, NOW())
+                   < NOW() - ($2 || ' seconds')::interval
             ) AS is_stale
        FROM buddy_session_participants p
        JOIN users u ON u.user_id = p.user_id
+       JOIN buddy_sessions s ON s.id = p.session_id
       WHERE p.session_id = $1
       ORDER BY p.distance_miles DESC, p.joined_at ASC NULLS LAST`,
     [sessionId, String(BUDDY_STALE_PROGRESS_SECONDS)],
