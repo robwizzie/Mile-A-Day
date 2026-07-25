@@ -42,6 +42,7 @@ import {
   runPendingMigrations,
   getMigrationReport,
 } from "./db/runMigrations.js";
+import { backfillFeedRoles } from "./db/backfillFeedRoles.js";
 import { getUnifiedFeed, getStoriesRail } from "./services/postService.js";
 import { verifyPostsMediaAccess } from "./services/mediaSigningService.js";
 import { webcrypto } from "node:crypto";
@@ -243,6 +244,11 @@ runPendingMigrations()
     server.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on port ${PORT}`);
       startCrons();
+      // Deliberately after listen() and deliberately not awaited: classifying
+      // the workouts back catalogue into feed_role is too big to sit in a
+      // migration (see backfillFeedRoles for why) and must not delay readiness.
+      // Rows it hasn't reached yet read 'extra', i.e. the pre-feature feed.
+      void backfillFeedRoles();
     });
   });
 

@@ -1,0 +1,26 @@
+ALTER TABLE "workouts" ADD COLUMN "feed_role" text DEFAULT 'extra' NOT NULL;--> statement-breakpoint
+ALTER TABLE "workouts" ADD CONSTRAINT "workouts_feed_role_check" CHECK ("workouts"."feed_role" IN ('hidden', 'rolled_up', 'daily_mile', 'extra')) NOT VALID;
+--
+-- Both statements above are metadata-only and return instantly whatever the
+-- size of `workouts`: on PG 11+ a constant DEFAULT is stored as a missing-value
+-- rather than rewriting the table, and NOT VALID skips the full scan that
+-- validating the CHECK against existing rows would need. (Every existing row
+-- reads 'extra', so it would pass — the scan is just wasted work.) The
+-- constraint still enforces on every insert and update from here on.
+--
+-- The BACKFILL and the partial index `idx_workouts_feed_candidates` are
+-- deliberately NOT in this file, even though drizzle generated the index here.
+-- Migrations run at server BOOT over the shared pool, which pins both
+-- statement_timeout and node-postgres' client-side query_timeout to 30s
+-- (DbService.ts), one transaction per migration (runMigrations.ts). A
+-- whole-table UPDATE or CREATE INDEX that overran 30s would abort the
+-- migration, never record it in __drizzle_migrations, and re-attempt the same
+-- doomed work on the next boot — a boot loop, on a deploy model with no shell
+-- access to dig out of. Both therefore run as a resumable background task once
+-- the server is listening (db/backfillFeedRoles.ts), on a dedicated connection
+-- with no timeout.
+--
+-- This is safe to sit in production on its own: until the backfill lands every
+-- row reads 'extra', which is precisely today's behaviour (one feed card per
+-- workout). The pre-backfill state is indistinguishable from the current
+-- release.

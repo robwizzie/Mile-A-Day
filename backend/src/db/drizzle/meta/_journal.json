@@ -204,6 +204,13 @@
       "when": 1784947140858,
       "tag": "0028_woozy_giant_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1784950339844,
+      "tag": "0029_misty_chimera",
+      "breakpoints": true
     }
   ]
 }

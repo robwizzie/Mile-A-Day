@@ -241,6 +241,20 @@ export const workouts = pgTable(
     // Soft flag for the suspicious-but-possible speed band — still counts, just
     // surfaced in the UI for the user to review.
     speedFlagged: boolean("speed_flagged").default(false).notNull(),
+    // How this workout shows up in the FEED — never whether it counts. A tiny
+    // accidental walk still adds to today's miles and can still complete a
+    // streak day (that's what `exclusion_reason` is for, and why this is a
+    // separate column); it just doesn't get to spam a card.
+    //   'hidden'     — under the feed floor, or its day never reached the mile
+    //   'rolled_up'  — a pre-mile segment, folded into the anchor's card
+    //   'daily_mile' — the workout that crossed the mile; the ANCHOR whose card
+    //                  represents the whole day's rollup
+    //   'extra'      — logged after the mile was done; gets its own card
+    // Recomputed for the whole (user, local_date) on every workout mutation by
+    // recomputeFeedRolesForDay (workoutService). Defaults to 'extra' so an
+    // unclassified row stays VISIBLE — failing open beats silently swallowing
+    // someone's run.
+    feedRole: text("feed_role").default("extra").notNull(),
   },
   (table) => [
     index("idx_workouts_local_date_user_id").using(
@@ -258,7 +272,24 @@ export const workouts = pgTable(
       table.userId.asc().nullsLast(),
       table.localDate.desc().nullsFirst(),
     ),
+    // The unified feed's workout candidates, in the order it reads them. The
+    // predicate mirrors that query's WHERE exactly so the planner can prove the
+    // partial index applies; keep the two in sync if either changes.
+    index("idx_workouts_feed_candidates")
+      .on(
+        table.userId.asc().nullsLast(),
+        table.deviceEndDate.desc().nullsFirst(),
+      )
+      .where(
+        sql`(deleted_at IS NULL AND exclusion_reason IS NULL AND feed_role IN ('daily_mile', 'extra'))`,
+      ),
     unique("workouts_user_workout_unique").on(table.workoutId, table.userId),
+    // A typo in any writer would silently hide someone's whole feed, and the
+    // column is only ever written by one function — cheap insurance.
+    check(
+      "workouts_feed_role_check",
+      sql`${table.feedRole} IN ('hidden', 'rolled_up', 'daily_mile', 'extra')`,
+    ),
   ],
 );
 

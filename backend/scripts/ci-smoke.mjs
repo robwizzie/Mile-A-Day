@@ -664,5 +664,150 @@ assert.equal(
 );
 await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
 
+// ── feed_role: tiny/partial workouts must not spam the feed ─────────────────
+// The rule has four moving parts (a floor, a per-day rollup, an anchor, and the
+// invariant that none of it changes what COUNTS), and they're only correct
+// together — so they're asserted together, against the real upload path.
+{
+  const CARL = "ci-carl";
+  const roleDay = "2026-03-04";
+  await db.query(`DELETE FROM workouts WHERE user_id = $1`, [CARL]);
+  await db.query(
+    `INSERT INTO users (user_id, email, apple_sub, username, first_name)
+		 VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id) DO NOTHING`,
+    [CARL, "carl@ci.local", "ci-sub-carl", "ci_carl", "carl"],
+  );
+  await db.query(
+    `INSERT INTO notification_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+    [CARL],
+  );
+  for (const [a, b] of [
+    [CARL, BOB],
+    [BOB, CARL],
+  ]) {
+    await db.query(
+      `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1,$2,'accepted')
+			 ON CONFLICT (user_id, friend_id) DO NOTHING`,
+      [a, b],
+    );
+  }
+
+  const at = (id, distance, duration, hour) => ({
+    workoutId: id,
+    distance,
+    localDate: roleDay,
+    date: roleDay,
+    timezoneOffset: 0,
+    workoutType: "walking",
+    deviceEndDate: `${roleDay}T${String(hour).padStart(2, "0")}:00:00Z`,
+    calories: 40,
+    totalDuration: duration,
+    source: "healthkit",
+    splits: [],
+  });
+  const rolesOf = async () =>
+    Object.fromEntries(
+      (
+        await db.query(
+          `SELECT workout_id, feed_role FROM workouts WHERE user_id = $1 ORDER BY device_end_date`,
+          [CARL],
+        )
+      ).map((r) => [r.workout_id, r.feed_role]),
+    );
+  const carlEntries = async () =>
+    (await getUnifiedFeed(BOB, 50, null)).filter((e) => e.user_id === CARL);
+
+  // A 0.00-mile 3-second accident, then a mile built from three short walks.
+  await uploadWorkouts(CARL, [
+    at("ci-role-junk", 0.0, 3, 6),
+    at("ci-role-a", 0.33, 400, 8),
+    at("ci-role-b", 0.33, 400, 9),
+    at("ci-role-c", 0.4, 500, 10),
+  ]);
+  assert.deepEqual(
+    await rolesOf(),
+    {
+      "ci-role-junk": "hidden",
+      "ci-role-a": "rolled_up",
+      "ci-role-b": "rolled_up",
+      "ci-role-c": "daily_mile",
+    },
+    "a mile made of three walks rolls up behind the workout that completed it",
+  );
+
+  let entries = await carlEntries();
+  assert.equal(
+    entries.length,
+    1,
+    "three walks produce ONE feed card, not three",
+  );
+  assert.equal(
+    entries[0].workout_id,
+    "ci-role-c",
+    "card anchors on the crossing workout",
+  );
+  assert.equal(entries[0].segment_count, 3, "card reports its three segments");
+  assert.equal(
+    Number(entries[0].distance.toFixed(2)),
+    1.06,
+    "card shows the combined mile (this is what old clients render, unchanged)",
+  );
+  assert.equal(
+    entries[0].route,
+    null,
+    "no route on a stitched mile — the anchor's trace is only its last leg",
+  );
+
+  // The floor is a FEED rule. It must never change what counts.
+  const counted = await db.query(
+    `SELECT COALESCE(SUM(distance),0)::float AS t FROM workouts
+		 WHERE user_id = $1 AND local_date = $2::date
+			 AND deleted_at IS NULL AND exclusion_reason IS NULL`,
+    [CARL, roleDay],
+  );
+  assert.equal(
+    Number(counted[0].t.toFixed(2)),
+    1.06,
+    "hidden junk still counts toward the day's miles and the streak",
+  );
+
+  // Anything after the mile stands on its own, with its OWN distance.
+  await uploadWorkouts(CARL, [at("ci-role-extra", 2.0, 1800, 14)]);
+  entries = await carlEntries();
+  assert.equal(entries.length, 2, "a run after the mile gets its own card");
+  const extra = entries.find((e) => e.workout_id === "ci-role-extra");
+  assert.equal(
+    extra.distance,
+    2.0,
+    "the extra run reports itself, not the day",
+  );
+  assert.equal(extra.segment_count, null, "an extra run carries no rollup");
+
+  // A day that never reaches the mile shows nothing at all.
+  const shortDay = "2026-03-05";
+  await uploadWorkouts(CARL, [
+    {
+      ...at("ci-role-short", 0.4, 600, 8),
+      localDate: shortDay,
+      date: shortDay,
+    },
+  ]);
+  assert.equal(
+    (await carlEntries()).some((e) => e.workout_id === "ci-role-short"),
+    false,
+    "a sub-goal day produces no feed card",
+  );
+
+  await db.query(`DELETE FROM workouts WHERE user_id = $1`, [CARL]);
+  await db.query(
+    `DELETE FROM friendships WHERE user_id = $1 OR friend_id = $1`,
+    [CARL],
+  );
+  await db.query(`DELETE FROM notification_settings WHERE user_id = $1`, [
+    CARL,
+  ]);
+  await db.query(`DELETE FROM users WHERE user_id = $1`, [CARL]);
+}
+
 console.log("ci-smoke: all assertions passed");
 process.exit(0);
