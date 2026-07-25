@@ -45,6 +45,7 @@ import {
   reconcileStreakFeaturesOnUpload,
   getStreakFeaturesPayload,
 } from "../services/streakFeatureService.js";
+import { reconcileBuddySessions } from "../services/buddySessionService.js";
 
 export async function uploadWorkouts(req: Request, res: Response) {
   if (!hasRequiredKeys(["userId"], req, res)) return;
@@ -110,6 +111,15 @@ export async function uploadWorkouts(req: Request, res: Response) {
     // switch is on AND this user enrolled via the new build.
     reconcileStreakFeaturesOnUpload(userId).catch((err) =>
       console.error("Error reconciling streak features:", err.message),
+    );
+
+    // Buddy sessions: stamp the AUTHORITATIVE result now that the real workout
+    // has landed. The live distance a session showed was accumulated from
+    // 5-second reports and is display-only; this replaces it with the synced
+    // HKWorkout and re-ranks placements. Fire-and-forget, and a no-op for the
+    // overwhelming majority of uploads that aren't tied to a session.
+    reconcileBuddySessions(userId, uploadedWorkoutIds).catch((err) =>
+      console.error("Error reconciling buddy sessions:", err.message),
     );
 
     try {

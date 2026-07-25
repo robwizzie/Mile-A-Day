@@ -1,0 +1,419 @@
+/**
+ * Buddy Walks end-to-end lifecycle test.
+ *
+ * The "multi-user testing without multiple devices" harness: every participant
+ * is driven entirely over HTTP, exactly as a real client would be. This is how
+ * you exercise a buddy session without owning N iPhones — and it stays useful
+ * during iOS work, where one real device can play one participant while this
+ * script plays the rest.
+ *
+ * NOT wired into CI (it needs a running server, not just a database). Run it
+ * against a THROWAWAY database only — it seeds users and friendships.
+ *
+ *   # 1. migrate a throwaway DB
+ *   DATABASE_URL=postgres://... node dist/db/migrateCli.js
+ *   # 2. boot the server against it with the feature flag on
+ *   DATABASE_URL=... APP_JWT_SECRET=dev PORT=4599 BUDDY_SESSIONS=true \
+ *     node dist/server.js &
+ *   # 3. run this
+ *   DATABASE_URL=... APP_JWT_SECRET=dev BASE_URL=http://127.0.0.1:4599 \
+ *     node scripts/buddy-e2e.mjs
+ */
+import { SignJWT } from "jose";
+import pg from "pg";
+
+const BASE = process.env.BASE_URL || "http://127.0.0.1:4599";
+const SECRET = new TextEncoder().encode(process.env.APP_JWT_SECRET);
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+
+let failures = 0;
+function check(label, cond, extra = "") {
+  if (cond) console.log(`  ✓ ${label}`);
+  else {
+    failures++;
+    console.log(`  ✗ ${label} ${extra}`);
+  }
+}
+
+async function token(userId) {
+  return new SignJWT({ sub: userId })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime("1h")
+    .sign(SECRET);
+}
+
+async function api(tok, method, path, body) {
+  const res = await fetch(`${BASE}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${tok}`,
+      "Content-Type": "application/json",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    /* non-JSON (e.g. 304 empty body) */
+  }
+  return { status: res.status, body: json, raw: text };
+}
+
+async function seed() {
+  const users = [
+    ["u_host", "hostie", "Host"],
+    ["u_pal", "pally", "Pal"],
+    ["u_third", "thirdy", "Third"],
+    ["u_stranger", "strange", "Stranger"],
+    ["u_legacy", "legacy", "Legacy"],
+  ];
+  for (const [id, uname, first] of users) {
+    await pool.query(
+      `INSERT INTO users (user_id, username, first_name, apple_sub, goal_miles, current_streak)
+       VALUES ($1,$2,$3,$4,'1.0',0) ON CONFLICT (user_id) DO NOTHING`,
+      [id, uname, first, id],
+    );
+  }
+  // Accepted friendships store BOTH directions.
+  const friends = [
+    ["u_host", "u_pal"],
+    ["u_host", "u_third"],
+    ["u_host", "u_legacy"],
+  ];
+  for (const [a, b] of friends) {
+    for (const [x, y] of [
+      [a, b],
+      [b, a],
+    ]) {
+      await pool.query(
+        `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1,$2,'accepted')
+         ON CONFLICT (user_id, friend_id) DO UPDATE SET status='accepted'`,
+        [x, y],
+      );
+    }
+  }
+  // Everyone except u_legacy is on a buddy-capable build.
+  await pool.query(
+    `UPDATE users SET buddy_enrolled_at = NOW()
+      WHERE user_id IN ('u_host','u_pal','u_third','u_stranger')`,
+  );
+}
+
+async function main() {
+  await seed();
+  const host = await token("u_host");
+  const pal = await token("u_pal");
+  const third = await token("u_third");
+  const stranger = await token("u_stranger");
+
+  console.log("\n── enrollment + candidates ──");
+  check(
+    "enroll is idempotent",
+    (await api(host, "POST", "/buddy/enroll")).status === 200,
+  );
+  const cands = await api(host, "GET", "/buddy/candidates");
+  const ids = (cands.body?.candidates ?? []).map((c) => c.user_id);
+  check(
+    "candidates include enrolled friends",
+    ids.includes("u_pal") && ids.includes("u_third"),
+  );
+  check(
+    "candidates EXCLUDE unenrolled friend (legacy build)",
+    !ids.includes("u_legacy"),
+  );
+  check("candidates exclude non-friends", !ids.includes("u_stranger"));
+
+  console.log("\n── create + invite ──");
+  const created = await api(host, "POST", "/buddy/sessions", {
+    mode: "coop_goal",
+    goalValue: 3,
+    activityType: "walking",
+    inviteUserIds: ["u_pal", "u_third", "u_legacy"],
+  });
+  check(
+    "create returns 201",
+    created.status === 201,
+    JSON.stringify(created.body),
+  );
+  const sid = created.body?.id;
+  const code = created.body?.join_code;
+  check("join code issued", typeof code === "string" && code.length === 6);
+  const invitedIds = created.body.participants.map((p) => p.user_id);
+  check("unenrolled friend was NOT invited", !invitedIds.includes("u_legacy"));
+  check("host is a participant", invitedIds.includes("u_host"));
+
+  console.log("\n── validation ──");
+  check(
+    "invalid mode rejected",
+    (
+      await api(host, "POST", "/buddy/sessions", {
+        mode: "nope",
+        activityType: "walking",
+      })
+    ).status === 400,
+  );
+  check(
+    "goal required for non-together mode",
+    (
+      await api(host, "POST", "/buddy/sessions", {
+        mode: "race_goal",
+        activityType: "walking",
+      })
+    ).status === 400,
+  );
+  const together = await api(host, "POST", "/buddy/sessions", {
+    mode: "together",
+    activityType: "any",
+  });
+  check("together mode needs no goal", together.status === 201);
+
+  console.log("\n── authorization ──");
+  check(
+    "non-participant cannot read state",
+    (await api(stranger, "GET", `/buddy/sessions/${sid}/state`)).status === 400,
+  );
+  check(
+    "non-friend cannot join by code",
+    (await api(stranger, "POST", "/buddy/sessions/join", { code })).status ===
+      400,
+  );
+
+  console.log("\n── join + polling cursor ──");
+  const joined = await api(pal, "POST", `/buddy/sessions/${sid}/join`);
+  check("invitee joins", joined.status === 200);
+  const v1 = joined.body.state_version;
+  const unchanged = await api(
+    pal,
+    "GET",
+    `/buddy/sessions/${sid}/state?since=${v1}`,
+  );
+  check("unchanged version returns 304", unchanged.status === 304);
+  await api(third, "POST", `/buddy/sessions/${sid}/join`);
+  const changed = await api(
+    pal,
+    "GET",
+    `/buddy/sessions/${sid}/state?since=${v1}`,
+  );
+  check(
+    "version bump returns fresh state",
+    changed.status === 200 && changed.body.state_version > v1,
+  );
+
+  console.log("\n── start ──");
+  check(
+    "non-host cannot start",
+    (await api(pal, "POST", `/buddy/sessions/${sid}/start`)).status === 400,
+  );
+  const started = await api(host, "POST", `/buddy/sessions/${sid}/start`);
+  check(
+    "host starts session",
+    started.status === 200 && started.body.status === "active",
+  );
+  const startAt = new Date(started.body.started_at).getTime();
+  check(
+    "started_at is in the FUTURE (synced countdown)",
+    startAt > Date.now(),
+    `(${started.body.started_at})`,
+  );
+  const active = started.body.participants.filter((p) => p.status === "active");
+  check("all joined participants became active", active.length === 3);
+
+  console.log("\n── progress: monotonic + clamped ──");
+  const p1 = await api(host, "POST", `/buddy/sessions/${sid}/progress`, {
+    distanceMiles: 0.2,
+    durationSeconds: 120,
+  });
+  check(
+    "progress returns full roster (not an ack)",
+    Array.isArray(p1.body?.participants),
+  );
+  const hostAfter1 = p1.body.participants.find((p) => p.user_id === "u_host");
+  check("progress recorded", hostAfter1.distance_miles > 0);
+
+  const p2 = await api(host, "POST", `/buddy/sessions/${sid}/progress`, {
+    distanceMiles: 0.05,
+    durationSeconds: 130,
+  });
+  const hostAfter2 = p2.body.participants.find((p) => p.user_id === "u_host");
+  check(
+    "backwards progress is ignored (monotonic)",
+    hostAfter2.distance_miles >= hostAfter1.distance_miles,
+    `${hostAfter1.distance_miles} -> ${hostAfter2.distance_miles}`,
+  );
+
+  const p3 = await api(host, "POST", `/buddy/sessions/${sid}/progress`, {
+    distanceMiles: 500,
+    durationSeconds: 140,
+  });
+  const hostAfter3 = p3.body.participants.find((p) => p.user_id === "u_host");
+  check(
+    "teleport clamped, not rejected",
+    hostAfter3.distance_miles < 1 &&
+      hostAfter3.distance_miles >= hostAfter2.distance_miles,
+    `got ${hostAfter3.distance_miles}`,
+  );
+
+  check(
+    "negative distance rejected",
+    (
+      await api(host, "POST", `/buddy/sessions/${sid}/progress`, {
+        distanceMiles: -5,
+        durationSeconds: 10,
+      })
+    ).status === 400,
+  );
+
+  console.log("\n── co-op pooling ──");
+  await api(pal, "POST", `/buddy/sessions/${sid}/progress`, {
+    distanceMiles: 0.4,
+    durationSeconds: 200,
+  });
+  const pooled = await api(third, "POST", `/buddy/sessions/${sid}/progress`, {
+    distanceMiles: 0.3,
+    durationSeconds: 200,
+  });
+  const sum = pooled.body.participants
+    .filter((p) => p.status === "active" || p.status === "finished")
+    .reduce((s, p) => s + p.distance_miles, 0);
+  check(
+    "group_distance_miles pools participants",
+    Math.abs(pooled.body.group_distance_miles - sum) < 0.01,
+    `${pooled.body.group_distance_miles} vs ${sum}`,
+  );
+
+  console.log("\n── finish + finalize ──");
+  await api(host, "POST", `/buddy/sessions/${sid}/finish`);
+  await api(pal, "POST", `/buddy/sessions/${sid}/finish`);
+  const last = await api(third, "POST", `/buddy/sessions/${sid}/finish`);
+  check(
+    "session completes when everyone finishes",
+    last.body.status === "completed",
+  );
+  check("co-op mode declares NO winner", last.body.winner_user_id === null);
+  check(
+    "placements stamped",
+    last.body.participants.every((p) => p.place !== null),
+  );
+
+  console.log("\n── race mode winner ──");
+  const race = await api(host, "POST", "/buddy/sessions", {
+    mode: "race_goal",
+    goalValue: 1,
+    activityType: "running",
+    inviteUserIds: ["u_pal"],
+  });
+  const rid = race.body.id;
+  await api(pal, "POST", `/buddy/sessions/${rid}/join`);
+  await api(host, "POST", `/buddy/sessions/${rid}/start`);
+  // Backdate the start so the physical-ceiling clamp permits a realistic
+  // distance — a real race has minutes of elapsed time behind every report.
+  await pool.query(
+    `UPDATE buddy_sessions SET started_at = NOW() - INTERVAL '20 minutes' WHERE id = $1`,
+    [rid],
+  );
+  await api(pal, "POST", `/buddy/sessions/${rid}/progress`, {
+    distanceMiles: 0.5,
+    durationSeconds: 300,
+  });
+  await api(host, "POST", `/buddy/sessions/${rid}/progress`, {
+    distanceMiles: 0.2,
+    durationSeconds: 300,
+  });
+  await api(host, "POST", `/buddy/sessions/${rid}/finish`);
+  const raceEnd = await api(pal, "POST", `/buddy/sessions/${rid}/finish`);
+  check(
+    "race declares the furthest participant winner",
+    raceEnd.body.winner_user_id === "u_pal",
+    JSON.stringify(raceEnd.body.winner_user_id),
+  );
+
+  console.log("\n── recap + mine ──");
+  const recap = await api(host, "GET", `/buddy/sessions/${sid}/recap`);
+  check(
+    "recap returns event timeline",
+    Array.isArray(recap.body?.events) && recap.body.events.length > 0,
+  );
+  const kinds = recap.body.events.map((e) => e.kind);
+  check(
+    "timeline records created/joined/started/finished/completed",
+    ["created", "joined", "started", "finished", "completed"].every((k) =>
+      kinds.includes(k),
+    ),
+    kinds.join(","),
+  );
+  const mine = await api(host, "GET", "/buddy/sessions/mine");
+  check(
+    "mine excludes completed sessions",
+    (mine.body.active?.id ?? null) !== sid,
+  );
+
+  console.log("\n── participant cap ──");
+  await pool.query(
+    `INSERT INTO users (user_id, username, first_name, apple_sub, goal_miles, current_streak)
+     SELECT 'u_fill'||g, 'fill'||g, 'Fill', 'u_fill'||g, '1.0', 0 FROM generate_series(1,9) g
+     ON CONFLICT (user_id) DO NOTHING`,
+  );
+  await pool.query(
+    `UPDATE users SET buddy_enrolled_at = NOW() WHERE user_id LIKE 'u_fill%'`,
+  );
+  for (let g = 1; g <= 9; g++) {
+    for (const [x, y] of [
+      ["u_host", `u_fill${g}`],
+      [`u_fill${g}`, "u_host"],
+    ]) {
+      await pool.query(
+        `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1,$2,'accepted')
+         ON CONFLICT (user_id, friend_id) DO UPDATE SET status='accepted'`,
+        [x, y],
+      );
+    }
+  }
+  const over = await api(host, "POST", "/buddy/sessions", {
+    mode: "together",
+    activityType: "any",
+    inviteUserIds: Array.from({ length: 9 }, (_, i) => `u_fill${i + 1}`),
+  });
+  check(
+    "oversized invite list rejected",
+    over.status === 400,
+    JSON.stringify(over.body),
+  );
+
+  const capped = await api(host, "POST", "/buddy/sessions", {
+    mode: "together",
+    activityType: "any",
+    inviteUserIds: Array.from({ length: 7 }, (_, i) => `u_fill${i + 1}`),
+  });
+  const cid = capped.body.id;
+  for (let g = 1; g <= 7; g++) {
+    await api(await token(`u_fill${g}`), "POST", `/buddy/sessions/${cid}/join`);
+  }
+  const nineth = await api(
+    await token("u_fill8"),
+    "POST",
+    "/buddy/sessions/join",
+    {
+      code: capped.body.join_code,
+    },
+  );
+  check(
+    "9th joiner blocked by participant cap",
+    nineth.status === 400,
+    JSON.stringify(nineth.body),
+  );
+
+  console.log(
+    `\n${failures === 0 ? "✅ ALL BUDDY E2E ASSERTIONS PASSED" : `❌ ${failures} FAILURE(S)`}`,
+  );
+  await pool.end();
+  process.exit(failures === 0 ? 0 : 1);
+}
+
+main().catch(async (e) => {
+  console.error(e);
+  await pool.end();
+  process.exit(1);
+});

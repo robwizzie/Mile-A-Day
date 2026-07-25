@@ -183,6 +183,16 @@ export const users = pgTable(
     doubleDownLastUsed: date("double_down_last_used"),
     streakSaveLastUsed: date("streak_save_last_used"),
     streakAssistLastUsed: date("streak_assist_last_used"),
+    // Buddy-sessions enrollment stamp. Only the app build that ships the Buddy
+    // Walks UI calls POST /buddy/enroll, so null = legacy build → this user is
+    // never offered as an invite candidate and never receives a buddy push.
+    // Without this gate you can invite someone whose installed app has no buddy
+    // UI at all: the server deploys weeks ahead of the App Store release.
+    // Mirrors streak_features_at / terms_accepted_at.
+    buddyEnrolledAt: timestamp("buddy_enrolled_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
   (table) => [
     index("idx_users_current_streak_desc").using(
@@ -351,6 +361,12 @@ export const notificationSettings = pgTable(
     friendRequestReminderEnabled: boolean(
       "friend_request_reminder_enabled",
     ).default(true),
+    // buddy_invites_enabled: the "X invited you to a Buddy Walk" push.
+    // buddy_invite is in HIGH_PRIORITY_TYPES (it is time-sensitive — the walk is
+    // starting now), which bypasses quiet hours and the daily cap, so this
+    // toggle is the ONLY thing standing between a user and an unmutable push.
+    // Guideline 4.5.4 requires it, and it must ship WITH the feature, not after.
+    buddyInvitesEnabled: boolean("buddy_invites_enabled").default(true),
   },
   (table) => [
     check(
@@ -1631,4 +1647,252 @@ export const androidWaitlist = pgTable(
     }).defaultNow(),
   },
   (table) => [unique("android_waitlist_email_unique").on(table.email)],
+);
+
+// ---------------------------------------------------------------------------
+// Buddy Walks & Runs
+//
+// A live shared walk/run: several friends move at the same time and see each
+// other's progress. The session is SERVER-AUTHORITATIVE — every participant
+// reports to the backend and reads everyone else back from it. There is no
+// peer-to-peer link, which is what makes a remote session work at all and what
+// keeps the session alive when two people on the same walk drift apart.
+//
+// A session DECORATES a normal workout; it never replaces one. Each participant
+// is running the ordinary WorkoutTrackingView / HealthKit / upload path, so
+// streaks, daily-mile, competitions and badges are untouched by this feature.
+// The live numbers below are for DISPLAY; the authoritative result is stamped
+// later by reconcileBuddySessions() from the real synced HKWorkout.
+// ---------------------------------------------------------------------------
+export const buddySessions = pgTable(
+  "buddy_sessions",
+  {
+    id: varchar({ length: 32 })
+      .default(sql`replace((gen_random_uuid())::text, '-'::text, ''::text)`)
+      .primaryKey()
+      .notNull(),
+    // Short human-shareable code. Unique only among sessions that are still
+    // open (partial index below) so codes recycle instead of exhausting.
+    joinCode: varchar("join_code", { length: 8 }).notNull(),
+    hostUserId: text("host_user_id"),
+    mode: text().notNull(),
+    // Miles for coop_goal/race_goal, minutes for race_time, NULL for 'together'.
+    goalValue: doublePrecision("goal_value"),
+    activityType: varchar("activity_type", { length: 50 }).notNull(),
+    status: text().notNull(),
+    // Which door people actually came through. Worth measuring before investing
+    // in the proximity handshake.
+    origin: text().notNull(),
+    // Phase 4 (scheduled long-distance sessions). NULL for everything today.
+    scheduledStartAt: timestamp("scheduled_start_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    // Set a few seconds in the FUTURE at start, so every client counts down to
+    // the same wall-clock instant instead of each starting when its own request
+    // happens to return.
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }),
+    // Only meaningful for race_time — computed from goal_value at start.
+    endsAt: timestamp("ends_at", { withTimezone: true, mode: "string" }),
+    endedAt: timestamp("ended_at", { withTimezone: true, mode: "string" }),
+    winnerUserId: text("winner_user_id"),
+    // Bumped on EVERY mutation. This is the polling cursor: clients send
+    // ?since=<version> and get a 304 when nothing has changed.
+    stateVersion: integer("state_version").default(1).notNull(),
+    localDate: date("local_date").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_buddy_sessions_join_code_open")
+      .using("btree", table.joinCode.asc().nullsLast())
+      .where(sql`(status = ANY (ARRAY['lobby'::text, 'active'::text]))`),
+    index("idx_buddy_sessions_status_created").using(
+      "btree",
+      table.status.asc().nullsLast(),
+      table.createdAt.desc().nullsLast(),
+    ),
+    foreignKey({
+      columns: [table.hostUserId],
+      foreignColumns: [users.userId],
+      name: "buddy_sessions_host_user_id_fkey",
+    }).onDelete("set null"),
+    foreignKey({
+      columns: [table.winnerUserId],
+      foreignColumns: [users.userId],
+      name: "buddy_sessions_winner_user_id_fkey",
+    }).onDelete("set null"),
+    check(
+      "buddy_sessions_mode_check",
+      sql`mode = ANY (ARRAY['together'::text, 'coop_goal'::text, 'race_goal'::text, 'race_time'::text])`,
+    ),
+    check(
+      "buddy_sessions_status_check",
+      sql`status = ANY (ARRAY['lobby'::text, 'active'::text, 'completed'::text, 'cancelled'::text])`,
+    ),
+    check(
+      "buddy_sessions_origin_check",
+      sql`origin = ANY (ARRAY['invite'::text, 'code'::text, 'join_active'::text, 'nearby'::text])`,
+    ),
+  ],
+);
+
+export const buddySessionParticipants = pgTable(
+  "buddy_session_participants",
+  {
+    sessionId: varchar("session_id", { length: 32 }).notNull(),
+    userId: text("user_id").notNull(),
+    status: text().notNull(),
+    invitedBy: text("invited_by"),
+    joinedAt: timestamp("joined_at", { withTimezone: true, mode: "string" }),
+    readyAt: timestamp("ready_at", { withTimezone: true, mode: "string" }),
+    finishedAt: timestamp("finished_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    // Live, MONOTONIC. Progress is clamped up (never rejected, never lowered):
+    // a rejected report freezes a participant whose GPS burped, which reads as a
+    // bug to everyone else watching the roster.
+    distanceMiles: doublePrecision("distance_miles").default(0).notNull(),
+    durationSeconds: integer("duration_seconds").default(0).notNull(),
+    // Staleness is derived from this at READ time (>90s → "out of range" in the
+    // UI). No cron is involved in the live display.
+    lastProgressAt: timestamp("last_progress_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+    // Stamped by reconcileBuddySessions() once the real workout syncs.
+    workoutId: varchar("workout_id", { length: 255 }),
+    finalDistanceMiles: doublePrecision("final_distance_miles"),
+    place: integer(),
+  },
+  (table) => [
+    index("idx_buddy_participants_user_status").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.status.asc().nullsLast(),
+    ),
+    foreignKey({
+      columns: [table.sessionId],
+      foreignColumns: [buddySessions.id],
+      name: "buddy_session_participants_session_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "buddy_session_participants_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.workoutId],
+      foreignColumns: [workouts.workoutId],
+      name: "buddy_session_participants_workout_id_fkey",
+    }).onDelete("set null"),
+    primaryKey({
+      columns: [table.sessionId, table.userId],
+      name: "buddy_session_participants_pkey",
+    }),
+    check(
+      "buddy_session_participants_status_check",
+      sql`status = ANY (ARRAY['invited'::text, 'joined'::text, 'ready'::text, 'active'::text, 'finished'::text, 'left'::text, 'declined'::text])`,
+    ),
+  ],
+);
+
+// Append-only timeline. Drives the recap screen and the auto-generated caption
+// on the collab post ("Rob hit the goal first at 22:14").
+export const buddySessionEvents = pgTable(
+  "buddy_session_events",
+  {
+    id: bigserial({ mode: "bigint" }).primaryKey().notNull(),
+    sessionId: varchar("session_id", { length: 32 }).notNull(),
+    userId: text("user_id"),
+    kind: text().notNull(),
+    payload: jsonb(),
+    at: timestamp({ withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("idx_buddy_events_session_at").using(
+      "btree",
+      table.sessionId.asc().nullsLast(),
+      table.at.asc().nullsLast(),
+    ),
+    foreignKey({
+      columns: [table.sessionId],
+      foreignColumns: [buddySessions.id],
+      name: "buddy_session_events_session_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "buddy_session_events_user_id_fkey",
+    }).onDelete("set null"),
+  ],
+);
+
+// Multi-person collab posts.
+//
+// The legacy coauthor mechanism is three SCALAR columns on `posts`
+// (coauthor_user_id / coauthor_status / coauthor_workout_id) and therefore tops
+// out at exactly two people — a 4-person buddy walk does not fit.
+//
+// This table COEXISTS with those columns rather than replacing them. A buddy
+// post writes BOTH: a row here for every participant, and the legacy scalars
+// populated with the first coauthor. A shipped client that knows nothing about
+// buddy walks then renders a 4-person walk as an ordinary 2-person collab —
+// degraded, but coherent — and visiblePostAuthor's existing predicate keeps
+// working unchanged for every post that has no rows here.
+export const postCoauthors = pgTable(
+  "post_coauthors",
+  {
+    postId: uuid("post_id").notNull(),
+    userId: text("user_id").notNull(),
+    status: text().default("pending").notNull(),
+    workoutId: varchar("workout_id", { length: 255 }),
+    buddySessionId: varchar("buddy_session_id", { length: 32 }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    respondedAt: timestamp("responded_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
+  },
+  (table) => [
+    index("idx_post_coauthors_user").using(
+      "btree",
+      table.userId.asc().nullsLast(),
+      table.status.asc().nullsLast(),
+    ),
+    foreignKey({
+      columns: [table.postId],
+      foreignColumns: [posts.postId],
+      name: "post_coauthors_post_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "post_coauthors_user_id_fkey",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.workoutId],
+      foreignColumns: [workouts.workoutId],
+      name: "post_coauthors_workout_id_fkey",
+    }).onDelete("set null"),
+    foreignKey({
+      columns: [table.buddySessionId],
+      foreignColumns: [buddySessions.id],
+      name: "post_coauthors_buddy_session_id_fkey",
+    }).onDelete("set null"),
+    primaryKey({
+      columns: [table.postId, table.userId],
+      name: "post_coauthors_pkey",
+    }),
+    check(
+      "post_coauthors_status_check",
+      sql`status = ANY (ARRAY['pending'::text, 'accepted'::text, 'declined'::text])`,
+    ),
+  ],
 );

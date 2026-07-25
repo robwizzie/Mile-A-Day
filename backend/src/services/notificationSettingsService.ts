@@ -33,6 +33,11 @@ export interface NotificationPreferences {
   // your friend" nudge. Separate from the friend_request push itself, so
   // muting the reminder never mutes the original request.
   friend_request_reminder_enabled: boolean;
+  // buddy_invites_enabled: "X wants to walk with you" invites. buddy_invite is
+  // high-priority (it bypasses quiet hours and the daily cap because the walk
+  // is starting within seconds), so this toggle is the ONLY thing that can
+  // silence it — Guideline 4.5.4.
+  buddy_invites_enabled: boolean;
   // Who may see my workout content (routes + photos): 'public' | 'friends' |
   // 'private'. Coarser than share_route_maps — that one decides WHETHER routes
   // are included, this decides WHO gets in at all. Both must pass.
@@ -60,6 +65,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   weekly_recap_enabled: true,
   h2h_close_friends_only: false,
   friend_request_reminder_enabled: true,
+  buddy_invites_enabled: true,
   workout_visibility: DEFAULT_WORKOUT_VISIBILITY,
 };
 
@@ -96,6 +102,7 @@ export async function getNotificationPreferences(
     h2h_close_friends_only: row.h2h_close_friends_only ?? false,
     friend_request_reminder_enabled:
       row.friend_request_reminder_enabled ?? true,
+    buddy_invites_enabled: row.buddy_invites_enabled ?? true,
     // Anything unrecognised reads as the safe default rather than being
     // handed to the client as-is.
     workout_visibility: isWorkoutVisibility(row.workout_visibility)
@@ -150,6 +157,7 @@ export async function updateNotificationPreferences(
       key: "friend_request_reminder_enabled",
       value: prefs.friend_request_reminder_enabled,
     },
+    { key: "buddy_invites_enabled", value: prefs.buddy_invites_enabled },
     { key: "workout_visibility", value: prefs.workout_visibility },
   ];
 
@@ -375,7 +383,13 @@ export async function shouldSendNotification(
     | "friend_personal_best"
     | "competition_invite"
     | "competition_update"
-    | "competition_milestone",
+    | "competition_milestone"
+    // Buddy Walks. Deliberately its OWN category rather than reusing "hype"
+    // (which every other social push overloads): buddy_invite is in
+    // HIGH_PRIORITY_TYPES, so it bypasses quiet hours and the daily cap and
+    // this pref is the only thing that can stop it. Overloading "hype" would
+    // mean muting hypes to mute buddy invites — not a real toggle (4.5.4).
+    | "buddy",
 ): Promise<boolean> {
   const prefs = await getNotificationPreferences(targetUserId);
 
@@ -404,6 +418,9 @@ export async function shouldSendNotification(
       break;
     case "competition_milestone":
       if (!prefs.competition_milestones_enabled) return false;
+      break;
+    case "buddy":
+      if (!prefs.buddy_invites_enabled) return false;
       break;
   }
 

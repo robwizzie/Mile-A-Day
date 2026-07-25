@@ -20,6 +20,7 @@ import dailyChallengesRoutes from "./routes/dailyChallengesRoutes.js";
 import dailyStepsRoutes from "./routes/dailyStepsRoutes.js";
 import leaderboardRoutes from "./routes/leaderboardRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
+import buddyRoutes from "./routes/buddyRoutes.js";
 import {
   authenticateToken,
   requireAdmin,
@@ -33,6 +34,7 @@ import { startSilentSyncCron } from "./cron/silentSyncCron.js";
 import { startStoriesCron } from "./cron/storiesCron.js";
 import { startPendingSendCron } from "./cron/pendingSendCron.js";
 import { startWeeklyRecapCron } from "./cron/weeklyRecapCron.js";
+import { startBuddySessionCron } from "./cron/buddySessionCron.js";
 import { startH2hChallengeCron } from "./cron/h2hChallengeCron.js";
 import { startStreakFeaturesCron } from "./cron/streakFeaturesCron.js";
 import { seedExtraBadges } from "./services/badgeService.js";
@@ -200,6 +202,7 @@ app.use("/hype", hypeRoutes);
 app.use("/posts", postsRoutes);
 app.use("/blocks", blocksRoutes);
 app.use("/leaderboard", leaderboardRoutes);
+app.use("/buddy", buddyRoutes);
 
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   console.error("Error:", err.message);
@@ -255,6 +258,7 @@ function startCrons() {
   startWeeklyRecapCron();
   startH2hChallengeCron();
   startStreakFeaturesCron();
+  startBuddySessionCron();
   // Idempotently ensure the v2 social/app-function badges exist in the catalog.
   seedExtraBadges();
   // Idempotently ensure the v2 daily challenges (5K/10K/social) exist.
