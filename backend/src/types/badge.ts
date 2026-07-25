@@ -8,7 +8,8 @@ export type BadgeCategory =
   | "story"
   | "hype"
   | "nudge"
-  | "competition";
+  | "competition"
+  | "buddy";
 export type BadgeRarity = "common" | "rare" | "legendary";
 export type DailyChallengeType =
   | "pace"
@@ -134,4 +135,9 @@ export interface UserAggregates {
   competitionsStarted: number;
   competitionsEntered: number;
   competitionsWon: number;
+  // Buddy Walks. `buddyDistinctPartners` counts PEOPLE, not sessions — walking
+  // with the same friend fifty times shouldn't unlock the "crew" family.
+  buddySessionsCompleted: number;
+  buddyDistinctPartners: number;
+  buddySessionsWon: number;
 }

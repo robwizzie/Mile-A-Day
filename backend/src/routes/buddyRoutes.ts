@@ -5,6 +5,7 @@ import {
   enrollController,
   finishController,
   inviteCandidatesController,
+  joinableFriendSessionsController,
   joinByCodeController,
   joinSessionController,
   leaveSessionController,
@@ -25,6 +26,9 @@ const router = Router();
 
 router.post("/enroll", enrollController);
 router.get("/candidates", inviteCandidatesController);
+// Friends walking RIGHT NOW that the caller could join. The deliberate,
+// permission-free substitute for ambient proximity sensing (see the service).
+router.get("/joinable", joinableFriendSessionsController);
 
 // Static segments MUST precede "/sessions/:sessionId/..." or "mine" and "join"
 // get captured as session ids — the same ordering trap the /friends/close

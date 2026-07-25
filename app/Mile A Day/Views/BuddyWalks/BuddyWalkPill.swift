@@ -8,6 +8,11 @@ extension Notification.Name {
     /// view layers below `DashboardView` — the same reason `MAD_SwitchTab` and
     /// `MAD_OpenWorkoutFromLiveActivity` exist.
     static let madStartBuddyWalk = Notification.Name("MAD_StartBuddyWalk")
+
+    /// Posted after joining a friend's in-flight walk; DashboardView opens the
+    /// lobby. Separate from `madStartBuddyWalk` because the session already
+    /// exists — there is nothing left to configure.
+    static let madOpenBuddyLobby = Notification.Name("MAD_OpenBuddyLobby")
 }
 
 /// Secondary entry point to Buddy Walks, sitting under the start button.

@@ -987,6 +987,73 @@ export async function getInviteCandidates(userId: string): Promise<
   );
 }
 
+/**
+ * Friends who have a joinable buddy walk running right now.
+ *
+ * This is the deliberate substitute for ambient proximity sensing. Detecting
+ * nearby friends in the background would need CoreBluetooth background
+ * advertising: unreliable, battery-hungry, and a heavy privacy and App Review
+ * surface. This gives the same "they're doing it, join them" moment with no new
+ * permissions, at any distance, for both co-located and remote friends.
+ *
+ * PULL ONLY — there is deliberately no push here. Broadcasting "your friend
+ * started walking" to every friend of every host is how a social feature turns
+ * into spam, and buddy_invite already bypasses quiet hours. A friend who wants
+ * you specifically can invite you directly.
+ *
+ * Sessions the caller is already in are excluded, as are full ones — an offer
+ * to join something you cannot join is worse than no offer.
+ */
+export async function getJoinableFriendSessions(userId: string): Promise<
+  Array<{
+    session_id: string;
+    join_code: string;
+    mode: string;
+    activity_type: string;
+    status: string;
+    host_user_id: string;
+    host_username: string | null;
+    host_first_name: string | null;
+    host_profile_image_url: string | null;
+    participant_count: number;
+  }>
+> {
+  return db.query(
+    `SELECT s.id AS session_id, s.join_code, s.mode, s.activity_type, s.status,
+            s.host_user_id, u.username AS host_username,
+            u.first_name AS host_first_name,
+            u.profile_image_url AS host_profile_image_url,
+            (SELECT COUNT(*)::int FROM buddy_session_participants c
+              WHERE c.session_id = s.id
+                AND c.status NOT IN ('left', 'declined')) AS participant_count
+       FROM buddy_sessions s
+       JOIN users u ON u.user_id = s.host_user_id
+       JOIN friendships f
+         ON f.user_id = $1 AND f.friend_id = s.host_user_id
+        AND f.status = 'accepted'
+      WHERE s.status IN ('lobby', 'active')
+        -- Only just-started walks. Offering to join a session an hour deep
+        -- means arriving with no chance of keeping up.
+        AND COALESCE(s.started_at, s.created_at) > NOW() - INTERVAL '20 minutes'
+        AND NOT EXISTS (
+          SELECT 1 FROM buddy_session_participants mine
+           WHERE mine.session_id = s.id AND mine.user_id = $1
+             AND mine.status NOT IN ('left', 'declined')
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM user_blocks b
+           WHERE (b.blocker_id = $1 AND b.blocked_id = s.host_user_id)
+              OR (b.blocker_id = s.host_user_id AND b.blocked_id = $1)
+        )
+        AND (SELECT COUNT(*) FROM buddy_session_participants c
+              WHERE c.session_id = s.id
+                AND c.status NOT IN ('left', 'declined')) < $2
+      ORDER BY COALESCE(s.started_at, s.created_at) DESC
+      LIMIT 5`,
+    [userId, BUDDY_MAX_PARTICIPANTS],
+  );
+}
+
 /** The caller's live session (if any) plus any outstanding invites. */
 export async function getMySessions(userId: string): Promise<{
   active: BuddySessionState | null;

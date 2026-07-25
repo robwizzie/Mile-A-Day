@@ -405,6 +405,177 @@ async function main() {
     JSON.stringify(nineth.body),
   );
 
+  console.log("\n── buddy medals ──");
+  // Medals are aggregate-driven and evaluated when a session closes; the co-op
+  // and race sessions above already completed for u_host and u_pal.
+  const hostBadges = await pool.query(
+    `SELECT badge_id FROM user_badges WHERE user_id = 'u_host' AND badge_id LIKE 'buddy_%'`,
+  );
+  const hostBadgeIds = hostBadges.rows.map((r) => r.badge_id);
+  check(
+    "buddy_done_1 awarded after finishing a session",
+    hostBadgeIds.includes("buddy_done_1"),
+    hostBadgeIds.join(","),
+  );
+  // u_host has walked with u_pal and u_third only — 2 distinct PEOPLE across
+  // two completed sessions. crew_3 must not fire yet: the aggregate counts
+  // people, not sessions, so repeat walks with the same friend can't unlock it.
+  check(
+    "buddy_crew_3 NOT awarded at 2 distinct partners",
+    !hostBadgeIds.includes("buddy_crew_3"),
+    hostBadgeIds.join(","),
+  );
+
+  // Complete one more session with a THIRD distinct person and it should land.
+  const crew = await api(host, "POST", "/buddy/sessions", {
+    mode: "together",
+    activityType: "walking",
+    inviteUserIds: ["u_fill1"],
+  });
+  const fill1Token = await token("u_fill1");
+  await api(fill1Token, "POST", `/buddy/sessions/${crew.body.id}/join`);
+  await api(host, "POST", `/buddy/sessions/${crew.body.id}/start`);
+  await api(host, "POST", `/buddy/sessions/${crew.body.id}/finish`);
+  await api(fill1Token, "POST", `/buddy/sessions/${crew.body.id}/finish`);
+  // Badge evaluation is fire-and-forget off the session close.
+  await new Promise((r) => setTimeout(r, 1500));
+
+  const hostBadges2 = await pool.query(
+    `SELECT badge_id FROM user_badges WHERE user_id = 'u_host' AND badge_id LIKE 'buddy_crew_%'`,
+  );
+  check(
+    "buddy_crew_3 awarded once a 3rd distinct partner is reached",
+    hostBadges2.rows.some((r) => r.badge_id === "buddy_crew_3"),
+    hostBadges2.rows.map((r) => r.badge_id).join(","),
+  );
+  const palBadges = await pool.query(
+    `SELECT badge_id FROM user_badges WHERE user_id = 'u_pal' AND badge_id LIKE 'buddy_won_%'`,
+  );
+  check(
+    "buddy_won_1 awarded to the race winner",
+    palBadges.rows.some((r) => r.badge_id === "buddy_won_1"),
+    palBadges.rows.map((r) => r.badge_id).join(","),
+  );
+  const hostWon = await pool.query(
+    `SELECT 1 FROM user_badges WHERE user_id = 'u_host' AND badge_id = 'buddy_won_1'`,
+  );
+  check("buddy_won_1 NOT awarded to the loser", hostWon.rows.length === 0);
+
+  console.log("\n── multi-person collab posts ──");
+  // A post needs media_url, so seed the row directly and then exercise the
+  // authorization surface — the part that actually carries risk.
+  const legacyPost = await pool.query(
+    `INSERT INTO posts (user_id, media_url, local_date, share_to_feed, share_to_story,
+                        is_auto, coauthor_user_id, coauthor_status)
+     VALUES ('u_host', '/uploads/posts/legacy.jpg', CURRENT_DATE, true, false, false,
+             'u_pal', 'accepted')
+     RETURNING post_id`,
+  );
+  const legacyPostId = legacyPost.rows[0].post_id;
+
+  const multiPost = await pool.query(
+    `INSERT INTO posts (user_id, media_url, local_date, share_to_feed, share_to_story,
+                        is_auto, coauthor_user_id, coauthor_status)
+     VALUES ('u_host', '/uploads/posts/buddy.jpg', CURRENT_DATE, true, false, false,
+             'u_pal', 'accepted')
+     RETURNING post_id`,
+  );
+  const multiPostId = multiPost.rows[0].post_id;
+  for (const [uid, st] of [
+    ["u_pal", "accepted"],
+    ["u_third", "accepted"],
+    ["u_fill1", "pending"],
+  ]) {
+    await pool.query(
+      `INSERT INTO post_coauthors (post_id, user_id, status) VALUES ($1,$2,$3)`,
+      [multiPostId, uid, st],
+    );
+  }
+
+  // visiblePostAuthor is exercised through the comments endpoint, which 404s
+  // when the viewer may not see the post.
+  const canSee = async (tok, postId) =>
+    (await api(tok, "GET", `/posts/${postId}/comments`)).status === 200;
+
+  check("author sees own legacy post", await canSee(host, legacyPostId));
+  check("legacy coauthor sees legacy post", await canSee(pal, legacyPostId));
+  check("friend-of-author sees legacy post", await canSee(third, legacyPostId));
+  check(
+    "stranger CANNOT see legacy post (unchanged)",
+    !(await canSee(stranger, legacyPostId)),
+  );
+
+  check("author sees multi-collab post", await canSee(host, multiPostId));
+  check(
+    "accepted multi-coauthor sees the post",
+    await canSee(third, multiPostId),
+  );
+  const fill1 = await token("u_fill1");
+  check(
+    "PENDING multi-coauthor still sees their own invite",
+    await canSee(fill1, multiPostId),
+  );
+  check(
+    "stranger CANNOT see multi-collab post",
+    !(await canSee(stranger, multiPostId)),
+  );
+
+  // A block against ANY accepted participant must deny the whole post, the
+  // same way it does for a legacy coauthor.
+  await pool.query(
+    `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ('u_fill2','u_third')
+     ON CONFLICT DO NOTHING`,
+  );
+  for (const [x, y] of [
+    ["u_host", "u_fill2"],
+    ["u_fill2", "u_host"],
+  ]) {
+    await pool.query(
+      `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1,$2,'accepted')
+       ON CONFLICT (user_id, friend_id) DO UPDATE SET status='accepted'`,
+      [x, y],
+    );
+  }
+  const fill2 = await token("u_fill2");
+  check(
+    "block vs an accepted multi-coauthor denies the post",
+    !(await canSee(fill2, multiPostId)),
+  );
+  check(
+    "same viewer CAN still see the legacy post (block is scoped)",
+    await canSee(fill2, legacyPostId),
+  );
+
+  console.log("\n── friends walking now (pull-only) ──");
+  const live = await api(host, "POST", "/buddy/sessions", {
+    mode: "together",
+    activityType: "walking",
+    inviteUserIds: [],
+  });
+  const joinable = await api(third, "GET", "/buddy/joinable");
+  const offered = (joinable.body?.sessions ?? []).map((s) => s.session_id);
+  check("friend's live session is offered", offered.includes(live.body.id));
+  const selfView = await api(host, "GET", "/buddy/joinable");
+  check(
+    "host is NOT offered their own session",
+    !(selfView.body?.sessions ?? []).some((s) => s.session_id === live.body.id),
+  );
+  const strangerView = await api(stranger, "GET", "/buddy/joinable");
+  check(
+    "non-friend is not offered the session",
+    !(strangerView.body?.sessions ?? []).some(
+      (s) => s.session_id === live.body.id,
+    ),
+  );
+  await api(third, "POST", `/buddy/sessions/${live.body.id}/join`);
+  const afterJoin = await api(third, "GET", "/buddy/joinable");
+  check(
+    "session disappears from the offer once joined",
+    !(afterJoin.body?.sessions ?? []).some(
+      (s) => s.session_id === live.body.id,
+    ),
+  );
+
   console.log(
     `\n${failures === 0 ? "✅ ALL BUDDY E2E ASSERTIONS PASSED" : `❌ ${failures} FAILURE(S)`}`,
   );

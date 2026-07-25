@@ -14,6 +14,7 @@ import {
   enrollUser,
   finishParticipation,
   getInviteCandidates,
+  getJoinableFriendSessions,
   getMySessions,
   getRecap,
   getSessionState,
@@ -76,6 +77,18 @@ export async function inviteCandidatesController(
     res.json({ candidates: await getInviteCandidates(req.userId!) });
   } catch (error) {
     handleError(res, error, "loading buddy invite candidates");
+  }
+}
+
+export async function joinableFriendSessionsController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!requireEnabled(res)) return;
+  try {
+    res.json({ sessions: await getJoinableFriendSessions(req.userId!) });
+  } catch (error) {
+    handleError(res, error, "loading joinable friend sessions");
   }
 }
 

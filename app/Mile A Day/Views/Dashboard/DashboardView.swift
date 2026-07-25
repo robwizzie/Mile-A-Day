@@ -638,6 +638,9 @@ struct DashboardView: View {
                         }
                     }
             )
+            .onReceive(NotificationCenter.default.publisher(for: .madOpenBuddyLobby)) { _ in
+                showBuddyLobby = true
+            }
             .onReceive(NotificationCenter.default.publisher(for: .madStartBuddyWalk)) { _ in
                 // An invite already waiting goes straight to the lobby; there is
                 // nothing left to configure.
@@ -662,6 +665,9 @@ struct DashboardView: View {
                 // at all. Idempotent, so it's safe on every appearance.
                 await buddyService.enrollIfNeeded()
                 await buddyService.refreshMySessions()
+                // "Alex is walking right now" — pulled, never pushed, so this
+                // is the only thing that surfaces the offer.
+                await buddyService.refreshJoinableFriendSessions()
 
                 // The `.onReceive` above only fires for values published AFTER
                 // this view mounts. On a cold launch the link is already parked,

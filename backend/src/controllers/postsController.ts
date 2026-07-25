@@ -40,6 +40,8 @@ import {
   notifyCoauthorInvite,
   notifyCoauthorAccepted,
   respondToCoauthorInvite,
+  respondToMultiCoauthorInvite,
+  postAuthorId,
 } from "../services/postService.js";
 import { getDailyGoalStatus } from "../services/workoutService.js";
 import { hasUnlimitedActions } from "../services/privilegedUsers.js";
@@ -120,6 +122,8 @@ export async function createPostController(
     is_auto,
     include_route,
     coauthor_user_id,
+    coauthor_user_ids,
+    buddy_session_id,
     posted_live,
   } = req.body ?? {};
 
@@ -244,6 +248,13 @@ export async function createPostController(
         typeof include_route === "boolean" ? include_route : undefined,
       coauthorUserId:
         typeof coauthor_user_id === "string" ? coauthor_user_id : null,
+      // Multi-person collab (Buddy Walks). Absent on every shipped client, so
+      // the single-coauthor path above is untouched for them.
+      coauthorUserIds: Array.isArray(coauthor_user_ids)
+        ? coauthor_user_ids.filter((id: unknown) => typeof id === "string")
+        : null,
+      buddySessionId:
+        typeof buddy_session_id === "string" ? buddy_session_id : null,
       // Client-owned FRESH claim (its 10-min window anchors to when the app
       // saw the run). Cosmetic; legacy clients omit it and get the feed
       // query's server-side derivation instead.
@@ -730,20 +741,51 @@ export async function respondToCoauthorController(
     if (typeof req.body?.accept !== "boolean") {
       return res.status(400).json({ error: "accept must be a boolean" });
     }
+    // Legacy scalar path first — it also updates the mirrored post_coauthors
+    // row, so a responder who is BOTH the mirror and a multi-collab member is
+    // fully resolved by this one call.
     const result = await respondToCoauthorInvite(
       req.userId!,
       req.params.postId,
       req.body.accept,
     );
-    if (!result) {
+
+    if (result) {
+      // Keep the multi-collab row in step for the mirrored participant.
+      await respondToMultiCoauthorInvite(
+        req.userId!,
+        req.params.postId,
+        req.body.accept,
+      );
+      if (req.body.accept) {
+        notifyCoauthorAccepted(
+          req.userId!,
+          result.author_id,
+          req.params.postId,
+        ).catch(() => {});
+      }
+      return res.json({ ok: true });
+    }
+
+    // Not the mirrored coauthor — they may still be one of the other credited
+    // participants on a multi-person collab.
+    const respondedMulti = await respondToMultiCoauthorInvite(
+      req.userId!,
+      req.params.postId,
+      req.body.accept,
+    );
+    if (!respondedMulti) {
       return res.status(404).json({ error: "invite_not_found" });
     }
     if (req.body.accept) {
-      notifyCoauthorAccepted(
-        req.userId!,
-        result.author_id,
-        req.params.postId,
-      ).catch(() => {});
+      const authorRows = await postAuthorId(req.params.postId);
+      if (authorRows) {
+        notifyCoauthorAccepted(
+          req.userId!,
+          authorRows,
+          req.params.postId,
+        ).catch(() => {});
+      }
     }
     res.json({ ok: true });
   } catch (error: any) {

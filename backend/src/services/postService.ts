@@ -37,6 +37,23 @@ export interface PostStatsSnapshot {
   date?: string | null;
 }
 
+/**
+ * One credited participant on a multi-person collab post.
+ *
+ * Cap of 8 matches BUDDY_MAX_PARTICIPANTS — a collab post exists to credit a
+ * buddy walk, so it can never need more names than a walk can hold.
+ */
+export const MAX_POST_COAUTHORS = 8;
+
+export interface PostCoauthor {
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+  status: "pending" | "accepted" | "declined";
+}
+
 export interface PostRow {
   post_id: string;
   user_id: string;
@@ -68,6 +85,10 @@ export interface PostRow {
   coauthor_first_name?: string | null;
   coauthor_last_name?: string | null;
   coauthor_profile_image_url?: string | null;
+  // Multi-person collab (Buddy Walks). NULL for every post that predates the
+  // feature, so the payload shape is unchanged for the legacy corpus and old
+  // clients go on reading the scalar fields above.
+  coauthors?: PostCoauthor[] | null;
   is_viewed?: boolean;
   // The viewer's own emoji reaction to this story (getUserActiveStories only),
   // so re-opening a story they already reacted to shows the reaction. null/absent
@@ -151,13 +172,70 @@ const POST_COLUMNS = `
 // visible only to the two people involved; accepted collabs are public to
 // whoever can see the post.
 const COAUTHOR_VISIBLE = `(p.coauthor_user_id IS NOT NULL AND (p.coauthor_status = 'accepted' OR p.user_id = $1 OR p.coauthor_user_id = $1))`;
+
+// ─── Multi-person collabs (post_coauthors) ──────────────────────────────
+//
+// A Buddy Walk post can credit up to 8 people, which the legacy scalar columns
+// (coauthor_user_id / _status / _workout_id) cannot express. Buddy posts write
+// BOTH representations: a post_coauthors row per participant AND the legacy
+// scalars pointing at the first one, so a shipped client that knows nothing
+// about this renders a coherent 2-person collab instead of breaking.
+//
+// EVERY fragment below is an EXISTS over post_coauthors, so it evaluates FALSE
+// for any post without rows there — which is every post that existed before
+// this feature. That is what keeps `visiblePostAuthor` byte-equivalent for the
+// legacy corpus: these clauses can only ever GRANT reach to a genuine
+// multi-collab, or DENY it on a block. `$1` must be the viewer id.
+const VIEWER_IS_MULTI_COAUTHOR = `EXISTS (
+	SELECT 1 FROM post_coauthors pca
+	WHERE pca.post_id = p.post_id AND pca.user_id = $1
+		AND pca.status <> 'declined'
+)`;
+
+// An accepted multi-collab reaches every participant's friend circle, exactly
+// as an accepted legacy collab reaches the coauthor's.
+const FRIEND_OF_MULTI_COAUTHOR = `EXISTS (
+	SELECT 1 FROM post_coauthors pca
+	JOIN friendships f ON f.friend_id = pca.user_id
+	WHERE pca.post_id = p.post_id AND pca.status = 'accepted'
+		AND f.user_id = $1 AND f.status = 'accepted'
+)`;
+
+// Blocks are checked against every ACCEPTED participant, in both directions —
+// the same rule the legacy coauthor block check applies.
+const BLOCKED_VS_MULTI_COAUTHOR = `EXISTS (
+	SELECT 1 FROM post_coauthors pca
+	JOIN user_blocks b
+		ON (b.blocker_id = $1 AND b.blocked_id = pca.user_id)
+		OR (b.blocker_id = pca.user_id AND b.blocked_id = $1)
+	WHERE pca.post_id = p.post_id AND pca.status = 'accepted'
+)`;
+
+// Accepted participants, as a JSON array for the client. NULL when the post has
+// none, which is every pre-existing post — so the payload shape is unchanged
+// for the entire legacy corpus and old clients keep reading the scalar columns.
+const MULTI_COAUTHORS_JSON = `(
+	SELECT jsonb_agg(jsonb_build_object(
+		'user_id', mcu.user_id,
+		'username', mcu.username,
+		'first_name', mcu.first_name,
+		'last_name', mcu.last_name,
+		'profile_image_url', mcu.profile_image_url,
+		'status', mca.status
+	) ORDER BY mca.created_at)
+	FROM post_coauthors mca
+	JOIN users mcu ON mcu.user_id = mca.user_id
+	WHERE mca.post_id = p.post_id
+		AND (mca.status = 'accepted' OR p.user_id = $1 OR mca.user_id = $1)
+)`;
 const COAUTHOR_COLUMNS = `
 	CASE WHEN ${COAUTHOR_VISIBLE} THEN p.coauthor_user_id END AS coauthor_user_id,
 	CASE WHEN ${COAUTHOR_VISIBLE} THEN p.coauthor_status END AS coauthor_status,
 	(SELECT cu.username FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_username,
 	(SELECT cu.first_name FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_first_name,
 	(SELECT cu.last_name FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_last_name,
-	(SELECT cu.profile_image_url FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_profile_image_url`;
+	(SELECT cu.profile_image_url FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_profile_image_url,
+	${MULTI_COAUTHORS_JSON} AS coauthors`;
 
 // SELECT list shared by feed + story-detail reads so both shapes match PostRow.
 // `$1` must be the viewer id (drives is_self / is_hyped).
@@ -203,6 +281,15 @@ export interface CreatePostInput {
   // Collab post: invite this accepted friend as coauthor (status 'pending'
   // until they accept). Ignored for auto posts.
   coauthorUserId?: string | null;
+  // Multi-person collab (Buddy Walks). When present, EVERY id here gets a
+  // post_coauthors row AND the first also fills the legacy scalar columns
+  // above, so shipped clients still render a coherent 2-person collab.
+  // Validated identically to coauthorUserId: accepted friend, no block either
+  // way, never self. Invalid ids are dropped rather than failing the post —
+  // one friend who unfriended you mid-walk shouldn't lose the whole recap.
+  coauthorUserIds?: string[] | null;
+  // Links the post back to the session it came from (analytics + recap).
+  buddySessionId?: string | null;
   // The author shared this inside their 10-minute fresh window (client-owned:
   // the window anchors to when the app SAW the finished workout). Drives the
   // FRESH chip for every viewer. Ignored for auto posts; legacy clients that
@@ -255,8 +342,39 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
   // here so the constraint holds no matter which controller path inserts.
   // Collabs are a FEED concept (profile grids + feed reach are feed-only) —
   // a story-only invite would be accepted into nothing. Silently ignored.
-  const coauthorId =
-    isAutoValue || !input.shareToFeed ? null : (input.coauthorUserId ?? null);
+  const collabAllowed = !isAutoValue && input.shareToFeed;
+
+  // Multi-person collab. Each candidate is validated with the SAME predicate
+  // the single-coauthor path uses, but invalid ones are DROPPED instead of
+  // throwing: a buddy recap crediting four people shouldn't fail outright
+  // because one of them unfriended you between the walk and the post.
+  const multiCoauthorIds: string[] = [];
+  if (collabAllowed && input.coauthorUserIds?.length) {
+    const candidates = Array.from(new Set(input.coauthorUserIds)).filter(
+      (id) => id && id !== input.userId,
+    );
+    for (const candidate of candidates.slice(0, MAX_POST_COAUTHORS)) {
+      const ok = await db.query(
+        `SELECT 1 FROM friendships f
+				 WHERE f.user_id = $1 AND f.friend_id = $2 AND f.status = 'accepted'
+					 AND NOT EXISTS (
+						 SELECT 1 FROM user_blocks b
+						 WHERE (b.blocker_id = $1 AND b.blocked_id = $2)
+								OR (b.blocker_id = $2 AND b.blocked_id = $1)
+					 )`,
+        [input.userId, candidate],
+      );
+      if (ok.length > 0) multiCoauthorIds.push(candidate);
+    }
+  }
+
+  // The legacy scalar mirrors the FIRST multi-coauthor when one wasn't named
+  // explicitly. That mirror is what keeps a shipped client — which has no idea
+  // post_coauthors exists — rendering the post as a normal 2-person collab
+  // rather than as a solo post with three uncredited people in the photo.
+  const coauthorId = !collabAllowed
+    ? null
+    : (input.coauthorUserId ?? multiCoauthorIds[0] ?? null);
   if (coauthorId) {
     if (coauthorId === input.userId) throw new Error("invalid_coauthor");
     const ok = await db.query(
@@ -269,6 +387,9 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 				 )`,
       [input.userId, coauthorId],
     );
+    // An explicitly-named bad coauthor is still a hard error (unchanged
+    // behavior); a mirrored one was already validated above, so this can only
+    // fire for the explicit path.
     if (ok.length === 0) throw new Error("invalid_coauthor");
   }
   // One deliberate share (a feed post OR a story) per workout — across BOTH
@@ -357,7 +478,28 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
       !isAutoValue && input.postedLive === true,
     ],
   );
-  if (rows[0]) return rows[0];
+  if (rows[0]) {
+    if (multiCoauthorIds.length > 0) {
+      await attachMultiCoauthors(
+        rows[0].post_id,
+        input.userId,
+        multiCoauthorIds,
+        coauthorId,
+        input.buddySessionId ?? null,
+      );
+      // Re-read so the caller's payload carries the coauthors array it just
+      // created, rather than the pre-attachment snapshot.
+      const refreshed = await db.query<PostRow>(
+        `${CREATED_POST_SELECT}
+			   FROM posts p
+			   JOIN users u ON u.user_id = p.user_id
+			  WHERE p.post_id = $2`,
+        [input.userId, rows[0].post_id],
+      );
+      if (refreshed[0]) return refreshed[0];
+    }
+    return rows[0];
+  }
 
   // Zero rows — the slot is taken and the update guard skipped it. An auto
   // post (flagged, or a legacy insert that classifies as auto) quietly yields
@@ -378,6 +520,104 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
     if (existing[0]) return existing[0];
   }
   throw new Error("workout_already_posted");
+}
+
+/**
+ * Write the post_coauthors rows for a multi-person collab and notify everyone.
+ *
+ * The participant mirrored into the legacy scalar columns is inserted here too,
+ * so post_coauthors is the COMPLETE list — code reading it never has to union
+ * it with the scalars to know who is on a post.
+ *
+ * Each row starts 'pending'; reach and block rules only apply once accepted,
+ * exactly like the single-coauthor flow.
+ */
+async function attachMultiCoauthors(
+  postId: string,
+  authorId: string,
+  coauthorIds: string[],
+  mirroredCoauthorId: string | null,
+  buddySessionId: string | null,
+): Promise<void> {
+  for (const coauthorId of coauthorIds) {
+    await db.query(
+      `INSERT INTO post_coauthors (post_id, user_id, status, buddy_session_id)
+			 VALUES ($1, $2, 'pending', $3)
+			 ON CONFLICT (post_id, user_id) DO NOTHING`,
+      [postId, coauthorId, buddySessionId],
+    );
+  }
+
+  // The mirrored participant already gets notifyCoauthorInvite from the legacy
+  // path — notifying them again here would double-push for one invite.
+  const toNotify = coauthorIds.filter((id) => id !== mirroredCoauthorId);
+  for (const coauthorId of toNotify) {
+    void notifyCoauthorInvite(authorId, coauthorId, postId).catch(() => {
+      /* a failed invite push must never fail the post */
+    });
+  }
+}
+
+/** The post's author id, or null when the post is gone. */
+export async function postAuthorId(postId: string): Promise<string | null> {
+  const rows = await db.query<{ user_id: string }>(
+    `SELECT user_id FROM posts WHERE post_id = $1 AND deleted_at IS NULL`,
+    [postId],
+  );
+  return rows[0]?.user_id ?? null;
+}
+
+/**
+ * Everyone credited on a post, legacy scalar and multi-collab alike.
+ *
+ * Callers that fan out notifications or run moderation need the full set;
+ * `acceptedCoauthor` (singular) remains for the legacy two-person paths.
+ */
+export async function acceptedCoauthorIds(postId: string): Promise<string[]> {
+  const rows = await db.query<{ user_id: string }>(
+    `SELECT user_id FROM post_coauthors
+		  WHERE post_id = $1 AND status = 'accepted'
+		 UNION
+		 SELECT coauthor_user_id AS user_id FROM posts
+		  WHERE post_id = $1 AND coauthor_status = 'accepted'
+		    AND coauthor_user_id IS NOT NULL AND deleted_at IS NULL`,
+    [postId],
+  );
+  return rows.map((r) => r.user_id);
+}
+
+/**
+ * Accept or decline a multi-person collab invite.
+ *
+ * Mirrors respondToCoauthorInvite: declining works after acceptance too
+ * ("leave post"). When the responder is ALSO the one mirrored into the legacy
+ * scalar columns, both representations are updated together so old and new
+ * clients never disagree about whether they're on the post.
+ */
+export async function respondToMultiCoauthorInvite(
+  userId: string,
+  postId: string,
+  accept: boolean,
+): Promise<boolean> {
+  const updated = await db.query<{ user_id: string }>(
+    `UPDATE post_coauthors
+		    SET status = $3, responded_at = NOW()
+		  WHERE post_id = $1 AND user_id = $2
+		  RETURNING user_id`,
+    [postId, userId, accept ? "accepted" : "declined"],
+  );
+  if (updated.length === 0) return false;
+
+  // Keep the legacy mirror in step when this responder is the mirrored one.
+  await db.query(
+    `UPDATE posts
+		    SET coauthor_status = $3,
+		        coauthor_user_id = CASE WHEN $3::text IS NULL THEN NULL ELSE coauthor_user_id END
+		  WHERE post_id = $1 AND coauthor_user_id = $2 AND deleted_at IS NULL`,
+    [postId, userId, accept ? "accepted" : null],
+  );
+
+  return true;
 }
 
 /**
@@ -1454,15 +1694,18 @@ export async function visiblePostAuthor(
     `SELECT p.user_id FROM posts p
 		 WHERE p.post_id = $2 AND p.deleted_at IS NULL AND p.share_to_feed
 			 AND (p.user_id = $1 OR p.coauthor_user_id = $1
+				 OR ${VIEWER_IS_MULTI_COAUTHOR}
 				 OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")})
 			 AND (p.user_id = $1
 				 OR p.coauthor_user_id = $1
+				 OR ${VIEWER_IS_MULTI_COAUTHOR}
 				 OR EXISTS (
 					 SELECT 1 FROM friendships f
 					 WHERE f.user_id = $1 AND f.status = 'accepted'
 						 AND (f.friend_id = p.user_id
 							 OR (p.coauthor_status = 'accepted' AND f.friend_id = p.coauthor_user_id))
-				 ))
+				 )
+				 OR ${FRIEND_OF_MULTI_COAUTHOR})
 			 AND NOT EXISTS (
 				 SELECT 1 FROM user_blocks b
 				 WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
@@ -1473,7 +1716,8 @@ export async function visiblePostAuthor(
 							(b.blocker_id = $1 AND b.blocked_id = p.coauthor_user_id)
 							OR (b.blocker_id = p.coauthor_user_id AND b.blocked_id = $1)
 						))
-			 )`,
+			 )
+			 AND NOT ${BLOCKED_VS_MULTI_COAUTHOR}`,
     [viewerId, postId],
   );
   return rows[0]?.user_id ?? null;

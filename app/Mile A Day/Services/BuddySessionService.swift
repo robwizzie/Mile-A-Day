@@ -65,6 +65,8 @@ final class BuddySessionService: ObservableObject {
     /// Invites waiting for a response.
     @Published private(set) var invites: [BuddySessionState] = []
     @Published private(set) var candidates: [BuddyCandidate] = []
+    /// Friends walking right now that the user could join.
+    @Published private(set) var joinableFriendSessions: [JoinableFriendSession] = []
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
 
@@ -135,6 +137,22 @@ final class BuddySessionService: ObservableObject {
             // A silent failure here is correct: this runs on every foreground
             // and must never surface an alert for a transient network blip.
             print("[BuddySessionService] refreshMySessions failed: \(error)")
+        }
+    }
+
+    /// Refresh the "friends walking right now" list.
+    ///
+    /// Silent on failure — this drives an optional dashboard card, and a
+    /// network blip must never produce an alert for something the user didn't
+    /// ask for. Cleared on failure so a stale offer can't linger.
+    func refreshJoinableFriendSessions() async {
+        guard currentUserId != nil else { return }
+        do {
+            joinableFriendSessions = try await request(
+                "/buddy/joinable", responseType: JoinableFriendSessionsResponse.self
+            ).sessions
+        } catch {
+            joinableFriendSessions = []
         }
     }
 

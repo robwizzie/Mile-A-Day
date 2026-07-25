@@ -320,3 +320,52 @@ struct BuddyRecapResponse: Codable {
 struct BuddyOKResponse: Codable {
     let ok: Bool?
 }
+
+/// A friend's buddy walk that's running right now and has room.
+///
+/// This is the permission-free substitute for ambient proximity sensing:
+/// same "they're doing it, join them" moment, no Bluetooth, any distance,
+/// and it works for remote friends too. Pull-only — the server deliberately
+/// sends no push for these, so nobody gets spammed every time a friend walks.
+struct JoinableFriendSession: Codable, Identifiable, Equatable {
+    let sessionId: String
+    let joinCode: String
+    let mode: BuddyMode
+    let activityType: String
+    let status: BuddySessionStatus
+    let hostUserId: String
+    let hostUsername: String?
+    let hostFirstName: String?
+    let hostProfileImageUrl: String?
+    let participantCount: Int
+
+    var id: String { sessionId }
+
+    var hostDisplayName: String {
+        if let hostFirstName, !hostFirstName.isEmpty { return hostFirstName }
+        if let hostUsername, !hostUsername.isEmpty { return hostUsername }
+        return "A friend"
+    }
+
+    var isRunning: Bool { activityType == "running" }
+    var accentColor: Color {
+        MADTheme.workoutColor(isRunning ? "running" : "walking")
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sessionId = "session_id"
+        case joinCode = "join_code"
+        case mode
+        case activityType = "activity_type"
+        case status
+        case hostUserId = "host_user_id"
+        case hostUsername = "host_username"
+        case hostFirstName = "host_first_name"
+        case hostProfileImageUrl = "host_profile_image_url"
+        case participantCount = "participant_count"
+    }
+}
+
+struct JoinableFriendSessionsResponse: Codable {
+    let sessions: [JoinableFriendSession]
+}

@@ -145,6 +145,9 @@ async function computeSocialAggregates(userId: string): Promise<{
   competitionsStarted: number;
   competitionsEntered: number;
   competitionsWon: number;
+  buddySessionsCompleted: number;
+  buddyDistinctPartners: number;
+  buddySessionsWon: number;
 }> {
   const zero = {
     storyPostsCount: 0,
@@ -153,9 +156,22 @@ async function computeSocialAggregates(userId: string): Promise<{
     competitionsStarted: 0,
     competitionsEntered: 0,
     competitionsWon: 0,
+    buddySessionsCompleted: 0,
+    buddyDistinctPartners: 0,
+    buddySessionsWon: 0,
   };
   try {
-    const [stories, hypes, nudges, started, entered, won] = await Promise.all([
+    const [
+      stories,
+      hypes,
+      nudges,
+      started,
+      entered,
+      won,
+      buddyDone,
+      buddyPartners,
+      buddyWon,
+    ] = await Promise.all([
       db
         .query<{
           count: string;
@@ -209,6 +225,46 @@ async function computeSocialAggregates(userId: string): Promise<{
           [userId],
         )
         .catch(() => [{ count: "0" }]),
+      // Buddy Walks. Only sessions that actually COMPLETED count — an
+      // abandoned lobby or a walk someone bailed on isn't an achievement.
+      db
+        .query<{
+          count: string;
+        }>(
+          `SELECT COUNT(*)::text AS count
+             FROM buddy_session_participants p
+             JOIN buddy_sessions s ON s.id = p.session_id
+            WHERE p.user_id = $1 AND p.status = 'finished'
+              AND s.status = 'completed'`,
+          [userId],
+        )
+        .catch(() => [{ count: "0" }]),
+      // Distinct PEOPLE walked with, across all completed sessions. Counting
+      // sessions here would let one friend unlock the whole crew family.
+      db
+        .query<{
+          count: string;
+        }>(
+          `SELECT COUNT(DISTINCT other.user_id)::text AS count
+             FROM buddy_session_participants mine
+             JOIN buddy_sessions s ON s.id = mine.session_id
+             JOIN buddy_session_participants other
+               ON other.session_id = mine.session_id
+              AND other.user_id <> mine.user_id
+            WHERE mine.user_id = $1 AND mine.status = 'finished'
+              AND s.status = 'completed'
+              AND other.status = 'finished'`,
+          [userId],
+        )
+        .catch(() => [{ count: "0" }]),
+      db
+        .query<{
+          count: string;
+        }>(
+          `SELECT COUNT(*)::text AS count FROM buddy_sessions WHERE winner_user_id = $1`,
+          [userId],
+        )
+        .catch(() => [{ count: "0" }]),
     ]);
     return {
       storyPostsCount: parseInt(stories[0]?.count ?? "0", 10) || 0,
@@ -217,6 +273,9 @@ async function computeSocialAggregates(userId: string): Promise<{
       competitionsStarted: parseInt(started[0]?.count ?? "0", 10) || 0,
       competitionsEntered: parseInt(entered[0]?.count ?? "0", 10) || 0,
       competitionsWon: parseInt(won[0]?.count ?? "0", 10) || 0,
+      buddySessionsCompleted: parseInt(buddyDone[0]?.count ?? "0", 10) || 0,
+      buddyDistinctPartners: parseInt(buddyPartners[0]?.count ?? "0", 10) || 0,
+      buddySessionsWon: parseInt(buddyWon[0]?.count ?? "0", 10) || 0,
     };
   } catch {
     return zero;
@@ -414,6 +473,21 @@ function evaluatePredicate(
       // default: entered/participated
       return { earned: agg.competitionsEntered >= req, aggregateOnly: true };
     }
+    case "buddy": {
+      // Same badgeId-prefix family shape as `competition` above.
+      if (req === null) return { earned: false, aggregateOnly: true };
+      if (badge.badgeId.startsWith("buddy_crew_")) {
+        return {
+          earned: agg.buddyDistinctPartners >= req,
+          aggregateOnly: true,
+        };
+      }
+      if (badge.badgeId.startsWith("buddy_won_")) {
+        return { earned: agg.buddySessionsWon >= req, aggregateOnly: true };
+      }
+      // default: completed sessions
+      return { earned: agg.buddySessionsCompleted >= req, aggregateOnly: true };
+    }
     default:
       return { earned: false, aggregateOnly: true };
   }
@@ -492,7 +566,11 @@ function isWorkoutDerived(category: BadgeCategory): boolean {
     category === "story" ||
     category === "hype" ||
     category === "nudge" ||
-    category === "competition"
+    category === "competition" ||
+    // Buddy medals derive from completed SESSIONS, not from workout history.
+    // Deleting a workout must not strip the medal for a walk you genuinely
+    // did with a friend — and the friend's copy of that session still exists.
+    category === "buddy"
   );
 }
 
@@ -754,6 +832,85 @@ const EXTRA_BADGES: Array<{
     rarity: "legendary",
     requirement: 25,
     sortOrder: 942,
+  },
+  // ── Buddy Walks ──
+  // Three families by badgeId prefix (see evaluatePredicate's "buddy" case):
+  // buddy_done_* = completed sessions, buddy_crew_* = distinct people walked
+  // with, buddy_won_* = races won. Cooperative modes never declare a winner,
+  // so the buddy_won_ family is reachable only through race modes.
+  //
+  // SF Symbols note: `figure.2` ships in SF Symbols 4 (iOS 16), so it renders
+  // on the iOS 17 deployment target. Avoid anything newer here — a too-new
+  // symbol renders as a BLANK box on iOS 17, not a fallback.
+  {
+    badgeId: "buddy_done_1",
+    category: "buddy",
+    name: "Better Together",
+    description: "Finished your first buddy walk",
+    icon: "figure.2",
+    rarity: "common",
+    requirement: 1,
+    sortOrder: 950,
+  },
+  {
+    badgeId: "buddy_done_10",
+    category: "buddy",
+    name: "Walking Partner",
+    description: "Finished 10 buddy walks",
+    icon: "figure.2",
+    rarity: "rare",
+    requirement: 10,
+    sortOrder: 951,
+  },
+  {
+    badgeId: "buddy_done_50",
+    category: "buddy",
+    name: "Inseparable",
+    description: "Finished 50 buddy walks",
+    icon: "figure.2",
+    rarity: "legendary",
+    requirement: 50,
+    sortOrder: 952,
+  },
+  {
+    badgeId: "buddy_crew_3",
+    category: "buddy",
+    name: "Small Crew",
+    description: "Walked with 3 different friends",
+    icon: "person.3.fill",
+    rarity: "common",
+    requirement: 3,
+    sortOrder: 953,
+  },
+  {
+    badgeId: "buddy_crew_10",
+    category: "buddy",
+    name: "Whole Crew",
+    description: "Walked with 10 different friends",
+    icon: "person.3.fill",
+    rarity: "rare",
+    requirement: 10,
+    sortOrder: 954,
+  },
+  {
+    badgeId: "buddy_won_1",
+    category: "buddy",
+    name: "Photo Finish",
+    description: "Won your first buddy race",
+    icon: "flag.checkered",
+    rarity: "rare",
+    requirement: 1,
+    sortOrder: 955,
+  },
+  {
+    badgeId: "buddy_won_10",
+    category: "buddy",
+    name: "Pace Setter",
+    description: "Won 10 buddy races",
+    icon: "flag.checkered",
+    rarity: "legendary",
+    requirement: 10,
+    sortOrder: 956,
   },
 ];
 
