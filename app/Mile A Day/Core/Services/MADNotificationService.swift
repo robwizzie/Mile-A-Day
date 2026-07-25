@@ -565,20 +565,20 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         }
 
         let service = FriendService()
-        // Only the id travels in the push payload, so resolve the row to get a
-        // BackendUser for the service call. If it's already gone, the request
-        // was answered elsewhere (another device, or in-app).
-        await service.loadFriendRequests()
-        guard let user = service.friendRequests.first(where: { $0.user_id == requesterId }) else {
-            await postLocalToast(
-                title: "Already handled",
-                body: "That request was already answered."
-            )
-            await setAppBadge(service.friendRequests.count)
-            return
-        }
-
         do {
+            // Only the id travels in the push payload, so resolve the row to get a
+            // BackendUser for the service call. If it's already gone, the request
+            // was answered elsewhere (another device, or in-app).
+            try await service.loadFriendRequests()
+            guard let user = service.friendRequests.first(where: { $0.user_id == requesterId }) else {
+                await postLocalToast(
+                    title: "Already handled",
+                    body: "That request was already answered."
+                )
+                await setAppBadge(service.friendRequests.count)
+                return
+            }
+
             if accept {
                 // acceptFriendRequest posts its own "You're now friends!" local
                 // notification, so adding a toast here would double-notify.
