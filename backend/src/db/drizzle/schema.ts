@@ -425,6 +425,10 @@ export const competitions = pgTable(
     workouts: jsonb().notNull(),
     type: varchar({ length: 20 }).notNull(),
     options: jsonb().notNull(),
+    // Optional team play: { member_pick: boolean, teams: [{ id, name }] }.
+    // Deliberately NOT inside options — clients PATCH options wholesale and
+    // would silently erase teams. NULL = no teams for this competition.
+    teams: jsonb(),
     ended: boolean().default(false),
     winner: text(),
     owner: text(),
@@ -1210,6 +1214,9 @@ export const competitionUsers = pgTable(
     userId: text("user_id").notNull(),
     progress: jsonb(),
     inviteStatus: varchar("invite_status", { length: 20 }),
+    // Team membership within the competition (id from competitions.teams).
+    // NULL = unassigned; cleared when the team is deleted.
+    teamId: text("team_id"),
     placement: integer(),
     lastKnownRank: integer("last_known_rank"),
     lastKnownScore: doublePrecision("last_known_score"),

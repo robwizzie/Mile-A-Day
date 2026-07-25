@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { BadRequestError } from "../errors/Errors.js";
 import {
   Competition,
@@ -217,6 +218,7 @@ const USERS_AGG_SQL = `
 				'competition_id', cu.competition_id,
 				'user_id', cu.user_id,
 				'invite_status', cu.invite_status,
+				'team_id', cu.team_id,
 				'progress', cu.progress,
 				'username', u.username,
 				'profile_image_url', u.profile_image_url
@@ -290,9 +292,28 @@ export async function getCompetition(
         ? { daily_activity: activityByUser[user.user_id] ?? {} }
         : {}),
     }));
+    attachTeamScores(competition);
   }
 
   return competition;
+}
+
+/**
+ * Derive per-team scores (straight sum of accepted members' scores) onto
+ * competition.teams.teams entries. Purely additive response enrichment —
+ * nothing is stored, so team standings always track the live recompute.
+ */
+function attachTeamScores(competition: Competition): void {
+  const teams = competition.teams?.teams;
+  if (!teams?.length) return;
+  const totals = new Map<string, number>(teams.map((t) => [t.id, 0]));
+  for (const user of competition.users) {
+    if (user.invite_status !== "accepted" || !user.team_id) continue;
+    if (totals.has(user.team_id)) {
+      totals.set(user.team_id, totals.get(user.team_id)! + (user.score ?? 0));
+    }
+  }
+  for (const team of teams) team.score = totals.get(team.id) ?? 0;
 }
 
 export async function getCompetitions(
@@ -352,6 +373,7 @@ export async function getCompetitions(
         ...user,
         ...userScores[user.user_id],
       }));
+      attachTeamScores(competition);
     }
   }
 
@@ -584,6 +606,182 @@ export async function deleteCompetition(
     competitionId,
   ]);
   await db.query("DELETE FROM competitions WHERE id = $1", [competitionId]);
+}
+
+/** Maximum number of teams per competition. */
+export const MAX_TEAMS = 12;
+
+function validateTeamName(name: unknown): string {
+  if (typeof name !== "string") {
+    throw new BadRequestError("team name must be a string");
+  }
+  const trimmed = name.trim();
+  if (trimmed.length === 0) {
+    throw new BadRequestError("team name cannot be empty");
+  }
+  if (trimmed.length > COMPETITION_NAME_MAX_LENGTH) {
+    throw new BadRequestError(
+      `team name cannot exceed ${COMPETITION_NAME_MAX_LENGTH} characters`,
+    );
+  }
+  return trimmed;
+}
+
+export interface SetCompetitionTeamsParams {
+  member_pick?: boolean;
+  teams?: { id?: string; name: string }[];
+  assignments?: Record<string, string | null>;
+}
+
+/**
+ * Owner-only team setup (authz + lobby check live in the controller).
+ * Replaces the team list and/or member_pick flag, applies membership
+ * assignments, and clears memberships that point at deleted teams.
+ * An empty team list turns team play off entirely (column back to NULL).
+ */
+export async function setCompetitionTeams(
+  competition: Competition,
+  params: SetCompetitionTeamsParams,
+): Promise<Competition> {
+  const { member_pick, teams, assignments } = params;
+
+  if (member_pick !== undefined && typeof member_pick !== "boolean") {
+    throw new BadRequestError("member_pick must be a boolean");
+  }
+
+  let teamList = competition.teams?.teams ?? [];
+  if (teams !== undefined) {
+    if (!Array.isArray(teams)) {
+      throw new BadRequestError("teams must be an array");
+    }
+    if (teams.length > MAX_TEAMS) {
+      throw new BadRequestError(`Cannot have more than ${MAX_TEAMS} teams`);
+    }
+    teamList = teams.map((t) => ({
+      // Keep client-known ids for renames; mint ids for new teams.
+      id:
+        typeof t.id === "string" && t.id.length > 0
+          ? t.id
+          : `t_${randomUUID().replaceAll("-", "").slice(0, 12)}`,
+      name: validateTeamName(t.name),
+    }));
+    const ids = teamList.map((t) => t.id);
+    const names = teamList.map((t) => t.name.toLowerCase());
+    if (new Set(ids).size !== ids.length) {
+      throw new BadRequestError("duplicate team ids");
+    }
+    if (new Set(names).size !== names.length) {
+      throw new BadRequestError("duplicate team names");
+    }
+  }
+
+  const stored =
+    teamList.length === 0
+      ? null
+      : {
+          member_pick: member_pick ?? competition.teams?.member_pick ?? false,
+          teams: teamList.map(({ id, name }) => ({ id, name })),
+        };
+
+  const validIds = teamList.map((t) => t.id);
+  const participantIds = new Set(competition.users.map((u) => u.user_id));
+  const entries = Object.entries(assignments ?? {});
+  for (const [userId, teamId] of entries) {
+    if (!participantIds.has(userId)) {
+      throw new BadRequestError(`${userId} is not in this competition`);
+    }
+    if (teamId !== null && !validIds.includes(teamId)) {
+      throw new BadRequestError(`unknown team id: ${teamId}`);
+    }
+  }
+
+  await db.query(
+    `UPDATE competitions SET teams = $1, updated_at = NOW() WHERE id = $2`,
+    [stored ? JSON.stringify(stored) : null, competition.id],
+  );
+  // Membership on a deleted team (or teams turned off) reverts to unassigned.
+  await db.query(
+    `UPDATE competition_users SET team_id = NULL
+		WHERE competition_id = $1 AND team_id IS NOT NULL AND team_id <> ALL($2::text[])`,
+    [competition.id, validIds],
+  );
+  for (const [userId, teamId] of entries) {
+    await db.query(
+      `UPDATE competition_users SET team_id = $1 WHERE competition_id = $2 AND user_id = $3`,
+      [teamId, competition.id, userId],
+    );
+  }
+
+  return getCompetition(competition.id);
+}
+
+/** Self-assignment (authz — member_pick/owner/lobby — lives in the controller). */
+export async function pickCompetitionTeam(
+  competitionId: string,
+  userId: string,
+  teamId: string | null,
+): Promise<Competition> {
+  await db.query(
+    `UPDATE competition_users SET team_id = $1 WHERE competition_id = $2 AND user_id = $3`,
+    [teamId, competitionId, userId],
+  );
+  return getCompetition(competitionId);
+}
+
+/**
+ * Per-participant recent-form stats for the Balance/Randomize UI: average
+ * per day over the last 14 FULL days (ending yesterday ET — today would skew
+ * low), filtered to the competition's activities (run/walk/both) or steps,
+ * plus the same average projected onto the competition's interval.
+ */
+export async function getCompetitionTeamStats(competition: Competition) {
+  const WINDOW_DAYS = 14;
+  const [y, m, d] = getTodayET().split("-").map(Number);
+  const todayMs = Date.UTC(y, m - 1, d);
+  const toStr = (ms: number) => new Date(ms).toISOString().split("T")[0];
+  const start = toStr(todayMs - WINDOW_DAYS * 86400000);
+  const end = toStr(todayMs - 86400000);
+
+  const acceptedIds = competition.users
+    .filter((u) => u.invite_status === "accepted")
+    .map((u) => u.user_id);
+  const isStepUnit = competition.options.unit === "steps";
+  const rows = isStepUnit
+    ? await getStepsDateRangeBatch(acceptedIds, start, end)
+    : await getQuantityDateRangeBatch(
+        acceptedIds,
+        start,
+        end,
+        competition.workouts,
+      );
+
+  const totals: Record<string, number> = {};
+  for (const id of acceptedIds) totals[id] = 0;
+  for (const row of rows) totals[row.user_id] += Number(row.total_distance);
+
+  const interval = competition.options.interval ?? "day";
+  // ponytail: month ≈ 30 days — close enough for a balancing heuristic.
+  const multiplier = interval === "week" ? 7 : interval === "month" ? 30 : 1;
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+
+  const stats: Record<
+    string,
+    { avg_per_day: number; avg_per_interval: number }
+  > = {};
+  for (const id of acceptedIds) {
+    const avgPerDay = totals[id] / WINDOW_DAYS;
+    stats[id] = {
+      avg_per_day: round2(avgPerDay),
+      avg_per_interval: round2(avgPerDay * multiplier),
+    };
+  }
+
+  return {
+    window_days: WINDOW_DAYS,
+    interval,
+    unit: competition.options.unit,
+    stats,
+  };
 }
 
 interface UserData {
