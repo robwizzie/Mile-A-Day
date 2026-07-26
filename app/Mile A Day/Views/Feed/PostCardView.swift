@@ -44,6 +44,17 @@ struct PostCardView: View {
     /// Non-nil when the CURRENT user is this post's pending coauthor —
     /// shows the Accept/Decline collab banner. Called with accept/decline.
     var onRespondCoauthor: ((Bool) -> Void)? = nil
+    /// Non-nil when the CURRENT user is this post's ACCEPTED coauthor — adds
+    /// "Remove me from this post" to the menu (the same decline call, which
+    /// doubles as "leave post" after acceptance).
+    var onLeaveCollab: (() -> Void)? = nil
+
+    /// The viewer is an author of this post — its poster, or the accepted
+    /// coauthor of a collab. `is_self` is the SERVER's "you posted this", so on
+    /// a collab it's false for the coauthor, which offered them a Hype button
+    /// and a Report/Block menu on a post they co-own. Everything that asks
+    /// "is this mine?" for interaction purposes goes through this.
+    private var isMine: Bool { post.is_self || onLeaveCollab != nil }
 
     @State private var hypeBurst = 0
     /// Collapses the same physical double-tap arriving from two recognizers
@@ -128,6 +139,10 @@ struct PostCardView: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
         .background(Capsule().fill(MADTheme.Colors.madRed))
+        // A collab header carries two names in the space of one. Without this
+        // the chip is as compressible as they are, and "FRESH" is the first
+        // thing to get squeezed — let the names truncate instead.
+        .fixedSize()
     }
 
     private var header: some View {
@@ -136,12 +151,18 @@ struct PostCardView: View {
                 // Collab post: overlapping avatars + "a & b", like Instagram's
                 // collab header — and like Instagram, each avatar/name is its
                 // OWN tap target routing to that person's profile.
+                // The overlap is PADDING, not `.offset` — an offset draws
+                // outside the layout bounds, so the cluster measured 40pt tall
+                // while occupying 44, and everything else in the header (the
+                // FRESH chip especially) centered 2pt high against it.
                 ZStack(alignment: .bottomTrailing) {
                     Button { onTapAuthor?() } label: {
                         AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
                     }
                     .buttonStyle(.plain)
                     .disabled(onTapAuthor == nil)
+                    .padding(.trailing, 8)
+                    .padding(.bottom, 4)
                     Button { onTapCoauthor?() } label: {
                         AvatarView(name: post.coauthorDisplayName,
                                    imageURL: post.coauthor_profile_image_url, size: 26)
@@ -149,9 +170,7 @@ struct PostCardView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(onTapCoauthor == nil)
-                    .offset(x: 8, y: 4)
                 }
-                .padding(.trailing, 8)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 0) {
                         Button { onTapAuthor?() } label: { nameText(post.displayName) }
@@ -204,6 +223,13 @@ struct PostCardView: View {
                     Button(role: .destructive, action: onDelete) {
                         Label(post.share_to_feed == false ? "Delete story" : "Delete post",
                               systemImage: "trash")
+                    }
+                } else if let onLeaveCollab {
+                    // Accepted coauthor: the post is the AUTHOR's to edit or
+                    // delete, but leaving it is theirs. Reporting/blocking a
+                    // post you're an author of makes no sense, so neither shows.
+                    Button(role: .destructive, action: onLeaveCollab) {
+                        Label("Remove me from this post", systemImage: "person.badge.minus")
                     }
                 } else {
                     Button(action: onReport) { Label("Report", systemImage: "flag") }
@@ -270,7 +296,7 @@ struct PostCardView: View {
     /// posts only, once — a re-double-tap replays the burst without
     /// double-counting).
     private func doubleTapHype() {
-        guard !post.is_self else { return }
+        guard !isMine else { return }
         let now = Date()
         guard now.timeIntervalSince(lastDoubleTapAt) > 0.35 else { return }
         lastDoubleTapAt = now
@@ -347,7 +373,7 @@ struct PostCardView: View {
             ZoomablePhotoSlide(
                 url: url,
                 badge: badged ? ("Stats", "chart.bar.fill") : nil,
-                onDoubleTap: post.is_self ? nil : doubleTapHype
+                onDoubleTap: isMine ? nil : doubleTapHype
             )
         case .route(let coords):
             routeSlide(coords)
@@ -379,7 +405,7 @@ struct PostCardView: View {
                 ZoomablePhotoSlide(
                     url: nil,
                     badge: nil,
-                    onDoubleTap: post.is_self ? nil : doubleTapHype
+                    onDoubleTap: isMine ? nil : doubleTapHype
                 )
             }
         }
@@ -405,7 +431,7 @@ struct PostCardView: View {
                     renderer.isOpaque = true
                     return renderer.uiImage
                 },
-                onDoubleTap: post.is_self ? nil : doubleTapHype
+                onDoubleTap: isMine ? nil : doubleTapHype
             )
     }
 
@@ -461,7 +487,7 @@ struct PostCardView: View {
         // retained snapshot — nothing big is baked per card up front.
         .instagramZoomable(
             imageProvider: { routeZoomComposite(coords) },
-            onDoubleTap: post.is_self ? nil : doubleTapHype
+            onDoubleTap: isMine ? nil : doubleTapHype
         )
     }
 
@@ -559,7 +585,7 @@ struct PostCardView: View {
             .buttonStyle(.plain)
             .disabled(onOpenComments == nil)
             Spacer()
-            if !post.is_self {
+            if !isMine {
                 HypeButton(
                     isHyped: post.is_hyped,
                     isBusy: isHyping,

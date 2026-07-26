@@ -5,7 +5,10 @@ import { getFriendship } from "../services/friendshipService.js";
 import { getUser } from "../services/userService.js";
 import { sendPush } from "../services/pushNotificationService.js";
 import { shouldSendNotification } from "../services/notificationSettingsService.js";
-import { getPostAuthor } from "../services/postService.js";
+import {
+  visiblePostAuthors,
+  VisiblePostAuthors,
+} from "../services/postService.js";
 import { hasUnlimitedHypes } from "../services/privilegedUsers.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import {
@@ -64,6 +67,53 @@ async function isFriendOrCoParticipant(
   return shareActiveCompetition(senderId, targetId);
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * A collab post reaches BOTH authors' circles, so "can I hype this?" can't be
+ * answered by friendship with the post's primary author alone — the whole
+ * point of a collab is that the coauthor's friends see it too. Anyone who can
+ * SEE the post can hype it; that's the same audience that can already comment
+ * on it (`visiblePostAuthors`), and it's strictly narrower than the feed.
+ *
+ * The hype itself is always recorded against the PRIMARY author, whichever of
+ * the two the client named: `hype_count` / `is_hyped` on a post card count
+ * rows keyed to `posts.user_id`, so a hype filed against the coauthor would be
+ * invisible on the card AND skip the per-run dedupe (letting the same post be
+ * hyped twice). The coauthor gets the push instead — see sendHype.
+ *
+ * Pure visibility + ownership: "is this MY post?" is a send-side rule only
+ * (viewing your own post's hypers is fine), so it lives in sendHype.
+ */
+async function resolvePostHypeTarget(
+  viewerId: string,
+  postId: string,
+  requestedTargetId: string,
+): Promise<
+  | { ok: true; targetId: string; authors: VisiblePostAuthors }
+  | { ok: false; error: string }
+> {
+  const authors = UUID_RE.test(postId)
+    ? await visiblePostAuthors(viewerId, postId)
+    : null;
+  // Deliberately the same message for "no such post" and "not visible to you":
+  // a distinct 404 would confirm the post exists to someone who can't see it.
+  if (!authors) {
+    return { ok: false, error: "context_id does not reference a visible post" };
+  }
+  if (
+    requestedTargetId !== authors.author_id &&
+    requestedTargetId !== authors.coauthor_user_id
+  ) {
+    return {
+      ok: false,
+      error: "context_id does not reference the target's post",
+    };
+  }
+  return { ok: true, targetId: authors.author_id, authors };
+}
+
 function buildHypeBackBody(
   senderName: string,
   context: HypeContext | undefined,
@@ -87,7 +137,7 @@ function buildHypeBackBody(
 
 export async function sendHype(req: AuthenticatedRequest, res: Response) {
   const senderId = req.userId!;
-  const targetUserId = req.body?.target_user_id;
+  let targetUserId = req.body?.target_user_id;
   const rawContextType = req.body?.context_type;
   const rawContextId = req.body?.context_id;
   const rawContextLabel = req.body?.context_label;
@@ -126,12 +176,42 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
       };
     }
 
-    const allowed = await isFriendOrCoParticipant(senderId, targetUserId);
-    if (!allowed) {
-      return res.status(403).json({
-        error:
-          "You can only hype friends or people in your active competitions",
-      });
+    // Post hypes are authorized by whether the sender can SEE the post, not by
+    // friendship with its primary author — a collab post legitimately reaches
+    // the coauthor's friends too, and the old friend-only gate 403'd them after
+    // the client had already played the hype animation. Resolving here also
+    // pins the hype to the primary author and rejects a (target, post) pair
+    // that don't belong together, which used to bypass dedupe and pollute
+    // counts. Non-post contexts keep the friend/co-participant gate.
+    let postCoauthorId: string | null = null;
+    if (context?.contextType === "post") {
+      const resolved = await resolvePostHypeTarget(
+        senderId,
+        context.contextId,
+        targetUserId,
+      );
+      if (!resolved.ok) {
+        return res.status(400).json({ error: resolved.error });
+      }
+      // Both sides of a collab own the post — neither may hype it. (The
+      // primary-author case is the plain self-hype check above; this is the
+      // coauthor, for whom `target_user_id` is the OTHER person.)
+      if (
+        resolved.targetId === senderId ||
+        resolved.authors.coauthor_user_id === senderId
+      ) {
+        return res.status(400).json({ error: "You can't hype your own post" });
+      }
+      targetUserId = resolved.targetId;
+      postCoauthorId = resolved.authors.coauthor_user_id;
+    } else {
+      const allowed = await isFriendOrCoParticipant(senderId, targetUserId);
+      if (!allowed) {
+        return res.status(403).json({
+          error:
+            "You can only hype friends or people in your active competitions",
+        });
+      }
     }
 
     // A context-less hype — older clients' push-notification "🔥 Hype" button
@@ -167,22 +247,6 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
     // when a real notification exists, so the notification itself is the proof.
     // Abuse is bounded by the friend/co-participant gate, per-context dedupe,
     // and the daily hype limit below.
-
-    // Post hypes must reference a real post authored by the target — without
-    // this, mismatched (target, post) pairs bypass dedupe and pollute counts.
-    // (Non-uuid ids short-circuit before they'd blow up the ::uuid cast.)
-    if (context?.contextType === "post") {
-      const isUuid =
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-          context.contextId,
-        );
-      const author = isUuid ? await getPostAuthor(context.contextId) : null;
-      if (author !== targetUserId) {
-        return res
-          .status(400)
-          .json({ error: "context_id does not reference the target's post" });
-      }
-    }
 
     // Canonicalize mile hypes so the feed (workout_id-keyed) and the
     // notifications inbox (user:date-keyed) write and dedupe the same context.
@@ -249,21 +313,33 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
       hasUnlimitedHypes(senderId),
     ]);
 
-    const shouldSend = await shouldSendNotification(
-      targetUserId,
-      senderId,
-      "hype",
-    );
-    if (shouldSend) {
-      const sender = await getUser({ userId: senderId });
-      const senderName = sender?.username ?? "Someone";
-      const body = buildHypeBackBody(senderName, context);
+    // Both authors of a collab hear about it. Only the primary author's row is
+    // in hype_log (see resolvePostHypeTarget) — the coauthor's copy is the
+    // push alone, which is what keeps the card's tally honest while still
+    // telling the person whose post it also is.
+    const recipients = [targetUserId];
+    if (postCoauthorId && postCoauthorId !== senderId) {
+      recipients.push(postCoauthorId);
+    }
+    const sender = await getUser({ userId: senderId });
+    const senderName = sender?.username ?? "Someone";
+    for (const recipientId of recipients) {
+      const shouldSend = await shouldSendNotification(
+        recipientId,
+        senderId,
+        "hype",
+      );
+      if (!shouldSend) continue;
+      const body =
+        recipientId === postCoauthorId
+          ? `${senderName} hyped your collab post 🔥`
+          : buildHypeBackBody(senderName, context);
       const pushData: Record<string, string> = { user_id: senderId };
       if (context) {
         pushData.context_type = context.contextType;
         pushData.context_label = context.contextLabel;
       }
-      await sendPush(targetUserId, {
+      await sendPush(recipientId, {
         title: "🔥 You got hyped!",
         body,
         type: "hype_received",
@@ -306,9 +382,10 @@ export async function getReceivedHypesController(
  * Who hyped a specific post or daily mile — the Instagram-style "who liked
  * this" list behind a hype tally. Query params: `context_type` ('post'|'mile'),
  * `context_id` (post id, or the mile's workout id / user:date composite), and
- * `target_user_id` (the content's author). Viewer must be the author, a
- * friend, or an active-competition co-participant — the same audience that can
- * see the tally on the feed.
+ * `target_user_id` (the content's author). Viewer must be someone who can see
+ * the content — for a post that's either author's circle, for a mile it's the
+ * author's friends / active-competition co-participants — i.e. the same
+ * audience that can see the tally on the feed.
  */
 export async function getContextHypersController(
   req: AuthenticatedRequest,
@@ -317,7 +394,7 @@ export async function getContextHypersController(
   const viewerId = req.userId!;
   const contextType = String(req.query.context_type ?? "");
   const rawContextId = String(req.query.context_id ?? "");
-  const targetUserId = String(req.query.target_user_id ?? "");
+  let targetUserId = String(req.query.target_user_id ?? "");
 
   try {
     if (!["post", "mile"].includes(contextType)) {
@@ -331,7 +408,22 @@ export async function getContextHypersController(
         .json({ error: "context_id and target_user_id are required" });
     }
 
-    if (viewerId !== targetUserId) {
+    // Same audience rule as sending: a post's hypers are visible to anyone who
+    // can see the post (a collab reaches the coauthor's friends too), and the
+    // list itself is always keyed to the PRIMARY author's rows.
+    if (contextType === "post") {
+      const resolved = await resolvePostHypeTarget(
+        viewerId,
+        rawContextId,
+        targetUserId,
+      );
+      if (!resolved.ok) {
+        return res
+          .status(403)
+          .json({ error: "You can only view hypes on content you can see" });
+      }
+      targetUserId = resolved.targetId;
+    } else if (viewerId !== targetUserId) {
       const allowed = await isFriendOrCoParticipant(viewerId, targetUserId);
       if (!allowed) {
         return res
