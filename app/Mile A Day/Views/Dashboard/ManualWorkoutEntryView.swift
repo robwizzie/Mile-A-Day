@@ -15,7 +15,6 @@ struct ManualWorkoutEntryView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var showSuccess = false
-    @State private var isDistanceFocused = false
     @State private var showDiscardConfirmation = false
     @FocusState private var distanceFieldFocused: Bool
 
