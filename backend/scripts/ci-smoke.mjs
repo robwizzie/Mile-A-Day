@@ -18,6 +18,7 @@ const {
   getUserTaggedPosts,
   respondToCoauthorInvite,
   visiblePostAuthors,
+  acceptedCoauthor,
   lockUnearnedPhotos,
 } = await import("../dist/services/postService.js");
 const { canonicalizeMileContext, logHypeIfUnderLimit, hasHypedMile } =
@@ -463,6 +464,40 @@ assert.equal(
   400,
   "someone in neither circle can't hype the post",
 );
+
+// A block BETWEEN the two authors ends the collab — the tagged tab already
+// dropped the row, so the feed must not keep showing "alice & bob". The post
+// reverts to a solo post rather than disappearing: the media and the run are
+// the author's.
+await db.query(
+  `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)
+	 ON CONFLICT DO NOTHING`,
+  [BOB, ALICE],
+);
+assert.equal(
+  await collabInFeedOf(CARL),
+  undefined,
+  "a severed collab stops reaching the ex-coauthor's circle",
+);
+const afterBlock = await collabInFeedOf(DANA);
+assert.ok(afterBlock, "…but the author keeps their own post");
+assert.equal(afterBlock.coauthor_user_id, null, "…with the tag severed");
+assert.ok(
+  await collabInFeedOf(ALICE),
+  "the author still sees their post after being blocked by the coauthor",
+);
+assert.ok(
+  !(await getUserTaggedPosts(ALICE, BOB, 20, null)).some(
+    (p) => p.post_id === collabPost.post_id,
+  ),
+  "…and it leaves the ex-coauthor's tagged tab",
+);
+assert.equal(
+  await acceptedCoauthor(collabPost.post_id),
+  null,
+  "…so comment/hype pushes stop reaching them too",
+);
+await db.query(`DELETE FROM user_blocks WHERE blocker_id = $1`, [BOB]);
 
 // Heatmap endpoint query.
 const routes = await getUserRoutes(BOB);
