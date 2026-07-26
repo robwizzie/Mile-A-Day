@@ -3,35 +3,61 @@ import Foundation
 /// Utilities for working with JWT tokens
 enum TokenUtils {
     
-    /// Decode JWT and extract expiration time
+    /// Decode a JWT's payload (second segment) into its claims.
     /// - Parameter token: JWT token string
-    /// - Returns: Expiration date if valid, nil otherwise
-    static func getExpirationDate(from token: String) -> Date? {
+    /// - Returns: Claim dictionary if the token is a well-formed JWT, nil otherwise
+    static func claims(from token: String) -> [String: Any]? {
         let parts = token.components(separatedBy: ".")
         guard parts.count == 3 else {
             return nil
         }
-        
+
         // Decode the payload (second part)
         let payload = parts[1]
-        
+
         // Add padding if needed (base64url decoding)
         var base64 = payload
             .replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
-        
+
         let remainder = base64.count % 4
         if remainder > 0 {
             base64 = base64.padding(toLength: base64.count + 4 - remainder, withPad: "=", startingAt: 0)
         }
-        
+
         guard let data = Data(base64Encoded: base64),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let exp = json["exp"] as? TimeInterval else {
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
-        
+
+        return json
+    }
+
+    /// Decode JWT and extract expiration time
+    /// - Parameter token: JWT token string
+    /// - Returns: Expiration date if valid, nil otherwise
+    static func getExpirationDate(from token: String) -> Date? {
+        guard let exp = claims(from: token)?["exp"] as? TimeInterval else {
+            return nil
+        }
+
         return Date(timeIntervalSince1970: exp)
+    }
+
+    /// The `sub` claim — the backend user id this access token was minted for.
+    ///
+    /// This is the only authoritative answer to "who am I?". The locally cached
+    /// ids (`currentUser.backendUserId`, `UserDefaults["backendUserId"]`) can
+    /// drift away from it, and every self-scoped endpoint puts the cached id in
+    /// the URL path where the server compares it against this claim.
+    /// - Parameter token: JWT token string
+    /// - Returns: The subject if present and non-empty, nil otherwise
+    static func subject(from token: String) -> String? {
+        guard let sub = claims(from: token)?["sub"] as? String, !sub.isEmpty else {
+            return nil
+        }
+
+        return sub
     }
     
     /// Check if access token is expired or expiring soon

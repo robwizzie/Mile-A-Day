@@ -119,8 +119,16 @@ struct Mile_A_DayApp: App {
     /// → Apps Using Apple ID → Mile A Day → Stop Using). If revoked, sign
     /// them out so they're returned to the auth screen on next launch.
     private func verifyAppleCredentialIfNeeded() async {
-        guard AppStateManager.shared.isAuthenticated,
-              let appleId = UserManager.shared.currentUser.appleId,
+        guard AppStateManager.shared.isAuthenticated else { return }
+
+        // Catch a wrong-account session before any request goes out. Note this
+        // is NOT redundant with the credential check below: two people sharing
+        // one Apple account both report `.authorized` for the same Apple id, so
+        // `getCredentialState` can never tell their sessions apart — only the
+        // token's `sub` can.
+        if await MainActor.run(body: { SessionIdentity.enforce() }) { return }
+
+        guard let appleId = UserManager.shared.currentUser.appleId,
               !appleId.isEmpty
         else { return }
 

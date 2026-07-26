@@ -210,6 +210,7 @@ class AppleSignInManager: NSObject, ObservableObject {
         case backendError(String)
         case decodingError
         case timeout
+        case inconsistentSession
 
         var errorDescription: String? {
             switch self {
@@ -231,6 +232,8 @@ class AppleSignInManager: NSObject, ObservableObject {
                 return "Failed to decode backend response"
             case .timeout:
                 return "Apple Sign In timed out"
+            case .inconsistentSession:
+                return "Sign in couldn't be completed. Please try again."
             }
         }
     }
