@@ -13,19 +13,77 @@ enum RunPostService {
     /// Build stats for the linked workout so one day's extra walks/runs don't
     /// collapse into a single all-day post. Uses the local WorkoutIndex when
     /// the HKWorkout object is still lagging, then falls back to day totals.
+    ///
+    /// One exception, and it's the common case: when the workout IS the day's
+    /// daily-mile anchor, the numbers are the DAY's rollup up to that point —
+    /// because that's what every read surface restates the card with (see
+    /// `POST_COLUMNS` in postService.ts). Baking the single leg meant a mile
+    /// walked in three goes produced a card reading "0.33 mi" sitting under a
+    /// "1.06 mi" headline. Workouts AFTER the anchor (the extra-mile posts) are
+    /// still exactly themselves — that's the whole reason the anchor check is
+    /// here rather than a blanket switch to day totals.
     @MainActor
     static func todayStats(workoutId: String) -> RunStatsInput {
         if let stats = exactStats(workoutId: workoutId) {
-            return stats
+            return dayRollupStats(anchorId: workoutId) ?? stats
         }
 
         return todayFallbackStats(workoutId: workoutId)
     }
 
+    /// The day's combined totals when `anchorId` is the workout that completed
+    /// the mile and it took more than one walk/run to get there. Nil otherwise,
+    /// so single-workout days and extra-mile posts keep their exact stats.
+    ///
+    /// Membership mirrors the server's rollup lateral: everything logged up to
+    /// and including the anchor. Pace is recomputed from the totals rather than
+    /// averaged — a 20-minute walk and a 7-minute jog don't average.
+    @MainActor
+    private static func dayRollupStats(anchorId: String) -> RunStatsInput? {
+        guard dailyMileWorkoutId() == anchorId else { return nil }
+        let hk = HealthKitManager.shared
+        guard let anchor = hk.todaysWorkouts.first(where: { $0.uuid.uuidString == anchorId })
+        else { return nil }
+
+        let segments = hk.todaysWorkouts.filter { $0.endDate <= anchor.endDate }
+        // Sub-floor phantoms are SUMMED but don't make a day "multi-segment" —
+        // the server counts legs the same way (`feed_role <> 'hidden'`), and if
+        // the two disagree the server declines to restate and the card is left
+        // showing a number nothing else reports.
+        guard segments.filter({ WorkoutFeedFloor.isSubstantive($0) }).count > 1 else { return nil }
+
+        let distance = segments.reduce(0.0) {
+            $0 + ($1.totalDistance?.doubleValue(for: .mile()) ?? 0)
+        }
+        let duration = segments.reduce(0.0) { $0 + $1.duration }
+        let calories = segments.reduce(0.0) { $0 + workoutCalories($1) }
+        guard distance > 0 else { return nil }
+
+        return RunStatsInput(
+            distance: distance,
+            paceSecondsPerMile: workoutPaceSecondsPerMile(distance: distance, duration: duration),
+            durationSeconds: duration > 0 ? duration : nil,
+            streak: postableStreak(),
+            calories: calories > 0 ? calories : nil,
+            steps: nil,
+            workoutId: anchorId,
+            dateText: dateText(for: anchor.startDate)
+        )
+    }
+
+    /// The streak to BAKE into a post. `currentUser.streak` is the live display
+    /// value, which deliberately lags a real break (UserManager quarantines a
+    /// 2+ day collapse until it's verified) — and a post keeps its number
+    /// forever, so a post made after a missed day was showing a streak the
+    /// author no longer had while every other surface showed the truth.
+    @MainActor
+    private static func postableStreak() -> Int {
+        UserManager.shared.freshBackendStreak ?? UserManager.shared.currentUser.streak
+    }
+
     @MainActor
     private static func exactStats(workoutId: String) -> RunStatsInput? {
         let hk = HealthKitManager.shared
-        let user = UserManager.shared.currentUser
 
         if let workout = hk.todaysWorkouts.first(where: { $0.uuid.uuidString == workoutId }) {
             let distance = workout.totalDistance?.doubleValue(for: .mile()) ?? 0
@@ -35,7 +93,7 @@ enum RunPostService {
                 distance: distance,
                 paceSecondsPerMile: pace,
                 durationSeconds: workout.duration > 0 ? workout.duration : nil,
-                streak: user.streak,
+                streak: postableStreak(),
                 calories: calories > 0 ? calories : nil,
                 steps: nil,
                 workoutId: workoutId,
@@ -49,7 +107,7 @@ enum RunPostService {
                 distance: record.distance,
                 paceSecondsPerMile: pace,
                 durationSeconds: record.duration > 0 ? record.duration : nil,
-                streak: user.streak,
+                streak: postableStreak(),
                 calories: nil,
                 steps: nil,
                 workoutId: workoutId,
@@ -63,13 +121,12 @@ enum RunPostService {
     @MainActor
     private static func todayFallbackStats(workoutId: String) -> RunStatsInput {
         let hk = HealthKitManager.shared
-        let user = UserManager.shared.currentUser
         let paceSecPerMile = hk.todaysAveragePace.map { $0 * 60 }
         return RunStatsInput(
             distance: hk.todaysDistance,
             paceSecondsPerMile: (paceSecPerMile ?? 0) > 0 ? paceSecPerMile : nil,
             durationSeconds: hk.todaysTotalDuration > 0 ? hk.todaysTotalDuration : nil,
-            streak: user.streak,
+            streak: postableStreak(),
             calories: hk.todaysTotalCalories > 0 ? hk.todaysTotalCalories : nil,
             steps: hk.todaysSteps > 0 ? hk.todaysSteps : nil,
             workoutId: workoutId,

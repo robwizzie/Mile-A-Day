@@ -16,6 +16,7 @@ import { requireSelfAccess } from "../middleware/auth.js";
 import {
   enableStreakFeaturesController,
   streakFeaturesStatusController,
+  friendRescueStatusController,
   giveStreakAssistController,
 } from "../controllers/streakFeaturesController.js";
 
@@ -38,6 +39,7 @@ const router = Router();
 // static paths can never be captured by /:userId.
 router.post("/streak-features/enable", enableStreakFeaturesController);
 router.get("/streak-features/status", streakFeaturesStatusController);
+router.get("/streak-features/rescue/:friendId", friendRescueStatusController);
 router.post("/streak-features/assist/:friendId", giveStreakAssistController);
 
 router.get("/search", searchUsers);

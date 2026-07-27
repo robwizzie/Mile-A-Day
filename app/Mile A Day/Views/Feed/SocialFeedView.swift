@@ -245,7 +245,9 @@ struct SocialFeedView: View {
             return RunPostService.todayStats(workoutId: workoutId)
         }
 
-        let user = userManager.currentUser
+        // Backend streak when it's fresh: a post bakes its streak permanently,
+        // and the displayed one lags a real break by design (UserManager).
+        let streak = userManager.freshBackendStreak ?? userManager.currentUser.streak
         let duration = healthManager.todaysTotalDuration
         // todaysAveragePace is MINUTES per mile; sticker/snapshot use SECONDS.
         let paceSecPerMile = healthManager.todaysAveragePace.map { $0 * 60 }
@@ -255,7 +257,7 @@ struct SocialFeedView: View {
             distance: healthManager.todaysDistance,
             paceSecondsPerMile: (paceSecPerMile ?? 0) > 0 ? paceSecPerMile : nil,
             durationSeconds: duration > 0 ? duration : nil,
-            streak: user.streak,
+            streak: streak,
             calories: calories > 0 ? calories : nil,
             steps: steps > 0 ? steps : nil,
             // Link to the newest not-yet-shared workout so this post upserts

@@ -508,11 +508,15 @@ struct UserProfileDetailView: View {
         }
     }
 
-    // MARK: - Action Row (Nudge + Compete)
+    // MARK: - Action Row (Save Streak + Nudge + Compete)
 
-    /// Side-by-side pills for the two main actions you can take on a
-    /// friend's profile. Nudge is hidden when the friend has already
-    /// completed today; in that case Compete takes full width alone.
+    /// Pills for the actions you can take on a friend's profile. Nudge is
+    /// hidden when the friend has already completed today; Compete is always
+    /// there. Save Streak renders itself only when there's a break to rescue —
+    /// it deliberately does NOT displace Nudge (a friend can have both a broken
+    /// streak to save AND today's mile still to run, and the two do different
+    /// jobs), so when all three apply the row wraps onto two lines rather than
+    /// squeezing three pills into one.
     @ViewBuilder
     private var actionRow: some View {
         let nudgeIsAvailable: Bool = {
@@ -520,11 +524,30 @@ struct UserProfileDetailView: View {
             return !status.has_completed_mile
         }()
 
-        HStack(spacing: 8) {
-            if nudgeIsAvailable {
-                nudgeProfileButton
+        VStack(spacing: 8) {
+            SaveFriendStreakView(
+                friendId: user.user_id,
+                friendName: user.username ?? user.displayName,
+                style: .prominent,
+                onSaved: { restored in
+                    showProfileNudgeFeedback(NudgeFeedback(
+                        icon: "checkmark.seal.fill",
+                        message: "Saved \(user.displayName)'s streak — back to \(restored) days!",
+                        isError: false
+                    ))
+                    // Their flame (and today's card) should read the restored
+                    // length immediately, not on the next cold open.
+                    Task { await refreshProfileData() }
+                    loadUserData()
+                }
+            )
+
+            HStack(spacing: 8) {
+                if nudgeIsAvailable {
+                    nudgeProfileButton
+                }
+                competeTogetherButton
             }
-            competeTogetherButton
         }
     }
 
