@@ -12,6 +12,7 @@ import {
   getFeed,
   getUnifiedFeed,
   getUserPosts,
+  getFeedEntryForPost,
   getUserTaggedPosts,
   notifyFriendsOfPost,
   getPostAuthor,
@@ -563,6 +564,33 @@ export async function getUnifiedFeedController(
       context: { path: "/posts/feed/unified" },
     });
     res.status(500).json({ error: "Error fetching feed" });
+  }
+}
+
+/**
+ * GET /posts/:postId — ONE post, shaped exactly like its feed entry.
+ *
+ * What makes opening a post directly possible: a tap on the profile grid, a
+ * mention push, a shared link. Scrolling a paginated feed to find it could
+ * never work for a post that's weeks old. 404 covers both "gone" and "not
+ * yours to see" so the two are indistinguishable.
+ */
+export async function getPostController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const postId = req.params.postId;
+    if (!isUuid(postId)) {
+      return res.status(404).json({ error: "Post not found" });
+    }
+    const item = await getFeedEntryForPost(req.userId!, postId);
+    if (!item) return res.status(404).json({ error: "Post not found" });
+    lockUnearnedPhotos([item], req.userId!, await viewerPhotoGate(req.userId!));
+    res.status(200).json(signMediaUrlsDeep(item));
+  } catch (error: any) {
+    console.error("Error fetching post:", error.message);
+    res.status(500).json({ error: "Error fetching post" });
   }
 }
 

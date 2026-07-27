@@ -102,6 +102,8 @@ struct SocialFeedView: View {
     /// Tapped hype tally — presents the "who hyped this" sheet.
     @State private var hypersContext: HypersListContext?
     @State private var commentsPost: PostItem?
+    /// Post being shared as a link (system share sheet).
+    @State private var sharingURL: ShareURL?
     @State private var workoutCommentsTarget: WorkoutCommentsTarget?
     /// Profile tapped INSIDE the hypers sheet — presented after that sheet
     /// fully dismisses (sheet-over-sheet races drop the second presentation).
@@ -469,6 +471,9 @@ struct SocialFeedView: View {
                 }
             }
         }
+        .sheet(item: $sharingURL) { share in
+            ShareLinkSheet(url: share.url)
+        }
         .sheet(item: $workoutCommentsTarget) { target in
             CommentsSheet(
                 target: .workout(target.entry.entryId),
@@ -671,6 +676,7 @@ struct SocialFeedView: View {
                 onTapMention: { username in openMentionProfile(username) },
                 onTapHypeCount: openHypers,
                 onOpenComments: { commentsPost = post },
+                onShare: { sharingURL = ShareURL(url: PostShareLink.url(for: post.post_id)) },
                 onRespondCoauthor: isMyPendingInvite
                     ? { accept in Task { await respondToCoauthor(post, accept: accept) } }
                     : nil
@@ -740,7 +746,7 @@ struct SocialFeedView: View {
     /// Resolves against loaded entries, refreshing once and then paging a
     /// few times if needed (an inbox tapped a day later usually points past
     /// page 1). Double scrollTo — a LazyVStack lands short on deep targets
-    /// (see ProfilePostsFeedSheet).
+    /// (see PostDetailView).
     private func revealDeepLink(using proxy: ScrollViewProxy) {
         guard let target = FeedDeepLink.pending else { return }
 

@@ -26,6 +26,12 @@ final class MADNotificationService: NSObject, ObservableObject {
     
     // Stores notification type from a tap when the app was not yet fully loaded
     @Published var pendingNotificationType: String?
+    /// The tapped push's `data` payload, kept alongside the type for the
+    /// cold-launch path. Without it a tap that landed while the app was dead
+    /// knew WHICH KIND of thing to open but not WHICH ONE — which is why
+    /// mention/comment taps used to dump the user in the notification inbox
+    /// instead of on the post.
+    @Published var pendingNotificationData: [String: String] = [:]
 
     // Track when we last sent a completion notification to prevent duplicates
     private var lastCompletionNotificationDate: Date?
@@ -482,6 +488,7 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
 
         // Store for cold-launch case (MainTabView may not be mounted yet)
         pendingNotificationType = type
+        pendingNotificationData = data
 
         // Post a tap-specific notification so the app can navigate to the right screen
         NotificationCenter.default.post(

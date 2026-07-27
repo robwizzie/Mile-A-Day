@@ -4,6 +4,11 @@ struct NotificationInboxView: View {
     @ObservedObject var competitionService: CompetitionService
     var onUnreadCountChanged: ((Int) -> Void)?
 
+    /// Rows that open a post close the inbox first — the post presents from
+    /// MainTabView, and stacking it under a sheet that's still up would either
+    /// drop the presentation or bury it.
+    @Environment(\.dismiss) private var dismiss
+
     @StateObject private var friendService = FriendService()
     @State private var notifications: [InAppNotification] = []
     @State private var unreadCount = 0
@@ -546,9 +551,13 @@ struct NotificationInboxView: View {
             // posts scroll the feed to the entry, stories open the viewer
             // (which still respects the day-scoped viewing gate).
             let kind = notification.data?["kind"]
+            if kind != "story", let postId = notification.data?["post_id"], !postId.isEmpty {
+                dismiss()
+                PostDeepLink.shared.openAfterDismiss(postId)
+                return
+            }
             FeedDeepLink.pending = FeedDeepLink.Target(
                 userId: notification.data?["user_id"],
-                postId: kind == "story" ? nil : notification.data?["post_id"],
                 storyUserId: kind == "story" ? notification.data?["user_id"] : nil
             )
             NotificationCenter.default.post(
@@ -570,12 +579,19 @@ struct NotificationInboxView: View {
             NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
         case "coauthor_invite", "coauthor_accepted", "mention", "post_comment":
             // Collab invites/accepts, @mentions, and comment activity all live
-            // on one specific feed item — post_id for posts, workout_id for
-            // raw workout comments.
+            // on one specific feed item. A post opens DIRECTLY — scrolling the
+            // feed to it only ever worked while the post was still on the
+            // loaded page, which an inbox row read days later rarely is.
+            if let postId = notification.data?["post_id"], !postId.isEmpty {
+                dismiss()
+                PostDeepLink.shared.openAfterDismiss(postId)
+                return
+            }
+            // Raw workout comments have no permalink — the feed entry is the
+            // only place they live.
             FeedDeepLink.pending = FeedDeepLink.Target(
                 workoutId: notification.data?["workout_id"],
-                userId: notification.data?["user_id"],
-                postId: notification.data?["post_id"]
+                userId: notification.data?["user_id"]
             )
             NotificationCenter.default.post(
                 name: NSNotification.Name("MAD_SwitchTab"),
@@ -622,6 +638,18 @@ struct NotificationInboxView: View {
         case "competition_invite", "competition_accepted", "competition_started",
              "competition_finished", "competition_nudge", "competition_flex",
              "competition_milestone", "lead_change", "clash_tie":
+            // A Head-to-Head lead change reuses `lead_change` (every shipped
+            // build routes it; a new type would tap to nothing on all of
+            // them). It has no competition, so send it to the Dashboard where
+            // the duel card lives rather than the Compete tab.
+            if notification.data?["challenge_key"] == "head_to_head" {
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("MAD_SwitchTab"),
+                    object: nil,
+                    userInfo: ["tab": 0]
+                )
+                return
+            }
             if let compId = notification.data?["competition_id"],
                let comp = competitionService.competitions.first(where: { $0.competition_id == compId })
                        ?? competitionService.invites.first(where: { $0.competition_id == compId }) {
