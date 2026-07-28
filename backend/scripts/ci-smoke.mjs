@@ -212,10 +212,12 @@ const collabPost = await alicePost(
   BOB,
   true, // posted_live claim — the client-owned FRESH path
 );
+// Tagging is IMMEDIATE (Instagram-style): no pending state, no accept step.
+// The coauthor's control is removing themselves afterwards.
 assert.equal(
   collabPost.coauthor_status,
-  "pending",
-  "collab invite starts pending",
+  "accepted",
+  "a collab tags the coauthor straight away",
 );
 let tagged = await getUserTaggedPosts(ALICE, BOB, 20, null);
 assert.ok(
@@ -227,9 +229,20 @@ assert.ok(
   "@ci_bobber does NOT count as a ci_bob mention (exact token match)",
 );
 assert.ok(
-  !tagged.some((p) => p.post_id === collabPost.post_id),
-  "pending collab invite stays out of the tagged tab",
+  tagged.some(
+    (p) => p.post_id === collabPost.post_id && p.coauthor_status === "accepted",
+  ),
+  "the tag is in Bob's tagged tab with no accept step",
 );
+// …and on his own grid, which is what "you're on this post" has to mean.
+assert.ok(
+  (await getUserPosts(BOB, BOB, 24)).some(
+    (p) => p.post_id === collabPost.post_id,
+  ),
+  "a tagged collab lands on the coauthor's own profile grid",
+);
+// An older build still sends accept:true. That has to succeed as a no-op
+// rather than 404 on a collab the user is already part of.
 const collabAccept = await respondToCoauthorInvite(
   BOB,
   collabPost.post_id,
@@ -238,14 +251,7 @@ const collabAccept = await respondToCoauthorInvite(
 assert.equal(
   collabAccept?.author_id,
   ALICE,
-  "coauthor accept returns the author",
-);
-tagged = await getUserTaggedPosts(ALICE, BOB, 20, null);
-assert.ok(
-  tagged.some(
-    (p) => p.post_id === collabPost.post_id && p.coauthor_status === "accepted",
-  ),
-  "accepted collab shows in Bob's tagged tab",
+  "a legacy accept on an already-accepted tag is idempotent",
 );
 assert.ok(
   !(await getUserTaggedPosts(ALICE, ALICE, 20, null)).some(
@@ -498,6 +504,35 @@ assert.equal(
   "…so comment/hype pushes stop reaching them too",
 );
 await db.query(`DELETE FROM user_blocks WHERE blocker_id = $1`, [BOB]);
+
+// Removing yourself is the ONLY control a tagged coauthor has now that tags
+// apply immediately, so it has to work from the accepted state (the old
+// decline path only ever ran against a pending row).
+const collabRemove = await respondToCoauthorInvite(
+  BOB,
+  collabPost.post_id,
+  false,
+);
+assert.equal(
+  collabRemove?.author_id,
+  ALICE,
+  "an accepted coauthor can remove themselves",
+);
+assert.equal(
+  await acceptedCoauthor(collabPost.post_id),
+  null,
+  "…which severs the tag",
+);
+assert.ok(
+  !(await getUserPosts(BOB, BOB, 24)).some(
+    (p) => p.post_id === collabPost.post_id,
+  ),
+  "…and takes the post off their profile grid",
+);
+assert.ok(
+  await collabInFeedOf(ALICE),
+  "…while the post itself stays the author's",
+);
 
 // Heatmap endpoint query.
 const routes = await getUserRoutes(BOB);

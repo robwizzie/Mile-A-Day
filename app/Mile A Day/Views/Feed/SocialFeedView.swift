@@ -680,10 +680,10 @@ struct SocialFeedView: View {
                 onTapMention: { username in openMentionProfile(username) },
                 onTapHypeCount: openHypers,
                 onOpenComments: { commentsPost = post },
-                onShare: { sharingURL = ShareURL(url: PostShareLink.url(for: post.post_id)) },
                 onRespondCoauthor: isMyPendingInvite
                     ? { accept in Task { await respondToCoauthor(post, accept: accept) } }
                     : nil,
+                onShare: { sharingURL = ShareURL(url: PostShareLink.url(for: post.post_id)) },
                 onLeaveCollab: isMyAcceptedCollab
                     ? { Task { await respondToCoauthor(post, accept: false) } }
                     : nil

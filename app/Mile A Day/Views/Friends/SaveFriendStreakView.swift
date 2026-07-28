@@ -48,6 +48,13 @@ struct SaveFriendStreakView: View {
                     icon: "arrow.down.circle",
                     text: "\(friendName) needs the latest update to be saved"
                 )
+            case .beyondRescue(let multiDay):
+                infoPill(
+                    icon: "clock.arrow.circlepath",
+                    text: multiDay
+                        ? "\(friendName) has missed more than one day — a Streak Assist only covers a single miss"
+                        : "\(friendName)'s miss is too old to rescue — Assists reach back 2 days"
+                )
             case .available(let status):
                 if status.viewer_holds_assist {
                     saveButton(status)
@@ -143,8 +150,9 @@ struct SaveFriendStreakView: View {
                 .font(.system(size: 11, weight: .bold))
             Text(text)
                 .font(.system(size: style == .compact ? 10 : 11, weight: .semibold, design: .rounded))
-                .lineLimit(2)
+                .lineLimit(3)
                 .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .foregroundColor(.white.opacity(0.45))
         .padding(.horizontal, style == .compact ? 11 : 14)
@@ -261,6 +269,10 @@ final class SaveFriendStreakModel: ObservableObject {
         /// They DO have a coverable miss, but their build predates streak
         /// tokens, so nothing can be written on their behalf.
         case friendNeedsUpdate
+        /// Their streak IS broken, but no single covered day brings it back —
+        /// a multi-day hole, or a miss older than the rescue window. Shown as
+        /// an explanation, because silence here reads as a broken feature.
+        case beyondRescue(multiDay: Bool)
         case available(FriendRescueStatus)
         case saving
         case saved(Int)
@@ -287,7 +299,12 @@ final class SaveFriendStreakModel: ObservableObject {
 
     private static func resolvePhase(for status: FriendRescueStatus) -> Phase {
         if status.available { return .available(status) }
-        return status.friendNotEnrolled ? .friendNeedsUpdate : .unavailable
+        if status.friendNotEnrolled { return .friendNeedsUpdate }
+        switch status.reason {
+        case "gap_too_wide": return .beyondRescue(multiDay: true)
+        case "window_passed": return .beyondRescue(multiDay: false)
+        default: return .unavailable
+        }
     }
 
     /// Returns the restored streak on success, nil on failure.

@@ -301,7 +301,13 @@ const DAILY_NOTIFICATION_CAP = 18;
  * mention during them queues and surfaces at the morning flush like anything
  * else. That's the difference from HIGH_PRIORITY_TYPES, which skip both.
  */
-const CAP_EXEMPT_TYPES: NotificationType[] = ["mention"];
+const CAP_EXEMPT_TYPES: NotificationType[] = [
+  "mention",
+  // Being tagged into someone else's post puts your name on content you
+  // didn't post. That has to reach you — a throttled tag is the one case
+  // where the in-app row lands and the person never learns they're on it.
+  "coauthor_invite",
+];
 
 // High-priority types bypass throttling
 const HIGH_PRIORITY_TYPES: NotificationType[] = [

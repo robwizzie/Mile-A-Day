@@ -225,6 +225,13 @@
       "when": 1785195957895,
       "tag": "0031_thin_madame_web",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1785202108685,
+      "tag": "0032_accept_pending_collab_tags",
+      "breakpoints": true
     }
   ]
 }

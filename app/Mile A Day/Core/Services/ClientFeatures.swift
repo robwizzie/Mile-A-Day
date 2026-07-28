@@ -16,7 +16,13 @@ enum ClientFeatures {
     /// and route. Without both halves a server-set badge would stick forever.
     static let friendRequestV2 = "friend_request_v2"
 
+    /// This build registers the COAUTHOR_TAG category, so a collab-tag push
+    /// carries a "Remove me" action the user can resolve from the banner
+    /// without opening the app. Older builds get the same push with no
+    /// buttons — it still opens the post, which is the safe direction.
+    static let collabTagV1 = "collab_tag_v1"
+
     /// Declared on registration. Add a string here only in the same build that
     /// actually implements the behavior.
-    static let supported: [String] = [friendRequestV2]
+    static let supported: [String] = [friendRequestV2, collabTagV1]
 }

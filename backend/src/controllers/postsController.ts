@@ -288,8 +288,11 @@ export async function createPostController(
       postedLive: posted_live === true,
     });
 
-    // Collab invite — fire-and-forget push to the invited coauthor.
-    if (post.coauthor_user_id && post.coauthor_status === "pending") {
+    // Collab tag — fire-and-forget push to the person just added. Gated on
+    // 'accepted', which is now what createPost writes: tagging is immediate,
+    // so there is no pending state left to wait for. (Checking for 'pending'
+    // here would silence the notification completely.)
+    if (post.coauthor_user_id && post.coauthor_status === "accepted") {
       notifyCoauthorInvite(userId, post.coauthor_user_id, post.post_id).catch(
         () => {},
       );
