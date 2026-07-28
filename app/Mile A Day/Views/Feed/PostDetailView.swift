@@ -194,8 +194,22 @@ struct PostDetailView: View {
                 )
             },
             onOpenComments: { commentsPost = post },
-            onShare: { sharingURL = ShareURL(url: PostShareLink.url(for: post.post_id)) }
+            onShare: { sharingURL = ShareURL(url: PostShareLink.url(for: post.post_id)) },
+            // Accepted coauthor: a collab has is_self == false for them, so
+            // without this the card offers them Hype/Report/Block on a post
+            // they co-own. Leaving is the one action that IS theirs.
+            onLeaveCollab: (post.hasAcceptedCoauthor && post.coauthor_user_id == currentUserId)
+                ? { Task { await leaveCollab(post) } }
+                : nil
         )
+    }
+
+    /// Accepted coauthor removes themselves from a collab post — "decline"
+    /// after acceptance clears the collab server-side, so the post is no
+    /// longer theirs and drops out of this list.
+    private func leaveCollab(_ post: PostItem) async {
+        try? await PostService.respondToCoauthor(postId: post.post_id, accept: false)
+        await MainActor.run { posts.removeAll { $0.post_id == post.post_id } }
     }
 
     /// A tapped caption @mention: resolve to the exact user and open their
@@ -214,6 +228,9 @@ struct PostDetailView: View {
 
     private func hype(_ post: PostItem) async {
         guard !post.is_self, !post.is_hyped, !hypingIds.contains(post.post_id) else { return }
+        // A collab you're an author on is your own post — the server rejects
+        // the hype, so don't play the burst and then silently walk it back.
+        guard !(post.hasAcceptedCoauthor && post.coauthor_user_id == currentUserId) else { return }
         await MainActor.run {
             _ = hypingIds.insert(post.post_id)
             updatePost(post.post_id) { item in

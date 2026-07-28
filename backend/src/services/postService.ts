@@ -1304,12 +1304,12 @@ export async function getUnifiedFeed(
 				AND EXISTS (
 					SELECT 1 FROM circle c
 					WHERE c.uid = p.user_id
-						OR (p.coauthor_status = 'accepted' AND c.uid = p.coauthor_user_id)
+						OR (c.uid = p.coauthor_user_id AND ${COLLAB_REACH_SQL})
 				)
 				AND p.user_id NOT IN (SELECT uid FROM blocked)
-				AND (p.coauthor_status IS DISTINCT FROM 'accepted'
+				AND (NOT ${COLLAB_ACTIVE}
 					OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
-				AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
+				AND ${AUTHOR_VISIBLE_TO_VIEWER}
 
 			UNION ALL
 
@@ -1343,11 +1343,18 @@ export async function getUnifiedFeed(
 						AND (p2.workout_id = w.workout_id
 							-- A collab post only stands in for the coauthor's mile when
 							-- the viewer can actually SEE that post (primary author not
-							-- blocked or private) — otherwise they'd get neither.
-							OR (p2.coauthor_status = 'accepted'
+							-- blocked or private) — otherwise they'd get neither. The
+							-- privacy arm mirrors AUTHOR_VISIBLE_TO_VIEWER so the two
+							-- stay in step: for the coauthor themselves the collab post
+							-- is visible even when the author went private, and their
+							-- own workout card must still give way to it. A severed
+							-- collab (either author blocked the other) stands in for
+							-- nothing — the ex-coauthor's own card comes back.
+							OR (${collabActiveSql("p2")}
 								AND p2.coauthor_workout_id = w.workout_id
 								AND p2.user_id NOT IN (SELECT uid FROM blocked)
-								AND ${OWNER_NOT_PRIVATE_SQL("p2.user_id")}))
+								AND (p2.user_id = $1 OR p2.coauthor_user_id = $1
+									OR ${OWNER_NOT_PRIVATE_SQL("p2.user_id")})))
 				)
 		),
 		page AS (
