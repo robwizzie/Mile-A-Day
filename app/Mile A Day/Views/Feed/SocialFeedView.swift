@@ -918,10 +918,11 @@ struct SocialFeedView: View {
         await MainActor.run { isLoading = feed.isEmpty }
         // Parallel fetches: feed, stories rail, and (if needed) user's own stories
         // all go out at the same time. Feed paints first, then stories arrive.
+        let uid = currentUserId
         async let feedFetch = PostService.fetchUnifiedFeed(before: nil)
         async let railFetch = PostService.fetchStoriesRail()
         async let userStoriesFetch: [PostItem]? = {
-            guard let uid = currentUserId else { return nil }
+            guard let uid else { return nil }
             return try? await PostService.fetchUserStories(userId: uid)
         }()
 
