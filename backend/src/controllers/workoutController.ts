@@ -46,6 +46,7 @@ import {
   reconcileStreakFeaturesOnUpload,
   getStreakFeaturesPayload,
 } from "../services/streakFeatureService.js";
+import { notifyH2hLeadChanges } from "../services/h2hMatchupService.js";
 
 export async function uploadWorkouts(req: Request, res: Response) {
   if (!hasRequiredKeys(["userId"], req, res)) return;
@@ -112,6 +113,17 @@ export async function uploadWorkouts(req: Request, res: Response) {
     reconcileStreakFeaturesOnUpload(userId).catch((err) =>
       console.error("Error reconciling streak features:", err.message),
     );
+
+    // Head-to-Head standings: tell whoever this upload just overtook (and the
+    // syncer, when they took the lead) while there's still a day left to
+    // answer. Skipped on the account-setup backfill and on pure history
+    // uploads — neither changes today's duel. Fire-and-forget: a duel push
+    // must never delay or fail a workout sync.
+    if (!isFullSync && hasRecentWorkout) {
+      notifyH2hLeadChanges(userId).catch((err) =>
+        console.error("Error notifying H2H lead change:", err.message),
+      );
+    }
 
     try {
       await checkRaceCompletions(userId);

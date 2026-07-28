@@ -8,6 +8,7 @@ import {
   NewChallengeCompletion,
   DailyChallengeType,
   ChallengeOpponent,
+  ChallengeChallenger,
 } from "../types/badge.js";
 import {
   ChallengeRow,
@@ -999,7 +1000,63 @@ async function buildOpponent(
     miles: Math.round(rivalMiles * 100) / 100,
     myMiles: Math.round(myMiles * 100) / 100,
     mutual: pin.mutual,
+    challengers: await buildChallengers(userId, localDate, pin.rivalId),
   };
+}
+
+/**
+ * Everyone ELSE who pinned this user as their rival today.
+ *
+ * Reciprocity is impossible for everyone (odd counts, star-shaped friend
+ * graphs), so a popular user routinely ends up as several people's one-sided
+ * rival and never hears about it. Surfacing them is free motivation: the duel
+ * card can say "3 others are chasing you" instead of pretending the day is a
+ * private one-on-one.
+ *
+ * Explicitly NOT part of scoring — `resolveOne` reads the pinned rival and
+ * nothing else, so out-running a challenger wins nothing. That's deliberate:
+ * one duel, one verdict, however many people happen to be watching.
+ */
+async function buildChallengers(
+  userId: string,
+  localDate: string,
+  pinnedRivalId: string,
+): Promise<ChallengeChallenger[]> {
+  const rows = await db.query<{
+    user_id: string;
+    username: string | null;
+    profile_image_url: string | null;
+    miles: string | null;
+  }>(
+    `SELECT m.user_id, u.username, u.profile_image_url,
+			COALESCE((
+				SELECT SUM(w.distance) FROM workouts w
+				WHERE w.user_id = m.user_id AND w.local_date = $2::date
+					AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+			), 0)::text AS miles
+		FROM h2h_matchups m
+		JOIN users u ON u.user_id = m.user_id
+		WHERE m.local_date = $2::date
+			AND m.rival_id = $1
+			-- The pinned rival already has the whole top of the card; listing
+			-- them again as a challenger would read as two different people.
+			AND m.user_id <> $3
+			AND m.user_id <> $1
+			AND NOT EXISTS (
+				SELECT 1 FROM user_blocks b
+				WHERE (b.blocker_id = $1 AND b.blocked_id = m.user_id)
+					OR (b.blocker_id = m.user_id AND b.blocked_id = $1)
+			)
+		ORDER BY u.username NULLS LAST
+		LIMIT 8`,
+    [userId, localDate, pinnedRivalId],
+  );
+  return rows.map((r) => ({
+    userId: r.user_id,
+    username: r.username,
+    profileImageUrl: r.profile_image_url,
+    miles: Math.round((parseFloat(r.miles ?? "0") || 0) * 100) / 100,
+  }));
 }
 
 function addDays(ymd: string, n: number): string {

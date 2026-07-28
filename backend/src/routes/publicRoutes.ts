@@ -5,6 +5,7 @@ import {
 } from "../controllers/usersController.js";
 import {
   getPublicStatsController,
+  getPublicPostController,
   joinAndroidWaitlistController,
 } from "../controllers/publicController.js";
 
@@ -31,6 +32,9 @@ router.get("/users", getPublicUserCount);
 router.get("/streak/:username", getPublicUserStreak);
 // Community-wide counters for the site's live stats band. Aggregates only.
 router.get("/stats", getPublicStatsController);
+// Shared post links (mileaday.run/p/<id>) — author identity only, never the
+// photo or caption. The page exists to hand off to the app.
+router.get("/posts/:postId", getPublicPostController);
 // Android launch waitlist signups from the site footer form.
 router.post("/android-waitlist", joinAndroidWaitlistController);
 

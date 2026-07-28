@@ -56,6 +56,13 @@ struct AssistableFriend: Codable, Identifiable {
     let profile_image_url: String?
     let broke_date: String
     let prior_streak: Int
+    /// What their streak becomes once the miss is covered — the number the CTA
+    /// promises. Optional so a backend that predates it still decodes.
+    let restored_streak: Int?
+    /// "double_down" | "streak_save" when the friend still holds a token that
+    /// could fix this themselves; nil otherwise. Never blocks the assist — the
+    /// confirmation just says so before a token is spent.
+    let self_recovery: String?
 
     var id: String { user_id }
 
@@ -64,6 +71,39 @@ struct AssistableFriend: Codable, Identifiable {
         if let first_name, !first_name.isEmpty { return first_name }
         return "A friend"
     }
+
+    /// Days the friend ends up on. Falls back to the pre-break run + the
+    /// covered day when the server didn't send a projection.
+    var streakAfterSave: Int { restored_streak ?? (prior_streak + 1) }
+}
+
+/// GET /users/streak-features/rescue/:friendId — everything one friend's
+/// profile needs to render (or explain the absence of) the Save Streak CTA.
+struct FriendRescueStatus: Codable {
+    let available: Bool
+    let missed_date: String?
+    let prior_streak: Int?
+    let restored_streak: Int?
+    let self_recovery: String?
+    let viewer_holds_assist: Bool
+    let viewer_meter: Meter?
+    let reason: String?
+
+    struct Meter: Codable {
+        let progress: Double
+        let target: Double
+
+        var fraction: Double {
+            guard target > 0 else { return 0 }
+            return min(max(progress / target, 0), 1)
+        }
+    }
+
+    var streakAfterSave: Int { restored_streak ?? ((prior_streak ?? 0) + 1) }
+
+    /// The friend hasn't got the token-capable build, so nothing can be done
+    /// for them yet — worth saying out loud rather than showing nothing.
+    var friendNotEnrolled: Bool { reason == "friend_not_enrolled" }
 }
 
 /// GET /users/streak-features/status. `active` false = feature off server-side
@@ -166,6 +206,17 @@ enum StreakFeatureService {
         try await APIClient.fancyFetch(
             endpoint: "/users/streak-features/status",
             responseType: StreakFeaturesStatus.self
+        )
+    }
+
+    /// Can the caller rescue THIS friend right now, and if not, why not. Cheap
+    /// per-friend read — the status endpoint only lists rescuable friends when
+    /// the caller already holds an Assist, which is exactly the case where a
+    /// profile can't explain why its CTA is missing.
+    static func rescueStatus(friendId: String) async throws -> FriendRescueStatus {
+        try await APIClient.fancyFetch(
+            endpoint: "/users/streak-features/rescue/\(friendId)",
+            responseType: FriendRescueStatus.self
         )
     }
 

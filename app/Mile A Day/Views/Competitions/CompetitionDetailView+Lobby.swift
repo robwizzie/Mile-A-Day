@@ -40,6 +40,13 @@ extension CompetitionDetailView {
             // Participants with invite statuses
             lobbyParticipantsSection
 
+            // Team setup — owner manages, members join when member-pick is on.
+            // Renders nothing for non-owners until teams exist.
+            CompetitionLobbyTeamsSection(
+                competition: $competition,
+                competitionService: competitionService
+            )
+
             // Invite more friends button
             if competition.currentUserInviteStatus == .accepted {
                 inviteButton

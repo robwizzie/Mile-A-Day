@@ -425,6 +425,10 @@ export const competitions = pgTable(
     workouts: jsonb().notNull(),
     type: varchar({ length: 20 }).notNull(),
     options: jsonb().notNull(),
+    // Optional team play: { member_pick: boolean, teams: [{ id, name }] }.
+    // Deliberately NOT inside options — clients PATCH options wholesale and
+    // would silently erase teams. NULL = no teams for this competition.
+    teams: jsonb(),
     ended: boolean().default(false),
     winner: text(),
     owner: text(),
@@ -846,6 +850,16 @@ export const h2hMatchups = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // Live lead-change pushes: the standing THIS ROW'S USER was last told
+    // about ('ahead' | 'behind'). The duel is scored end-of-day, so without a
+    // record of what was already announced every sync by either side would
+    // re-push the same "you're behind". A flip only notifies when the new
+    // standing differs from what's stored here.
+    leadNotifiedState: text("lead_notified_state"),
+    leadNotifiedAt: timestamp("lead_notified_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
   (table) => [
     foreignKey({
@@ -1210,6 +1224,9 @@ export const competitionUsers = pgTable(
     userId: text("user_id").notNull(),
     progress: jsonb(),
     inviteStatus: varchar("invite_status", { length: 20 }),
+    // Team membership within the competition (id from competitions.teams).
+    // NULL = unassigned; cleared when the team is deleted.
+    teamId: text("team_id"),
     placement: integer(),
     lastKnownRank: integer("last_known_rank"),
     lastKnownScore: doublePrecision("last_known_score"),

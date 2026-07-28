@@ -217,7 +217,9 @@ final class StreakTokensState: ObservableObject {
                 last_name: nil,
                 profile_image_url: nil,
                 broke_date: "2026-07-20",
-                prior_streak: 42
+                prior_streak: 42,
+                restored_streak: 44,
+                self_recovery: nil
             )
         ]
     }

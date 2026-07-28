@@ -44,17 +44,10 @@ struct PostCardView: View {
     /// Non-nil when the CURRENT user is this post's pending coauthor —
     /// shows the Accept/Decline collab banner. Called with accept/decline.
     var onRespondCoauthor: ((Bool) -> Void)? = nil
-    /// Non-nil when the CURRENT user is this post's ACCEPTED coauthor — adds
-    /// "Remove me from this post" to the menu (the same decline call, which
-    /// doubles as "leave post" after acceptance).
-    var onLeaveCollab: (() -> Void)? = nil
-
-    /// The viewer is an author of this post — its poster, or the accepted
-    /// coauthor of a collab. `is_self` is the SERVER's "you posted this", so on
-    /// a collab it's false for the coauthor, which offered them a Hype button
-    /// and a Report/Block menu on a post they co-own. Everything that asks
-    /// "is this mine?" for interaction purposes goes through this.
-    private var isMine: Bool { post.is_self || onLeaveCollab != nil }
+    /// Copy/share a link to this post. Offered on every post, own or not —
+    /// the link's landing page shows nothing the recipient isn't already
+    /// entitled to (see PostShareLink).
+    var onShare: (() -> Void)? = nil
 
     @State private var hypeBurst = 0
     /// Collapses the same physical double-tap arriving from two recognizers
@@ -214,6 +207,14 @@ struct PostCardView: View {
                     .background(Circle().fill(ActivityCardView.color(type).opacity(0.15)))
             }
             Menu {
+                // Sharing is not a moderation action — it sits above the
+                // divider-less group of them, and applies to any post that
+                // actually lives on the feed (a story has no permalink).
+                if let onShare, post.share_to_feed != false {
+                    Button(action: onShare) {
+                        Label("Share link", systemImage: "square.and.arrow.up")
+                    }
+                }
                 if post.is_self {
                     if let onEditCaption {
                         Button(action: onEditCaption) {

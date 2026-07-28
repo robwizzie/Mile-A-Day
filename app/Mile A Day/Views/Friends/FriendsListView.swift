@@ -68,7 +68,8 @@ struct FriendsListView: View {
     // the rescuable list is empty until streak features are live). The CTA
     // lives ON the friend's row, in the nudge/action slot.
     @ObservedObject private var tokensState = StreakTokensState.shared
-    @State private var assistingFriendId: String?
+    /// Friends saved in this session — the row keeps its confirmation chip
+    /// instead of snapping back to a nudge the moment the status refreshes.
     @State private var savedFriendIds: Set<String> = []
 
     var body: some View {
@@ -202,41 +203,30 @@ struct FriendsListView: View {
 
     /// The rescue for this friend, if one is open: their streak broke within
     /// the window, I'm holding an Assist, and I haven't just saved them.
-    private func assistRescue(for friend: BackendUser) -> AssistableFriend? {
+    ///
+    /// Shaped into the same payload the profile CTA fetches per friend, so both
+    /// surfaces render one component with one confirmation. This list already
+    /// has every rescue from the single status call — handing it down keeps a
+    /// long friends list at zero extra requests.
+    private func assistRescue(for friend: BackendUser) -> FriendRescueStatus? {
         guard tokensState.payload?.streak_assist.held == true else { return nil }
         guard !savedFriendIds.contains(friend.user_id) else { return nil }
-        return tokensState.assistableFriends.first { $0.user_id == friend.user_id }
-    }
-
-    /// "Save Streak" — lives in the row's action slot (where Nudge sits), led
-    /// by the minted Assist medallion. One tap spends the token, restores the
-    /// friend's streak, and they get the "saved your streak" push.
-    private func saveStreakButton(friend: BackendUser, rescue: AssistableFriend) -> some View {
-        Button {
-            sendAssist(to: rescue)
-        } label: {
-            HStack(spacing: 6) {
-                if assistingFriendId == rescue.user_id {
-                    ProgressView().tint(.white).scaleEffect(0.6)
-                } else {
-                    TokenMedallion(kind: .assist, held: true, size: 18)
-                }
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Save Streak")
-                        .font(.system(size: 11, weight: .heavy, design: .rounded))
-                    Text("\(rescue.prior_streak) days")
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .opacity(0.8)
-                }
-            }
-            .foregroundColor(.white)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
-            .background(Capsule().fill(MADTheme.Colors.redGradient))
-            .shadow(color: MADTheme.Colors.madRed.opacity(0.45), radius: 5)
-        }
-        .buttonStyle(ScaleButtonStyle())
-        .disabled(assistingFriendId != nil)
+        guard let rescue = tokensState.assistableFriends.first(where: { $0.user_id == friend.user_id })
+        else { return nil }
+        let meter = tokensState.payload?.streak_assist
+        return FriendRescueStatus(
+            available: true,
+            missed_date: rescue.broke_date,
+            prior_streak: rescue.prior_streak,
+            restored_streak: rescue.restored_streak,
+            self_recovery: rescue.self_recovery,
+            viewer_holds_assist: true,
+            viewer_meter: .init(
+                progress: meter?.progress ?? 0,
+                target: meter?.target ?? 20
+            ),
+            reason: nil
+        )
     }
 
     /// Post-rescue confirmation chip in the same slot.
@@ -251,36 +241,6 @@ struct FriendsListView: View {
         .padding(.horizontal, 11)
         .padding(.vertical, 6)
         .background(Capsule().fill(Color.green.opacity(0.14)))
-    }
-
-    private func sendAssist(to rescue: AssistableFriend) {
-        guard assistingFriendId == nil else { return }
-        assistingFriendId = rescue.user_id
-        Task {
-            do {
-                let result = try await StreakFeatureService.assist(friendId: rescue.user_id)
-                await MainActor.run {
-                    assistingFriendId = nil
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                        _ = savedFriendIds.insert(rescue.user_id)
-                    }
-                    MADHaptics.success()
-                    print("[Assist] restored streak: \(result.restored_streak ?? -1)")
-                }
-                // Refresh meters/rescues + row statuses so the friend's flame
-                // comes back at its restored length.
-                await tokensState.refreshStatus()
-                await loadNudgeStatuses()
-            } catch {
-                await MainActor.run {
-                    assistingFriendId = nil
-                    // Someone else may have saved them first, or the window
-                    // closed — refresh so the slot reflects reality.
-                    MADHaptics.warning()
-                }
-                await tokensState.refreshStatus()
-            }
-        }
     }
 
     // MARK: - Custom header (title + search + requests-with-badge)
@@ -1058,18 +1018,39 @@ struct FriendsListView: View {
             }
             .buttonStyle(.plain)
 
-            // Action slot (where hype used to live): a rescuable broken streak
-            // outranks a nudge — restoring yesterday beats poking about today.
-            if let rescue = assistRescue(for: friend) {
-                saveStreakButton(friend: friend, rescue: rescue)
-                    .padding(.trailing, MADTheme.Spacing.md)
-            } else if savedFriendIds.contains(friend.user_id) {
-                savedChip
-                    .padding(.trailing, MADTheme.Spacing.md)
-            } else if !isCompleted {
-                nudgeButton(friend: friend, alreadyNudged: alreadyNudged, canRenudge: canRenudge)
-                    .padding(.trailing, MADTheme.Spacing.md)
+            // Action slot (where hype used to live). A rescuable broken streak
+            // and today's unrun mile are different problems, so when a friend
+            // has both, both show — Save Streak leads (restoring yesterday is
+            // the time-boxed one) and the nudge shrinks to its bell.
+            HStack(spacing: 6) {
+                if let rescue = assistRescue(for: friend) {
+                    SaveFriendStreakView(
+                        friendId: friend.user_id,
+                        friendName: friend.username ?? friend.displayName,
+                        style: .compact,
+                        preloaded: rescue,
+                        onSaved: { _ in
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                                _ = savedFriendIds.insert(friend.user_id)
+                            }
+                            Task { await loadNudgeStatuses() }
+                        }
+                    )
+                    if !isCompleted {
+                        nudgeButton(
+                            friend: friend,
+                            alreadyNudged: alreadyNudged,
+                            canRenudge: canRenudge,
+                            iconOnly: true
+                        )
+                    }
+                } else if savedFriendIds.contains(friend.user_id) {
+                    savedChip
+                } else if !isCompleted {
+                    nudgeButton(friend: friend, alreadyNudged: alreadyNudged, canRenudge: canRenudge)
+                }
             }
+            .padding(.trailing, MADTheme.Spacing.md)
         }
         // Shared identity across sections so a friend moving from Cheer →
         // Done (or vice versa) slides instead of fade-popping.
@@ -1167,7 +1148,16 @@ struct FriendsListView: View {
     /// `canRenudge` (unlimited-nudge roles): an already-nudged friend shows an
     /// ENABLED "Nudge again" pill — visibly different from the fresh "Nudge",
     /// so the sender knows one already went out today before sending another.
-    private func nudgeButton(friend: BackendUser, alreadyNudged: Bool, canRenudge: Bool = false) -> some View {
+    ///
+    /// `iconOnly` drops the labels for the case where a Save Streak pill is
+    /// already in the row's action slot: both actions stay reachable without
+    /// two full-width pills fighting over the same ~120pt.
+    private func nudgeButton(
+        friend: BackendUser,
+        alreadyNudged: Bool,
+        canRenudge: Bool = false,
+        iconOnly: Bool = false
+    ) -> some View {
         Group {
             if alreadyNudged && canRenudge {
                 Button {
@@ -1181,8 +1171,10 @@ struct FriendsListView: View {
                         } else {
                             Image(systemName: "bell.and.waves.left.and.right.fill")
                                 .font(.system(size: 10, weight: .semibold))
-                            Text("Nudge again")
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            if !iconOnly {
+                                Text("Nudge again")
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            }
                         }
                     }
                     .foregroundColor(.orange.opacity(0.75))
@@ -1203,8 +1195,10 @@ struct FriendsListView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "bell.slash.fill")
                         .font(.system(size: 10))
-                    Text("Nudged")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                    if !iconOnly {
+                        Text("Nudged")
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                    }
                 }
                 .foregroundColor(.white.opacity(0.25))
                 .padding(.horizontal, 10)
@@ -1226,8 +1220,10 @@ struct FriendsListView: View {
                             Image(systemName: "bell.badge")
                                 .font(.system(size: 10, weight: .semibold))
                                 .modifier(BellShakeModifier(isShaking: bellShakeIds.contains(friend.user_id)))
-                            Text("Nudge")
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            if !iconOnly {
+                                Text("Nudge")
+                                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            }
                         }
                     }
                     .foregroundColor(.orange)

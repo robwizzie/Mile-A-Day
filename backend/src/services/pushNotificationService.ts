@@ -287,6 +287,22 @@ async function removeInvalidToken(deviceToken: string): Promise<void> {
 
 const DAILY_NOTIFICATION_CAP = 18;
 
+/**
+ * Types that skip the DAILY CAP but still respect quiet hours.
+ *
+ * The cap exists to stop automated chatter (activity, challenges, reminders)
+ * burying the user. An @mention is not chatter — it's one person addressing
+ * another by name, and it's the single push where "arrived silently" is worst:
+ * `sendPush` still writes the in-app row when it throttles, so the recipient
+ * gets an inbox entry and no notification, which reads as the mention feature
+ * being broken rather than as rate limiting.
+ *
+ * Quiet hours are the user's own explicit choice, so those still apply — a
+ * mention during them queues and surfaces at the morning flush like anything
+ * else. That's the difference from HIGH_PRIORITY_TYPES, which skip both.
+ */
+const CAP_EXEMPT_TYPES: NotificationType[] = ["mention"];
+
 // High-priority types bypass throttling
 const HIGH_PRIORITY_TYPES: NotificationType[] = [
   "friend_request",
@@ -377,7 +393,10 @@ export async function sendPush(
 
     // Smart throttling: check daily cap
     const dailyCount = await getDailyNotificationCount(userId);
-    if (dailyCount >= DAILY_NOTIFICATION_CAP) {
+    if (
+      dailyCount >= DAILY_NOTIFICATION_CAP &&
+      !CAP_EXEMPT_TYPES.includes(payload.type)
+    ) {
       console.log(
         `[Push] Throttled "${payload.type}" for user ${userId} (${dailyCount}/${DAILY_NOTIFICATION_CAP} today)`,
       );

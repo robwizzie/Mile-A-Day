@@ -13,6 +13,7 @@ import {
   getFeedController,
   getUnifiedFeedController,
   getUserPostsController,
+  getPostController,
   getUserTaggedPostsController,
   deletePostController,
   updatePostController,
@@ -81,10 +82,14 @@ router.post("/:postId/comments", addCommentController);
 router.delete("/comments/:commentId", deleteCommentController);
 router.post("/comments/:commentId/report", reportCommentController);
 
-// Per-post actions.
+// Per-post actions. The bare GET is LAST among the /:postId routes on purpose
+// — it's the most permissive pattern and would otherwise swallow /terms,
+// /stories, /memories, /feed and /user (all registered above).
 router.post("/:postId/coauthor", respondToCoauthorController);
 router.post("/:postId/report", reportPostController);
 router.patch("/:postId", updatePostController);
 router.delete("/:postId", deletePostController);
+// One post, shaped like its feed entry — opening a post directly.
+router.get("/:postId", getPostController);
 
 export default router;

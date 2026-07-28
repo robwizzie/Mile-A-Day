@@ -926,6 +926,112 @@ struct ChallengeOpponent: Equatable {
     let myMiles: Double
     /// TRUE when the rival's own Head-to-Head is against you too (reciprocal pair).
     let mutual: Bool
+    /// Others who picked YOU as their rival today. Shown, never scored — see
+    /// `ChallengersStrip`.
+    var challengers: [ChallengeChallenger] = []
+}
+
+/// Someone racing you today without being your pinned duel.
+struct ChallengeChallenger: Equatable, Identifiable {
+    let userId: String
+    let username: String?
+    let profileImageUrl: String?
+    let miles: Double
+
+    var id: String { userId }
+    var displayName: String { username ?? "A friend" }
+}
+
+/// "3 others are chasing you" — the people who pinned this user as THEIR rival
+/// today.
+///
+/// Reciprocal matchups aren't possible for everyone (odd friend counts,
+/// star-shaped graphs), so a well-connected user is routinely several people's
+/// one-sided rival and never hears a word about it. The card said "you vs one
+/// person" while three others were quietly measuring themselves against them.
+///
+/// Deliberately scoreboard-shaped but NOT a scoreboard: beating a challenger
+/// wins nothing, the pinned duel above is the only one that decides the day.
+/// Anyone currently ahead of the user is marked, because that's the part worth
+/// reacting to.
+struct ChallengersStrip: View {
+    let challengers: [ChallengeChallenger]
+    let myMiles: Double
+
+    private var aheadCount: Int {
+        challengers.filter { $0.miles > myMiles + 0.005 }.count
+    }
+
+    private var headline: String {
+        let n = challengers.count
+        if aheadCount > 0 {
+            return "\(n) other\(n == 1 ? " is" : "s are") chasing you · \(aheadCount) ahead"
+        }
+        return "\(n) other\(n == 1 ? " is" : "s are") chasing you"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "eye.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.purple)
+                Text(headline)
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .foregroundColor(.primary.opacity(0.85))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 0)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(challengers) { challenger in
+                        let ahead = challenger.miles > myMiles + 0.005
+                        VStack(spacing: 3) {
+                            AvatarView(
+                                name: challenger.displayName,
+                                imageURL: challenger.profileImageUrl,
+                                size: 30
+                            )
+                            .overlay(
+                                Circle().strokeBorder(
+                                    ahead ? Color.orange : Color.clear,
+                                    lineWidth: 2
+                                )
+                            )
+                            Text(challenger.displayName)
+                                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                            Text("\(String(format: "%.2f", challenger.miles))")
+                                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                .foregroundColor(ahead ? .orange : .primary.opacity(0.6))
+                                .monospacedDigit()
+                        }
+                        .frame(width: 52)
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+
+            // Says the quiet part out loud so nobody thinks they need to beat
+            // five people to complete the challenge.
+            Text("Just for fun — only your matchup above counts")
+                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                .foregroundColor(.secondary.opacity(0.8))
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.purple.opacity(0.07))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.purple.opacity(0.28), lineWidth: 1)
+                )
+        )
+    }
 }
 
 /// Fun "you vs rival" strip for the Head-to-Head daily challenge. Shows both
@@ -954,6 +1060,20 @@ struct HeadToHeadStrip: View {
     private var statusColor: Color { tied ? .yellow : (leading ? .green : .orange) }
 
     var body: some View {
+        VStack(spacing: 8) {
+            duelStrip
+            // Sits BELOW the duel, in its own card, so the one matchup that
+            // decides the day stays visually first.
+            if !opponent.challengers.isEmpty {
+                ChallengersStrip(
+                    challengers: opponent.challengers,
+                    myMiles: opponent.myMiles
+                )
+            }
+        }
+    }
+
+    private var duelStrip: some View {
         VStack(spacing: 6) {
             HStack(spacing: 10) {
                 side(name: "You", image: myImage, miles: opponent.myMiles,

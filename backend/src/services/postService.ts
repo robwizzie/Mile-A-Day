@@ -651,6 +651,37 @@ export async function getOwnedWorkoutDistance(
   return Number.isFinite(distance) ? distance : null;
 }
 
+/**
+ * The DAY's rollup distance for a post's linked workout — i.e. the number every
+ * read surface already restates a `daily_mile` anchor with (see POST_COLUMNS).
+ * Null when the workout isn't the day's anchor, so callers fall back to the
+ * workout's own distance.
+ *
+ * Exists so the auto-post stats guard accepts a card that bakes the day's total
+ * (what the feed will display) as well as one that bakes the single leg. Same
+ * membership rule as the feed lateral: everything rolled into the anchor, plus
+ * sub-floor junk logged up to it.
+ */
+export async function getOwnedWorkoutRollupDistance(
+  userId: string,
+  workoutId: string,
+): Promise<number | null> {
+  const rows = await db.query<{ distance: number | string | null }>(
+    `SELECT SUM(m.distance)::double precision AS distance
+		 FROM workouts w
+		 JOIN workouts m ON m.user_id = w.user_id AND m.local_date = w.local_date
+			 AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
+			 AND (
+				 m.feed_role IN ('rolled_up', 'daily_mile')
+				 OR (m.feed_role = 'hidden' AND m.device_end_date <= w.device_end_date)
+			 )
+		 WHERE w.workout_id = $1 AND w.user_id = $2 AND w.feed_role = 'daily_mile'`,
+    [workoutId, userId],
+  );
+  const distance = Number(rows[0]?.distance);
+  return Number.isFinite(distance) ? distance : null;
+}
+
 /** One row in a story's "seen by" list, with any emoji reaction. */
 export interface StoryViewerRow {
   user_id: string;
@@ -1024,106 +1055,14 @@ export interface FeedEntryRow {
 }
 
 /**
- * Unified, infinitely-scrollable feed: photo posts AND raw workout activity from
- * the viewer's circle, interleaved newest-first, keyset-paginated on a combined
- * timestamp (`before`). A workout that already has a feed post is omitted (the
- * post represents it), and a user's raw workouts are hidden when they've turned
- * off `share_workouts_to_feed`. No time window — paginate as far back as desired.
+ * Everything a feed ENTRY carries, projected onto a `page` CTE of
+ * (kind, id, sort_ts, owner_id, workout_id) rows. Shared verbatim by the
+ * unified feed and the single-post read so a post opened directly renders
+ * from byte-identical data to the same post scrolled to in the feed — the
+ * rollup restatement, hype/comment counts, FRESH chip and route gating all
+ * included. `$1` must be the viewer id; the projection uses no other param.
  */
-export async function getUnifiedFeed(
-  viewerId: string,
-  limit: number,
-  before?: string | null,
-): Promise<FeedEntryRow[]> {
-  // PERF: the expensive per-row columns (route JSONB, is_hyped, hype_count,
-  // story_photo_url) are computed ONLY for the page's rows, not for the whole
-  // circle's history. The old shape put them in the SELECT list of a UNION ALL
-  // that was then ORDER BY sort_ts DESC LIMIT $3 — so Postgres had to evaluate
-  // them for every post AND every workout in the viewer's circle across all
-  // time before the outer LIMIT could apply, and got linearly slower as the
-  // workouts table grew. Now `candidates` unions only the cheap keys, `page`
-  // sorts+limits them (the LIMIT is a hard barrier), and the outer SELECT
-  // projects the heavy columns onto just those <= $3 rows. Output shape and
-  // every value are identical to the old query; results are keyed by column
-  // name so column order is irrelevant. All lookups here are already indexed
-  // (idx_posts_user_created, idx_workouts_user_device_end for the candidate
-  // ordering; hype_log_context_dedupe_idx / idx_hype_log_target_context for the
-  // hype checks).
-  const rows = await db.query<FeedEntryRow>(
-    `
-		${CIRCLE_CTE},
-		candidates AS (
-			SELECT
-				'post'::text AS kind,
-				p.post_id::text AS id,
-				p.created_at AS sort_ts,
-				p.user_id AS owner_id,
-				p.workout_id AS workout_id
-			FROM posts p
-			WHERE p.share_to_feed AND p.deleted_at IS NULL
-				-- Accepted collab posts reach BOTH authors' circles (semi-join, not
-				-- a JOIN, so a post whose two authors share the viewer isn't doubled).
-				AND EXISTS (
-					SELECT 1 FROM circle c
-					WHERE c.uid = p.user_id
-						OR (c.uid = p.coauthor_user_id AND ${COLLAB_REACH_SQL})
-				)
-				AND p.user_id NOT IN (SELECT uid FROM blocked)
-				AND (NOT ${COLLAB_ACTIVE}
-					OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
-				AND ${AUTHOR_VISIBLE_TO_VIEWER}
-
-			UNION ALL
-
-			SELECT
-				'workout'::text AS kind,
-				w.workout_id AS id,
-				w.device_end_date AS sort_ts,
-				w.user_id AS owner_id,
-				w.workout_id AS workout_id
-			FROM workouts w
-			JOIN circle c ON c.uid = w.user_id
-			LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
-			WHERE w.user_id NOT IN (SELECT uid FROM blocked)
-				AND COALESCE(ns.share_workouts_to_feed, true) = true
-				-- The feed is always YOUR circle, so 'public' must not pour
-				-- strangers in; only the tightening direction applies here.
-				AND ${OWNER_NOT_PRIVATE_SQL("w.user_id")}
-				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
-				-- Only two roles ever earn a card: the workout that completed the
-				-- day's mile (which stands in for every pre-mile segment — see the
-				-- rollup lateral below) and anything logged after it. 'rolled_up'
-				-- and 'hidden' are represented by the anchor or not at all, which
-				-- is what stops three 0.33 walks becoming three cards and a 3-second
-				-- phantom becoming one. A plain indexed predicate on purpose:
-				-- idx_workouts_feed_candidates matches this WHERE exactly, and the
-				-- PERF note above rules out anything heavier inside candidates.
-				AND w.feed_role IN ('daily_mile', 'extra')
-				AND NOT EXISTS (
-					SELECT 1 FROM posts p2
-					WHERE p2.deleted_at IS NULL AND p2.share_to_feed
-						AND (p2.workout_id = w.workout_id
-							-- A collab post only stands in for the coauthor's mile when
-							-- the viewer can actually SEE that post (primary author not
-							-- blocked or private) — otherwise they'd get neither. The
-							-- privacy arm mirrors AUTHOR_VISIBLE_TO_VIEWER so the two
-							-- stay in step: for the coauthor themselves the collab post
-							-- is visible even when the author went private, and their
-							-- own workout card must still give way to it.
-							OR (${collabActiveSql("p2")}
-								AND p2.coauthor_workout_id = w.workout_id
-								AND p2.user_id NOT IN (SELECT uid FROM blocked)
-								AND (p2.user_id = $1 OR p2.coauthor_user_id = $1
-									OR ${OWNER_NOT_PRIVATE_SQL("p2.user_id")})))
-				)
-		),
-		page AS (
-			SELECT kind, id, sort_ts, owner_id, workout_id
-			FROM candidates
-			WHERE ($2::timestamptz IS NULL OR sort_ts < $2::timestamptz)
-			ORDER BY sort_ts DESC
-			LIMIT $3
-		)
+const FEED_ENTRY_PROJECTION = `
 		SELECT
 			page.kind,
 			page.id,
@@ -1320,11 +1259,176 @@ export async function getUnifiedFeed(
 					OR (m.feed_role = 'hidden' AND m.device_end_date <= wt.device_end_date)
 				)
 		) roll ON TRUE
-		ORDER BY page.sort_ts DESC
+		ORDER BY page.sort_ts DESC`;
+
+/**
+ * Unified, infinitely-scrollable feed: photo posts AND raw workout activity from
+ * the viewer's circle, interleaved newest-first, keyset-paginated on a combined
+ * timestamp (`before`). A workout that already has a feed post is omitted (the
+ * post represents it), and a user's raw workouts are hidden when they've turned
+ * off `share_workouts_to_feed`. No time window — paginate as far back as desired.
+ */
+export async function getUnifiedFeed(
+  viewerId: string,
+  limit: number,
+  before?: string | null,
+): Promise<FeedEntryRow[]> {
+  // PERF: the expensive per-row columns (route JSONB, is_hyped, hype_count,
+  // story_photo_url) are computed ONLY for the page's rows, not for the whole
+  // circle's history. The old shape put them in the SELECT list of a UNION ALL
+  // that was then ORDER BY sort_ts DESC LIMIT $3 — so Postgres had to evaluate
+  // them for every post AND every workout in the viewer's circle across all
+  // time before the outer LIMIT could apply, and got linearly slower as the
+  // workouts table grew. Now `candidates` unions only the cheap keys, `page`
+  // sorts+limits them (the LIMIT is a hard barrier), and the outer SELECT
+  // projects the heavy columns onto just those <= $3 rows. Output shape and
+  // every value are identical to the old query; results are keyed by column
+  // name so column order is irrelevant. All lookups here are already indexed
+  // (idx_posts_user_created, idx_workouts_user_device_end for the candidate
+  // ordering; hype_log_context_dedupe_idx / idx_hype_log_target_context for the
+  // hype checks).
+  const rows = await db.query<FeedEntryRow>(
+    `
+		${CIRCLE_CTE},
+		candidates AS (
+			SELECT
+				'post'::text AS kind,
+				p.post_id::text AS id,
+				p.created_at AS sort_ts,
+				p.user_id AS owner_id,
+				p.workout_id AS workout_id
+			FROM posts p
+			WHERE p.share_to_feed AND p.deleted_at IS NULL
+				-- Accepted collab posts reach BOTH authors' circles (semi-join, not
+				-- a JOIN, so a post whose two authors share the viewer isn't doubled).
+				AND EXISTS (
+					SELECT 1 FROM circle c
+					WHERE c.uid = p.user_id
+						OR (p.coauthor_status = 'accepted' AND c.uid = p.coauthor_user_id)
+				)
+				AND p.user_id NOT IN (SELECT uid FROM blocked)
+				AND (p.coauthor_status IS DISTINCT FROM 'accepted'
+					OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
+				AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
+
+			UNION ALL
+
+			SELECT
+				'workout'::text AS kind,
+				w.workout_id AS id,
+				w.device_end_date AS sort_ts,
+				w.user_id AS owner_id,
+				w.workout_id AS workout_id
+			FROM workouts w
+			JOIN circle c ON c.uid = w.user_id
+			LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
+			WHERE w.user_id NOT IN (SELECT uid FROM blocked)
+				AND COALESCE(ns.share_workouts_to_feed, true) = true
+				-- The feed is always YOUR circle, so 'public' must not pour
+				-- strangers in; only the tightening direction applies here.
+				AND ${OWNER_NOT_PRIVATE_SQL("w.user_id")}
+				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+				-- Only two roles ever earn a card: the workout that completed the
+				-- day's mile (which stands in for every pre-mile segment — see the
+				-- rollup lateral below) and anything logged after it. 'rolled_up'
+				-- and 'hidden' are represented by the anchor or not at all, which
+				-- is what stops three 0.33 walks becoming three cards and a 3-second
+				-- phantom becoming one. A plain indexed predicate on purpose:
+				-- idx_workouts_feed_candidates matches this WHERE exactly, and the
+				-- PERF note above rules out anything heavier inside candidates.
+				AND w.feed_role IN ('daily_mile', 'extra')
+				AND NOT EXISTS (
+					SELECT 1 FROM posts p2
+					WHERE p2.deleted_at IS NULL AND p2.share_to_feed
+						AND (p2.workout_id = w.workout_id
+							-- A collab post only stands in for the coauthor's mile when
+							-- the viewer can actually SEE that post (primary author not
+							-- blocked or private) — otherwise they'd get neither.
+							OR (p2.coauthor_status = 'accepted'
+								AND p2.coauthor_workout_id = w.workout_id
+								AND p2.user_id NOT IN (SELECT uid FROM blocked)
+								AND ${OWNER_NOT_PRIVATE_SQL("p2.user_id")}))
+				)
+		),
+		page AS (
+			SELECT kind, id, sort_ts, owner_id, workout_id
+			FROM candidates
+			WHERE ($2::timestamptz IS NULL OR sort_ts < $2::timestamptz)
+			ORDER BY sort_ts DESC
+			LIMIT $3
+		)
+		${FEED_ENTRY_PROJECTION}
 		`,
     [viewerId, before ?? null, limit],
   );
   return rows;
+}
+
+/**
+ * ONE post, shaped exactly like the feed entry for it. Backs opening a post
+ * directly (a tap on the profile grid, a mention push, a shared link) instead
+ * of hunting for it in a paginated feed — which could never work for a post
+ * old enough to be several pages down, or one whose author's activity the
+ * viewer doesn't otherwise follow closely.
+ *
+ * Authorization is `visiblePostAuthor`, the same gate comments and mentions
+ * use — it mirrors the feed's circle + block rules, including accepted-coauthor
+ * reach. Null when the post is gone or the viewer may not see it; the
+ * controller maps that to 404 so post existence isn't leaked.
+ */
+export async function getFeedEntryForPost(
+  viewerId: string,
+  postId: string,
+): Promise<FeedEntryRow | null> {
+  if (!(await visiblePostAuthor(viewerId, postId))) return null;
+  const rows = await db.query<FeedEntryRow>(
+    `
+		WITH page AS (
+			SELECT
+				'post'::text AS kind,
+				p0.post_id::text AS id,
+				p0.created_at AS sort_ts,
+				p0.user_id AS owner_id,
+				p0.workout_id AS workout_id
+			FROM posts p0
+			WHERE p0.post_id = $2::uuid AND p0.deleted_at IS NULL
+		)
+		${FEED_ENTRY_PROJECTION}
+		`,
+    [viewerId, postId],
+  );
+  return rows[0] ?? null;
+}
+
+export interface PublicPostPreview {
+  post_id: string;
+  username: string | null;
+  first_name: string | null;
+}
+
+/**
+ * The unauthenticated preview behind a shared post link (mileaday.run/p/<id>).
+ *
+ * Deliberately just "who posted this" — no photo, no caption, no distance.
+ * A post is friends-only content and a share link can be forwarded anywhere,
+ * so the web page is a signpost, not a viewer: it confirms the link is real,
+ * names the author (data already public via /public/users/:username), and
+ * hands off to the app, which re-authorizes the viewer properly. Even the
+ * `public` workout visibility means "any signed-in user", not the open web.
+ *
+ * Returns null for a deleted or story-only post, so a bad link 404s.
+ */
+export async function getPublicPostPreview(
+  postId: string,
+): Promise<PublicPostPreview | null> {
+  const rows = await db.query<PublicPostPreview>(
+    `SELECT p.post_id::text AS post_id, u.username, u.first_name
+		 FROM posts p
+		 JOIN users u ON u.user_id = p.user_id
+		 WHERE p.post_id = $1::uuid AND p.deleted_at IS NULL AND p.share_to_feed`,
+    [postId],
+  );
+  return rows[0] ?? null;
 }
 
 /**

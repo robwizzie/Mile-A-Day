@@ -1640,8 +1640,16 @@ final class MADWatchBridge: NSObject {
         // Carry the backend auth token + user id so the watch can upload
         // workouts directly. The watch never refreshes tokens — it relies on
         // these pushes, which is safe because access tokens last 30 days.
-        let authToken = UserDefaults.standard.string(forKey: "authToken")
-        let backendUserId = UserDefaults.standard.string(forKey: "backendUserId")
+        //
+        // Never ship a mismatched pair. The watch builds self-scoped upload
+        // URLs from this id and authorizes with this token, so if they name
+        // different accounts every upload 403s — and the watch has no refresh,
+        // no sign-out and no auth UI to recover with. Withholding credentials
+        // leaves it read-only until the phone resolves the mismatch (which
+        // SessionIdentity does at launch/foreground or on the next 403).
+        let identityAgrees = !SessionIdentity.isMismatched
+        let authToken = identityAgrees ? UserDefaults.standard.string(forKey: "authToken") : nil
+        let backendUserId = identityAgrees ? UserDefaults.standard.string(forKey: "backendUserId") : nil
         if let authToken { payload["authToken"] = authToken }
         if let backendUserId { payload["backendUserId"] = backendUserId }
 

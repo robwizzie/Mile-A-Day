@@ -261,6 +261,10 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
         let myMiles: Double
         // Optional: older server builds don't send it.
         let mutual: Bool?
+        /// Others who pinned the viewer as THEIR rival today. Optional for the
+        /// same reason — a server that predates it simply sends no list, and
+        /// the strip doesn't render.
+        let challengers: [ChallengerDTO]?
 
         func toOpponent() -> ChallengeOpponent {
             ChallengeOpponent(
@@ -269,9 +273,25 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
                 profileImageUrl: profileImageUrl,
                 miles: miles,
                 myMiles: myMiles,
-                mutual: mutual ?? false
+                mutual: mutual ?? false,
+                challengers: (challengers ?? []).map {
+                    ChallengeChallenger(
+                        userId: $0.userId,
+                        username: $0.username,
+                        profileImageUrl: $0.profileImageUrl,
+                        miles: $0.miles
+                    )
+                }
             )
         }
+    }
+
+    /// One of the people racing the viewer today without being their matchup.
+    struct ChallengerDTO: Codable {
+        let userId: String
+        let username: String?
+        let profileImageUrl: String?
+        let miles: Double
     }
 
     struct TodayResponseDTO: Codable {
