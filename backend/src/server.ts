@@ -187,13 +187,21 @@ app.get("/status/schema", async (req, res) => {
                     n["Index Name"] ??
                     n["CTE Name"] ??
                     undefined,
+                  // Names the correlated subquery when the hot node is one.
+                  subplan: n["Subplan Name"] ?? undefined,
                   rows: n["Actual Rows"],
                   loops,
+                  // A node that reads a lot and discards a lot is the tell for
+                  // a scan running per-row that should have been an index hit.
+                  discarded: n["Rows Removed by Filter"] ?? undefined,
                   ms: Math.round((n["Actual Total Time"] ?? 0) * loops),
                 });
                 for (const c of n["Plans"] ?? []) walk(c);
               };
-              walk(root);
+              // FORMAT JSON wraps the tree: root is
+              // { Plan: {...}, "Planning Time": n, "Execution Time": n }
+              // so the node tree hangs off root.Plan, not root itself.
+              walk(root?.["Plan"]);
               nodes.sort((a, b) => b.ms - a.ms);
 
               const scale = await db.query<any>(
