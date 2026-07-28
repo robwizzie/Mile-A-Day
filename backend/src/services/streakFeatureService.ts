@@ -760,7 +760,7 @@ export async function getAssistableFriends(
       Number(row.prior_streak),
     );
     // Don't advertise a rescue the give call would refuse.
-    if (!detail.bridged) continue;
+    if (!detail.bridged || !detail.inWindow) continue;
     stampedRows.push({
       ...row,
       restored_streak: detail.restored,
@@ -934,7 +934,7 @@ export async function getFriendRescueStatus(
       stamped[0].local_date,
       prior,
     );
-    breakInfo = detail.bridged
+    breakInfo = detail.bridged && detail.inWindow
       ? {
           local_date: stamped[0].local_date,
           prior_streak: prior,
@@ -1054,7 +1054,7 @@ async function stampedBreakDetail(
   userId: string,
   missedDay: string,
   priorStreak: number,
-): Promise<{ restored: number; bridged: boolean }> {
+): Promise<{ restored: number; bridged: boolean; inWindow: boolean }> {
   const userToday = await getUserLocalToday(userId);
   const facts = await recentDayFacts(userId, missedDay);
   const ok = (d: string) => facts.qualified.has(d) || facts.covered.has(d);
@@ -1072,5 +1072,10 @@ async function stampedBreakDetail(
   return {
     restored: projectRestoredStreak(missedDay, userToday, priorStreak, ok),
     bridged,
+    // The list query bounds break age by the SERVER's CURRENT_DATE; the give
+    // call bounds it by the FRIEND's local today. For anyone west of UTC those
+    // are different days, so a break can pass the list and then come back
+    // `window_passed`. Re-check it against the friend's own clock.
+    inWindow: missedDay >= dateStrMinus(userToday, ASSIST_RESCUE_WINDOW_DAYS),
   };
 }

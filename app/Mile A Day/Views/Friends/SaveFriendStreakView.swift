@@ -89,7 +89,7 @@ struct SaveFriendStreakView: View {
                             .lineLimit(1)
                         // The number this actually buys: their run BEFORE the
                         // miss, plus the covered day, plus everything since.
-                        Text("\(status.streakAfterSave) days")
+                        Text(Self.dayCount(status.streakAfterSave))
                             .font(.system(size: style == .compact ? 9 : 10, weight: .bold, design: .rounded))
                             .opacity(0.85)
                     }
@@ -154,7 +154,7 @@ struct SaveFriendStreakView: View {
         HStack(spacing: 5) {
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 12, weight: .bold))
-            Text("Saved · \(streak) days")
+            Text("Saved · \(Self.dayCount(streak))")
                 .font(.system(size: style == .compact ? 11 : 12, weight: .heavy, design: .rounded))
                 .lineLimit(1)
         }
@@ -211,6 +211,12 @@ struct SaveFriendStreakView: View {
         }
         lines.append("Streak Assists are earned by banking 20 miles beyond your own daily goal.")
         return lines.joined(separator: "\n\n")
+    }
+
+    /// "1 day" / "5 days" — a rescue is regularly worth exactly one day, and
+    /// "1 days" on the button looked like a bug in its own right.
+    static func dayCount(_ n: Int) -> String {
+        "\(n) day\(n == 1 ? "" : "s")"
     }
 
     /// "Sunday, Jul 26" from a yyyy-MM-dd local date, or "the missed day".
