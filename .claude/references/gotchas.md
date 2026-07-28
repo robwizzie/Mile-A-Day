@@ -37,3 +37,18 @@ When you correct Claude on something non-obvious, run `/remember "rule"` to add 
 **Rule**: `MADNotificationService.currentDeviceToken` is only assigned in the `didRegisterForRemoteNotifications` callback, so it is nil anywhere in `AppDelegate`'s launch task. Never compare a stored token against it to decide what to unregister.
 **Why**: A DEBUG-only "stale token cleanup" guarded on `oldToken != currentDeviceToken`, which is always true at launch — so it `DELETE`d the user's valid token every dev launch, racing the new registration and making "I never get notifications" worse.
 **Source**: reverted in 226a340, session 2026-07-27
+
+## An OR across two columns in NOT EXISTS silently disables both indexes
+**Rule**: Never OR two different columns inside a `NOT EXISTS`/`EXISTS` correlated subquery. Postgres cannot serve `a.x = $outer OR a.y = $outer` from an index on either column, so it falls back to scanning every qualifying row of the inner table once per outer row. Split it: `NOT EXISTS(A OR B)` = `NOT EXISTS(A) AND NOT EXISTS(B)` (distribute the shared predicates over the OR, then De Morgan the existential) — exact, and each arm can then use its own index.
+**Why**: `getUnifiedFeed`'s workouts arm ORed `p2.workout_id = w.workout_id` with `p2.coauthor_workout_id = w.workout_id`. That scanned all 232 shared posts per candidate workout — 857 x 232 = ~198k executions of the privacy/block subplans nested inside — for a 5,484ms feed on a viewer with THREE friends. Splitting it: 267ms, a 20x win, with `uq_posts_workout_active` and `idx_posts_coauthor_workout` (both of which already existed) finally being used.
+**Source**: 542fc76, session 2026-07-27
+
+## "Seq Scan" in a plan is not automatically a missing index
+**Rule**: Read `loops` before reacting to a node type. A seq scan of a small table is the CORRECT plan once and a catastrophe 195,720 times — the fix is to remove the loops, not to index the table. Check whether the column is already a PK/unique before proposing an index.
+**Why**: The hot node above was `Seq Scan on notification_settings`, whose `user_id` is already a PRIMARY KEY. The planner picks a seq scan because the table is ~114 rows and that is genuinely cheaper per execution. Adding an index — the reflex response — would have changed nothing.
+**Source**: 542fc76, session 2026-07-27
+
+## Profile the feed with /status/schema?profile=feed
+**Rule**: Before touching feed performance, GET `https://mad.mindgoblin.tech/status/schema?profile=feed`. It returns planning/execution ms, the 12 hottest plan nodes (with `loops`, `discarded`, `subplan`) and scale counts, by running `EXPLAIN (ANALYZE, BUFFERS)` on `UNIFIED_FEED_SQL` — the byte-identical string `getUnifiedFeed` runs. Opt-in param, throttled to one run per 20s. Note the DEFAULT `/status/schema` response also runs a real feed query, so do not poll it on a short timer.
+**Why**: Five plausible hypotheses (missing posts index, NOT IN on blocked, LIMIT not pushed into the UNION, data volume, projection cost) were all wrong, and one EXPLAIN killed all five in seconds.
+**Source**: dae2e72 / 4c5d2d5, session 2026-07-27
