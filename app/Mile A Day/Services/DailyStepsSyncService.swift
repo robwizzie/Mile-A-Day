@@ -107,6 +107,41 @@ final class DailyStepsSyncService {
         }
     }
 
+    /// Re-post the last `days` days of step counts so the backend can back-correct
+    /// any day that was left partial. The live sync only ever finalizes today (and
+    /// yesterday, once, at a day rollover); a day whose final steps reached
+    /// HealthKit after its last post — a late Watch sync, or the app simply not
+    /// being open that evening — stays stuck at the partial value forever. Apple
+    /// Health holds the true daily totals and the backend upsert keeps the
+    /// GREATEST, so re-querying and re-posting can only raise a stale day to its
+    /// real count, never lower a correct one.
+    ///
+    /// Invoked by the "Recalibrate Streak" maintenance action, which runs in the
+    /// foreground with the device unlocked so the step queries succeed. A 0 result
+    /// (no data, or a locked-device query error that `fetchSteps` can't tell apart)
+    /// is skipped, not posted: GREATEST means a 0 could never correct anything,
+    /// only create empty rows.
+    func backfillRecentDays(_ days: Int) async {
+        guard AppStateManager.shared.isAuthenticated,
+              let userId = UserManager.shared.currentUser.backendUserId else { return }
+
+        let calendar = Calendar.current
+        let today = Date()
+        await withTaskGroup(of: Void.self) { group in
+            for offset in 0..<max(days, 1) {
+                guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
+                group.addTask { [weak self] in
+                    guard let self else { return }
+                    let steps = await self.fetchSteps(for: day)
+                    guard steps > 0 else { return }
+                    _ = await self.post(userId: userId,
+                                        localDate: Self.localDateString(for: day),
+                                        steps: steps)
+                }
+            }
+        }
+    }
+
     // MARK: - Throttle
 
     private func shouldPost(currentSteps: Int, todayLocalDate: String, now: Date) -> Bool {

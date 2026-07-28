@@ -207,6 +207,13 @@ struct ProfileView: View {
             recalibrateResultMessage =
                 "We couldn't finish recalibrating right now. Please check your connection and try again."
         }
+
+        // Steps live in a separate daily_steps table that only ever finalizes
+        // today (and yesterday once at rollover), so a day left partial by a late
+        // Watch sync is never revisited. Re-post the recent window; the backend
+        // keeps the GREATEST, so this back-corrects a stale day and never lowers a
+        // good one. Best-effort and independent of the streak result above.
+        await DailyStepsSyncService.shared.backfillRecentDays(30)
     }
 
     // MARK: - Profile Header
