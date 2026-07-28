@@ -1302,7 +1302,7 @@ export async function getUnifiedFeed(
   // (idx_posts_user_created, idx_workouts_user_device_end for the candidate
   // ordering; hype_log_context_dedupe_idx / idx_hype_log_target_context for the
   // hype checks).
-  const rows = await db.query<FeedEntryRow>(
+  const rows = await db.queryWithExtendedTimeout<FeedEntryRow>(
     `
 		${CIRCLE_CTE},
 		candidates AS (
