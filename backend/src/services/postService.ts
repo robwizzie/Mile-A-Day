@@ -1283,27 +1283,25 @@ const FEED_ENTRY_PROJECTION = `
  * post represents it), and a user's raw workouts are hidden when they've turned
  * off `share_workouts_to_feed`. No time window — paginate as far back as desired.
  */
-export async function getUnifiedFeed(
-  viewerId: string,
-  limit: number,
-  before?: string | null,
-): Promise<FeedEntryRow[]> {
-  // PERF: the expensive per-row columns (route JSONB, is_hyped, hype_count,
-  // story_photo_url) are computed ONLY for the page's rows, not for the whole
-  // circle's history. The old shape put them in the SELECT list of a UNION ALL
-  // that was then ORDER BY sort_ts DESC LIMIT $3 — so Postgres had to evaluate
-  // them for every post AND every workout in the viewer's circle across all
-  // time before the outer LIMIT could apply, and got linearly slower as the
-  // workouts table grew. Now `candidates` unions only the cheap keys, `page`
-  // sorts+limits them (the LIMIT is a hard barrier), and the outer SELECT
-  // projects the heavy columns onto just those <= $3 rows. Output shape and
-  // every value are identical to the old query; results are keyed by column
-  // name so column order is irrelevant. All lookups here are already indexed
-  // (idx_posts_user_created, idx_workouts_user_device_end for the candidate
-  // ordering; hype_log_context_dedupe_idx / idx_hype_log_target_context for the
-  // hype checks).
-  const rows = await db.query<FeedEntryRow>(
-    `
+// Hoisted to a const so the /status/schema?profile=feed probe can EXPLAIN the
+// BYTE-IDENTICAL string this function runs. A profiler that measures its own
+// copy of the SQL measures the wrong query the moment the two drift.
+//
+// PERF: the expensive per-row columns (route JSONB, is_hyped, hype_count,
+// story_photo_url) are computed ONLY for the page's rows, not for the whole
+// circle's history. The old shape put them in the SELECT list of a UNION ALL
+// that was then ORDER BY sort_ts DESC LIMIT $3 — so Postgres had to evaluate
+// them for every post AND every workout in the viewer's circle across all
+// time before the outer LIMIT could apply, and got linearly slower as the
+// workouts table grew. Now `candidates` unions only the cheap keys, `page`
+// sorts+limits them (the LIMIT is a hard barrier), and the outer SELECT
+// projects the heavy columns onto just those <= $3 rows. Output shape and
+// every value are identical to the old query; results are keyed by column
+// name so column order is irrelevant. All lookups here are already indexed
+// (idx_posts_user_created, idx_workouts_user_device_end for the candidate
+// ordering; hype_log_context_dedupe_idx / idx_hype_log_target_context for the
+// hype checks).
+export const UNIFIED_FEED_SQL = `
 		${CIRCLE_CTE},
 		candidates AS (
 			SELECT
@@ -1393,10 +1391,18 @@ export async function getUnifiedFeed(
 			LIMIT $3
 		)
 		${FEED_ENTRY_PROJECTION}
-		`,
-    [viewerId, before ?? null, limit],
-  );
-  return rows;
+		`;
+
+export async function getUnifiedFeed(
+  viewerId: string,
+  limit: number,
+  before?: string | null,
+): Promise<FeedEntryRow[]> {
+  return db.query<FeedEntryRow>(UNIFIED_FEED_SQL, [
+    viewerId,
+    before ?? null,
+    limit,
+  ]);
 }
 
 /**

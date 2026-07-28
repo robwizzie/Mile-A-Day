@@ -43,7 +43,16 @@ import {
   getMigrationReport,
 } from "./db/runMigrations.js";
 import { backfillFeedRoles } from "./db/backfillFeedRoles.js";
-import { getUnifiedFeed, getStoriesRail } from "./services/postService.js";
+import {
+  getUnifiedFeed,
+  getStoriesRail,
+  UNIFIED_FEED_SQL,
+} from "./services/postService.js";
+
+// Throttle for /status/schema?profile=feed. The probe runs a real EXPLAIN
+// ANALYZE (~seconds), so an unthrottled public endpoint would be a cheap
+// amplification vector. One run per 20s is plenty for diagnosis.
+let lastFeedProfileAt = 0;
 import { verifyPostsMediaAccess } from "./services/mediaSigningService.js";
 import { webcrypto } from "node:crypto";
 
@@ -130,6 +139,96 @@ app.get("/status/schema", async (req, res) => {
         return `error: ${e?.message ?? e}`;
       }
     })(),
+    // Opt-in deep profile: /status/schema?profile=feed
+    //
+    // Diagnostic for "why is the feed slow". Reports TIMINGS, ROW COUNTS and
+    // plan node types only — never post content, captions or media — matching
+    // the row-counts-only contract feed_probe already follows above. Absent
+    // from the default response, so routine health checks stay cheap.
+    //
+    // Remove once the feed is fast; this is not meant to live here forever.
+    feed_profile:
+      req.query.profile === "feed"
+        ? await (async () => {
+            const sinceLast = Date.now() - lastFeedProfileAt;
+            if (sinceLast < 20_000) {
+              return `throttled — retry in ${Math.ceil((20_000 - sinceLast) / 1000)}s`;
+            }
+            lastFeedProfileAt = Date.now();
+            try {
+              const db = PostgresService.getInstance();
+              const who = await db.query<{ user_id: string }>(
+                `SELECT user_id FROM workouts WHERE deleted_at IS NULL
+									ORDER BY device_end_date DESC LIMIT 1`,
+              );
+              const uid = who[0]?.user_id;
+              if (!uid) return "no workouts in db";
+
+              const t0 = Date.now();
+              const rows = await getUnifiedFeed(uid, 20, null);
+              const fullMs = Date.now() - t0;
+
+              // EXPLAIN the byte-identical SQL getUnifiedFeed just ran.
+              const explained = await db.query<any>(
+                `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${UNIFIED_FEED_SQL}`,
+                [uid, null, 20],
+              );
+              const root = explained[0]?.["QUERY PLAN"]?.[0];
+
+              // Flatten the tree so the hot node is obvious at a glance.
+              const nodes: any[] = [];
+              const walk = (n: any) => {
+                if (!n) return;
+                const loops = n["Actual Loops"] ?? 1;
+                nodes.push({
+                  node: n["Node Type"],
+                  on:
+                    n["Relation Name"] ??
+                    n["Index Name"] ??
+                    n["CTE Name"] ??
+                    undefined,
+                  rows: n["Actual Rows"],
+                  loops,
+                  ms: Math.round((n["Actual Total Time"] ?? 0) * loops),
+                });
+                for (const c of n["Plans"] ?? []) walk(c);
+              };
+              walk(root);
+              nodes.sort((a, b) => b.ms - a.ms);
+
+              const scale = await db.query<any>(
+                `SELECT
+									(SELECT count(*)::int FROM friendships
+										WHERE user_id = $1 AND status = 'accepted') AS friends,
+									(SELECT count(*)::int FROM user_blocks
+										WHERE blocker_id = $1 OR blocked_id = $1) AS blocks,
+									(SELECT count(*)::int FROM workouts w
+										WHERE w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+											AND w.feed_role IN ('daily_mile','extra')
+											AND w.user_id IN (
+												SELECT friend_id FROM friendships
+													WHERE user_id = $1 AND status = 'accepted'
+												UNION SELECT $1)) AS workout_candidates,
+									(SELECT count(*)::int FROM posts
+										WHERE deleted_at IS NULL AND share_to_feed) AS posts_shared`,
+                [uid],
+              );
+
+              return {
+                rows_returned: rows.length,
+                full_query_ms: fullMs,
+                planning_ms: Math.round(root?.["Planning Time"] ?? 0),
+                execution_ms: Math.round(root?.["Execution Time"] ?? 0),
+                scale: scale[0],
+                // Inclusive time, so parents contain their children — read the
+                // deepest expensive node, not just the top one.
+                hottest_nodes: nodes.slice(0, 12),
+              };
+            } catch (e: any) {
+              return `error: ${e?.message ?? e}`;
+            }
+          })()
+        : undefined,
   });
 });
 

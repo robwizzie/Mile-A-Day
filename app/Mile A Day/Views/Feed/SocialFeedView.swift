@@ -921,7 +921,14 @@ struct SocialFeedView: View {
         // the rail + own-stories round trips (three serial fetches), which was
         // the bulk of the "feed takes forever to load" wait.
         async let railFetch = PostService.fetchStoriesRail()
+        // Timing is measured around the feed request ALONE. Measuring the whole
+        // of refresh() reports the same number for every request, because the
+        // concurrent calls share one HTTP/2 connection and a slow feed response
+        // head-of-line blocks the rest — which reads as "stories are slow too"
+        // when only the feed is.
+        let feedStart = Date()
         let feedResponse = try? await PostService.fetchUnifiedFeed(before: nil)
+        print("[Feed] unified feed: \(Int(Date().timeIntervalSince(feedStart) * 1000))ms")
         await MainActor.run {
             if let feedResponse {
                 feed = feedResponse.items
