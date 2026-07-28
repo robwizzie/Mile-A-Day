@@ -921,7 +921,7 @@ struct SocialFeedView: View {
         async let feedFetch = PostService.fetchUnifiedFeed(before: nil)
         async let railFetch = PostService.fetchStoriesRail()
         let uid = currentUserId
-        async let userStoriesFetch: [StoryItem]? = {
+        async let userStoriesFetch: [PostItem]? = {
             guard let uid else { return nil }
             return try? await PostService.fetchUserStories(userId: uid)
         }()
@@ -940,10 +940,10 @@ struct SocialFeedView: View {
 
         // Stories and user stories fetch concurrently; update when both done
         let storyGroups = try? await railFetch
-        let userStories = try? await userStoriesFetch
+        let userStories = await userStoriesFetch
         var storyWorkoutIds: Set<String> = []
         if let uid, let ownStories = userStories {
-            storyWorkoutIds = Set(ownStories.compactMap(\.workout_id))
+            storyWorkoutIds = Set(ownStories.compactMap { $0.workout_id })
         }
 
         await MainActor.run {
