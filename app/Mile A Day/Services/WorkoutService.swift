@@ -102,6 +102,8 @@ class WorkoutService: ObservableObject {
                 throw WorkoutServiceError.notAuthenticated
             case .unauthorized:
                 throw WorkoutServiceError.unauthorized
+            case .accountMismatch:
+                throw WorkoutServiceError.notAuthenticated
             case .badRequest(let message):
                 throw WorkoutServiceError.apiError(message)
             case .conflict(let message):

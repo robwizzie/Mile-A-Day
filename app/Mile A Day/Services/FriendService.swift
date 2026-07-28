@@ -67,6 +67,8 @@ class FriendService: ObservableObject {
                 throw FriendServiceError.notAuthenticated
             case .unauthorized:
                 throw FriendServiceError.unauthorized
+            case .accountMismatch:
+                throw FriendServiceError.notAuthenticated
             case .badRequest(let message):
                 throw FriendServiceError.apiError(message)
             case .conflict(let message):

@@ -66,6 +66,8 @@ class CompetitionService: ObservableObject {
                 throw CompetitionServiceError.notAuthenticated
             case .unauthorized:
                 throw CompetitionServiceError.unauthorized
+            case .accountMismatch:
+                throw CompetitionServiceError.notAuthenticated
             case .badRequest(let message):
                 throw CompetitionServiceError.apiError(message)
             case .conflict(let message):
