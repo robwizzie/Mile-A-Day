@@ -338,6 +338,10 @@ export async function sendHype(req: AuthenticatedRequest, res: Response) {
       if (context) {
         pushData.context_type = context.contextType;
         pushData.context_label = context.contextLabel;
+        // For post hypes this is the post uuid — the inbox uses it to show
+        // the post's thumbnail and open the post on tap. String-valued like
+        // every data field (shipped clients decode data as [String: String]).
+        pushData.context_id = context.contextId;
       }
       await sendPush(recipientId, {
         title: "🔥 You got hyped!",
