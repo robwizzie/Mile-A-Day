@@ -48,6 +48,8 @@ struct PostCardView: View {
     /// the link's landing page shows nothing the recipient isn't already
     /// entitled to (see PostShareLink).
     var onShare: (() -> Void)? = nil
+    /// Accepted coauthor: leave this post (remove self as coauthor).
+    var onLeaveCollab: (() -> Void)? = nil
 
     @State private var hypeBurst = 0
     /// Collapses the same physical double-tap arriving from two recognizers
@@ -57,6 +59,11 @@ struct PostCardView: View {
     /// The route slide's raw map snapshot (~400×300) — the only piece kept
     /// around; the zoom's floating composite is rendered on demand from it.
     @State private var routeSnapshot: UIImage?
+
+    /// True if the current user is the post author.
+    private var isMine: Bool {
+        post.is_self
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
