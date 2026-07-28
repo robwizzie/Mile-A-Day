@@ -5,9 +5,11 @@ import SwiftUI
 /// Shared by the friends list row and the friend's profile so both surfaces
 /// promise the same thing and take the same confirmation. States:
 ///
-///  1. **Rescuable + token held** → the "Save Streak · N days" pill. Tapping it
-///     opens a confirmation naming the day it covers and the streak the friend
-///     ends up on. Nothing is spent until that's confirmed.
+///  1. **Rescuable + token held** → the "Save Streak · Back to N days" pill.
+///     N is where the friend LANDS (`restored_streak`), not the run that ended
+///     at the miss — those differ by every day they've kept since. Tapping
+///     opens a confirmation naming the day it covers and that same number.
+///     Nothing is spent until it's confirmed.
 ///  2. **Rescuable, no token yet** → a locked pill showing the Assist meter, so
 ///     "why don't I have the option" has a visible answer instead of the CTA
 ///     silently not rendering.
@@ -87,11 +89,16 @@ struct SaveFriendStreakView: View {
                         Text("Save Streak")
                             .font(.system(size: style == .compact ? 11 : 12, weight: .heavy, design: .rounded))
                             .lineLimit(1)
-                        // The number this actually buys: their run BEFORE the
-                        // miss, plus the covered day, plus everything since.
-                        Text(Self.dayCount(status.streakAfterSave))
+                        // Says where they LAND, not what's being spent. A bare
+                        // "5 days" under "Save Streak" reads as "this saves 5
+                        // days"; the number is actually the streak they end up
+                        // on — their run before the miss, plus the covered day,
+                        // plus every day they've kept since.
+                        Text("Back to \(Self.dayCount(status.streakAfterSave))")
                             .font(.system(size: style == .compact ? 9 : 10, weight: .bold, design: .rounded))
                             .opacity(0.85)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
                     }
                 }
                 .foregroundColor(.white)
@@ -154,7 +161,7 @@ struct SaveFriendStreakView: View {
         HStack(spacing: 5) {
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 12, weight: .bold))
-            Text("Saved · \(Self.dayCount(streak))")
+            Text("Saved · \(streak)-day streak")
                 .font(.system(size: style == .compact ? 11 : 12, weight: .heavy, design: .rounded))
                 .lineLimit(1)
         }
