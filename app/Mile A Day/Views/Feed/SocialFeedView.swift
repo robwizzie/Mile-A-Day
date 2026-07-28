@@ -920,9 +920,8 @@ struct SocialFeedView: View {
         // all go out at the same time. Feed paints first, then stories arrive.
         async let feedFetch = PostService.fetchUnifiedFeed(before: nil)
         async let railFetch = PostService.fetchStoriesRail()
-        let uid = currentUserId
         async let userStoriesFetch: [PostItem]? = {
-            guard let uid else { return nil }
+            guard let uid = currentUserId else { return nil }
             return try? await PostService.fetchUserStories(userId: uid)
         }()
 
@@ -942,7 +941,7 @@ struct SocialFeedView: View {
         let storyGroups = try? await railFetch
         let userStories = await userStoriesFetch
         var storyWorkoutIds: Set<String> = []
-        if let uid, let ownStories = userStories {
+        if let ownStories = userStories {
             storyWorkoutIds = Set(ownStories.compactMap { $0.workout_id })
         }
 
