@@ -57,6 +57,20 @@ export interface DailyChallenge {
 }
 
 /** Today's rival for the Head-to-Head challenge. */
+/**
+ * Someone who picked YOU as their Head-to-Head rival today, other than the
+ * rival you were given. Purely for show: only the pinned duel decides whether
+ * the challenge completes, and only that one is scored. These are the people
+ * who are quietly racing you without you knowing it, which is a much better
+ * story to tell the user than nothing at all.
+ */
+export interface ChallengeChallenger {
+  userId: string;
+  username: string | null;
+  profileImageUrl: string | null;
+  miles: number;
+}
+
 export interface ChallengeOpponent {
   userId: string;
   username: string | null;
@@ -65,6 +79,12 @@ export interface ChallengeOpponent {
   myMiles: number;
   /** TRUE when the rival got the same matchup back (reciprocal pair). */
   mutual: boolean;
+  /**
+   * Others who pinned the viewer as THEIR rival today. Never affects the
+   * outcome — beating one of these wins nothing. Additive, so older clients
+   * ignore it entirely.
+   */
+  challengers?: ChallengeChallenger[];
 }
 
 export interface TodaysChallengeResponse {

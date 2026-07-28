@@ -44,6 +44,10 @@ struct PostCardView: View {
     /// Non-nil when the CURRENT user is this post's pending coauthor —
     /// shows the Accept/Decline collab banner. Called with accept/decline.
     var onRespondCoauthor: ((Bool) -> Void)? = nil
+    /// Copy/share a link to this post. Offered on every post, own or not —
+    /// the link's landing page shows nothing the recipient isn't already
+    /// entitled to (see PostShareLink).
+    var onShare: (() -> Void)? = nil
 
     @State private var hypeBurst = 0
     /// Collapses the same physical double-tap arriving from two recognizers
@@ -195,6 +199,14 @@ struct PostCardView: View {
                     .background(Circle().fill(ActivityCardView.color(type).opacity(0.15)))
             }
             Menu {
+                // Sharing is not a moderation action — it sits above the
+                // divider-less group of them, and applies to any post that
+                // actually lives on the feed (a story has no permalink).
+                if let onShare, post.share_to_feed != false {
+                    Button(action: onShare) {
+                        Label("Share link", systemImage: "square.and.arrow.up")
+                    }
+                }
                 if post.is_self {
                     if let onEditCaption {
                         Button(action: onEditCaption) {

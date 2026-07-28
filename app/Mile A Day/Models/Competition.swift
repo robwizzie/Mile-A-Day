@@ -14,6 +14,8 @@ struct Competition: Codable, Identifiable {
     let options: CompetitionOptions
     let owner: String?
     let winner: String?
+    /// Team play config — nil when this competition has no teams.
+    let teams: CompetitionTeamsConfig?
     let users: [CompetitionUser]
 
     var id: String { competition_id }
@@ -28,10 +30,11 @@ struct Competition: Codable, Identifiable {
         case options
         case owner
         case winner
+        case teams
         case users
     }
 
-    init(competition_id: String, competition_name: String, start_date: String?, end_date: String?, workouts: [CompetitionActivity], type: CompetitionType, options: CompetitionOptions, owner: String? = nil, winner: String? = nil, users: [CompetitionUser]) {
+    init(competition_id: String, competition_name: String, start_date: String?, end_date: String?, workouts: [CompetitionActivity], type: CompetitionType, options: CompetitionOptions, owner: String? = nil, winner: String? = nil, teams: CompetitionTeamsConfig? = nil, users: [CompetitionUser]) {
         self.competition_id = competition_id
         self.competition_name = competition_name
         self.start_date = start_date
@@ -41,6 +44,7 @@ struct Competition: Codable, Identifiable {
         self.options = options
         self.owner = owner
         self.winner = winner
+        self.teams = teams
         self.users = users
     }
 
@@ -55,6 +59,7 @@ struct Competition: Codable, Identifiable {
         options = try container.decodeIfPresent(CompetitionOptions.self, forKey: .options) ?? CompetitionOptions.defaults
         owner = try container.decodeIfPresent(String.self, forKey: .owner)
         winner = try container.decodeIfPresent(String.self, forKey: .winner)
+        teams = try container.decodeIfPresent(CompetitionTeamsConfig.self, forKey: .teams)
         users = try container.decodeIfPresent([CompetitionUser].self, forKey: .users) ?? []
     }
 
@@ -92,6 +97,46 @@ struct Competition: Codable, Identifiable {
 
     var acceptedUsersCount: Int {
         users.filter { $0.invite_status == .accepted }.count
+    }
+
+    // MARK: Teams
+
+    /// True when team play is configured (at least one team exists).
+    var hasTeams: Bool {
+        !(teams?.teams.isEmpty ?? true)
+    }
+
+    /// The team a user belongs to. An orphaned team_id (its team was deleted)
+    /// counts as unassigned.
+    func team(for userId: String) -> CompetitionTeam? {
+        guard let teamId = users.first(where: { $0.user_id == userId })?.team_id else { return nil }
+        return teams?.teams.first(where: { $0.id == teamId })
+    }
+
+    /// Teams ranked by score (sum of member scores, computed server-side),
+    /// stable on the configured order for ties/pre-start.
+    var rankedTeams: [CompetitionTeam] {
+        (teams?.teams ?? []).sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+    }
+
+    /// Accepted members of a team, best score first.
+    func members(of teamId: String) -> [CompetitionUser] {
+        users
+            .filter { $0.invite_status == .accepted && $0.team_id == teamId }
+            .sorted { ($0.score ?? 0) > ($1.score ?? 0) }
+    }
+
+    /// Accepted participants not on any (existing) team.
+    var unassignedUsers: [CompetitionUser] {
+        let validIds = Set((teams?.teams ?? []).map { $0.id })
+        return users.filter { $0.invite_status == .accepted && !($0.team_id.map(validIds.contains) ?? false) }
+    }
+
+    /// Stable per-team accent color, keyed by the team's configured position.
+    func teamColor(_ teamId: String) -> Color {
+        let palette: [Color] = [MADTheme.Colors.madRed, .blue, .orange, .green, .purple, .teal, .pink, .indigo, .mint, .yellow, .cyan, .brown]
+        guard let idx = teams?.teams.firstIndex(where: { $0.id == teamId }) else { return .gray }
+        return palette[idx % palette.count]
     }
 
     /// Parses a "YYYY-MM-DD" string from the backend as midnight in Eastern Time.
@@ -636,6 +681,38 @@ enum CompetitionInterval: String, Codable, CaseIterable {
     }
 }
 
+/// One team within a competition. `score` is derived server-side (straight
+/// sum of accepted members' scores) and only present once the comp started.
+struct CompetitionTeam: Codable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let score: Double?
+
+    init(id: String, name: String, score: Double? = nil) {
+        self.id = id
+        self.name = name
+        self.score = score
+    }
+}
+
+/// Team play configuration mirrored from `competitions.teams` on the backend.
+struct CompetitionTeamsConfig: Codable, Equatable {
+    /// When true, participants may pick/switch their own team in the lobby.
+    let member_pick: Bool
+    let teams: [CompetitionTeam]
+
+    init(member_pick: Bool, teams: [CompetitionTeam]) {
+        self.member_pick = member_pick
+        self.teams = teams
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        member_pick = try container.decodeIfPresent(Bool.self, forKey: .member_pick) ?? false
+        teams = try container.decodeIfPresent([CompetitionTeam].self, forKey: .teams) ?? []
+    }
+}
+
 /// One activity type's slice of a user's day — distance + workout count for
 /// "running" or "walking" on a single local date. Both fields optional so
 /// partial backend payloads decode safely.
@@ -649,6 +726,8 @@ struct CompetitionUser: Codable, Identifiable {
     let competition_id: String
     let user_id: String
     let invite_status: InviteStatus
+    /// Team membership (id from Competition.teams). Nil = unassigned.
+    let team_id: String?
     let username: String?
     let profile_image_url: String?
     let score: Double?
@@ -696,10 +775,11 @@ struct CompetitionUser: Codable, Identifiable {
         return daily.values.reduce(0) { $0 + ($1[activity.dailyActivityKey]?.count ?? 0) }
     }
 
-    init(competition_id: String, user_id: String, invite_status: InviteStatus, username: String?, profile_image_url: String? = nil, score: Double?, intervals: [String: Double]?, remaining_lives: Int? = nil, has_manual_workouts: Bool? = nil, daily_activity: [String: [String: DailyActivityEntry]]? = nil) {
+    init(competition_id: String, user_id: String, invite_status: InviteStatus, team_id: String? = nil, username: String?, profile_image_url: String? = nil, score: Double?, intervals: [String: Double]?, remaining_lives: Int? = nil, has_manual_workouts: Bool? = nil, daily_activity: [String: [String: DailyActivityEntry]]? = nil) {
         self.competition_id = competition_id
         self.user_id = user_id
         self.invite_status = invite_status
+        self.team_id = team_id
         self.username = username
         self.profile_image_url = profile_image_url
         self.score = score
@@ -714,6 +794,7 @@ struct CompetitionUser: Codable, Identifiable {
         competition_id = try container.decodeIfPresent(String.self, forKey: .competition_id) ?? ""
         user_id = try container.decode(String.self, forKey: .user_id)
         invite_status = try container.decodeIfPresent(InviteStatus.self, forKey: .invite_status) ?? .pending
+        team_id = try container.decodeIfPresent(String.self, forKey: .team_id)
         username = try container.decodeIfPresent(String.self, forKey: .username)
         profile_image_url = try container.decodeIfPresent(String.self, forKey: .profile_image_url)
         score = try container.decodeIfPresent(Double.self, forKey: .score)
@@ -779,6 +860,40 @@ struct PartialCompetitionOptionsRequest: Codable {
 /// Request to invite a user
 struct InviteUserRequest: Codable {
     let inviteUser: String
+}
+
+// MARK: Teams API models
+
+/// PUT /competitions/:id/teams — every field optional; only what's sent changes.
+struct SetTeamsRequest: Codable {
+    let member_pick: Bool?
+    /// Full replacement team list. Entries without an id are new (server mints one).
+    let teams: [TeamDefinition]?
+    /// userId -> teamId (or nil to unassign). Encoded nils become JSON nulls.
+    let assignments: [String: String?]?
+
+    struct TeamDefinition: Codable {
+        let id: String?
+        let name: String
+    }
+}
+
+/// POST /competitions/:id/teams/pick
+struct PickTeamRequest: Codable {
+    let team_id: String?
+}
+
+/// GET /competitions/:id/teams/stats — recent-form stats for the balance UI.
+struct TeamStatsResponse: Codable {
+    let window_days: Int
+    let interval: CompetitionInterval
+    let unit: CompetitionUnit
+    let stats: [String: MemberStat]
+
+    struct MemberStat: Codable {
+        let avg_per_day: Double
+        let avg_per_interval: Double
+    }
 }
 
 // MARK: - API Response Models

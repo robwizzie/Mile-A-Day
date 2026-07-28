@@ -9,7 +9,10 @@ import {
 	getCompInvites,
 	getCompInviteHandler,
 	updateComp,
-	deleteComp
+	deleteComp,
+	setCompTeams,
+	pickCompTeam,
+	getCompTeamStats
 } from '../controllers/competitionController.js';
 import { nudgeUser } from '../controllers/nudgeController.js';
 import { flexOnUser, getFlexPresets } from '../controllers/flexController.js';
@@ -25,6 +28,9 @@ router.patch('/:competitionId', updateComp);
 router.delete('/:competitionId', deleteComp);
 router.post('/:competitionId/start', startComp);
 router.post('/:competitionId/invite', inviteUsersToComp);
+router.put('/:competitionId/teams', setCompTeams);
+router.post('/:competitionId/teams/pick', pickCompTeam);
+router.get('/:competitionId/teams/stats', getCompTeamStats);
 router.delete('/:competitionId/users/:userId', removeUserFromComp);
 router.post('/:competitionId/accept', getCompInviteHandler('accepted'));
 router.post('/:competitionId/decline', getCompInviteHandler('declined'));

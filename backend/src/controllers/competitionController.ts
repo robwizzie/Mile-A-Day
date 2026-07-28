@@ -13,6 +13,9 @@ import {
   removeUserFromCompetition,
   getTodayET,
   autoStartIfAllAccepted,
+  setCompetitionTeams,
+  pickCompetitionTeam,
+  getCompetitionTeamStats,
 } from "../services/competitionService.js";
 import { getUser } from "../services/userService.js";
 import { CompetitionUser } from "../types/competitions.js";
@@ -404,6 +407,146 @@ export async function updateComp(req: AuthenticatedRequest, res: Response) {
     res
       .status(500)
       .json({ error: "Error updating competition: " + error.message });
+  }
+}
+
+// Shared guards for the team endpoints. Returns the competition, or null
+// after having already written the error response.
+async function loadCompForTeamEdit(
+  req: AuthenticatedRequest,
+  res: Response,
+  { ownerOnly }: { ownerOnly: boolean },
+) {
+  const competitionId = req.params.competitionId;
+  const competition = await getCompetition(competitionId);
+
+  if (!competition) {
+    res
+      .status(404)
+      .json({ error: `No competition found with id: ${competitionId}` });
+    return null;
+  }
+  if (ownerOnly && competition.owner !== req.userId!) {
+    res
+      .status(403)
+      .json({ error: "Only the competition owner can manage teams" });
+    return null;
+  }
+  // Editable while in the lobby OR scheduled-but-not-yet-started; frozen once live.
+  if (competition.start_date && competition.start_date <= getTodayET()) {
+    res
+      .status(400)
+      .json({ error: "Teams are locked once the competition has started" });
+    return null;
+  }
+  return competition;
+}
+
+export async function setCompTeams(req: AuthenticatedRequest, res: Response) {
+  if (!hasRequiredKeys(["competitionId"], req, res)) return;
+
+  try {
+    const competition = await loadCompForTeamEdit(req, res, {
+      ownerOnly: true,
+    });
+    if (!competition) return;
+
+    const { member_pick, teams, assignments } = req.body;
+    const updated = await setCompetitionTeams(competition, {
+      member_pick,
+      teams,
+      assignments,
+    });
+    res.status(200).json({ competition: updated });
+  } catch (error: any) {
+    if (error instanceof BadRequestError) {
+      return res.status(400).json({ error: error.message });
+    }
+    console.error("Error setting competition teams:", error.message);
+    res.status(500).json({ error: "Error setting teams: " + error.message });
+  }
+}
+
+export async function pickCompTeam(req: AuthenticatedRequest, res: Response) {
+  if (!hasRequiredKeys(["competitionId"], req, res)) return;
+
+  try {
+    const competition = await loadCompForTeamEdit(req, res, {
+      ownerOnly: false,
+    });
+    if (!competition) return;
+
+    const me = competition.users.find(
+      (u) => u.user_id === req.userId! && u.invite_status === "accepted",
+    );
+    if (!me) {
+      return res
+        .status(403)
+        .json({ error: "User is not a participant in this competition" });
+    }
+
+    const teamsConfig = competition.teams;
+    if (!teamsConfig?.teams?.length) {
+      return res
+        .status(400)
+        .json({ error: "This competition does not have teams" });
+    }
+    if (!teamsConfig.member_pick && competition.owner !== req.userId!) {
+      return res
+        .status(403)
+        .json({ error: "The owner assigns teams in this competition" });
+    }
+
+    const teamId = req.body.team_id ?? null;
+    if (teamId !== null && !teamsConfig.teams.some((t) => t.id === teamId)) {
+      return res.status(400).json({ error: `Unknown team id: ${teamId}` });
+    }
+
+    const updated = await pickCompetitionTeam(
+      competition.id,
+      req.userId!,
+      teamId,
+    );
+    res.status(200).json({ competition: updated });
+  } catch (error: any) {
+    console.error("Error picking competition team:", error.message);
+    res.status(500).json({ error: "Error picking team: " + error.message });
+  }
+}
+
+export async function getCompTeamStats(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  if (!hasRequiredKeys(["competitionId"], req, res)) return;
+
+  try {
+    const competitionId = req.params.competitionId;
+    const competition = await getCompetition(competitionId);
+
+    if (!competition) {
+      return res
+        .status(404)
+        .json({ error: `No competition found with id: ${competitionId}` });
+    }
+    // Accepted participants only — the stats expose recent activity history,
+    // so a pending/declined invitee must not read them before joining.
+    if (
+      !competition.users.some(
+        (u) => u.user_id === req.userId! && u.invite_status === "accepted",
+      )
+    ) {
+      return res
+        .status(403)
+        .json({ error: "User is not a participant in this competition" });
+    }
+
+    res.status(200).json(await getCompetitionTeamStats(competition));
+  } catch (error: any) {
+    console.error("Error getting team stats:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error getting team stats: " + error.message });
   }
 }
 

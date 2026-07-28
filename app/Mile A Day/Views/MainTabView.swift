@@ -2,6 +2,29 @@ import SwiftUI
 import HealthKit
 import UserNotifications
 
+/// The post a tapped push is ABOUT, when it's about one.
+///
+/// Anything that happened on a specific post opens that post directly. This
+/// used to route to the notification inbox and make the user tap a second
+/// time — and the row it landed on then only scrolled the feed, which found
+/// nothing at all whenever the post was older than the loaded page.
+///
+/// Deliberate exclusions:
+///  - `story_reaction` is about the viewer's own STORY, which has no feed
+///    permalink; its existing handler replays the story viewer.
+///  - a `friend_post` whose `kind` is "story" is the same case wearing a
+///    different type.
+///  - `friend_activity` is usually a raw workout with no post at all, and its
+///    own handler already knows how to land on one.
+func postTargetForPush(type: String, data: [String: String]) -> String? {
+    let postTypes: Set<String> = [
+        "mention", "post_comment", "coauthor_invite", "coauthor_accepted", "friend_post",
+    ]
+    guard postTypes.contains(type), data["kind"] != "story" else { return nil }
+    guard let postId = data["post_id"], !postId.isEmpty else { return nil }
+    return postId
+}
+
 struct MainTabView: View {
     @Environment(\.appStateManager) var appStateManager
     @StateObject private var healthManager = HealthKitManager.shared
@@ -31,6 +54,11 @@ struct MainTabView: View {
     // wherever the user is; hosted on the Dashboard tab it played invisibly
     // (and got spent) whenever a mile landed while another tab was selected.
     @StateObject private var celebrationManager = CelebrationManager.shared
+
+    /// "Open this post" from a shared link or a notification tap. Presented
+    /// here rather than inside a tab so it works from wherever the user is and
+    /// survives a cold launch (the link may arrive before any tab is mounted).
+    @StateObject private var postDeepLink = PostDeepLink.shared
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -142,6 +170,21 @@ struct MainTabView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .didTapPushNotification)) { notification in
             guard let type = notification.userInfo?["type"] as? String else { return }
+            let data = notification.userInfo?["data"] as? [String: String] ?? [:]
+            if let postId = postTargetForPush(type: type, data: data) {
+                postDeepLink.open(postId)
+                Task { await refreshUnreadCount() }
+                return
+            }
+            // A Head-to-Head lead change: the duel card is on the Dashboard,
+            // so go straight there. Opening the inbox on top of it (what
+            // `lead_change` otherwise does, since it's a competition type)
+            // would hide the very thing the push is about.
+            if type == "lead_change", data["challenge_key"] == "head_to_head" {
+                selectedTab = 0
+                Task { await refreshUnreadCount() }
+                return
+            }
             Task {
                 switch type {
                 case "friend_request", "friend_request_reminder":
@@ -293,6 +336,16 @@ struct MainTabView: View {
         .sheet(isPresented: $reviewManager.isPresented, onDismiss: handleReviewSheetDismiss) {
             ReviewPromptView(manager: reviewManager)
         }
+        .sheet(
+            isPresented: Binding(
+                get: { postDeepLink.pendingPostId != nil },
+                set: { if !$0 { postDeepLink.pendingPostId = nil } }
+            )
+        ) {
+            if let postId = postDeepLink.pendingPostId {
+                PostDetailLoaderView(postId: postId)
+            }
+        }
         .onChange(of: userManager.currentUser.streak) { _, _ in
             scheduleReviewEvaluation()
         }
@@ -342,6 +395,17 @@ struct MainTabView: View {
 
     private func handlePendingNotification() {
         guard let type = notificationService.pendingNotificationType else { return }
+        // Same rule as the warm path — the payload now survives a cold launch,
+        // so a mention tapped from the lock screen lands on the post too.
+        if let postId = postTargetForPush(
+            type: type,
+            data: notificationService.pendingNotificationData
+        ) {
+            notificationService.pendingNotificationType = nil
+            postDeepLink.open(postId)
+            Task { await refreshUnreadCount() }
+            return
+        }
         // Mirror the live `.didTapPushNotification` handler so a cold-launch tap
         // routes to the same destination a warm tap would.
         //

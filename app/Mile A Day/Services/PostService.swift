@@ -574,6 +574,18 @@ enum PostService {
         return try await APIClient.fancyFetch(endpoint: endpoint, responseType: UnifiedFeedResponse.self)
     }
 
+    /// ONE post, shaped exactly like its feed entry. Backs opening a post
+    /// directly from a link or a notification — a post can be far older than
+    /// anything the feed has paged in, so there is nothing to scroll to.
+    /// Throws `APIError.notFound` when it's deleted or not visible to the
+    /// caller (the server deliberately doesn't distinguish the two).
+    static func fetchPost(postId: String) async throws -> FeedEntry {
+        try await APIClient.fancyFetch(
+            endpoint: "/posts/\(postId)",
+            responseType: FeedEntry.self
+        )
+    }
+
     /// A user's permanent posts for the Instagram-style profile grid.
     /// `includeStories` (own profile only — the server enforces it) also
     /// returns story-only posts whose run isn't on the feed, so the owner can

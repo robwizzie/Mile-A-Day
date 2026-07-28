@@ -365,6 +365,28 @@ class UserManager: ObservableObject {
         return displayed
     }
 
+    /// The backend's own streak walk, when it's recent enough to trust (same
+    /// 48h freshness window `vettedHealthKitStreak` uses). Nil when we've never
+    /// heard from the backend or the answer is stale.
+    ///
+    /// The DISPLAYED streak deliberately lags a real break: `vettedHealthKitStreak`
+    /// refuses a 2+ day collapse until it's verified, and `updateStreakFromBackend`
+    /// only ever raises. That's right for a live number that self-corrects a
+    /// moment later — and wrong for anything BAKED PERMANENTLY, like the streak
+    /// stamped into a post's image and stats snapshot. A post made the morning
+    /// after a missed day would otherwise sit in the feed forever claiming a
+    /// streak the author no longer has, while every server-driven surface shows
+    /// the real one. Post-building code reads this; UI keeps reading
+    /// `currentUser.streak`.
+    var freshBackendStreak: Int? {
+        let defaults = UserDefaults.standard
+        guard let at = defaults.object(forKey: Self.backendStreakAtKey) as? Date,
+              Date().timeIntervalSince(at) < 48 * 3600,
+              defaults.object(forKey: Self.backendStreakKey) != nil
+        else { return nil }
+        return defaults.integer(forKey: Self.backendStreakKey)
+    }
+
     /// Kick a full WorkoutIndex rebuild (max once per calendar day) so a held
     /// streak either gets its hole repaired or its break confirmed.
     private func scheduleWorkoutIndexRepair() {
