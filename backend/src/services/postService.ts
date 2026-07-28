@@ -1861,22 +1861,27 @@ export async function visiblePostAuthors(
   return rows[0] ?? null;
 }
 
+const POST_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Batch: the subset of `postIds` the viewer may see (same guards as
  * visiblePostAuthors) with each post's media path — feeds the notification
- * inbox's per-row post thumbnails. Callers must pass valid uuid strings
- * (the ANY cast 500s on garbage) and sign media urls before responding.
+ * inbox's per-row post thumbnails. Non-uuid strings are filtered out here
+ * (the ANY cast would 500 on garbage), so ids straight from untrusted push
+ * payload data are safe to pass. Sign media urls before responding.
  */
 export async function visiblePostPreviews(
   viewerId: string,
   postIds: string[],
 ): Promise<Array<{ post_id: string; media_url: string }>> {
-  if (postIds.length === 0) return [];
+  const ids = postIds.filter((id) => POST_UUID_RE.test(id));
+  if (ids.length === 0) return [];
   return db.query<{ post_id: string; media_url: string }>(
     `SELECT p.post_id, p.media_url
 		 FROM posts p
 		 WHERE p.post_id = ANY($2::uuid[]) AND ${DIRECT_POST_ACCESS_SQL}`,
-    [viewerId, postIds],
+    [viewerId, ids],
   );
 }
 

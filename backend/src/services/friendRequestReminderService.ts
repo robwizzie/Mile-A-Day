@@ -104,7 +104,7 @@ export async function sendPendingFriendRequestReminders(): Promise<void> {
     if (count === 0) continue;
 
     const name = candidate.requester_name;
-    const single = count === 1 && name !== null;
+    const single = count === 1 && !!name;
     const body = single
       ? `${name} is waiting to be your friend`
       : `${count} people are waiting to be your friend`;
