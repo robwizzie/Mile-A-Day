@@ -1309,6 +1309,12 @@ export async function getUnifiedFeed(
 				AND p.user_id NOT IN (SELECT uid FROM blocked)
 				AND (NOT ${COLLAB_ACTIVE}
 					OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
+				-- 78ed93a's "reached via coauthor, so the coauthor must not be
+				-- private" is folded into the circle semi-join above (via
+				-- COLLAB_REACH_SQL), costing no second scan of the circle CTE;
+				-- ci-smoke asserts exactly the case that commit targeted. What is
+				-- left here is the AUTHOR's side, with the exemption that keeps a
+				-- private author's post in their own and their coauthor's feed.
 				AND ${AUTHOR_VISIBLE_TO_VIEWER}
 
 			UNION ALL
