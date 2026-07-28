@@ -1310,6 +1310,11 @@ export async function getUnifiedFeed(
 				AND (p.coauthor_status IS DISTINCT FROM 'accepted'
 					OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
 				AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
+				-- If post reaches viewer via coauthor, coauthor must not be private
+				AND (
+					EXISTS (SELECT 1 FROM circle c WHERE c.uid = p.user_id)
+					OR (p.coauthor_status = 'accepted' AND ${OWNER_NOT_PRIVATE_SQL("p.coauthor_user_id")})
+				)
 
 			UNION ALL
 
