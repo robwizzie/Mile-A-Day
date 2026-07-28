@@ -49,6 +49,12 @@ struct Mile_A_DayApp: App {
                     }
                 }
                 .onOpenURL { url in
+                    // Shared post links (mileaday.run/p/<id> and its in-app
+                    // scheme). Parked, not presented here, for the same reason
+                    // as profile links: on a cold launch nothing that can show
+                    // a post is mounted yet. MainTabView presents it.
+                    if PostDeepLink.shared.handle(url) { return }
+
                     // In-app profile links (mileaday://u/<username>) park their
                     // username on DeepLinkRouter so the Friends tab can resolve
                     // it whenever it's ready — covers cold launches where the

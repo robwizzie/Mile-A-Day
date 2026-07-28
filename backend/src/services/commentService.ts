@@ -206,7 +206,8 @@ export async function addWorkoutComment(
   const comment = rows[0];
 
   notifyForComment(comment, commenterId, workoutAuthor, parentAuthor).catch(
-    (e: any) => console.error("[addWorkoutComment] notify failed:", e?.message ?? e),
+    (e: any) =>
+      console.error("[addWorkoutComment] notify failed:", e?.message ?? e),
   );
   return comment;
 }
@@ -229,13 +230,19 @@ async function notifyForComment(
     console.error("[notifyForComment] mentions failed:", e?.message ?? e);
   }
   const mentionedIds = new Set(mentioned.map((m) => m.user_id));
+  // The target id must match the KIND. A comment on a raw workout has a null
+  // post_id, so passing post_id alongside kind 'workout' handed
+  // `visibleWorkoutAuthor` a null and every mention on a workout comment was
+  // silently dropped — resolved, counted as "mention wins over comment", and
+  // then notified to nobody.
+  const isWorkoutComment = comment.workout_id != null;
   notifyMentions(
     commenterId,
     mentioned,
-    comment.post_id,
+    isWorkoutComment ? comment.workout_id! : comment.post_id,
     comment.content,
     "comment",
-    comment.workout_id ? "workout" : "post",
+    isWorkoutComment ? "workout" : "post",
   ).catch((e: any) =>
     console.error("[notifyForComment] mention push failed:", e?.message ?? e),
   );
@@ -272,7 +279,8 @@ async function notifyForComment(
     );
     if (!shouldSend) continue;
     const replied =
-      recipient === parentAuthor && recipient !== postAuthor &&
+      recipient === parentAuthor &&
+      recipient !== postAuthor &&
       recipient !== coauthor;
     sendPush(recipient, {
       title: replied

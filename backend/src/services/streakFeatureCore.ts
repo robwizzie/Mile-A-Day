@@ -86,6 +86,11 @@ export function dateStrMinus(dateStr: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** The other direction, for walking a window forward. */
+export function dateStrPlus(dateStr: string, days: number): string {
+  return dateStrMinus(dateStr, -days);
+}
+
 /**
  * The coverage-aware streak walk: identical anchor/grace/consecutive semantics
  * to the legacy walks (today counts if present but isn't required; stop at the

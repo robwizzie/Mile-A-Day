@@ -596,6 +596,150 @@ async function selectedChallengeKey(
   return picked.challenge_key;
 }
 
+// ─── Live lead changes (workout-sync path) ──────────────────────────
+
+/** One side's standing in a duel, from that row owner's point of view. */
+type LeadState = "ahead" | "behind" | "tied";
+
+function standing(mine: number, theirs: number): LeadState {
+  // Compared at the 2dp the duel card displays, and the same precision the
+  // end-of-day resolver uses — so "you're behind" can never disagree with the
+  // number the user is looking at.
+  const a = Math.round(mine * 100) / 100;
+  const b = Math.round(theirs * 100) / 100;
+  if (a > b) return "ahead";
+  if (a < b) return "behind";
+  return "tied";
+}
+
+/**
+ * Push live standings changes for every duel this workout upload could have
+ * moved. Called fire-and-forget after a sync.
+ *
+ * Head-to-Head used to be silent all day and then announce a winner the next
+ * morning — the one moment that actually motivates anybody (someone passing
+ * you while there are still hours left to answer) went completely unreported.
+ *
+ * Only the syncing user's mileage changed, so exactly two kinds of row are
+ * affected: their OWN duel (they may have just taken or lost the lead) and
+ * every duel that PINNED THEM as the rival (those users may have just been
+ * passed). One-sided pins are included — being someone's rival without them
+ * being yours is the normal case for odd-numbered friend graphs.
+ *
+ * Debounced on `lead_notified_state`: a standing is announced once, and only
+ * announced again when it actually flips. Ties are recorded but never pushed —
+ * "you're level" is not news, and a duel that oscillates around a tie would
+ * otherwise fire on every sync.
+ */
+export async function notifyH2hLeadChanges(actorId: string): Promise<void> {
+  const rows = await db.query<{
+    local_date: string;
+    user_id: string;
+    rival_id: string;
+    lead_notified_state: string | null;
+  }>(
+    `SELECT m.local_date::text AS local_date, m.user_id, m.rival_id,
+			m.lead_notified_state
+		FROM h2h_matchups m
+		WHERE (m.user_id = $1 OR m.rival_id = $1)
+			AND m.resolved_at IS NULL
+			-- Only a duel that is still LIVE for the person being told about it.
+			-- A yesterday row the resolver hasn't reached yet must never push
+			-- "you got passed" about a day nobody can respond to.
+			AND m.local_date = (${localNowSql("m.user_id")})::date`,
+    [actorId],
+  );
+  if (rows.length === 0) return;
+
+  for (const row of rows) {
+    try {
+      await notifyOneLeadChange(row);
+    } catch (e: any) {
+      console.error(
+        `[H2H] Lead-change notify failed for ${row.user_id} @ ${row.local_date}:`,
+        e?.message ?? e,
+      );
+    }
+  }
+}
+
+async function notifyOneLeadChange(row: {
+  local_date: string;
+  user_id: string;
+  rival_id: string;
+  lead_notified_state: string | null;
+}): Promise<void> {
+  // The duel only exists for a user whose rotation actually landed on it —
+  // the pin is written on the first read of the day and survives an
+  // eligibility flip that moved them onto a different challenge.
+  if (
+    (await selectedChallengeKey(row.user_id, row.local_date)) !== "head_to_head"
+  ) {
+    return;
+  }
+
+  const [mine, theirs] = await Promise.all([
+    dayTotalDistance(row.user_id, row.local_date),
+    dayTotalDistance(row.rival_id, row.local_date),
+  ]);
+  const state = standing(mine, theirs);
+  if (state === row.lead_notified_state) return;
+
+  // Claim the transition before sending. Two devices syncing at once would
+  // otherwise both read the old state and both push.
+  const claimed = await db.query<{ user_id: string }>(
+    `UPDATE h2h_matchups
+		SET lead_notified_state = $3, lead_notified_at = NOW()
+		WHERE local_date = $1 AND user_id = $2
+			AND lead_notified_state IS NOT DISTINCT FROM $4
+		RETURNING user_id`,
+    [row.local_date, row.user_id, state, row.lead_notified_state],
+  );
+  if (claimed.length === 0) return;
+
+  // What's worth interrupting someone for:
+  //  - BEHIND is always news. Someone just went past you and there are still
+  //    hours left to answer — this is the whole point of the feature.
+  //  - AHEAD only when it's an ANSWER (you were behind and just retook it).
+  //    Being first to run isn't taking the lead, it's being first, and pushing
+  //    that would fire for nearly every user every day.
+  //  - TIED is recorded (so the next real flip still reads as a change) but
+  //    never announced.
+  if (state === "tied") return;
+  if (state === "behind" && theirs <= 0) return;
+  if (state === "ahead" && row.lead_notified_state !== "behind") return;
+
+  const [rival] = await db.query<{ username: string | null }>(
+    `SELECT username FROM users WHERE user_id = $1`,
+    [row.rival_id],
+  );
+  const name = rival?.username ?? "Your rival";
+  const gap = Math.abs(Math.round((mine - theirs) * 100) / 100).toFixed(2);
+
+  await sendPush(row.user_id, {
+    title:
+      state === "behind"
+        ? `${name} just passed you 👀`
+        : `You're ahead of ${name} 🔥`,
+    body:
+      state === "behind"
+        ? `${theirs.toFixed(2)} mi to your ${mine.toFixed(2)} — ${gap} mi to make up before the day's out.`
+        : `${mine.toFixed(2)} mi to their ${theirs.toFixed(2)}. Hold the lead until midnight and the duel is yours.`,
+    // Reuses the existing competition lead-change type ON PURPOSE: it's routed
+    // by every shipped build (a new type would display but tap to nothing on
+    // anything but the newest one). `challenge_key` tells clients that can tell
+    // the difference which surface to open.
+    type: "lead_change",
+    data: {
+      challenge_key: "head_to_head",
+      local_date: row.local_date,
+      rival_id: row.rival_id,
+      rival_username: rival?.username ?? "",
+      standing: state,
+    },
+  });
+}
+
 // ─── Winner notification (cron) ─────────────────────────────────────
 
 /**

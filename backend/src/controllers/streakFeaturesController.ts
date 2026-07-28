@@ -4,6 +4,7 @@ import {
   enrollStreakFeatures,
   getStreakFeaturesPayload,
   getAssistableFriends,
+  getFriendRescueStatus,
   giveStreakAssist,
 } from "../services/streakFeatureService.js";
 import {
@@ -64,6 +65,29 @@ export async function streakFeaturesStatusController(
   } catch (error: any) {
     console.error("Error getting streak-features status:", error.message);
     res.status(500).json({ error: "Error getting streak features" });
+  }
+}
+
+/**
+ * GET /users/streak-features/rescue/:friendId — can the caller save THIS
+ * friend's streak right now, how many days would it come back as, and if not,
+ * why not. One friend, one read: the profile needs this even when the caller
+ * isn't holding an Assist (so the CTA can show the meter instead of silently
+ * rendering nothing, which is indistinguishable from "the feature is broken").
+ */
+export async function friendRescueStatusController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const status = await getFriendRescueStatus(
+      req.userId!,
+      req.params.friendId,
+    );
+    res.status(200).json(status);
+  } catch (error: any) {
+    console.error("Error getting friend rescue status:", error.message);
+    res.status(500).json({ error: "Error getting rescue status" });
   }
 }
 

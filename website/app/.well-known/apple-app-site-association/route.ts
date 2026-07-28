@@ -1,5 +1,5 @@
 // Apple App Site Association — required for universal links so
-// https://mileaday.run/u/<username> opens the iOS app directly.
+// https://mileaday.run/u/<username> and /p/<postId> open the iOS app directly.
 //
 // Served as a route handler (not a public/ file) to guarantee the
 // application/json content type with no file extension, which is what
@@ -19,6 +19,10 @@ export async function GET() {
             {
               '/': '/u/*',
               comment: 'Public profile share links',
+            },
+            {
+              '/': '/p/*',
+              comment: 'Shared post links',
             },
           ],
         },

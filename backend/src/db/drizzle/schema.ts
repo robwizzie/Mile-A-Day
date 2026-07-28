@@ -850,6 +850,16 @@ export const h2hMatchups = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // Live lead-change pushes: the standing THIS ROW'S USER was last told
+    // about ('ahead' | 'behind'). The duel is scored end-of-day, so without a
+    // record of what was already announced every sync by either side would
+    // re-push the same "you're behind". A flip only notifies when the new
+    // standing differs from what's stored here.
+    leadNotifiedState: text("lead_notified_state"),
+    leadNotifiedAt: timestamp("lead_notified_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
   (table) => [
     foreignKey({
