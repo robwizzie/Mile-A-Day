@@ -636,6 +636,10 @@ struct SocialFeedView: View {
         if entry.isPost, let post = entry.asPostItem() {
             let isMyPendingInvite = post.coauthor_status == "pending"
                 && post.coauthor_user_id == currentUserId
+            // Accepted coauthor: the post is theirs too, so the card must not
+            // offer them Hype/Report/Block on it — only a way out of it.
+            let isMyAcceptedCollab = post.hasAcceptedCoauthor
+                && post.coauthor_user_id == currentUserId
             // The collab coauthor's name/avatar routes to THEIR profile (nil
             // when it's the viewer, or while the invite is still pending).
             let openCoauthorProfile: (() -> Void)? =
@@ -679,6 +683,9 @@ struct SocialFeedView: View {
                 onShare: { sharingURL = ShareURL(url: PostShareLink.url(for: post.post_id)) },
                 onRespondCoauthor: isMyPendingInvite
                     ? { accept in Task { await respondToCoauthor(post, accept: accept) } }
+                    : nil,
+                onLeaveCollab: isMyAcceptedCollab
+                    ? { Task { await respondToCoauthor(post, accept: false) } }
                     : nil
             )
         } else {
@@ -1010,6 +1017,10 @@ struct SocialFeedView: View {
 
     private func hype(_ entry: FeedEntry) async {
         guard !entry.is_self, !entry.is_hyped, !hypingIds.contains(entry.id) else { return }
+        // A collab you're an author on is your own post — the server rejects
+        // the hype, so don't play the burst and then silently walk it back.
+        guard !(entry.coauthor_status == "accepted"
+            && entry.coauthor_user_id == currentUserId) else { return }
         // Optimistic, Instagram-style: the card flips to "Hyped" and the tally
         // bumps the instant the user acts — the network round-trip happens
         // behind it and only a rejection walks it back.

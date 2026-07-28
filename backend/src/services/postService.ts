@@ -181,10 +181,63 @@ const POST_COLUMNS = `
 	p.include_route,
 	(SELECT w.workout_type FROM workouts w WHERE w.workout_id = p.workout_id) AS workout_type`;
 
-// Collab-post columns. `$1` must be the viewer id: a PENDING coauthor is
-// visible only to the two people involved; accepted collabs are public to
-// whoever can see the post.
-const COAUTHOR_VISIBLE = `(p.coauthor_user_id IS NOT NULL AND (p.coauthor_status = 'accepted' OR p.user_id = $1 OR p.coauthor_user_id = $1))`;
+/**
+ * SQL: is the collab on `a` still a real collab AT ALL? Viewer-independent:
+ * accepted, and neither author has blocked the other. A block between the two
+ * ENDS the collab for everybody — it already drops the row from the coauthor's
+ * tagged tab (getUserTaggedPosts), and leaving the feed showing "alice & bob"
+ * after bob blocked alice contradicts that. Severing the tag, not the post: the
+ * media and the run are the author's, so it simply reverts to a solo post.
+ */
+const collabActiveSql = (a: string) => `(${a}.coauthor_status = 'accepted'
+	AND NOT EXISTS (
+		SELECT 1 FROM user_blocks cb
+		WHERE (cb.blocker_id = ${a}.user_id AND cb.blocked_id = ${a}.coauthor_user_id)
+			OR (cb.blocker_id = ${a}.coauthor_user_id AND cb.blocked_id = ${a}.user_id)
+	))`;
+
+/**
+ * SQL: is the collab TAG on `a` shown to viewer `$1`?
+ *
+ * The two people involved always see a LIVE collab (that's how a pending
+ * invite reaches the person who has to answer it). For everyone else it also
+ * needs the coauthor not set to 'private' — "Only me" promises a user their
+ * name never appears in someone else's feed, and a collab tag is exactly that.
+ * A withheld tag doesn't remove the post: it stays the AUTHOR's post, shown to
+ * the author's circle with no coauthor on it (collabReachSql drops the matching
+ * reach). Viewer-side blocks are handled separately and hide the whole post.
+ */
+const coauthorVisibleSql = (
+  a: string,
+) => `(${a}.coauthor_user_id IS NOT NULL AND (
+	${a}.user_id = $1
+	OR ${a}.coauthor_user_id = $1
+	OR (${collabActiveSql(a)} AND ${OWNER_NOT_PRIVATE_SQL(`${a}.coauthor_user_id`)})
+))`;
+const COAUTHOR_VISIBLE = coauthorVisibleSql("p");
+
+/**
+ * SQL: may the collab on `a` extend the post's reach to the COAUTHOR's circle?
+ * Same rule as the tag above — a live collab with a non-private coauthor.
+ * Written as its own fragment because the reach checks sit in circle semi-joins
+ * while the tag check sits in the SELECT list.
+ */
+const collabReachSql = (a: string) => `(${collabActiveSql(a)} AND (
+	${a}.coauthor_user_id = $1 OR ${OWNER_NOT_PRIVATE_SQL(`${a}.coauthor_user_id`)}
+))`;
+const COLLAB_REACH_SQL = collabReachSql("p");
+const COLLAB_ACTIVE = collabActiveSql("p");
+
+/**
+ * SQL: may viewer `$1` see post `p` given the AUTHOR's visibility? Both authors
+ * always see their own collab (a private author's post leaves everyone else's
+ * feed, but never their own or their coauthor's).
+ */
+const AUTHOR_VISIBLE_TO_VIEWER = `(
+	p.user_id = $1
+	OR p.coauthor_user_id = $1
+	OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
+)`;
 const COAUTHOR_COLUMNS = `
 	CASE WHEN ${COAUTHOR_VISIBLE} THEN p.coauthor_user_id END AS coauthor_user_id,
 	CASE WHEN ${COAUTHOR_VISIBLE} THEN p.coauthor_status END AS coauthor_status,
@@ -911,10 +964,11 @@ export async function getFeed(
 			AND EXISTS (
 				SELECT 1 FROM circle c
 				WHERE c.uid = p.user_id
-					OR (p.coauthor_status = 'accepted' AND c.uid = p.coauthor_user_id)
+					OR (c.uid = p.coauthor_user_id AND ${COLLAB_REACH_SQL})
 			)
+			AND ${AUTHOR_VISIBLE_TO_VIEWER}
 			AND p.user_id NOT IN (SELECT uid FROM blocked)
-			AND (p.coauthor_status IS DISTINCT FROM 'accepted'
+			AND (NOT ${COLLAB_ACTIVE}
 				OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
 			AND ($2::timestamptz IS NULL OR p.created_at < $2::timestamptz)
 		ORDER BY p.created_at DESC
@@ -1420,7 +1474,7 @@ export async function getUserPosts(
 		FROM posts p
 		JOIN users u ON u.user_id = p.user_id
 		WHERE (p.user_id = $2
-				OR (p.coauthor_user_id = $2 AND p.coauthor_status = 'accepted'))
+				OR (p.coauthor_user_id = $2 AND ${COLLAB_ACTIVE}))
 			AND p.deleted_at IS NULL
 			AND (
 				p.share_to_feed
@@ -1443,14 +1497,15 @@ export async function getUserPosts(
 			-- Collab rows surface the PRIMARY author's content on the coauthor's
 			-- profile. Reach mirrors the unified feed: a collab deliberately
 			-- shares BOTH audiences, so the viewer needn't be the author's
-			-- friend — but a private or blocked author still disappears.
-			AND (p.user_id = $2 OR (
-				${OWNER_NOT_PRIVATE_SQL("p.user_id")}
-				AND NOT EXISTS (
-					SELECT 1 FROM user_blocks b
-					WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
-						OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
-				)
+			-- friend — but a private or blocked author still disappears. The
+			-- privacy arm alone exempts the coauthor (they co-own the post and
+			-- must keep seeing it); a block still wins, in either direction.
+			AND (p.user_id = $2 OR p.coauthor_user_id = $1
+				OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")})
+			AND (p.user_id = $2 OR NOT EXISTS (
+				SELECT 1 FROM user_blocks b
+				WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
+					OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
 			))
 			AND ($3::timestamptz IS NULL OR p.created_at < $3::timestamptz)
 		ORDER BY p.created_at DESC
@@ -1519,20 +1574,21 @@ export async function getUserTaggedPosts(
 			AND p.share_to_feed
 			AND p.user_id <> $2
 			AND (
-				(p.coauthor_user_id = $2 AND p.coauthor_status = 'accepted')
+				(p.coauthor_user_id = $2 AND ${COLLAB_ACTIVE})
 				OR ($5::text IS NOT NULL AND p.caption IS NOT NULL AND p.caption ~* $5)
 			)
 			-- Profile gate: may the viewer see the tagged user's content at all?
 			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$2", "$1")}
 			-- Author gate (mirrors getUserPosts' collab reach): the viewer's own
 			-- posts always show; others' need not-private + no blocks either way.
-			AND (p.user_id = $1 OR (
-				${OWNER_NOT_PRIVATE_SQL("p.user_id")}
-				AND NOT EXISTS (
-					SELECT 1 FROM user_blocks b
-					WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
-						OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
-				)
+			-- Being an author of the collab exempts the PRIVACY arm only — a
+			-- block still hides the row, in either direction.
+			AND (p.user_id = $1 OR p.coauthor_user_id = $1
+				OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")})
+			AND (p.user_id = $1 OR NOT EXISTS (
+				SELECT 1 FROM user_blocks b
+				WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
+					OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
 			))
 			-- Blocks between the tagged user and the author end the tag.
 			AND NOT EXISTS (
@@ -1687,43 +1743,65 @@ export async function notifyFriendsOfPost(input: {
   }
 }
 
+/** Both sides of a post the viewer may see. `coauthor_user_id` is the ACCEPTED
+ * coauthor only (a pending invite isn't a second author yet) and is returned
+ * regardless of that coauthor's own visibility setting — privacy withholds the
+ * public TAG, it doesn't stop the person being an author of the post. */
+export interface VisiblePostAuthors {
+  author_id: string;
+  coauthor_user_id: string | null;
+}
+
 /**
- * The post's author IF the viewer may see the post: viewer is the author or
- * an accepted friend, post is live on the feed, and no block exists in either
- * direction. Null when not visible — callers map that to 404 so post
- * existence isn't leaked. Shared by comments + mentions.
+ * The post's authors IF the viewer may see the post: viewer is one of the two
+ * authors or an accepted friend of one of them, the post is live on the feed,
+ * and no block exists in either direction. Null when not visible — callers map
+ * that to 404 so post existence isn't leaked. Shared by comments, mentions and
+ * hypes, so all three agree on who can touch a collab post.
  */
-export async function visiblePostAuthor(
+export async function visiblePostAuthors(
   viewerId: string,
   postId: string,
-): Promise<string | null> {
-  const rows = await db.query<{ user_id: string }>(
-    `SELECT p.user_id FROM posts p
+): Promise<VisiblePostAuthors | null> {
+  const rows = await db.query<VisiblePostAuthors>(
+    `SELECT p.user_id AS author_id,
+				CASE WHEN ${COLLAB_ACTIVE} THEN p.coauthor_user_id END
+					AS coauthor_user_id
+		 FROM posts p
 		 WHERE p.post_id = $2 AND p.deleted_at IS NULL AND p.share_to_feed
-			 AND (p.user_id = $1 OR p.coauthor_user_id = $1
-				 OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")})
+			 AND ${AUTHOR_VISIBLE_TO_VIEWER}
 			 AND (p.user_id = $1
 				 OR p.coauthor_user_id = $1
 				 OR EXISTS (
 					 SELECT 1 FROM friendships f
 					 WHERE f.user_id = $1 AND f.status = 'accepted'
 						 AND (f.friend_id = p.user_id
-							 OR (p.coauthor_status = 'accepted' AND f.friend_id = p.coauthor_user_id))
+							 -- Reach through the coauthor stops when they go 'private',
+							 -- exactly as it does in the feed.
+							 OR (f.friend_id = p.coauthor_user_id AND ${COLLAB_REACH_SQL}))
 				 ))
 			 AND NOT EXISTS (
 				 SELECT 1 FROM user_blocks b
 				 WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
 						OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
-						-- Accepted collabs are hidden from feeds when EITHER author is
+						-- Live collabs are hidden from feeds when EITHER author is
 						-- blocked; deny direct access (comments/mentions) the same way.
-						OR (p.coauthor_status = 'accepted' AND (
+						OR (${COLLAB_ACTIVE} AND (
 							(b.blocker_id = $1 AND b.blocked_id = p.coauthor_user_id)
 							OR (b.blocker_id = p.coauthor_user_id AND b.blocked_id = $1)
 						))
 			 )`,
     [viewerId, postId],
   );
-  return rows[0]?.user_id ?? null;
+  return rows[0] ?? null;
+}
+
+/** The post's PRIMARY author if the viewer may see it — see visiblePostAuthors. */
+export async function visiblePostAuthor(
+  viewerId: string,
+  postId: string,
+): Promise<string | null> {
+  return (await visiblePostAuthors(viewerId, postId))?.author_id ?? null;
 }
 
 /**
@@ -1759,12 +1837,14 @@ export async function visibleWorkoutAuthor(
 }
 
 /**
- * The post's accepted coauthor, if any (comment notifications + moderation).
+ * The post's LIVE coauthor, if any (comment notifications + moderation). A
+ * block between the two authors ends the collab, so it also stops the pushes
+ * that ride on it.
  */
 export async function acceptedCoauthor(postId: string): Promise<string | null> {
   const rows = await db.query<{ coauthor_user_id: string }>(
-    `SELECT coauthor_user_id FROM posts
-		 WHERE post_id = $1 AND coauthor_status = 'accepted' AND deleted_at IS NULL`,
+    `SELECT p.coauthor_user_id FROM posts p
+		 WHERE p.post_id = $1 AND ${COLLAB_ACTIVE} AND p.deleted_at IS NULL`,
     [postId],
   );
   return rows[0]?.coauthor_user_id ?? null;

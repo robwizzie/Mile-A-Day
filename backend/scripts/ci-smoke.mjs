@@ -17,6 +17,8 @@ const {
   getUserPosts,
   getUserTaggedPosts,
   respondToCoauthorInvite,
+  visiblePostAuthors,
+  acceptedCoauthor,
   lockUnearnedPhotos,
 } = await import("../dist/services/postService.js");
 const { canonicalizeMileContext, logHypeIfUnderLimit, hasHypedMile } =
@@ -25,11 +27,19 @@ const { signMediaUrl, verifyPostsMediaAccess, stripMediaQuery } =
   await import("../dist/services/mediaSigningService.js");
 const { getNotificationPreferences, updateNotificationPreferences } =
   await import("../dist/services/notificationSettingsService.js");
+// Hype authorization is controller-level (it's where the friend/visibility
+// gate lives), so the collab assertions below drive the real handlers.
+const { sendHype, getContextHypersController } =
+  await import("../dist/controllers/hypeController.js");
 
 const db = PostgresService.getInstance();
 
 const ALICE = "ci-alice";
 const BOB = "ci-bob";
+// Collab-permission witnesses: each is friends with exactly ONE side of the
+// collab, so a rule that leaks or over-blocks shows up on one of them.
+const CARL = "ci-carl"; // Bob's friend only  (reach via the COAUTHOR)
+const DANA = "ci-dana"; // Alice's friend only (reach via the AUTHOR)
 const localDate = new Date().toISOString().slice(0, 10);
 const nowIso = new Date().toISOString();
 
@@ -44,6 +54,12 @@ async function cleanup() {
     `DELETE FROM workout_routes WHERE workout_id LIKE 'ci-workout-%'`,
   );
   await db.query(`DELETE FROM workouts WHERE user_id LIKE 'ci-%'`);
+  // The collab-permission assertions flip users to 'private' mid-run; a failed
+  // run must not leave that behind to poison the next one.
+  await db.query(
+    `UPDATE notification_settings SET workout_visibility = 'friends'
+		 WHERE user_id LIKE 'ci-%'`,
+  );
 }
 
 async function seed() {
@@ -51,6 +67,8 @@ async function seed() {
   for (const [id, name] of [
     [ALICE, "alice"],
     [BOB, "bob"],
+    [CARL, "carl"],
+    [DANA, "dana"],
   ]) {
     await db.query(
       `INSERT INTO users (user_id, email, apple_sub, username, first_name)
@@ -71,6 +89,10 @@ async function seed() {
   for (const [a, b] of [
     [ALICE, BOB],
     [BOB, ALICE],
+    [BOB, CARL],
+    [CARL, BOB],
+    [ALICE, DANA],
+    [DANA, ALICE],
   ]) {
     await db.query(
       `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1, $2, 'accepted')
@@ -250,6 +272,232 @@ assert.equal(
   false,
   "no claim + no linked workout stays unfresh",
 );
+
+// --- Collab permissions -------------------------------------------------
+// A collab post reaches BOTH authors' circles, so every rule has to hold from
+// two sides. CARL is Bob's friend only (reach comes purely from the coauthor);
+// DANA is Alice's friend only (reach comes purely from the author).
+const collabInFeedOf = async (uid) =>
+  (await getUnifiedFeed(uid, 30, null)).find(
+    (r) => r.kind === "post" && r.id === collabPost.post_id,
+  );
+
+let carlSees = await collabInFeedOf(CARL);
+assert.ok(
+  carlSees,
+  "collab reaches the COAUTHOR's friend who isn't the author's",
+);
+assert.equal(carlSees.coauthor_user_id, BOB, "…carrying the collab tag");
+assert.ok(
+  await visiblePostAuthors(CARL, collabPost.post_id),
+  "coauthor's friend may act on the post (comments + hypes authorize on this)",
+);
+assert.equal(
+  (await visiblePostAuthors(CARL, collabPost.post_id)).coauthor_user_id,
+  BOB,
+  "…and the coauthor comes back so the hype can notify them",
+);
+
+// Coauthor goes 'private' ("Only me"): the collab TAG and the reach it carries
+// both stop, but the post is still Alice's and stays with Alice's circle.
+await updateNotificationPreferences(BOB, { workout_visibility: "private" });
+assert.equal(
+  await collabInFeedOf(CARL),
+  undefined,
+  "private coauthor no longer pulls the post into their own friends' feeds",
+);
+assert.equal(
+  await visiblePostAuthors(CARL, collabPost.post_id),
+  null,
+  "…and direct access through the private coauthor closes too",
+);
+const danaSeesPrivateCollab = await collabInFeedOf(DANA);
+assert.ok(
+  danaSeesPrivateCollab,
+  "the author's own circle keeps the post — privacy withholds the tag, not the post",
+);
+assert.equal(
+  danaSeesPrivateCollab.coauthor_user_id,
+  null,
+  "private coauthor's name/avatar is withheld from third parties",
+);
+assert.equal(
+  danaSeesPrivateCollab.coauthor_username,
+  null,
+  "…including the username",
+);
+assert.equal(
+  (await collabInFeedOf(BOB))?.coauthor_user_id,
+  BOB,
+  "both authors still see the collab on their own post",
+);
+await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
+
+// Author goes 'private': the post leaves everyone's feed EXCEPT the two
+// authors' — "nobody but you" has to still include you (and your coauthor).
+await updateNotificationPreferences(ALICE, { workout_visibility: "private" });
+assert.equal(
+  await collabInFeedOf(DANA),
+  undefined,
+  "private author's post leaves their friends' feeds",
+);
+assert.equal(
+  await collabInFeedOf(CARL),
+  undefined,
+  "…and doesn't survive via the coauthor's circle either",
+);
+assert.ok(
+  await collabInFeedOf(ALICE),
+  "a private author still sees their own post",
+);
+assert.ok(
+  await collabInFeedOf(BOB),
+  "the coauthor still sees a collab they're an author on",
+);
+assert.ok(
+  await visiblePostAuthors(BOB, collabPost.post_id),
+  "…and can still act on it",
+);
+await updateNotificationPreferences(ALICE, { workout_visibility: "friends" });
+
+// Hype authorization: the post's audience, not friendship with its author.
+const collabAuthors = await visiblePostAuthors(CARL, collabPost.post_id);
+assert.equal(
+  collabAuthors?.author_id,
+  ALICE,
+  "hypes on a collab are always filed against the PRIMARY author",
+);
+assert.equal(
+  (await visiblePostAuthors(ALICE, mentionPost.post_id)) !== null,
+  true,
+  "an author can always see their own post",
+);
+assert.equal(
+  await visiblePostAuthors(CARL, mentionPost.post_id),
+  null,
+  "a non-collab post stays inside its author's circle",
+);
+
+// …and end-to-end through the real controller, because the shipped bug was
+// exactly this: the card rendered, the hype animation played, and the request
+// came back 403 because the sender wasn't friends with the PRIMARY author.
+function fakeRes() {
+  const out = { code: null, body: null };
+  const res = {
+    status(c) {
+      out.code = c;
+      return res;
+    },
+    json(b) {
+      out.body = b;
+      return res;
+    },
+  };
+  return { res, out };
+}
+const postHypeCtx = (target) => ({
+  target_user_id: target,
+  context_type: "post",
+  context_id: collabPost.post_id,
+  context_label: "collab",
+});
+const callSendHype = async (userId, body) => {
+  const { res, out } = fakeRes();
+  await sendHype({ userId, body }, res);
+  return out;
+};
+const callHypers = async (userId) => {
+  const { res, out } = fakeRes();
+  await getContextHypersController(
+    {
+      userId,
+      query: {
+        context_type: "post",
+        context_id: collabPost.post_id,
+        target_user_id: ALICE,
+      },
+    },
+    res,
+  );
+  return out;
+};
+
+let hypeRes = await callSendHype(CARL, postHypeCtx(ALICE));
+assert.equal(
+  hypeRes.code,
+  200,
+  `the coauthor's friend can hype the collab (got ${JSON.stringify(hypeRes.body)})`,
+);
+assert.deepEqual(
+  await db.query(
+    `SELECT target_id, context_type FROM hype_log WHERE sender_id = $1`,
+    [CARL],
+  ),
+  [{ target_id: ALICE, context_type: "post" }],
+  "a collab hype is filed against the PRIMARY author (the tally reads that row)",
+);
+assert.equal(
+  (await callSendHype(CARL, postHypeCtx(ALICE))).code,
+  409,
+  "…and still dedupes",
+);
+hypeRes = await callSendHype(BOB, postHypeCtx(ALICE));
+assert.equal(hypeRes.code, 400, "an author can't hype their own collab");
+assert.match(hypeRes.body.error, /your own post/);
+assert.equal(
+  (await callSendHype(DANA, postHypeCtx(ALICE))).code,
+  200,
+  "the author's friend can hype it too",
+);
+assert.equal(
+  (await callHypers(CARL)).code,
+  200,
+  "the coauthor's friend can open the hypers list",
+);
+assert.equal(
+  (await callHypers(BOB)).code,
+  200,
+  "an author can read their own post's hypers even though they can't hype it",
+);
+assert.equal(
+  (await callSendHype("ci-stranger", postHypeCtx(ALICE))).code,
+  400,
+  "someone in neither circle can't hype the post",
+);
+
+// A block BETWEEN the two authors ends the collab — the tagged tab already
+// dropped the row, so the feed must not keep showing "alice & bob". The post
+// reverts to a solo post rather than disappearing: the media and the run are
+// the author's.
+await db.query(
+  `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)
+	 ON CONFLICT DO NOTHING`,
+  [BOB, ALICE],
+);
+assert.equal(
+  await collabInFeedOf(CARL),
+  undefined,
+  "a severed collab stops reaching the ex-coauthor's circle",
+);
+const afterBlock = await collabInFeedOf(DANA);
+assert.ok(afterBlock, "…but the author keeps their own post");
+assert.equal(afterBlock.coauthor_user_id, null, "…with the tag severed");
+assert.ok(
+  await collabInFeedOf(ALICE),
+  "the author still sees their post after being blocked by the coauthor",
+);
+assert.ok(
+  !(await getUserTaggedPosts(ALICE, BOB, 20, null)).some(
+    (p) => p.post_id === collabPost.post_id,
+  ),
+  "…and it leaves the ex-coauthor's tagged tab",
+);
+assert.equal(
+  await acceptedCoauthor(collabPost.post_id),
+  null,
+  "…so comment/hype pushes stop reaching them too",
+);
+await db.query(`DELETE FROM user_blocks WHERE blocker_id = $1`, [BOB]);
 
 // Heatmap endpoint query.
 const routes = await getUserRoutes(BOB);
