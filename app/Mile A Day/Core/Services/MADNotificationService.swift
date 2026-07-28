@@ -632,6 +632,7 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         }
     }
 
+    @MainActor
     private func handleFriendRequestAction(
         userInfo: [AnyHashable: Any],
         accept: Bool
