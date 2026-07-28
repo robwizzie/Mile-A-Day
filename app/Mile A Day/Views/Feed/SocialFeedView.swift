@@ -915,28 +915,13 @@ struct SocialFeedView: View {
     // MARK: - Data
 
     private func refresh() async {
-        let totalStart = Date()
         await MainActor.run { isLoading = feed.isEmpty }
-        // Parallel fetches: feed, stories rail, and (if needed) user's own stories
-        // all go out at the same time. Feed paints first, then stories arrive.
-        let uid = currentUserId
-        
-        let feedStart = Date()
-        async let feedFetch = PostService.fetchUnifiedFeed(before: nil)
-        
-        let railStart = Date()
+        // The rail request goes out CONCURRENTLY with the feed request, and the
+        // feed paints the moment its response lands — it used to queue behind
+        // the rail + own-stories round trips (three serial fetches), which was
+        // the bulk of the "feed takes forever to load" wait.
         async let railFetch = PostService.fetchStoriesRail()
-        
-        let userStoriesStart = Date()
-        async let userStoriesFetch: [PostItem]? = {
-            guard let uid else { return nil }
-            return try? await PostService.fetchUserStories(userId: uid)
-        }()
-
-        let feedResponse = try? await feedFetch
-        let feedMs = Date().timeIntervalSince(feedStart) * 1000
-        print("[Feed] Feed fetch: \(Int(feedMs))ms")
-        
+        let feedResponse = try? await PostService.fetchUnifiedFeed(before: nil)
         await MainActor.run {
             if let feedResponse {
                 feed = feedResponse.items
@@ -947,33 +932,27 @@ struct SocialFeedView: View {
             isLoading = false
             loadedOnce = true
         }
-
-        // Stories and user stories fetch concurrently; update when both done
         let storyGroups = try? await railFetch
-        let railMs = Date().timeIntervalSince(railStart) * 1000
-        print("[Feed] Stories rail fetch: \(Int(railMs))ms")
-        
-        let userStories = await userStoriesFetch
-        let userStoriesMs = Date().timeIntervalSince(userStoriesStart) * 1000
-        print("[Feed] User stories fetch: \(Int(userStoriesMs))ms")
-        
+        // Own active stories carry their workout ids — needed to know which
+        // of today's workouts are already "spent" on a story share.
         var storyWorkoutIds: Set<String> = []
-        if let ownStories = userStories {
-            storyWorkoutIds = Set(ownStories.compactMap { $0.workout_id })
+        if let uid = currentUserId,
+           storyGroups?.contains(where: { $0.user_id == uid }) == true,
+           let ownStories = try? await PostService.fetchUserStories(userId: uid) {
+            storyWorkoutIds = Set(ownStories.compactMap(\.workout_id))
         }
-
         await MainActor.run {
             if let storyGroups {
                 stories = storyGroups
                 myStoryWorkoutIds = storyWorkoutIds
             }
+            // Both fetches succeeded → feed + stories now reflect every real
+            // share, so the optimistic bridge can be dropped. Keep it on a failed
+            // fetch so a stale feed doesn't re-open an already-shared slot.
             if feedResponse != nil, storyGroups != nil {
                 optimisticSharedWorkoutIds.removeAll()
             }
         }
-        
-        let totalMs = Date().timeIntervalSince(totalStart) * 1000
-        print("[Feed] Total refresh: \(Int(totalMs))ms")
     }
 
     /// Reload just the stories rail (viewed rings, expired groups) without the

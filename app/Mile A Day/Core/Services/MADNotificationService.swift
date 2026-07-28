@@ -358,29 +358,6 @@ final class MADNotificationService: NSObject, ObservableObject {
         UserDefaults.standard.removeObject(forKey: "apnsDeviceToken")
     }
 
-    /// Cleans up old stale device tokens from the backend on dev-build launches.
-    /// Prevents sandbox tokens from accumulating with wrong environment tags.
-    func unregisterOldDeviceTokensOnDevBuild() async {
-        guard UserDefaults.standard.string(forKey: "authToken") != nil else { return }
-
-        let oldToken = UserDefaults.standard.string(forKey: "apnsDeviceToken")
-        guard let oldToken, oldToken != currentDeviceToken else { return }
-
-        do {
-            struct UnregisterRequest: Codable { let device_token: String }
-            let body = try JSONEncoder().encode(UnregisterRequest(device_token: oldToken))
-            let _: [String: String] = try await APIClient.fancyFetch(
-                endpoint: "/devices/unregister",
-                method: .DELETE,
-                body: body,
-                responseType: [String: String].self
-            )
-            print("[Notifications] Unregistered stale dev token: \(oldToken.prefix(8))...")
-        } catch {
-            print("[Notifications] Failed to unregister old token (non-fatal): \(error.localizedDescription)")
-        }
-    }
-
     /// Checks if a remote notification type is enabled in user preferences.
     private func isRemoteNotificationEnabled(type: String) -> Bool {
         let prefs = NotificationPreferences.load()
@@ -632,7 +609,6 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         }
     }
 
-    @MainActor
     private func handleFriendRequestAction(
         userInfo: [AnyHashable: Any],
         accept: Bool

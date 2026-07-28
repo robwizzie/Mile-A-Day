@@ -40,12 +40,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
                 await MADNotificationService.shared.requestAuthorization()
                 MADNotificationService.shared.registerForRemoteNotifications()
                 await MADNotificationService.shared.syncDailyReminderPrefsToBackend()
-                // In DEBUG builds, unregister old stale tokens on each launch to
-                // prevent them from accumulating and silently failing APNs sends
-                // when they have the wrong environment tag.
-                #if DEBUG
-                await MADNotificationService.shared.unregisterOldDeviceTokensOnDevBuild()
-                #endif
             }
         }
 

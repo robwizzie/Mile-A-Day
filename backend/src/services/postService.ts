@@ -15,16 +15,6 @@ import {
 
 const db = PostgresService.getInstance();
 
-// Feed result cache: store recent results per user to avoid repeated expensive queries
-const feedCache = new Map<
-  string,
-  {
-    items: FeedEntryRow[];
-    cachedAt: number;
-  }
->();
-const FEED_CACHE_TTL = 60 * 1000; // 60 seconds
-
 // Shared circle + symmetric-block fragment. `$1` is always the viewer id.
 // `circle` = the viewer's accepted friends plus the viewer themself; blocked
 // ids (either direction) are excluded so neither party sees the other.
@@ -1293,140 +1283,26 @@ const FEED_ENTRY_PROJECTION = `
  * post represents it), and a user's raw workouts are hidden when they've turned
  * off `share_workouts_to_feed`. No time window — paginate as far back as desired.
  */
-/**
- * Fetch engagement stats (hype counts, comment counts, fresh status) for a batch
- * of feed entry IDs. This runs as a parallel request after the initial minimal
- * feed load so engagement data populates seamlessly in the background.
- */
-export async function getFeedEntryStats(
-  viewerId: string,
-  entries: Array<{ kind: string; id: string; workout_id: string | null }>,
-): Promise<
-  Record<
-    string,
-    {
-      is_hyped: boolean;
-      hype_count: number;
-      comment_count: number;
-      is_fresh: boolean;
-    }
-  >
-> {
-  if (entries.length === 0) return {};
-
-  // Separate posts and workouts
-  const postIds = entries.filter((e) => e.kind === "post").map((e) => e.id);
-  const workoutIds = entries
-    .filter((e) => e.kind === "workout")
-    .map((e) => e.workout_id)
-    .filter((id): id is string => id !== null);
-
-  const stats: Record<
-    string,
-    {
-      is_hyped: boolean;
-      hype_count: number;
-      comment_count: number;
-      is_fresh: boolean;
-    }
-  > = {};
-
-  // Fetch post stats
-  if (postIds.length > 0) {
-    const rows = await db.query<{
-      post_id: string;
-      is_hyped: boolean;
-      hype_count: number;
-      comment_count: number;
-      is_fresh: boolean;
-    }>(
-      `SELECT
-        p.post_id,
-        EXISTS (
-          SELECT 1 FROM hype_log h
-          WHERE h.sender_id = $1 AND h.target_id = p.user_id
-            AND ${postHypedByViewerMatchSql("h", "p")}
-        ) AS is_hyped,
-        (SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
-          WHERE hc.target_id = p.user_id AND ${postHypeMatchSql("hc", "p")}) AS hype_count,
-        (SELECT COUNT(*)::int FROM post_comments pc
-          WHERE pc.deleted_at IS NULL
-            AND (pc.post_id = p.post_id OR (p.workout_id IS NOT NULL AND pc.workout_id = p.workout_id))
-        ) AS comment_count,
-        (p.created_at > NOW() - INTERVAL '24 hours'
-          AND (p.posted_fresh OR (NOT p.is_auto AND p.workout_id IS NOT NULL
-            AND EXISTS (SELECT 1 FROM workouts wt WHERE wt.workout_id = p.workout_id
-              AND p.created_at <= wt.created_at + INTERVAL '10 minutes')))
-        ) AS is_fresh
-      FROM posts p
-      WHERE p.post_id::text = ANY($2::text[])`,
-      [viewerId, postIds],
-    );
-    for (const row of rows) {
-      stats[row.post_id] = {
-        is_hyped: row.is_hyped,
-        hype_count: row.hype_count,
-        comment_count: row.comment_count,
-        is_fresh: row.is_fresh,
-      };
-    }
-  }
-
-  // Fetch workout stats
-  if (workoutIds.length > 0) {
-    const rows = await db.query<{
-      workout_id: string;
-      is_hyped: boolean;
-      hype_count: number;
-      comment_count: number;
-    }>(
-      `SELECT
-        wt.workout_id,
-        EXISTS (
-          SELECT 1 FROM hype_log h
-          WHERE h.sender_id = $1 AND h.target_id = wt.user_id
-            AND ${runHypedByViewerMatchSql("h", "wt")}
-        ) AS is_hyped,
-        (SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
-          WHERE hc.target_id = wt.user_id AND ${runHypeMatchSql("hc", "wt")}) AS hype_count,
-        (SELECT COUNT(*)::int FROM post_comments pc
-          WHERE pc.workout_id = wt.workout_id AND pc.deleted_at IS NULL
-        ) AS comment_count
-      FROM workouts wt
-      WHERE wt.workout_id = ANY($2::text[])`,
-      [viewerId, workoutIds],
-    );
-    for (const row of rows) {
-      stats[row.workout_id] = {
-        is_hyped: row.is_hyped,
-        hype_count: row.hype_count,
-        comment_count: row.comment_count,
-        is_fresh: false,
-      };
-    }
-  }
-
-  return stats;
-}
-
 export async function getUnifiedFeed(
   viewerId: string,
   limit: number,
   before?: string | null,
 ): Promise<FeedEntryRow[]> {
-  // CACHE: For the first page (before=null), serve from cache if available.
-  // Feed doesn't need to be real-time—caching eliminates the expensive
-  // database query entirely, dropping load time from 14s to <100ms.
-  const cacheKey = `${viewerId}:feed`;
-  if (before === null || before === undefined) {
-    const cached = feedCache.get(cacheKey);
-    if (cached && Date.now() - cached.cachedAt < FEED_CACHE_TTL) {
-      console.log("[Feed] Cache hit");
-      return cached.items;
-    }
-  }
-
-  const rows = await db.queryWithExtendedTimeout<FeedEntryRow>(
+  // PERF: the expensive per-row columns (route JSONB, is_hyped, hype_count,
+  // story_photo_url) are computed ONLY for the page's rows, not for the whole
+  // circle's history. The old shape put them in the SELECT list of a UNION ALL
+  // that was then ORDER BY sort_ts DESC LIMIT $3 — so Postgres had to evaluate
+  // them for every post AND every workout in the viewer's circle across all
+  // time before the outer LIMIT could apply, and got linearly slower as the
+  // workouts table grew. Now `candidates` unions only the cheap keys, `page`
+  // sorts+limits them (the LIMIT is a hard barrier), and the outer SELECT
+  // projects the heavy columns onto just those <= $3 rows. Output shape and
+  // every value are identical to the old query; results are keyed by column
+  // name so column order is irrelevant. All lookups here are already indexed
+  // (idx_posts_user_created, idx_workouts_user_device_end for the candidate
+  // ordering; hype_log_context_dedupe_idx / idx_hype_log_target_context for the
+  // hype checks).
+  const rows = await db.query<FeedEntryRow>(
     `
 		${CIRCLE_CTE},
 		candidates AS (
@@ -1516,52 +1392,10 @@ export async function getUnifiedFeed(
 			ORDER BY sort_ts DESC
 			LIMIT $3
 		)
-		SELECT
-			page.kind,
-			page.id,
-			page.sort_ts,
-			page.owner_id AS user_id,
-			u.username, u.first_name, u.last_name, u.profile_image_url,
-			p.media_url, p.caption,
-			p.stats_snapshot,
-			p.local_date::text AS local_date,
-			null AS story_photo_url,
-			p.is_auto,
-			page.workout_id,
-			wt.workout_type,
-			CASE WHEN page.kind = 'workout'
-				THEN wt.distance::double precision END AS distance,
-			CASE WHEN page.kind = 'workout'
-				THEN wt.total_duration::double precision END AS total_duration,
-			CASE WHEN page.kind = 'workout'
-				THEN wt.calories::double precision END AS calories,
-			CASE WHEN page.kind = 'workout'
-				THEN wt.steps END AS steps,
-			null AS segment_count,
-			null AS segments,
-			null AS route,
-			(page.owner_id = $1) AS is_self,
-			false AS is_hyped,
-			null AS hype_count,
-			null AS comment_count,
-			false AS is_fresh,
-			${COAUTHOR_COLUMNS},
-			${URL_SAFE_CURSOR("page.sort_ts")} AS cursor
-		FROM page
-		JOIN users u ON u.user_id = page.owner_id
-		LEFT JOIN posts p ON page.kind = 'post' AND p.post_id::text = page.id
-		LEFT JOIN workouts wt ON wt.workout_id = page.workout_id
-		ORDER BY page.sort_ts DESC
+		${FEED_ENTRY_PROJECTION}
 		`,
     [viewerId, before ?? null, limit],
   );
-
-  // Cache the first-page results
-  if (before === null || before === undefined) {
-    feedCache.set(cacheKey, { items: rows, cachedAt: Date.now() });
-    console.log("[Feed] Cache updated");
-  }
-
   return rows;
 }
 

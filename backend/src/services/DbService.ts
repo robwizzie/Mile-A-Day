@@ -69,22 +69,6 @@ export class PostgresService {
     return result.rows;
   }
 
-  /** Run a query with extended timeout (60s) for complex operations like feed loading. */
-  public async queryWithExtendedTimeout<T extends QueryResultRow = any>(
-    query: string,
-    params?: any[],
-  ): Promise<T[]> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("SET statement_timeout = '60s'");
-      const result = await client.query<T>(query, params);
-      return result.rows;
-    } finally {
-      await client.query("SET statement_timeout = '30s'");
-      client.release();
-    }
-  }
-
   public async transaction(queries: QueryConfig[]): Promise<void> {
     const client = await this.pool.connect();
     try {
