@@ -12,6 +12,7 @@ import {
   getPostMemoriesController,
   getFeedController,
   getUnifiedFeedController,
+  getFeedStatsController,
   getUserPostsController,
   getPostController,
   getUserTaggedPostsController,
@@ -68,6 +69,7 @@ router.get("/memories", getPostMemoriesController);
 // Persistent feed (photo-only) + unified feed (posts + workout activity).
 router.get("/feed", getFeedController);
 router.get("/feed/unified", getUnifiedFeedController);
+router.post("/feed/stats", getFeedStatsController);
 
 // A user's posts for the Instagram-style profile grid, and the posts they're
 // tagged in (accepted collabs + caption @mentions) for the "Tagged" tab.

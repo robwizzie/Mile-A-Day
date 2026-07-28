@@ -1283,6 +1283,122 @@ const FEED_ENTRY_PROJECTION = `
  * post represents it), and a user's raw workouts are hidden when they've turned
  * off `share_workouts_to_feed`. No time window — paginate as far back as desired.
  */
+/**
+ * Fetch engagement stats (hype counts, comment counts, fresh status) for a batch
+ * of feed entry IDs. This runs as a parallel request after the initial minimal
+ * feed load so engagement data populates seamlessly in the background.
+ */
+export async function getFeedEntryStats(
+  viewerId: string,
+  entries: Array<{ kind: string; id: string; workout_id: string | null }>,
+): Promise<
+  Record<
+    string,
+    {
+      is_hyped: boolean;
+      hype_count: number;
+      comment_count: number;
+      is_fresh: boolean;
+    }
+  >
+> {
+  if (entries.length === 0) return {};
+
+  // Separate posts and workouts
+  const postIds = entries.filter((e) => e.kind === "post").map((e) => e.id);
+  const workoutIds = entries
+    .filter((e) => e.kind === "workout")
+    .map((e) => e.workout_id)
+    .filter((id): id is string => id !== null);
+
+  const stats: Record<
+    string,
+    {
+      is_hyped: boolean;
+      hype_count: number;
+      comment_count: number;
+      is_fresh: boolean;
+    }
+  > = {};
+
+  // Fetch post stats
+  if (postIds.length > 0) {
+    const rows = await db.query<{
+      post_id: string;
+      is_hyped: boolean;
+      hype_count: number;
+      comment_count: number;
+      is_fresh: boolean;
+    }>(
+      `SELECT
+        p.post_id,
+        EXISTS (
+          SELECT 1 FROM hype_log h
+          WHERE h.sender_id = $1 AND h.target_id = p.user_id
+            AND ${postHypedByViewerMatchSql("h", "p")}
+        ) AS is_hyped,
+        (SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
+          WHERE hc.target_id = p.user_id AND ${postHypeMatchSql("hc", "p")}) AS hype_count,
+        (SELECT COUNT(*)::int FROM post_comments pc
+          WHERE pc.deleted_at IS NULL
+            AND (pc.post_id = p.post_id OR (p.workout_id IS NOT NULL AND pc.workout_id = p.workout_id))
+        ) AS comment_count,
+        (p.created_at > NOW() - INTERVAL '24 hours'
+          AND (p.posted_fresh OR (NOT p.is_auto AND p.workout_id IS NOT NULL
+            AND EXISTS (SELECT 1 FROM workouts wt WHERE wt.workout_id = p.workout_id
+              AND p.created_at <= wt.created_at + INTERVAL '10 minutes')))
+        ) AS is_fresh
+      FROM posts p
+      WHERE p.post_id::text = ANY($2::text[])`,
+      [viewerId, postIds],
+    );
+    for (const row of rows) {
+      stats[row.post_id] = {
+        is_hyped: row.is_hyped,
+        hype_count: row.hype_count,
+        comment_count: row.comment_count,
+        is_fresh: row.is_fresh,
+      };
+    }
+  }
+
+  // Fetch workout stats
+  if (workoutIds.length > 0) {
+    const rows = await db.query<{
+      workout_id: string;
+      is_hyped: boolean;
+      hype_count: number;
+      comment_count: number;
+    }>(
+      `SELECT
+        wt.workout_id,
+        EXISTS (
+          SELECT 1 FROM hype_log h
+          WHERE h.sender_id = $1 AND h.target_id = wt.user_id
+            AND ${runHypedByViewerMatchSql("h", "wt")}
+        ) AS is_hyped,
+        (SELECT COUNT(DISTINCT hc.sender_id)::int FROM hype_log hc
+          WHERE hc.target_id = wt.user_id AND ${runHypeMatchSql("hc", "wt")}) AS hype_count,
+        (SELECT COUNT(*)::int FROM post_comments pc
+          WHERE pc.workout_id = wt.workout_id AND pc.deleted_at IS NULL
+        ) AS comment_count
+      FROM workouts wt
+      WHERE wt.workout_id = ANY($2::text[])`,
+      [viewerId, workoutIds],
+    );
+    for (const row of rows) {
+      stats[row.workout_id] = {
+        is_hyped: row.is_hyped,
+        hype_count: row.hype_count,
+        comment_count: row.comment_count,
+        is_fresh: false,
+      };
+    }
+  }
+
+  return stats;
+}
+
 export async function getUnifiedFeed(
   viewerId: string,
   limit: number,
@@ -1392,7 +1508,59 @@ export async function getUnifiedFeed(
 			ORDER BY sort_ts DESC
 			LIMIT $3
 		)
-		${FEED_ENTRY_PROJECTION}
+		SELECT
+			page.kind,
+			page.id,
+			page.sort_ts,
+			page.owner_id AS user_id,
+			u.username, u.first_name, u.last_name, u.profile_image_url,
+			p.media_url, p.caption,
+			p.stats_snapshot,
+			p.local_date::text AS local_date,
+			null AS story_photo_url,
+			p.is_auto,
+			page.workout_id,
+			wt.workout_type,
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.distance, wt.distance)::double precision END AS distance,
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.total_duration, wt.total_duration)::double precision END AS total_duration,
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.calories, wt.calories)::double precision END AS calories,
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.steps, wt.steps) END AS steps,
+			CASE WHEN wt.feed_role = 'daily_mile' THEN roll.segment_count END AS segment_count,
+			null AS segments,
+			null AS route,
+			(page.owner_id = $1) AS is_self,
+			false AS is_hyped,
+			null AS hype_count,
+			null AS comment_count,
+			false AS is_fresh,
+			${COAUTHOR_COLUMNS},
+			${URL_SAFE_CURSOR("page.sort_ts")} AS cursor
+		FROM page
+		JOIN users u ON u.user_id = page.owner_id
+		LEFT JOIN posts p ON page.kind = 'post' AND p.post_id::text = page.id
+		LEFT JOIN workouts wt ON wt.workout_id = page.workout_id
+		LEFT JOIN LATERAL (
+			SELECT
+				COUNT(*) FILTER (WHERE m.feed_role <> 'hidden')::int AS segment_count,
+				SUM(m.distance)::double precision AS distance,
+				SUM(m.total_duration)::double precision AS total_duration,
+				SUM(m.calories)::double precision AS calories,
+				SUM(m.steps)::int AS steps
+			FROM workouts m
+			WHERE wt.feed_role = 'daily_mile'
+				AND m.user_id = wt.user_id
+				AND m.local_date = wt.local_date
+				AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
+				AND (
+					m.feed_role IN ('rolled_up', 'daily_mile')
+					OR (m.feed_role = 'hidden' AND m.device_end_date <= wt.device_end_date)
+				)
+		) roll ON TRUE
+		ORDER BY page.sort_ts DESC
 		`,
     [viewerId, before ?? null, limit],
   );

@@ -11,6 +11,7 @@ import {
   markStoryViewed,
   getFeed,
   getUnifiedFeed,
+  getFeedEntryStats,
   getUserPosts,
   getFeedEntryForPost,
   getUserTaggedPosts,
@@ -567,6 +568,28 @@ export async function getUnifiedFeedController(
       context: { path: "/posts/feed/unified" },
     });
     res.status(500).json({ error: "Error fetching feed" });
+  }
+}
+
+/**
+ * POST /posts/feed/stats — Fetch engagement stats (hype counts, comment counts,
+ * fresh status) for a batch of feed entry IDs. Called in parallel with the
+ * initial feed load for seamless progressive enhancement.
+ */
+export async function getFeedStatsController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const entries = Array.isArray(req.body?.entries) ? req.body.entries : [];
+    if (entries.length === 0) {
+      return res.json({});
+    }
+    const stats = await getFeedEntryStats(req.userId!, entries);
+    res.json(stats);
+  } catch (error: any) {
+    console.error("Error fetching feed stats:", error.message);
+    res.status(500).json({ error: "Error fetching feed stats" });
   }
 }
 
