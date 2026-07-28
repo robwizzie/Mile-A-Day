@@ -90,9 +90,25 @@ final class MADNotificationService: NSObject, ObservableObject {
             options: []
         )
 
+        // Collab tags are applied immediately, so there's nothing to accept —
+        // the only action is the way out. Not .foreground for the same reason
+        // as the friend-request actions: opting out of someone else's post
+        // shouldn't require opening the app.
+        let removeCollabAction = UNNotificationAction(
+            identifier: "COAUTHOR_REMOVE_ACTION",
+            title: "Remove me",
+            options: [.destructive]
+        )
+        let coauthorTag = UNNotificationCategory(
+            identifier: "COAUTHOR_TAG",
+            actions: [removeCollabAction],
+            intentIdentifiers: [],
+            options: []
+        )
+
         // setNotificationCategories REPLACES the whole set — FRIEND_ACTIVITY
         // must stay in this array or the Hype button silently disappears.
-        center.setNotificationCategories([friendActivity, friendRequest])
+        center.setNotificationCategories([friendActivity, friendRequest, coauthorTag])
     }
 
     // MARK: - Public API
@@ -482,6 +498,10 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             await handleFriendRequestAction(userInfo: userInfo, accept: false)
             return
         }
+        if response.actionIdentifier == "COAUTHOR_REMOVE_ACTION" {
+            await handleRemoveCollabAction(userInfo: userInfo)
+            return
+        }
 
         guard let type = userInfo["type"] as? String else { return }
         let data = userInfo["data"] as? [String: String] ?? [:]
@@ -560,6 +580,35 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
     /// instance is safe and cheap: its init only reads the auth token out of
     /// UserDefaults, no network.
     @MainActor
+    /// "Remove me" on a collab-tag push: take this user off the post without
+    /// opening the app.
+    ///
+    /// Runs while the app may be suspended, so it touches nothing view-owned —
+    /// a static service call and a local toast, per the notification-action
+    /// rule in .claude/rules/ios.md.
+    private func handleRemoveCollabAction(userInfo: [AnyHashable: Any]) async {
+        let data = userInfo["data"] as? [String: String]
+        guard let postId = data?["post_id"], !postId.isEmpty else {
+            await postLocalToast(
+                title: "Couldn't remove you",
+                body: "Open the app to remove yourself from this post."
+            )
+            return
+        }
+        do {
+            try await PostService.respondToCoauthor(postId: postId, accept: false)
+            await postLocalToast(
+                title: "Removed",
+                body: "You're no longer tagged in that post."
+            )
+        } catch {
+            await postLocalToast(
+                title: "Couldn't remove you",
+                body: "Open the app to remove yourself from this post."
+            )
+        }
+    }
+
     private func handleFriendRequestAction(
         userInfo: [AnyHashable: Any],
         accept: Bool

@@ -1,4 +1,5 @@
 import { PostgresService } from "./DbService.js";
+import { CLIENT_FEATURES, userSupports } from "./clientFeatures.js";
 import { sendPush } from "./pushNotificationService.js";
 import { shouldSendNotification } from "./notificationSettingsService.js";
 import {
@@ -401,12 +402,25 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 				user_id, media_url, caption, workout_id, stats_snapshot,
 				local_date, share_to_feed, share_to_story, story_expires_at,
 				is_auto, include_route, coauthor_user_id, coauthor_status,
-				posted_fresh
+				coauthor_workout_id, posted_fresh
 			)
 			VALUES (
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
 				CASE WHEN $8 THEN NOW() + INTERVAL '24 hours' ELSE NULL END,
-				$9, $10, $11, CASE WHEN $11::text IS NULL THEN NULL ELSE 'pending' END,
+				-- Tagging is IMMEDIATE, Instagram-style: a collab lands on the
+				-- coauthor's profile the moment it's posted, and their way out is
+				-- to remove themselves (respondToCoauthorInvite with accept=false).
+				-- It used to insert 'pending' and wait for an accept that most
+				-- people never saw, so collabs simply never appeared.
+				$9, $10, $11, CASE WHEN $11::text IS NULL THEN NULL ELSE 'accepted' END,
+				-- Their side of the day's run, picked the same way the old accept
+				-- path picked it. Stamped here now that there's no accept step.
+				(
+					SELECT w.workout_id FROM workouts w
+					WHERE w.user_id = $11 AND w.local_date = $6::date
+						AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+					ORDER BY w.distance DESC LIMIT 1
+				),
 				$12
 			)
 				ON CONFLICT ${conflictTarget}
@@ -421,6 +435,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 					-- carries a coauthor — so taking EXCLUDED wholesale is safe.
 					coauthor_user_id = EXCLUDED.coauthor_user_id,
 					coauthor_status = EXCLUDED.coauthor_status,
+					coauthor_workout_id = EXCLUDED.coauthor_workout_id,
 					posted_fresh = EXCLUDED.posted_fresh${flagUpdates}
 				${updateGuard}
 			RETURNING *
@@ -1301,20 +1316,21 @@ export async function getUnifiedFeed(
 			WHERE p.share_to_feed AND p.deleted_at IS NULL
 				-- Accepted collab posts reach BOTH authors' circles (semi-join, not
 				-- a JOIN, so a post whose two authors share the viewer isn't doubled).
+				-- These are the SAME four gates getFeed applies, via the same
+				-- fragments. They drifted apart once and produced two different
+				-- answers for one post: this branch dropped a private author's post
+				-- from their OWN feed (bare OWNER_NOT_PRIVATE_SQL has no self
+				-- exception — "only me" has to still include me), and let a private
+				-- coauthor's reach through. Keep them spelled the same.
 				AND EXISTS (
 					SELECT 1 FROM circle c
 					WHERE c.uid = p.user_id
-						OR (p.coauthor_status = 'accepted' AND c.uid = p.coauthor_user_id)
+						OR (c.uid = p.coauthor_user_id AND ${COLLAB_REACH_SQL})
 				)
+				AND ${AUTHOR_VISIBLE_TO_VIEWER}
 				AND p.user_id NOT IN (SELECT uid FROM blocked)
-				AND (p.coauthor_status IS DISTINCT FROM 'accepted'
+				AND (NOT ${COLLAB_ACTIVE}
 					OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
-				AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
-				-- If post reaches viewer via coauthor, coauthor must not be private
-				AND (
-					EXISTS (SELECT 1 FROM circle c WHERE c.uid = p.user_id)
-					OR (p.coauthor_status = 'accepted' AND ${OWNER_NOT_PRIVATE_SQL("p.coauthor_user_id")})
-				)
 
 			UNION ALL
 
@@ -1877,7 +1893,12 @@ export async function respondToCoauthorInvite(
 						ORDER BY w.distance DESC LIMIT 1
 					)
 				 WHERE post_id = $2 AND coauthor_user_id = $1
-					 AND coauthor_status = 'pending' AND deleted_at IS NULL
+					 -- Tags are accepted on creation now, so 'accepted' is the normal
+					 -- state here. Kept idempotent rather than pending-only: an older
+					 -- build still shows Accept, and that tap must succeed as a no-op
+					 -- instead of 404ing on a collab the user is already part of.
+					 AND coauthor_status IN ('pending', 'accepted')
+					 AND deleted_at IS NULL
 				 RETURNING user_id AS author_id`,
         [userId, postId],
       )
@@ -1891,7 +1912,14 @@ export async function respondToCoauthorInvite(
   return rows[0] ?? null;
 }
 
-/** Push the collab invite to the invited coauthor. Never throws. */
+/**
+ * Push "you've been tagged" to the coauthor. Never throws.
+ *
+ * The post is ALREADY on their profile by the time this sends — there's no
+ * invite to answer, so the push is an FYI with a way out, not a decision.
+ * Devices that registered the collab-tag capability additionally get a
+ * "Remove me" action button, so opting out never requires opening the app.
+ */
 export async function notifyCoauthorInvite(
   authorId: string,
   coauthorId: string,
@@ -1904,10 +1932,17 @@ export async function notifyCoauthorInvite(
       [authorId],
     );
     const name = rows[0]?.username ?? "A friend";
+    const canRemoveInline = await userSupports(
+      coauthorId,
+      CLIENT_FEATURES.collabTagV1,
+    );
     await sendPush(coauthorId, {
-      title: `${name} added you to their post 🤝`,
-      body: "Accept to share this mile on your profile too",
+      title: `${name} tagged you in their post 🤝`,
+      body: "It's on your profile now — you can remove yourself any time.",
+      // Type unchanged: every shipped build routes `coauthor_invite`, and a new
+      // string would tap to nothing on all of them.
       type: "coauthor_invite",
+      ...(canRemoveInline ? { category: "COAUTHOR_TAG" } : {}),
       data: { user_id: authorId, post_id: postId },
     });
   } catch (e: any) {
