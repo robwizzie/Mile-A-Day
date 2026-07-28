@@ -360,7 +360,6 @@ final class MADNotificationService: NSObject, ObservableObject {
 
     /// Cleans up old stale device tokens from the backend on dev-build launches.
     /// Prevents sandbox tokens from accumulating with wrong environment tags.
-    @MainActor
     func unregisterOldDeviceTokensOnDevBuild() async {
         guard UserDefaults.standard.string(forKey: "authToken") != nil else { return }
 
