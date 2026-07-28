@@ -609,6 +609,10 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
         }
     }
 
+    // @MainActor because this builds a throwaway `FriendService`, which is
+    // @MainActor-isolated. The only caller (userNotificationCenter(_:didReceive:))
+    // is already @MainActor and already awaits this, so there's no extra hop.
+    @MainActor
     private func handleFriendRequestAction(
         userInfo: [AnyHashable: Any],
         accept: Bool
