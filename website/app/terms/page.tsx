@@ -2,8 +2,9 @@ import type { Metadata } from 'next';
 import { LegalPage, Section } from '@/components/legal-page';
 
 export const metadata: Metadata = {
-	title: 'Terms of Use - Mile A Day',
-	description: 'The terms and conditions for using the Mile A Day app.'
+	title: 'Terms of Use',
+	description: 'The terms and conditions for using the Mile A Day app.',
+	alternates: { canonical: '/terms' }
 };
 
 export default function TermsPage() {
