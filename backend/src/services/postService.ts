@@ -1363,24 +1363,41 @@ export const UNIFIED_FEED_SQL = `
 				-- idx_workouts_feed_candidates matches this WHERE exactly, and the
 				-- PERF note above rules out anything heavier inside candidates.
 				AND w.feed_role IN ('daily_mile', 'extra')
+				-- These two NOT EXISTS were ONE clause with an OR between
+				-- p2.workout_id and p2.coauthor_workout_id. Splitting them is the
+				-- identity NOT EXISTS(A OR B) = NOT EXISTS(A) AND NOT EXISTS(B),
+				-- so the result is unchanged — but the OR spanned two different
+				-- columns, which left Postgres unable to use an index for either
+				-- and scanning every shared post once per candidate workout. That
+				-- cost 857 x 232 = ~198k executions of the privacy and block
+				-- subplans inside, including 195,720 seq scans of
+				-- notification_settings (its user_id IS a primary key; the planner
+				-- picks a seq scan anyway because the table is ~114 rows, which is
+				-- only a disaster at this loop count). Split, each arm matches an
+				-- index — uq_posts_workout_active and idx_posts_coauthor_workout —
+				-- so it is two probes per workout, and the privacy subplans run
+				-- only for rows that are genuinely collab posts.
 				AND NOT EXISTS (
 					SELECT 1 FROM posts p2
 					WHERE p2.deleted_at IS NULL AND p2.share_to_feed
-						AND (p2.workout_id = w.workout_id
-							-- A collab post only stands in for the coauthor's mile when
-							-- the viewer can actually SEE that post (primary author not
-							-- blocked or private) — otherwise they'd get neither. The
-							-- privacy arm mirrors AUTHOR_VISIBLE_TO_VIEWER so the two
-							-- stay in step: for the coauthor themselves the collab post
-							-- is visible even when the author went private, and their
-							-- own workout card must still give way to it. A severed
-							-- collab (either author blocked the other) stands in for
-							-- nothing — the ex-coauthor's own card comes back.
-							OR (${collabActiveSql("p2")}
-								AND p2.coauthor_workout_id = w.workout_id
-								AND p2.user_id NOT IN (SELECT uid FROM blocked)
-								AND (p2.user_id = $1 OR p2.coauthor_user_id = $1
-									OR ${OWNER_NOT_PRIVATE_SQL("p2.user_id")})))
+						AND p2.workout_id = w.workout_id
+				)
+				-- A collab post only stands in for the coauthor's mile when the
+				-- viewer can actually SEE that post (primary author not blocked or
+				-- private) — otherwise they'd get neither. The privacy arm mirrors
+				-- AUTHOR_VISIBLE_TO_VIEWER so the two stay in step: for the
+				-- coauthor themselves the collab post is visible even when the
+				-- author went private, and their own workout card must still give
+				-- way to it. A severed collab (either author blocked the other)
+				-- stands in for nothing — the ex-coauthor's own card comes back.
+				AND NOT EXISTS (
+					SELECT 1 FROM posts p2
+					WHERE p2.deleted_at IS NULL AND p2.share_to_feed
+						AND p2.coauthor_workout_id = w.workout_id
+						AND ${collabActiveSql("p2")}
+						AND p2.user_id NOT IN (SELECT uid FROM blocked)
+						AND (p2.user_id = $1 OR p2.coauthor_user_id = $1
+							OR ${OWNER_NOT_PRIVATE_SQL("p2.user_id")})
 				)
 		),
 		page AS (
