@@ -35,8 +35,32 @@ struct SaveFriendStreakView: View {
 
     enum Style { case compact, prominent }
 
-    @StateObject private var model = SaveFriendStreakModel()
+    @StateObject private var model: SaveFriendStreakModel
     @State private var showingConfirmation = false
+
+    /// The first load is kicked off by the MODEL's init, not by the `.task`
+    /// below. Every phase that shows no CTA renders `EmptyView`, and SwiftUI
+    /// never fires lifecycle modifiers on an empty view — so a `.task`-driven
+    /// first load could never leave `.idle`: empty view → no task → still
+    /// `.idle` → still empty. The CTA was invisible on both surfaces.
+    /// The `.task` stays for RE-loads (a fresh `preloaded` handed down), which
+    /// only happen while the view is already rendering something.
+    init(
+        friendId: String,
+        friendName: String,
+        style: Style = .prominent,
+        preloaded: FriendRescueStatus? = nil,
+        onSaved: @escaping (Int) -> Void = { _ in }
+    ) {
+        self.friendId = friendId
+        self.friendName = friendName
+        self.style = style
+        self.preloaded = preloaded
+        self.onSaved = onSaved
+        _model = StateObject(
+            wrappedValue: SaveFriendStreakModel(friendId: friendId, preloaded: preloaded)
+        )
+    }
 
     var body: some View {
         Group {
@@ -279,6 +303,19 @@ final class SaveFriendStreakModel: ObservableObject {
     }
 
     @Published private(set) var phase: Phase = .idle
+
+    /// Resolves the phase at construction so the view never has to render an
+    /// empty frame it can't recover from (see the init comment on the view).
+    /// A host that already holds the rescue lands on its final phase with no
+    /// async hop at all; the profile, which has nothing preloaded, starts its
+    /// fetch here instead of waiting for a `.task` that will never fire.
+    init(friendId: String, preloaded: FriendRescueStatus? = nil) {
+        if let preloaded {
+            phase = Self.resolvePhase(for: preloaded)
+            return
+        }
+        Task { [weak self] in await self?.load(friendId: friendId) }
+    }
 
     func load(friendId: String, preloaded: FriendRescueStatus? = nil) async {
         // A completed save is terminal for this view's lifetime — refetching
