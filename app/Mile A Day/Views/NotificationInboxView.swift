@@ -62,7 +62,12 @@ struct NotificationInboxView: View {
             case .all:
                 return true
             case .friends:
+                // Streak rescues are friend activity too — without these two
+                // they'd only ever surface under All (nothing else matches
+                // the streak_ prefix).
                 return type.hasPrefix("friend_")
+                    || type == "streak_assist_opportunity"
+                    || type == "streak_assisted"
             case .comps:
                 return type.hasPrefix("competition_") || type == "lead_change" || type == "clash_tie"
             case .achievements:
@@ -698,8 +703,13 @@ struct NotificationInboxView: View {
             // Your own award — the trophy case is on your profile.
             switchTab(4)
         case "streak_assist_opportunity":
-            // The rescue CTA lives with the friend rows.
-            switchTab(3)
+            // The push copy says "save it from their profile" — land on the
+            // broken friend's profile, where SaveFriendStreakView fetches a
+            // fresh rescue status. (The Friends-tab row button also works but
+            // depends on a tokensState refresh that a tab switch alone
+            // doesn't guarantee.) Legacy rows without an actor fall back to
+            // the Friends tab.
+            openActorProfileOrFriends(notification)
         default:
             // Streak token outcomes, reminders, recaps, and any future type:
             // land on the Dashboard rather than dead-ending the tap.
