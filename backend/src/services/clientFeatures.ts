@@ -35,6 +35,17 @@ export const CLIENT_FEATURES = {
    * for someone who has stopped opening the app.
    */
   friendRequestV2: "friend_request_v2",
+
+  /**
+   * The build registers the COAUTHOR_TAG category, so a collab-tag push can
+   * carry a "Remove me" action the user resolves from the banner.
+   *
+   * Gated because an unregistered category renders NO buttons on older builds —
+   * the push still arrives and still opens the post, it just can't be actioned
+   * without opening the app. Safe in that direction, which is why the type
+   * string stays `coauthor_invite` for everyone.
+   */
+  collabTagV1: "collab_tag_v1",
 } as const;
 
 export type ClientFeature =
