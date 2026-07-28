@@ -754,18 +754,38 @@ export async function getUserRoutes(userId: string, limit: number = 1000) {
   );
 }
 
+// Cache timezone lookups for 5 minutes to avoid querying workouts on every feed request
+const tzCache = new Map<string, { offset: number; cachedAt: number }>();
+const TZ_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function getUserTimezoneOffset(userId: string): Promise<number> {
+  const cached = tzCache.get(userId);
+  if (cached && Date.now() - cached.cachedAt < TZ_CACHE_TTL) {
+    return cached.offset;
+  }
+  const rows = await db.query<{ timezone_offset: number | null }>(
+    `SELECT COALESCE(
+		(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
+		0
+	) AS timezone_offset`,
+    [userId],
+  );
+  const offset = rows[0]?.timezone_offset ?? 0;
+  tzCache.set(userId, { offset, cachedAt: Date.now() });
+  return offset;
+}
+
 /**
  * Today's date ('YYYY-MM-DD') in the user's local timezone, derived from their
  * most recent workout's timezone_offset (matches workouts.local_date format).
  * Falls back to the server's UTC date if the user has no workouts.
+ * Timezone is cached for 5 minutes to avoid querying workouts on every request.
  */
 export async function getUserLocalDate(userId: string): Promise<string> {
+  const offset = await getUserTimezoneOffset(userId);
   const rows = await db.query<{ local_date: string }>(
-    `SELECT (NOW() + (COALESCE(
-			(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
-			0
-		) || ' minutes')::interval)::date::text AS local_date`,
-    [userId],
+    `SELECT (NOW() + ($1 || ' minutes')::interval)::date::text AS local_date`,
+    [offset],
   );
   return rows[0].local_date;
 }
