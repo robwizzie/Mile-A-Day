@@ -1301,20 +1301,21 @@ export async function getUnifiedFeed(
 			WHERE p.share_to_feed AND p.deleted_at IS NULL
 				-- Accepted collab posts reach BOTH authors' circles (semi-join, not
 				-- a JOIN, so a post whose two authors share the viewer isn't doubled).
+				-- These are the SAME four gates getFeed applies, via the same
+				-- fragments. They drifted apart once and produced two different
+				-- answers for one post: this branch dropped a private author's post
+				-- from their OWN feed (bare OWNER_NOT_PRIVATE_SQL has no self
+				-- exception — "only me" has to still include me), and let a private
+				-- coauthor's reach through. Keep them spelled the same.
 				AND EXISTS (
 					SELECT 1 FROM circle c
 					WHERE c.uid = p.user_id
-						OR (p.coauthor_status = 'accepted' AND c.uid = p.coauthor_user_id)
+						OR (c.uid = p.coauthor_user_id AND ${COLLAB_REACH_SQL})
 				)
+				AND ${AUTHOR_VISIBLE_TO_VIEWER}
 				AND p.user_id NOT IN (SELECT uid FROM blocked)
-				AND (p.coauthor_status IS DISTINCT FROM 'accepted'
+				AND (NOT ${COLLAB_ACTIVE}
 					OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
-				AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
-				-- If post reaches viewer via coauthor, coauthor must not be private
-				AND (
-					EXISTS (SELECT 1 FROM circle c WHERE c.uid = p.user_id)
-					OR (p.coauthor_status = 'accepted' AND ${OWNER_NOT_PRIVATE_SQL("p.coauthor_user_id")})
-				)
 
 			UNION ALL
 
