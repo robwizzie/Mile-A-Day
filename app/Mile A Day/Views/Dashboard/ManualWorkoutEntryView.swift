@@ -15,11 +15,19 @@ struct ManualWorkoutEntryView: View {
     @State private var isSaving = false
     @State private var errorMessage: String?
     @State private var showSuccess = false
-    @State private var isDistanceFocused = false
+    @State private var showDiscardConfirmation = false
     @FocusState private var distanceFieldFocused: Bool
 
     private var distance: Double? {
         Double(distanceString)
+    }
+
+    /// Anything the user would lose if the sheet closed right now. Drives both
+    /// the swipe-to-dismiss guard and the Cancel confirmation — a decimal pad
+    /// has no return key, so people drag down to get rid of the keyboard and
+    /// used to take the whole sheet (and their entry) with it.
+    private var hasUnsavedInput: Bool {
+        !distanceString.isEmpty || totalDuration > 0
     }
 
     private var totalDuration: TimeInterval {
@@ -61,11 +69,12 @@ struct ManualWorkoutEntryView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") { cancelTapped() }
                         .foregroundColor(.white.opacity(0.7))
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
+                        distanceFieldFocused = false
                         Task { await saveWorkout() }
                     } label: {
                         Text("Save")
@@ -73,9 +82,38 @@ struct ManualWorkoutEntryView: View {
                     }
                     .disabled(!isValid || isSaving)
                 }
+                // The decimal pad ships no return key. Without this the only
+                // way out of the keyboard is dragging the scroll view, which
+                // is the same gesture that dismisses the sheet.
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { distanceFieldFocused = false }
+                        .fontWeight(.semibold)
+                }
             }
             .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
+        }
+        // Don't let a stray swipe throw away a half-entered workout. Explicit
+        // Cancel still works, and the post-save dismiss is programmatic so it
+        // is never blocked by this.
+        .interactiveDismissDisabled(hasUnsavedInput && !showSuccess)
+        .confirmationDialog(
+            "Discard this workout?",
+            isPresented: $showDiscardConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Discard", role: .destructive) { dismiss() }
+            Button("Keep Editing", role: .cancel) { }
+        }
+    }
+
+    private func cancelTapped() {
+        distanceFieldFocused = false
+        if hasUnsavedInput {
+            showDiscardConfirmation = true
+        } else {
+            dismiss()
         }
     }
 
@@ -119,7 +157,13 @@ struct ManualWorkoutEntryView: View {
             }
             .padding(.vertical, 20)
         }
-        .scrollDismissesKeyboard(.interactively)
+        // `.immediately` over `.interactively`: an interactive dismiss follows
+        // the drag, so a half-swipe leaves the keyboard hanging mid-screen and
+        // reads as the sheet starting to close. Scroll = keyboard gone.
+        .scrollDismissesKeyboard(.immediately)
+        // Tapping elsewhere in the form is the other thing people try. Runs
+        // simultaneously so the row/button under the finger still gets its tap.
+        .simultaneousGesture(TapGesture().onEnded { distanceFieldFocused = false })
         .overlay {
             if isSaving {
                 Color.black.opacity(0.4)
@@ -243,21 +287,13 @@ struct ManualWorkoutEntryView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionLabel("DURATION")
 
+            // Each wheel takes an equal third with no separators between them.
+            // The old fixed 70pt wheels left wide dead gaps (and two ":" glyphs)
+            // where a drag meant for a wheel scrolled the whole form instead —
+            // the single biggest source of "I swiped and lost my place".
             HStack(spacing: 0) {
                 durationWheel(value: $hours, label: "hr", range: 0...23)
-
-                Text(":")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.3))
-                    .offset(y: -2)
-
                 durationWheel(value: $minutes, label: "min", range: 0...59)
-
-                Text(":")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.3))
-                    .offset(y: -2)
-
                 durationWheel(value: $seconds, label: "sec", range: 0...59)
             }
             .frame(maxWidth: .infinity)
@@ -285,7 +321,8 @@ struct ManualWorkoutEntryView: View {
                 }
             }
             .pickerStyle(.wheel)
-            .frame(width: 70, height: 120)
+            .frame(maxWidth: .infinity)
+            .frame(height: 130)
             .clipped()
 
             Text(label)

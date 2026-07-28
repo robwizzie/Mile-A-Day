@@ -221,7 +221,7 @@ struct AuthenticationView: View {
                 let (profile, backendResponse) = try await appleSignInManager.signIn()
 
                 // Update user manager with Apple authentication data
-                userManager.handleAppleSignIn(profile: profile, backendResponse: backendResponse)
+                try userManager.handleAppleSignIn(profile: profile, backendResponse: backendResponse)
 
                 await MainActor.run {
                     withAnimation(MADTheme.Animation.standard) {

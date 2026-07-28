@@ -51,7 +51,7 @@ struct ProfileView: View {
 
     enum ProfileSheetType: String, Identifiable {
         case totalMiles, fastestPace, mostMiles
-        case usernameSetup, privacySettings
+        case usernameSetup
         var id: String { rawValue }
     }
 
@@ -112,14 +112,24 @@ struct ProfileView: View {
             ShareProfileView()
         }
         .navigationDestination(isPresented: $showingSettings) {
+            // Confirmations for these rows are presented BY the settings page —
+            // a modal attached here never appears while that page is pushed on
+            // top, which made Sign Out look like a no-op until you hit Back.
             ProfileSettingsView(
                 userManager: userManager,
                 friendService: friendService,
-                onLogout: { showingLogoutConfirmation = true },
-                onDeleteAccount: { showingDeleteAccountConfirmation = true },
+                showingLogoutConfirmation: $showingLogoutConfirmation,
+                showingDeleteAccountConfirmation: $showingDeleteAccountConfirmation,
+                deleteAccountErrorMessage: $deleteAccountErrorMessage,
+                recalibrateResultMessage: $recalibrateResultMessage,
+                onConfirmLogout: {
+                    userManager.signOut()
+                    appStateManager.signOut()
+                },
+                onConfirmDeleteAccount: { Task { await performDeleteAccount() } },
                 onRecalibrateStreak: { Task { await recalibrateStreak() } },
                 isRecalibratingStreak: isRecalibratingStreak,
-                onPrivacySettings: { activeSheet = .privacySettings }
+                isDeletingAccount: isDeletingAccount
             )
         }
         .sheet(item: $activeSheet) { sheet in
@@ -133,8 +143,6 @@ struct ProfileView: View {
             case .usernameSetup:
                 UsernameSetupView()
                     .environmentObject(userManager)
-            case .privacySettings:
-                PrivacySettingsView()
             }
         }
         // Edit Profile is a real screen, not a form sheet.
@@ -169,45 +177,9 @@ struct ProfileView: View {
         .task {
             await userManager.refreshBadgesFromServer()
         }
-        .alert("Sign Out", isPresented: $showingLogoutConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Sign Out", role: .destructive) {
-                userManager.signOut()
-                appStateManager.signOut()
-            }
-        } message: {
-            Text("Are you sure you want to sign out?")
-        }
-        .alert("Delete Account?", isPresented: $showingDeleteAccountConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                Task { await performDeleteAccount() }
-            }
-        } message: {
-            Text("This permanently deletes your account, workouts, streak history, friendships, and competition data. This cannot be undone.")
-        }
-        .alert(
-            "Couldn't Delete Account",
-            isPresented: Binding(
-                get: { deleteAccountErrorMessage != nil },
-                set: { if !$0 { deleteAccountErrorMessage = nil } }
-            )
-        ) {
-            Button("OK") { deleteAccountErrorMessage = nil }
-        } message: {
-            Text(deleteAccountErrorMessage ?? "")
-        }
-        .alert(
-            "Streak Recalibrated",
-            isPresented: Binding(
-                get: { recalibrateResultMessage != nil },
-                set: { if !$0 { recalibrateResultMessage = nil } }
-            )
-        ) {
-            Button("OK") { recalibrateResultMessage = nil }
-        } message: {
-            Text(recalibrateResultMessage ?? "")
-        }
+        // Sign Out / Delete Account / Recalibrate confirmations live on
+        // ProfileSettingsView — every one of their buttons is over there, and a
+        // modal attached to this view can't present while that page is pushed.
     }
 
     // MARK: - Recalibrate Streak

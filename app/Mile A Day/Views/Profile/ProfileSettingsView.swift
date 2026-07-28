@@ -8,11 +8,23 @@ struct ProfileSettingsView: View {
     @ObservedObject var friendService: FriendService
     @Environment(\.appStateManager) var appStateManager
 
-    let onLogout: () -> Void
-    let onDeleteAccount: () -> Void
+    /// The confirmations for these rows are presented HERE, not by ProfileView.
+    /// A modal attached to ProfileView never appears while this page is pushed
+    /// on top of it — tapping Sign Out looked like a no-op until you hit Back.
+    /// Same rule as the sheet/toast gotcha: whoever owns the button renders the
+    /// feedback. ProfileView still owns the state so it can run the actions.
+    @Binding var showingLogoutConfirmation: Bool
+    @Binding var showingDeleteAccountConfirmation: Bool
+    @Binding var deleteAccountErrorMessage: String?
+    @Binding var recalibrateResultMessage: String?
+
+    let onConfirmLogout: () -> Void
+    let onConfirmDeleteAccount: () -> Void
     let onRecalibrateStreak: () -> Void
     let isRecalibratingStreak: Bool
-    let onPrivacySettings: () -> Void
+    let isDeletingAccount: Bool
+
+    @State private var showingPrivacySettings = false
 
     var body: some View {
         ScrollView {
@@ -30,6 +42,43 @@ struct ProfileSettingsView: View {
         .background(MADTheme.Colors.appBackgroundGradient)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
+        .sheet(isPresented: $showingPrivacySettings) {
+            PrivacySettingsView()
+        }
+        .alert("Sign Out", isPresented: $showingLogoutConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Sign Out", role: .destructive, action: onConfirmLogout)
+        } message: {
+            Text("Are you sure you want to sign out?")
+        }
+        .alert("Delete Account?", isPresented: $showingDeleteAccountConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive, action: onConfirmDeleteAccount)
+        } message: {
+            Text("This permanently deletes your account, workouts, streak history, friendships, and competition data. This cannot be undone.")
+        }
+        .alert(
+            "Couldn't Delete Account",
+            isPresented: Binding(
+                get: { deleteAccountErrorMessage != nil },
+                set: { if !$0 { deleteAccountErrorMessage = nil } }
+            )
+        ) {
+            Button("OK") { deleteAccountErrorMessage = nil }
+        } message: {
+            Text(deleteAccountErrorMessage ?? "")
+        }
+        .alert(
+            "Streak Recalibrated",
+            isPresented: Binding(
+                get: { recalibrateResultMessage != nil },
+                set: { if !$0 { recalibrateResultMessage = nil } }
+            )
+        ) {
+            Button("OK") { recalibrateResultMessage = nil }
+        } message: {
+            Text(recalibrateResultMessage ?? "")
+        }
     }
 
     // MARK: - Settings
@@ -100,7 +149,7 @@ struct ProfileSettingsView: View {
 
             settingsDivider
 
-            Button(action: onPrivacySettings) {
+            Button { showingPrivacySettings = true } label: {
                 MADSettingsRow(
                     icon: "lock.shield.fill",
                     title: "Privacy Settings",
@@ -123,7 +172,7 @@ struct ProfileSettingsView: View {
 
             settingsDivider
 
-            Button(action: onLogout) {
+            Button { showingLogoutConfirmation = true } label: {
                 MADSettingsRow(
                     icon: "arrow.right.square.fill",
                     title: "Sign Out",
@@ -135,15 +184,18 @@ struct ProfileSettingsView: View {
 
             settingsDivider
 
-            Button(action: onDeleteAccount) {
+            Button { showingDeleteAccountConfirmation = true } label: {
                 MADSettingsRow(
                     icon: "trash.fill",
                     title: "Delete Account",
-                    subtitle: "Permanently remove your account and data",
+                    subtitle: isDeletingAccount
+                        ? "Deleting your account…"
+                        : "Permanently remove your account and data",
                     iconColor: .red
                 )
             }
             .buttonStyle(.plain)
+            .disabled(isDeletingAccount)
         }
         .padding(MADTheme.Spacing.md)
         .madLiquidGlass()
