@@ -546,19 +546,39 @@ export async function getUnifiedFeedController(
   res: Response,
 ) {
   try {
+    const startTotal = Date.now();
     const rawLimit = parseInt(String(req.query.limit ?? ""), 10);
     const limit = Number.isFinite(rawLimit)
       ? Math.min(Math.max(rawLimit, 1), MAX_FEED_LIMIT)
       : DEFAULT_FEED_LIMIT;
     const before = repairBeforeCursor(req);
+
+    const startQuery = Date.now();
     const items = await getUnifiedFeed(req.userId!, limit, before);
-    lockUnearnedPhotos(items, req.userId!, await viewerPhotoGate(req.userId!));
+    const queryMs = Date.now() - startQuery;
+
+    const startGate = Date.now();
+    const gate = await viewerPhotoGate(req.userId!);
+    const gateMs = Date.now() - startGate;
+
+    const startLock = Date.now();
+    lockUnearnedPhotos(items, req.userId!, gate);
+    const lockMs = Date.now() - startLock;
+
     const last = items[items.length - 1];
     const nextBefore =
       items.length === limit ? (last.cursor ?? last.sort_ts) : null;
-    res
-      .status(200)
-      .json({ items: signMediaUrlsDeep(items), next_before: nextBefore });
+
+    const startSign = Date.now();
+    const signedItems = signMediaUrlsDeep(items);
+    const signMs = Date.now() - startSign;
+
+    const totalMs = Date.now() - startTotal;
+    console.log(
+      `[Feed] Query: ${queryMs}ms, Gate: ${gateMs}ms, Lock: ${lockMs}ms, Sign: ${signMs}ms, Total: ${totalMs}ms`,
+    );
+
+    res.status(200).json({ items: signedItems, next_before: nextBefore });
   } catch (error: any) {
     console.error("Error fetching unified feed:", error.message);
     // Surface in the error dashboard — the app swallows feed failures

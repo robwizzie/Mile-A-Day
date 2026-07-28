@@ -1522,14 +1522,14 @@ export async function getUnifiedFeed(
 			page.workout_id,
 			wt.workout_type,
 			CASE WHEN page.kind = 'workout'
-				THEN COALESCE(roll.distance, wt.distance)::double precision END AS distance,
+				THEN wt.distance::double precision END AS distance,
 			CASE WHEN page.kind = 'workout'
-				THEN COALESCE(roll.total_duration, wt.total_duration)::double precision END AS total_duration,
+				THEN wt.total_duration::double precision END AS total_duration,
 			CASE WHEN page.kind = 'workout'
-				THEN COALESCE(roll.calories, wt.calories)::double precision END AS calories,
+				THEN wt.calories::double precision END AS calories,
 			CASE WHEN page.kind = 'workout'
-				THEN COALESCE(roll.steps, wt.steps) END AS steps,
-			CASE WHEN wt.feed_role = 'daily_mile' THEN roll.segment_count END AS segment_count,
+				THEN wt.steps END AS steps,
+			null AS segment_count,
 			null AS segments,
 			null AS route,
 			(page.owner_id = $1) AS is_self,
@@ -1543,23 +1543,6 @@ export async function getUnifiedFeed(
 		JOIN users u ON u.user_id = page.owner_id
 		LEFT JOIN posts p ON page.kind = 'post' AND p.post_id::text = page.id
 		LEFT JOIN workouts wt ON wt.workout_id = page.workout_id
-		LEFT JOIN LATERAL (
-			SELECT
-				COUNT(*) FILTER (WHERE m.feed_role <> 'hidden')::int AS segment_count,
-				SUM(m.distance)::double precision AS distance,
-				SUM(m.total_duration)::double precision AS total_duration,
-				SUM(m.calories)::double precision AS calories,
-				SUM(m.steps)::int AS steps
-			FROM workouts m
-			WHERE wt.feed_role = 'daily_mile'
-				AND m.user_id = wt.user_id
-				AND m.local_date = wt.local_date
-				AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
-				AND (
-					m.feed_role IN ('rolled_up', 'daily_mile')
-					OR (m.feed_role = 'hidden' AND m.device_end_date <= wt.device_end_date)
-				)
-		) roll ON TRUE
 		ORDER BY page.sort_ts DESC
 		`,
     [viewerId, before ?? null, limit],

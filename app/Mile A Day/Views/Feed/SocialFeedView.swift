@@ -915,18 +915,28 @@ struct SocialFeedView: View {
     // MARK: - Data
 
     private func refresh() async {
+        let totalStart = Date()
         await MainActor.run { isLoading = feed.isEmpty }
         // Parallel fetches: feed, stories rail, and (if needed) user's own stories
         // all go out at the same time. Feed paints first, then stories arrive.
         let uid = currentUserId
+        
+        let feedStart = Date()
         async let feedFetch = PostService.fetchUnifiedFeed(before: nil)
+        
+        let railStart = Date()
         async let railFetch = PostService.fetchStoriesRail()
+        
+        let userStoriesStart = Date()
         async let userStoriesFetch: [PostItem]? = {
             guard let uid else { return nil }
             return try? await PostService.fetchUserStories(userId: uid)
         }()
 
         let feedResponse = try? await feedFetch
+        let feedMs = Date().timeIntervalSince(feedStart) * 1000
+        print("[Feed] Feed fetch: \(Int(feedMs))ms")
+        
         await MainActor.run {
             if let feedResponse {
                 feed = feedResponse.items
@@ -940,7 +950,13 @@ struct SocialFeedView: View {
 
         // Stories and user stories fetch concurrently; update when both done
         let storyGroups = try? await railFetch
+        let railMs = Date().timeIntervalSince(railStart) * 1000
+        print("[Feed] Stories rail fetch: \(Int(railMs))ms")
+        
         let userStories = await userStoriesFetch
+        let userStoriesMs = Date().timeIntervalSince(userStoriesStart) * 1000
+        print("[Feed] User stories fetch: \(Int(userStoriesMs))ms")
+        
         var storyWorkoutIds: Set<String> = []
         if let ownStories = userStories {
             storyWorkoutIds = Set(ownStories.compactMap { $0.workout_id })
@@ -955,6 +971,9 @@ struct SocialFeedView: View {
                 optimisticSharedWorkoutIds.removeAll()
             }
         }
+        
+        let totalMs = Date().timeIntervalSince(totalStart) * 1000
+        print("[Feed] Total refresh: \(Int(totalMs))ms")
     }
 
     /// Reload just the stories rail (viewed rings, expired groups) without the
