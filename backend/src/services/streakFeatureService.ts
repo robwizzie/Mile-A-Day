@@ -831,13 +831,24 @@ export interface FriendRescueStatus {
   viewer_holds_assist: boolean;
   /** The caller's Assist meter, so a locked CTA can show how far off it is. */
   viewer_meter: { progress: number; target: number };
-  /** Why nothing is offered, when `available` is false. */
+  /**
+   * Why nothing is offered, when `available` is false.
+   *
+   * `gap_too_wide` / `window_passed` mean a break EXISTS but no single
+   * coverage row can bring it back — distinct from `no_recent_break`, which
+   * means there's nothing wrong with them at all. The client renders those two
+   * as an explanation rather than as silence: "no rescue possible" and "this
+   * feature is broken" looked identical before, which is how a friend three
+   * days into a gap read as a bug.
+   */
   reason?:
     | "disabled"
     | "not_enrolled"
     | "friend_not_enrolled"
     | "forbidden"
     | "no_recent_break"
+    | "gap_too_wide"
+    | "window_passed"
     | "self";
 }
 
@@ -880,22 +891,36 @@ export async function getFriendRescueStatus(
     },
   };
 
+  // How far gone is this friend's streak? Computed once and reused for every
+  // "no, and here's why" answer below. The profile renders NOTHING when a
+  // rescue isn't possible, so a vague reason is indistinguishable from the
+  // feature being broken — which is exactly how it read in practice.
+  const friendToday = await getUserLocalToday(friendId);
+  const facts = await recentDayFacts(friendId, dateStrMinus(friendToday, 4));
+  const dayOk = (d: string) => facts.qualified.has(d) || facts.covered.has(d);
+  const d1 = dateStrMinus(friendToday, 1);
+  const d2 = dateStrMinus(friendToday, 2);
+  const d3 = dateStrMinus(friendToday, 3);
+  // The only two shapes a single missed day can take (yesterday, or the day
+  // before with yesterday made up). Anything else is a multi-day hole that no
+  // single coverage row can bridge.
+  const singleDayMiss =
+    (!dayOk(d1) && dayOk(d2)) || (dayOk(d1) && !dayOk(d2) && dayOk(d3));
+  const multiDayGap = !dayOk(d1) && !dayOk(d2);
+
   // An un-enrolled friend can't be covered (their streak walk is the legacy
   // one and would never see the coverage row). Report that only when they
   // ACTUALLY have a break, so the profile can say "they need the update" at the
   // one moment it matters instead of on every friend who hasn't updated.
   if (!friendRow?.streak_features_at) {
-    const friendToday = await getUserLocalToday(friendId);
-    const facts = await recentDayFacts(friendId, dateStrMinus(friendToday, 4));
-    const ok = (d: string) => facts.qualified.has(d) || facts.covered.has(d);
-    const d1 = dateStrMinus(friendToday, 1);
-    const d2 = dateStrMinus(friendToday, 2);
-    const d3 = dateStrMinus(friendToday, 3);
-    const hasBreak = (!ok(d1) && ok(d2)) || (ok(d1) && !ok(d2) && ok(d3));
     return {
       ...base,
       available: false,
-      reason: hasBreak ? "friend_not_enrolled" : "no_recent_break",
+      reason: singleDayMiss
+        ? "friend_not_enrolled"
+        : multiDayGap
+          ? "gap_too_wide"
+          : "no_recent_break",
     };
   }
 
@@ -912,7 +937,6 @@ export async function getFriendRescueStatus(
   if (allowed.length === 0)
     return { ...base, available: false, reason: "forbidden" };
 
-  const friendToday = await getUserLocalToday(friendId);
   const stamped = await db.query<{ local_date: string; prior_streak: number }>(
     `SELECT to_char(e.local_date, 'YYYY-MM-DD') AS local_date, e.prior_streak
      FROM streak_events e
@@ -927,6 +951,9 @@ export async function getFriendRescueStatus(
   );
 
   let breakInfo: LiveBreak | null = null;
+  // Set when a break EXISTS but can't be rescued — the difference between
+  // "nothing to do here" and "too late", which the user has to be told.
+  let blocked: FriendRescueStatus["reason"] = undefined;
   if (stamped[0]) {
     const prior = Number(stamped[0].prior_streak);
     const detail = await stampedBreakDetail(
@@ -934,14 +961,20 @@ export async function getFriendRescueStatus(
       stamped[0].local_date,
       prior,
     );
-    breakInfo = detail.bridged && detail.inWindow
-      ? {
-          local_date: stamped[0].local_date,
-          prior_streak: prior,
-          restored_streak: detail.restored,
-          self_recovery: null,
-        }
-      : null;
+    if (!detail.bridged) {
+      // Checked before the window: a second missed day is the more
+      // fundamental reason, and the more useful thing to say.
+      blocked = "gap_too_wide";
+    } else if (!detail.inWindow) {
+      blocked = "window_passed";
+    } else {
+      breakInfo = {
+        local_date: stamped[0].local_date,
+        prior_streak: prior,
+        restored_streak: detail.restored,
+        self_recovery: null,
+      };
+    }
   } else {
     breakInfo = await getLiveAssistableBreak(friendId, friendToday, friendRow);
   }
@@ -950,7 +983,14 @@ export async function getFriendRescueStatus(
     !breakInfo ||
     breakInfo.local_date < dateStrMinus(friendToday, ASSIST_RESCUE_WINDOW_DAYS)
   ) {
-    return { ...base, available: false, reason: "no_recent_break" };
+    return {
+      ...base,
+      available: false,
+      // A multi-day hole with no stamped event (the sweep never reached it, or
+      // the break predates the query window) still has to explain itself —
+      // that's the JoePo case, three missed days and a silent profile.
+      reason: blocked ?? (multiDayGap ? "gap_too_wide" : "no_recent_break"),
+    };
   }
 
   return {
