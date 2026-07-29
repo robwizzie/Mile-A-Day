@@ -85,6 +85,15 @@ struct WorkoutTrackingView: View {
         let ok: Bool
     }
 
+    // Live presence: which friends are out right now + hypes that land
+    // mid-walk. The consent interstitial runs ONCE (first tracked workout on
+    // this build), between picking a location and the countdown.
+    @ObservedObject private var livePresence = LivePresenceService.shared
+    @State private var showFriendsOutSheet = false
+    @State private var hypeToast: String?
+    @AppStorage("hasAnsweredLivePresenceConsent") private var hasAnsweredLivePresenceConsent = false
+    @State private var showPresenceConsent = false
+
     // Ghost race: opt-in per session from the pre-start card (never a
     // default). `raceGhost` is resolved once at startWorkout; nil = not
     // racing. The verdict freezes at the 1.0-mile crossing. Session-local by
@@ -479,6 +488,8 @@ struct WorkoutTrackingView: View {
 
                         timeDisplay
 
+                        friendsOutPulseRow
+
                         Spacer(minLength: 0)
                     }
                     .frame(maxWidth: .infinity, minHeight: trackingMetricsHeight)
@@ -505,6 +516,56 @@ struct WorkoutTrackingView: View {
         .overlay(alignment: .top) { snapSavedToast }
         .overlay(alignment: .top) { importToastView }
         .overlay(alignment: .top) { saveFallbackToast }
+        // Rendered HERE, not by the global banner: this view is a
+        // fullScreenCover, which sits on top of MainTabView's InAppBanner
+        // overlay — a hype toast anywhere else is invisible mid-workout.
+        .overlay(alignment: .top) { hypeReceivedToast }
+        .onChange(of: livePresence.sessionHypes.count) { oldCount, newCount in
+            guard newCount > oldCount, let latest = livePresence.sessionHypes.last else { return }
+            MADHaptics.action()
+            withAnimation(.spring(response: 0.35)) {
+                hypeToast = "\(latest.senderName) hyped you mid-\(selectedActivityType == .running ? "run" : "walk")!"
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                withAnimation { hypeToast = nil }
+            }
+            // Carry the hype onto the Live Activity right away — the 30s
+            // cadence would otherwise sit on the moment.
+            lastActivityPushDate = .distantPast
+            updateLiveActivity()
+        }
+        .sheet(isPresented: $showFriendsOutSheet) {
+            FriendsOutSheet(friends: livePresence.friendsOut)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+        }
+    }
+
+    /// "🔥 Davey hyped you mid-walk!" — same quiet pattern as the snap toast.
+    @ViewBuilder
+    private var hypeReceivedToast: some View {
+        if let text = hypeToast {
+            HStack(spacing: 8) {
+                Image(systemName: "flame.fill")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.orange)
+                Text(text)
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(Color.black.opacity(0.75))
+                    .overlay(Capsule().strokeBorder(Color.orange.opacity(0.35), lineWidth: 1))
+            )
+            .padding(.top, 72)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .allowsHitTesting(false)
+        }
     }
 
     // MARK: - Mid-Run Photo Capture
@@ -1027,6 +1088,77 @@ struct WorkoutTrackingView: View {
         .background(Capsule().fill((ahead ? Color.green : Color.orange).opacity(0.15)))
     }
 
+    // MARK: - Live presence UI
+
+    /// Subtle pulse when at least one friend is also out right now. Appears
+    /// organically, disappears quietly; tap for the list + a Hype button per
+    /// friend. Real-time presence is the feature — keep it calm, not loud.
+    @ViewBuilder
+    private var friendsOutPulseRow: some View {
+        if !livePresence.friendsOut.isEmpty {
+            Button {
+                MADHaptics.action()
+                showFriendsOutSheet = true
+            } label: {
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.green.opacity(0.35))
+                            .frame(width: 10, height: 10)
+                            .scaleEffect(1.9)
+                            .opacity(0.55)
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 10, height: 10)
+                    }
+                    .pulseGlow(color: .green, maxScale: 1.6)
+
+                    HStack(spacing: -8) {
+                        ForEach(livePresence.friendsOut.prefix(3)) { friend in
+                            AvatarView(
+                                name: friend.displayName,
+                                imageURL: friend.profile_image_url,
+                                size: 28
+                            )
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.7), lineWidth: 1.5))
+                        }
+                    }
+
+                    Text(friendsOutLabel)
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.92))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    Spacer(minLength: 4)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    Capsule()
+                        .fill(Color.white.opacity(0.12))
+                        .overlay(Capsule().strokeBorder(Color.green.opacity(0.35), lineWidth: 1))
+                )
+                .padding(.horizontal, 32)
+            }
+            .buttonStyle(.plain)
+            .transition(.opacity.combined(with: .scale))
+        }
+    }
+
+    private var friendsOutLabel: String {
+        let friends = livePresence.friendsOut
+        guard let first = friends.first else { return "" }
+        if friends.count == 1 {
+            return "\(first.firstNameOrUsername) is out right now"
+        }
+        return "\(first.firstNameOrUsername) + \(friends.count - 1) more are out"
+    }
+
     private var stopButton: some View {
         Button(action: { showStopConfirmation = true }) {
             HStack(spacing: 12) {
@@ -1185,6 +1317,8 @@ struct WorkoutTrackingView: View {
                 activitySelectionContent
             } else if showLocationTypeSelection {
                 locationTypeSelectionContent
+            } else if showPresenceConsent {
+                presenceConsentContent
             } else if showCountdown {
                 countdownContent
             } else if showRecap {
@@ -1362,11 +1496,102 @@ struct WorkoutTrackingView: View {
         // Haptic feedback
         MADHaptics.action()
 
+        // First tracked workout on this build: one explicit presence choice
+        // before the countdown. Asked exactly once, ever — after that the
+        // toggle lives in notification settings.
+        if !hasAnsweredLivePresenceConsent {
+            withAnimation {
+                showLocationTypeSelection = false
+                showPresenceConsent = true
+            }
+            return
+        }
+
         // Hide location type selection and show countdown
         withAnimation {
             showLocationTypeSelection = false
             showCountdown = true
             countdownNumber = 3 // Reset countdown
+        }
+    }
+
+    private func resolvePresenceConsent(share: Bool) {
+        hasAnsweredLivePresenceConsent = true
+        LivePresenceService.setSharePresence(share)
+        MADHaptics.action()
+        withAnimation {
+            showPresenceConsent = false
+            showCountdown = true
+            countdownNumber = 3
+        }
+    }
+
+    /// One-time interstitial between picking a location and the countdown:
+    /// an explicit yes/no on live presence (5.1.1-friendly — no location is
+    /// ever shared, and either answer proceeds straight into the workout).
+    private var presenceConsentContent: some View {
+        VStack(spacing: 0) {
+            Spacer()
+
+            VStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.12))
+                        .frame(width: 96, height: 96)
+                    Image(systemName: "person.2.wave.2.fill")
+                        .font(.system(size: 40))
+                        .foregroundColor(.white)
+                }
+
+                Text("Share that you're out?")
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+
+                Text("While you track a walk or run, friends who are also out see \u{201C}you're out right now\u{201D} — and their hypes land on your Live Activity mid-walk. Never your location, only that you're moving. You'll see them too either way.")
+                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.82))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 32)
+
+            Spacer()
+
+            VStack(spacing: 14) {
+                Button {
+                    resolvePresenceConsent(share: true)
+                } label: {
+                    Text("Share when I'm out")
+                        .font(.system(size: 18, weight: .bold, design: .rounded))
+                        .foregroundColor(Color(red: 0.5, green: 0.15, blue: 0.2))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 54)
+                        .background(RoundedRectangle(cornerRadius: 16).fill(.white))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    resolvePresenceConsent(share: false)
+                } label: {
+                    Text("Not now")
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.85))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .strokeBorder(Color.white.opacity(0.35), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+
+                Text("Change any time in notification settings.")
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+            .padding(.horizontal, 32)
+            .padding(.bottom, 48)
         }
     }
 
@@ -1410,6 +1635,12 @@ struct WorkoutTrackingView: View {
             raceGhost = nil
             raceGhostIsSeeded = false
         }
+
+        // Live presence session (fire-and-forget; the share pref only gates
+        // being SEEN — server-side — so this always starts).
+        livePresence.startSession(
+            workoutType: selectedActivityType == .running ? "running" : "walking"
+        )
 
         // Fresh session: drop mid-run snaps left over from a previous workout
         // ONLY when today's goal was already met before this one. A workout on
@@ -1486,6 +1717,9 @@ struct WorkoutTrackingView: View {
             guard !isStopping else { return }
             elapsedTime = Date().timeIntervalSince(startDate)
             updateLiveActivity()
+            // Foreground heartbeat driver (self-throttled to ~45s). The
+            // background driver is the location/pedometer callback path.
+            livePresence.tick()
         }
     }
 
@@ -1576,6 +1810,7 @@ struct WorkoutTrackingView: View {
         timer?.invalidate()
         timer = nil
         locationManager.stopTracking()
+        livePresence.endSession()
 
         // Safety timeout: if HealthKit callbacks never fire, force-cleanup after 10s
         let timeout = DispatchWorkItem { [self] in
@@ -1807,7 +2042,9 @@ struct WorkoutTrackingView: View {
             streak: userManager.currentUser.streak,
             movingSeconds: locationManager.movingSeconds,
             isAutoPaused: locationManager.isAutoPaused,
-            ghostDeltaSeconds: raceDeltaSeconds
+            ghostDeltaSeconds: raceDeltaSeconds,
+            hypeCount: livePresence.sessionHypes.isEmpty ? nil : livePresence.sessionHypes.count,
+            latestHypeName: livePresence.sessionHypes.last?.senderName
         )
 
         // If the goal was already met before this workout (post-goal extra
@@ -1888,7 +2125,9 @@ struct WorkoutTrackingView: View {
                     streak: userManager.currentUser.streak,
                     movingSeconds: locationManager.movingSeconds,
                     isAutoPaused: locationManager.isAutoPaused,
-                    ghostDeltaSeconds: raceDeltaSeconds
+                    ghostDeltaSeconds: raceDeltaSeconds,
+                    hypeCount: livePresence.sessionHypes.isEmpty ? nil : livePresence.sessionHypes.count,
+                    latestHypeName: livePresence.sessionHypes.last?.senderName
                 )
                 // staleDate lets the system dim the activity if the app dies and
                 // stops sending updates, instead of showing confident stale data.

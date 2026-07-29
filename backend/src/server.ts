@@ -19,6 +19,7 @@ import badgesRoutes, { publicBadgesRouter } from "./routes/badgesRoutes.js";
 import dailyChallengesRoutes from "./routes/dailyChallengesRoutes.js";
 import dailyStepsRoutes from "./routes/dailyStepsRoutes.js";
 import leaderboardRoutes from "./routes/leaderboardRoutes.js";
+import liveTrackingRoutes from "./routes/liveTrackingRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
 import {
   authenticateToken,
@@ -309,6 +310,7 @@ app.use("/hype", hypeRoutes);
 app.use("/posts", postsRoutes);
 app.use("/blocks", blocksRoutes);
 app.use("/leaderboard", leaderboardRoutes);
+app.use("/live", liveTrackingRoutes);
 
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   console.error("Error:", err.message);

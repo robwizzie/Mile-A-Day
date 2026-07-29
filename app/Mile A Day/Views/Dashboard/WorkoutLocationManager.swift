@@ -221,6 +221,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
                             self.sampleEffortCurve()
                             self.persistDistanceThrottled()
                             self.armTrackingWatchdog()
+                            LivePresenceService.shared.tick()
                         }
                     }
                 }
@@ -415,6 +416,9 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // no-signal banner.
         lastFixAt = Date()
         armTrackingWatchdog()
+        // Presence heartbeat rides the same callback: view timers suspend in
+        // the background, delegate callbacks don't. Self-throttled to ~45s.
+        LivePresenceService.shared.tick()
 
         // In pedometer mode location is only a background keep-alive —
         // distance comes from CMPedometer and there's no meaningful route.

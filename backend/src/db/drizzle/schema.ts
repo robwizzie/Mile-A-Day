@@ -381,6 +381,11 @@ export const notificationSettings = pgTable(
     // feed entries/posts. Explicit consent surface — when off, friends see the
     // cards without the route slide/map.
     shareRouteMaps: boolean("share_route_maps").default(true),
+    // Live presence: friends may see "out on a walk right now" while this
+    // user tracks in-app (never location — just the fact). Gates being SEEN,
+    // not seeing others. Default true; the app asks explicitly on the first
+    // tracked workout of the supporting build.
+    shareLivePresence: boolean("share_live_presence").default(true),
     // weekly_recap_enabled: Sunday-evening "Your week" recap push + story card.
     weeklyRecapEnabled: boolean("weekly_recap_enabled").default(true),
     // workout_visibility: who may see my workout CONTENT — routes and photos.
@@ -1687,6 +1692,38 @@ export const errorLog = pgTable(
       table.category.asc().nullsLast(),
       table.createdAt.desc().nullsFirst(),
     ),
+  ],
+);
+
+// Live tracking presence: one row per user (PK), replaced by upsert on every
+// session start — the table is bounded by user count, so there is no growth
+// and no sweep. "Currently out" is a query-time predicate: ended_at IS NULL
+// AND last_seen_at within LIVE_PRESENCE_WINDOW_SECONDS (liveTrackingService).
+// session_id rotates per start so a zombie second device's heartbeats are
+// rejectable instead of resurrecting an ended session.
+export const liveTrackingSessions = pgTable(
+  "live_tracking_sessions",
+  {
+    userId: text("user_id").primaryKey().notNull(),
+    sessionId: uuid("session_id").defaultRandom().notNull(),
+    workoutType: varchar("workout_type", { length: 50 }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" })
+      .defaultNow()
+      .notNull(),
+    lastSeenAt: timestamp("last_seen_at", {
+      withTimezone: true,
+      mode: "string",
+    })
+      .defaultNow()
+      .notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true, mode: "string" }),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId],
+      foreignColumns: [users.userId],
+      name: "live_tracking_sessions_user_id_fkey",
+    }).onDelete("cascade"),
   ],
 );
 

@@ -28,6 +28,11 @@ struct WorkoutActivityAttributes: ActivityAttributes {
         /// the current distance. nil = not racing this session. Optional so
         /// an in-flight activity from an older build still decodes.
         var ghostDeltaSeconds: Double? = nil
+        /// Mid-workout hypes from friends (live presence): how many landed
+        /// this session and who sent the latest. Defaulted optionals for the
+        /// same decode-safety reason as above.
+        var hypeCount: Int? = nil
+        var latestHypeName: String? = nil
     }
 
     var startTime: Date
@@ -70,6 +75,15 @@ private extension WorkoutActivityAttributes.ContentState {
         let ahead = delta >= 0
         let magnitude = Int(abs(delta).rounded())
         return ("\(ahead ? "▲" : "▼") \(magnitude)s", ahead)
+    }
+
+    /// "🔥 Davey" — the latest mid-workout hype, when any landed.
+    var hypeLineText: String? {
+        guard let count = hypeCount, count > 0 else { return nil }
+        if let name = latestHypeName, !name.isEmpty {
+            return count > 1 ? "🔥 \(name) +\(count - 1)" : "🔥 \(name)"
+        }
+        return "🔥 ×\(count)"
     }
 }
 
@@ -173,6 +187,13 @@ struct WorkoutLiveActivity: Widget {
                                     .font(.system(size: 10, weight: .heavy, design: .rounded))
                                     .foregroundColor(ghost.ahead ? .green : .orange)
                                     .monospacedDigit()
+                            }
+
+                            if let hype = context.state.hypeLineText {
+                                Text(hype)
+                                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                    .foregroundColor(.orange)
+                                    .lineLimit(1)
                             }
                         }
                     }
@@ -398,6 +419,13 @@ struct WorkoutLiveActivityView: View {
                             .font(.system(size: 11, weight: .heavy, design: .rounded))
                             .foregroundColor(ghost.ahead ? .green : .orange)
                             .monospacedDigit()
+                    }
+
+                    if let hype = context.state.hypeLineText {
+                        Text(hype)
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .foregroundColor(.orange)
+                            .lineLimit(1)
                     }
                 }
                 }
