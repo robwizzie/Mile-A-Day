@@ -76,7 +76,7 @@ struct PostCardView: View {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 media
                 if let stats = post.stats_snapshot {
-                    PostStatStrip(stats: stats).padding(.horizontal, 2)
+                    PostStatStrip(stats: stats, feedRole: post.feed_role).padding(.horizontal, 2)
                 }
                 // The strip above shows the day's combined mile when this post is
                 // attached to the workout that completed one made of several

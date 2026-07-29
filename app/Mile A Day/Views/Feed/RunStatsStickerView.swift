@@ -383,6 +383,13 @@ struct PostStatStrip: View {
     /// When shown over a photo (story viewer), use a darker chip + shadow so the
     /// text stays legible on any image. Default keeps the feed-card appearance.
     var onPhoto: Bool = false
+    /// The entry's (linked workout's) feed role, when the server sent it —
+    /// reframes the distance chip so a post-goal stroll never reads like it
+    /// was the whole day: "extra" renders as green "+0.14 mi extra" (the
+    /// goal is already banked; this is bonus), "daily_mile" as the day's
+    /// goal achievement. Nil (old servers, unlinked posts) keeps the plain
+    /// chip.
+    var feedRole: String? = nil
 
     private struct Item: Identifiable { let id = UUID(); let icon: String; let text: String; let tint: Color }
 
@@ -392,7 +399,15 @@ struct PostStatStrip: View {
             out.append(Item(icon: "flame.fill", text: "\(s) day streak", tint: .orange))
         }
         if let d = stats.distance, d > 0 {
-            out.append(Item(icon: "figure.run", text: "\(String(format: "%.2f", d)) mi", tint: .white.opacity(0.85)))
+            let miles = String(format: "%.2f", d)
+            switch feedRole {
+            case "extra":
+                out.append(Item(icon: "plus.circle.fill", text: "+\(miles) mi extra", tint: .green))
+            case "daily_mile":
+                out.append(Item(icon: "checkmark.circle.fill", text: "\(miles) mi · goal", tint: .green))
+            default:
+                out.append(Item(icon: "figure.run", text: "\(miles) mi", tint: .white.opacity(0.85)))
+            }
         }
         if let p = stats.pace, p > 0 {
             out.append(Item(icon: "speedometer", text: "\(RunStatsStickerView.paceText(p)) /mi", tint: .white.opacity(0.85)))

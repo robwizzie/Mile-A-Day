@@ -48,6 +48,9 @@ export interface PostRow {
   media_url: string;
   caption: string | null;
   workout_id: string | null;
+  // Linked workout's feed_role — display framing only (see the projection
+  // comments); null when the post has no workout.
+  feed_role: string | null;
   stats_snapshot: PostStatsSnapshot | null;
   local_date: string;
   share_to_feed: boolean;
@@ -138,6 +141,10 @@ const POST_COLUMNS = `
 	p.media_url,
 	p.caption,
 	p.workout_id,
+	-- Linked workout's feed_role, display framing only (extra vs goal
+	-- entry) — same additive field the unified feed carries.
+	(SELECT w0.feed_role FROM workouts w0 WHERE w0.workout_id = p.workout_id)
+		AS feed_role,
 	-- Restated in rollup terms when this post is attached to the workout that
 	-- completed a mile made of several walks — the SAME projection the unified
 	-- feed applies (getUnifiedFeed). Shared here so the profile grid, story
@@ -1044,6 +1051,9 @@ export interface FeedEntryRow {
   // On a 'daily_mile' anchor these are the DAY's rollup across every workout up
   // to and including it, not that one workout's figures.
   workout_type: string | null;
+  // Entry/linked workout's feed_role — display framing only ('daily_mile'
+  // = goal-completing entry, 'extra' = post-goal bonus). Never summed.
+  feed_role: string | null;
   distance: number | null;
   total_duration: number | null;
   // Moving-time display-pace divisor (rollup-aware); null on rows without it.
@@ -1133,6 +1143,11 @@ const FEED_ENTRY_PROJECTION = `
 			page.workout_id,
 			-- Populated for posts (via their linked workout) and workouts alike.
 			wt.workout_type,
+			-- Additive, DISPLAY-ONLY: lets clients frame the entry against the
+			-- day's goal ('daily_mile' = the goal-completing entry, 'extra' =
+			-- post-goal bonus miles shown as "+0.14 mi extra" instead of a
+			-- bare number that reads like the whole day). Never used in sums.
+			wt.feed_role,
 			-- On an anchor entry these carry the DAY's rollup, not the single
 			-- workout's — which is also what makes already-shipped iOS builds
 			-- correct: they render whatever numbers arrive, so a stitched-together

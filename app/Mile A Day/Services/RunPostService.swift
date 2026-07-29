@@ -101,7 +101,8 @@ enum RunPostService {
                 calories: calories > 0 ? calories : nil,
                 steps: nil,
                 workoutId: workoutId,
-                dateText: dateText(for: workout.startDate)
+                dateText: dateText(for: workout.startDate),
+                isExtra: isExtraWorkout(workoutId)
             )
         }
 
@@ -115,7 +116,8 @@ enum RunPostService {
                 calories: nil,
                 steps: nil,
                 workoutId: workoutId,
-                dateText: dateText(for: record.localDate)
+                dateText: dateText(for: record.localDate),
+                isExtra: isExtraWorkout(workoutId)
             )
         }
 
@@ -136,6 +138,23 @@ enum RunPostService {
             workoutId: workoutId,
             dateText: todayText()
         )
+    }
+
+    /// True when this workout is a post-goal bonus: the day's goal is already
+    /// complete and this isn't the goal-completing anchor. Drives the
+    /// "+0.14 mi" sticker framing so a short extra walk bakes as ADDED miles,
+    /// never as a number that reads like the whole day. The goal check
+    /// matters: pre-goal legs must stay plain (dailyMileWorkoutId falls back
+    /// to the latest workout even before the goal is met).
+    @MainActor
+    private static func isExtraWorkout(_ workoutId: String) -> Bool {
+        let hk = HealthKitManager.shared
+        let goalDone = ProgressCalculator.isGoalCompleted(
+            current: hk.todaysDistance,
+            goal: UserManager.shared.currentUser.goalMiles
+        )
+        guard goalDone else { return false }
+        return dailyMileWorkoutId() != workoutId
     }
 
     /// Display-pace divisor: the tracker's recorded moving time when this
