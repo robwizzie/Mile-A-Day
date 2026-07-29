@@ -787,8 +787,11 @@ struct NotificationInboxView: View {
 
                 // Instagram-style trailing thumbnail of the post the row is
                 // about — instantly answers "which post?" and reinforces that
-                // tapping lands on it.
-                if let thumbURL = thumbnailURL(for: notification) {
+                // tapping lands on it. Today's photos stay LOCKED until the
+                // viewer runs, exactly like the feed — same gate, same look.
+                if notification.post_preview?.photo_locked == true {
+                    NotificationPostThumb(url: nil, locked: true)
+                } else if let thumbURL = thumbnailURL(for: notification) {
                     NotificationPostThumb(url: thumbURL)
                 }
 
@@ -801,23 +804,14 @@ struct NotificationInboxView: View {
             }
             .padding(MADTheme.Spacing.md)
             .background(
-                ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(isUnread ? Color.white.opacity(0.06) : Color.white.opacity(0.03))
-
-                    // Colored leading stripe — quick visual identifier for
-                    // the notification type. Plain rectangle clipped by the
-                    // outer rounded shape so it hugs the card's curve
-                    // instead of overflowing past the rounded corners.
-                    Rectangle()
-                        .fill(accent.opacity(isUnread ? 0.85 : 0.35))
-                        .frame(width: 3)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
-                        .strokeBorder(Color.white.opacity(isUnread ? 0.10 : 0.05), lineWidth: 1)
-                )
+                // Flat card — the type's color signal lives in the avatar
+                // badge and label, so no accent stripe.
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                    .fill(isUnread ? Color.white.opacity(0.06) : Color.white.opacity(0.03))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large, style: .continuous)
+                            .strokeBorder(Color.white.opacity(isUnread ? 0.10 : 0.05), lineWidth: 1)
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -968,6 +962,7 @@ struct NotificationInboxView: View {
         case "competition_flex": return "FLEX"
         case "competition_milestone": return "MILESTONE"
         case "streak_broken": return "STREAK"
+        case "goal_reached": return "GOAL DONE"
         case "personal_best": return "PERSONAL BEST"
         case "badge_earned": return "BADGE"
         case "lead_change": return "LEAD CHANGE"
@@ -1000,6 +995,7 @@ struct NotificationInboxView: View {
         case "competition_flex": return ("flame.fill", .red)
         case "competition_milestone": return ("star.fill", .yellow)
         case "streak_broken": return ("flame.fill", .red)
+        case "goal_reached": return ("checkmark.seal.fill", .green)
         case "personal_best": return ("medal.fill", .yellow)
         case "lead_change": return ("arrow.up.right", .green)
         case "clash_tie": return ("equal.circle.fill", .purple)
@@ -1131,15 +1127,23 @@ struct NotificationInboxView: View {
 /// Small trailing thumbnail of the post a notification is about. Uses the
 /// feed's image cache (keyed by URL path) so a photo already seen in the feed
 /// never re-downloads here — and signed-URL query rotation doesn't bust it.
+/// `locked` renders the feed's "run to see today's photos" state: a lock
+/// tile, no image request (the server withholds the bytes anyway).
 private struct NotificationPostThumb: View {
-    let url: URL
+    let url: URL?
+    var locked: Bool = false
 
     @State private var image: UIImage?
     @State private var failed = false
 
     var body: some View {
         ZStack {
-            if let image {
+            if locked {
+                Color.white.opacity(0.06)
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.55))
+            } else if let image {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
@@ -1162,6 +1166,7 @@ private struct NotificationPostThumb: View {
     }
 
     private func load() async {
+        guard !locked, let url else { return }
         if let cached = FeedImageCache.image(for: url) {
             image = cached
             return

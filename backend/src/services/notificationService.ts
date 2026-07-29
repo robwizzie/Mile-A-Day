@@ -159,6 +159,36 @@ export async function notifyFriendsOfMileCompletion(
     // evening miles (e.g. 11pm ET) and collides with the next day's mile.
     const localDate = await getUserLocalDate(userId);
 
+    // The runner's OWN "you did it" — sent from this exact spot because the
+    // claim above is the app's one atomic, once-per-day detection of the
+    // goal crossing, and it fires no matter which device recorded the mile
+    // (Watch sync, locked phone, third-party app). Client-side celebrations
+    // only play with the app open; this is the reliable path. Deliberately
+    // BEFORE the outgoing-audience branch: telling friends is optional,
+    // telling the runner is not.
+    try {
+      let selfBody = "Your daily goal is done — streak safe for today.";
+      try {
+        const selfStats = await getTodayStats(userId);
+        if (selfStats.miles > 0) {
+          selfBody = `${formatMiles(selfStats.miles)} · ${formatDuration(selfStats.durationSeconds)} — your streak is safe for today.`;
+        }
+      } catch {
+        // Stats are garnish; the celebration still goes out.
+      }
+      await sendPush(userId, {
+        title: "Mile complete! 🔥",
+        body: selfBody,
+        type: "goal_reached",
+        data: { local_date: localDate },
+      });
+    } catch (err: any) {
+      console.error(
+        "[Notifications] goal_reached self-push failed:",
+        err?.message ?? err,
+      );
+    }
+
     // Activity for audience resolution: the workout that completed the mile —
     // approximated as today's most recent running/walking workout. Default 'run'.
     const [recentWorkout] = await db.query<{

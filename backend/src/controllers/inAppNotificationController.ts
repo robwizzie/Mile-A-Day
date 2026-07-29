@@ -1,6 +1,11 @@
 import { Request, Response } from "express";
 import { PostgresService } from "../services/DbService.js";
-import { visiblePostPreviews } from "../services/postService.js";
+import {
+  visiblePostPreviews,
+  lockUnearnedPhotos,
+  ViewerGoalGate,
+} from "../services/postService.js";
+import { getDailyGoalStatus } from "../services/workoutService.js";
 import { signMediaUrlsDeep } from "../services/mediaSigningService.js";
 
 const db = PostgresService.getInstance();
@@ -304,6 +309,25 @@ export async function getInAppNotifications(req: Request, res: Response) {
       visiblePostPreviews(userId, previewPostIds),
     ]);
 
+    // Same "run to see today's photos" gate the feed applies — an inbox
+    // thumbnail must not leak a photo the feed would still have locked.
+    // Fail-OPEN like the feed's viewerPhotoGate: a stats hiccup should
+    // never blank thumbnails wholesale.
+    if (previewRows.length > 0) {
+      let gate: ViewerGoalGate;
+      try {
+        const goal = await getDailyGoalStatus(userId);
+        gate = { completed: goal.completed, localDate: goal.localDate };
+      } catch (e: any) {
+        console.error(
+          "[inbox] viewer photo gate failed, failing open:",
+          e?.message ?? e,
+        );
+        gate = { completed: true, localDate: "" };
+      }
+      lockUnearnedPhotos(previewRows, userId, gate);
+    }
+
     const actorById = new Map(actorRows.map((a) => [a.user_id, a]));
     const previewByPostId = new Map(previewRows.map((p) => [p.post_id, p]));
 
@@ -359,7 +383,13 @@ export async function getInAppNotifications(req: Request, res: Response) {
         // rows with no actor/post — clients keep the type-icon fallback.
         actor,
         post_preview: preview
-          ? { post_id: preview.post_id, media_url: preview.media_url }
+          ? {
+              post_id: preview.post_id,
+              // Blanked to "" by the gate when locked — same shape the feed
+              // sends; photo_locked tells new clients to draw the lock tile.
+              media_url: preview.media_url,
+              photo_locked: preview.photo_locked === true,
+            }
           : null,
       };
     });

@@ -185,6 +185,13 @@ struct MainTabView: View {
                 Task { await refreshUnreadCount() }
                 return
             }
+            // Your own "mile complete" — the celebration home is the
+            // Dashboard itself, not the inbox.
+            if type == "goal_reached" {
+                selectedTab = 0
+                Task { await refreshUnreadCount() }
+                return
+            }
             Task {
                 switch type {
                 case "friend_request", "friend_request_reminder":
@@ -429,6 +436,11 @@ struct MainTabView: View {
                  "coauthor_invite", "coauthor_accepted", "mention", "post_comment":
                 selectedTab = 0
                 showNotificationInbox = true
+                notificationService.pendingNotificationType = nil
+            case "goal_reached":
+                // Straight to the Dashboard — the celebration home — with no
+                // inbox sheet covering it.
+                selectedTab = 0
                 notificationService.pendingNotificationType = nil
             default:
                 notificationService.pendingNotificationType = nil
