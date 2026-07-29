@@ -56,12 +56,16 @@ enum RunPostService {
             $0 + ($1.totalDistance?.doubleValue(for: .mile()) ?? 0)
         }
         let duration = segments.reduce(0.0) { $0 + $1.duration }
+        // Pace divides by MOVING time where legs recorded it (per-leg elapsed
+        // fallback — a day can mix in-app and Watch legs), mirroring the
+        // server's rollup restating. `duration` stays the elapsed truth.
+        let paceDivisor = segments.reduce(0.0) { $0 + paceDuration(of: $1) }
         let calories = segments.reduce(0.0) { $0 + workoutCalories($1) }
         guard distance > 0 else { return nil }
 
         return RunStatsInput(
             distance: distance,
-            paceSecondsPerMile: workoutPaceSecondsPerMile(distance: distance, duration: duration),
+            paceSecondsPerMile: workoutPaceSecondsPerMile(distance: distance, duration: paceDivisor),
             durationSeconds: duration > 0 ? duration : nil,
             streak: postableStreak(),
             calories: calories > 0 ? calories : nil,
@@ -87,7 +91,7 @@ enum RunPostService {
 
         if let workout = hk.todaysWorkouts.first(where: { $0.uuid.uuidString == workoutId }) {
             let distance = workout.totalDistance?.doubleValue(for: .mile()) ?? 0
-            let pace = workoutPaceSecondsPerMile(distance: distance, duration: workout.duration)
+            let pace = workoutPaceSecondsPerMile(distance: distance, duration: paceDuration(of: workout))
             let calories = workoutCalories(workout)
             return RunStatsInput(
                 distance: distance,
@@ -97,7 +101,8 @@ enum RunPostService {
                 calories: calories > 0 ? calories : nil,
                 steps: nil,
                 workoutId: workoutId,
-                dateText: dateText(for: workout.startDate)
+                dateText: dateText(for: workout.startDate),
+                isExtra: isExtraWorkout(workoutId)
             )
         }
 
@@ -111,7 +116,8 @@ enum RunPostService {
                 calories: nil,
                 steps: nil,
                 workoutId: workoutId,
-                dateText: dateText(for: record.localDate)
+                dateText: dateText(for: record.localDate),
+                isExtra: isExtraWorkout(workoutId)
             )
         }
 
@@ -132,6 +138,33 @@ enum RunPostService {
             workoutId: workoutId,
             dateText: todayText()
         )
+    }
+
+    /// True when this workout is a post-goal bonus: the day's goal is already
+    /// complete and this isn't the goal-completing anchor. Drives the
+    /// "+0.14 mi" sticker framing so a short extra walk bakes as ADDED miles,
+    /// never as a number that reads like the whole day. The goal check
+    /// matters: pre-goal legs must stay plain (dailyMileWorkoutId falls back
+    /// to the latest workout even before the goal is met).
+    @MainActor
+    private static func isExtraWorkout(_ workoutId: String) -> Bool {
+        let hk = HealthKitManager.shared
+        let goalDone = ProgressCalculator.isGoalCompleted(
+            current: hk.todaysDistance,
+            goal: UserManager.shared.currentUser.goalMiles
+        )
+        guard goalDone else { return false }
+        return dailyMileWorkoutId() != workoutId
+    }
+
+    /// Display-pace divisor: the tracker's recorded moving time when this
+    /// workout carries it (in-app tracked; clamped to elapsed), else elapsed.
+    private static func paceDuration(of workout: HKWorkout) -> TimeInterval {
+        if let moving = workout.metadata?[WorkoutLocationManager.movingSecondsMetadataKey] as? Double,
+           moving > 0, moving <= workout.duration {
+            return moving
+        }
+        return workout.duration
     }
 
     private static func workoutPaceSecondsPerMile(distance: Double, duration: TimeInterval) -> TimeInterval? {

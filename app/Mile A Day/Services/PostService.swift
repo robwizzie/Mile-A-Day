@@ -45,6 +45,9 @@ struct PostItem: Codable, Identifiable {
     let media_url: String
     var caption: String?
     let workout_id: String?
+    /// Linked workout's feed role — display framing only: "extra" renders
+    /// the distance as post-goal bonus miles, "daily_mile" as the goal.
+    var feed_role: String?
     let stats_snapshot: PostStats?
     let local_date: String?
     let share_to_feed: Bool?
@@ -195,8 +198,14 @@ struct FeedEntry: Codable, Identifiable {
     // When this entry is the anchor of a mile completed across several walks,
     // these are the DAY's combined figures, not that one workout's.
     let workout_type: String?
+    /// Entry/linked workout's feed role — display framing only ("daily_mile"
+    /// = the goal-completing entry, "extra" = post-goal bonus miles).
+    let feed_role: String?
     let distance: Double?
     let total_duration: Double?
+    /// Moving-time display-pace divisor (rollup-aware on anchors). Absent on
+    /// old rows and Watch/third-party syncs — fall back to total_duration.
+    let moving_seconds: Double?
     let calories: Double?
     let steps: Int?
     /// How many walks/runs the daily mile was stitched together from. nil on an
@@ -270,7 +279,8 @@ struct FeedEntry: Codable, Identifiable {
             post_id: entryId, user_id: user_id, username: username,
             first_name: first_name, last_name: last_name,
             profile_image_url: profile_image_url, media_url: media, caption: caption,
-            workout_id: workout_id, stats_snapshot: stats_snapshot, local_date: nil,
+            workout_id: workout_id, feed_role: feed_role,
+            stats_snapshot: stats_snapshot, local_date: nil,
             share_to_feed: true, share_to_story: nil, story_expires_at: nil,
             created_at: sort_ts, is_auto: is_auto, workout_type: workout_type,
             route: route, story_photo_url: story_photo_url,

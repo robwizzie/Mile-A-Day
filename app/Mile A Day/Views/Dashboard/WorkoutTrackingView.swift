@@ -706,7 +706,26 @@ struct WorkoutTrackingView: View {
                 .font(.system(size: 48, weight: .semibold, design: .rounded))
                 .foregroundColor(.white)
                 .monospacedDigit()
+
+            // The movement gate freezing distance is CORRECT behavior — this
+            // chip is what keeps it from reading as "tracking broke" while
+            // the user stands at a light or sits down mid-walk.
+            if locationManager.isAutoPaused {
+                HStack(spacing: 5) {
+                    Image(systemName: "pause.fill")
+                        .font(.system(size: 9, weight: .bold))
+                    Text("AUTO-PAUSED")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .tracking(1.0)
+                }
+                .foregroundColor(.orange)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(Color.orange.opacity(0.15)))
+                .transition(.opacity.combined(with: .scale))
+            }
         }
+        .animation(.spring(response: 0.3), value: locationManager.isAutoPaused)
     }
 
     private var stopButton: some View {
@@ -1187,8 +1206,12 @@ struct WorkoutTrackingView: View {
         // in-app workouts never got an HKWorkoutRoute, so the sync (which reads
         // routes back from HealthKit) uploaded them route-less and the feed
         // could never draw their maps.
-        let routeLocations = (InProgressWorkoutStore.load()?.routePoints ?? [])
-            .map { $0.toCLLocation() }
+        // Cleaned once here — despiked, smoothed, simplified — because this
+        // is the single point every route consumer flows through (HealthKit
+        // route → backend sync → feed maps).
+        let routeLocations = WorkoutRouteCleanup.cleaned(
+            (InProgressWorkoutStore.load()?.routePoints ?? []).map { $0.toCLLocation() }
+        )
 
         // Stop timer and location tracking
         timer?.invalidate()
@@ -1258,18 +1281,32 @@ struct WorkoutTrackingView: View {
             }
         }
 
-        if finalDistance > 0 {
-            let distanceMeters = finalDistance / 0.000621371
-            let distanceQuantity = HKQuantity(unit: HKUnit.meter(), doubleValue: distanceMeters)
-            let sample = HKQuantitySample(
-                type: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!,
-                quantity: distanceQuantity,
-                start: startDate,
-                end: endDate
-            )
-            builder.add([sample], completion: addCompletion)
+        let beginSave = {
+            if finalDistance > 0 {
+                let distanceMeters = finalDistance / 0.000621371
+                let distanceQuantity = HKQuantity(unit: HKUnit.meter(), doubleValue: distanceMeters)
+                let sample = HKQuantitySample(
+                    type: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!,
+                    quantity: distanceQuantity,
+                    start: startDate,
+                    end: endDate
+                )
+                builder.add([sample], completion: addCompletion)
+            } else {
+                addCompletion(true, nil)
+            }
+        }
+
+        // Stamp the tracker's moving time on the workout itself — the sync
+        // reads HKWorkouts back, so this is how display pace's divisor
+        // travels. Best-effort: a metadata failure still saves the workout.
+        let movingSeconds = locationManager.movingSeconds
+        if movingSeconds > 0 {
+            builder.addMetadata([WorkoutLocationManager.movingSecondsMetadataKey: movingSeconds]) { _, _ in
+                beginSave()
+            }
         } else {
-            addCompletion(true, nil)
+            beginSave()
         }
     }
 
@@ -1401,7 +1438,9 @@ struct WorkoutTrackingView: View {
             goalDistance: goalDistance,
             activityType: selectedActivityType == .running ? "Running" : "Walking",
             timerStartDate: Date().addingTimeInterval(-realTimeElapsed),
-            streak: userManager.currentUser.streak
+            streak: userManager.currentUser.streak,
+            movingSeconds: locationManager.movingSeconds,
+            isAutoPaused: locationManager.isAutoPaused
         )
 
         // If the goal was already met before this workout (post-goal extra
@@ -1472,7 +1511,9 @@ struct WorkoutTrackingView: View {
                     goalDistance: goalDistance,
                     activityType: selectedActivityType == .running ? "Running" : "Walking",
                     timerStartDate: Date().addingTimeInterval(-realTimeElapsed),
-                    streak: userManager.currentUser.streak
+                    streak: userManager.currentUser.streak,
+                    movingSeconds: locationManager.movingSeconds,
+                    isAutoPaused: locationManager.isAutoPaused
                 )
                 // staleDate lets the system dim the activity if the app dies and
                 // stops sending updates, instead of showing confident stale data.
@@ -1527,7 +1568,9 @@ struct WorkoutTrackingView: View {
             goalDistance: goalDistance,
             activityType: selectedActivityType == .running ? "Running" : "Walking",
             timerStartDate: nil,
-            streak: userManager.currentUser.streak
+            streak: userManager.currentUser.streak,
+            movingSeconds: locationManager.movingSeconds,
+            isAutoPaused: false
         )
 
         // Capture the ID before clearing the reference so the orphan cleanup can exclude it

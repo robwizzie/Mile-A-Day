@@ -12,6 +12,9 @@ struct RunStatsInput: Equatable {
     var steps: Int?
     var workoutId: String?
     var dateText: String?
+    /// Post-goal bonus workout: the sticker bakes the distance as "+0.14 mi"
+    /// so a short extra walk reads as ADDED miles, not the whole day.
+    var isExtra: Bool = false
 
     var snapshot: PostStats {
         PostStats(
@@ -33,7 +36,8 @@ struct RunStatsInput: Equatable {
     func datum(for kind: RunStatKind) -> RunStatDatum? {
         switch kind {
         case .distance:
-            return RunStatDatum(kind: .distance, value: "\(String(format: "%.2f", distance)) mi")
+            let miles = String(format: "%.2f", distance)
+            return RunStatDatum(kind: .distance, value: isExtra ? "+\(miles) mi" : "\(miles) mi")
         case .pace:
             guard let p = paceSecondsPerMile, p > 0 else { return nil }
             return RunStatDatum(kind: .pace, value: "\(RunStatsStickerView.paceText(p)) /mi")
