@@ -2,6 +2,7 @@ import SwiftUI
 import HealthKit
 import CoreLocation
 import CoreMotion
+import UserNotifications
 
 // MARK: - Workout Location Manager
 
@@ -40,9 +41,30 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     private var lastLocation: CLLocation?
     /// Last fix ACCEPTED into the route trace (stricter bar than distance).
     private var lastRoutePoint: CLLocation?
-    private var isUsingPedometer = false
+    private(set) var isUsingPedometer = false
     /// Published so the app-wide "workout in progress" banner can appear/hide.
     @Published private(set) var isTracking = false
+
+    /// When ANY location fix last arrived (before quality gates) — the
+    /// tracking screen's "no GPS signal" banner keys off this going quiet.
+    private(set) var lastFixAt: Date?
+    /// Precise vs approximate location. Approximate fixes (~5 km) fail the
+    /// accuracy gate EVERY time, so tracking reads 0.00 forever while looking
+    /// alive — the screen must tell the user to flip Precise Location on.
+    var accuracyAuthorization: CLAccuracyAuthorization {
+        locationManager.accuracyAuthorization
+    }
+
+    /// Dead-man switch: a local notification ~5 minutes out, pushed forward
+    /// every minute by live callbacks (location fixes, pedometer batches).
+    /// While the app is alive it never fires; if iOS terminates the app
+    /// mid-workout (long lock under memory pressure — likelier in Low Power
+    /// Mode, and unrecoverable with when-in-use permission), the pending
+    /// notification outlives the process and tells the user their workout
+    /// stopped tracking instead of letting them discover it a mile later.
+    /// Tapping it opens the app, where the recovery banner offers resume.
+    private static let watchdogNotificationId = "MAD_tracking_watchdog"
+    private var lastWatchdogArm = Date.distantPast
 
     /// Doppler speed below this = standing still. GPS jitter while stopped
     /// must never accrue: distance is a sum of segment LENGTHS, so noise is
@@ -149,8 +171,10 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         isConfidentlyAutomotive = false
         lastLocation = nil
         lastRoutePoint = nil
+        lastFixAt = nil
         isUsingPedometer = (locationType == .indoor)
         pedometerOffset = initialDistance
+        armTrackingWatchdog(force: true)
 
         if locationType == .indoor {
             if CMPedometer.isDistanceAvailable() {
@@ -163,6 +187,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
                         DispatchQueue.main.async {
                             self.currentDistance = newTotal
                             self.persistDistanceThrottled()
+                            self.armTrackingWatchdog()
                         }
                     }
                 }
@@ -230,6 +255,9 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
                     self.lastPedometerProgressAt = Date()
                 }
                 self.outdoorPedometerMiles = miles
+                // Second liveness source: keeps the watchdog honest through
+                // GPS dead zones while the walker is still stepping.
+                self.armTrackingWatchdog()
             }
         }
     }
@@ -249,9 +277,40 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         return Date().timeIntervalSince(reference) < 60
     }
 
+    /// (Re-)arm the dead-man notification. Called from every live data
+    /// callback, throttled to once a minute; `force` skips the throttle at
+    /// session start. Same identifier = each add REPLACES the pending one,
+    /// so the fire date keeps sliding forward while the app is alive.
+    private func armTrackingWatchdog(force: Bool = false) {
+        guard isTracking || force else { return }
+        let now = Date()
+        guard force || now.timeIntervalSince(lastWatchdogArm) >= 60 else { return }
+        lastWatchdogArm = now
+
+        let content = UNMutableNotificationContent()
+        content.title = "Is your workout still tracking?"
+        content.body = "iOS may have stopped Mile A Day in the background. Open the app to check — your progress is saved and can resume."
+        content.sound = .default
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 300, repeats: false)
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(
+                identifier: Self.watchdogNotificationId,
+                content: content,
+                trigger: trigger
+            )
+        )
+    }
+
+    private func cancelTrackingWatchdog() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.watchdogNotificationId]
+        )
+    }
+
     func stopTracking() {
         guard isTracking else { return }
         isTracking = false
+        cancelTrackingWatchdog()
 
         // Pedometer runs in BOTH modes now (distance source indoors, cross-
         // check odometer outdoors) — always stop it.
@@ -318,6 +377,12 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     // MARK: - CLLocationManagerDelegate
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        // Liveness bookkeeping runs in BOTH modes: any delivered fix proves
+        // the app is alive (slide the watchdog forward) and feeds the
+        // no-signal banner.
+        lastFixAt = Date()
+        armTrackingWatchdog()
+
         // In pedometer mode location is only a background keep-alive —
         // distance comes from CMPedometer and there's no meaningful route.
         guard !isUsingPedometer else { return }

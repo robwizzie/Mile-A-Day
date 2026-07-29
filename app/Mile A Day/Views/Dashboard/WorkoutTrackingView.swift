@@ -304,6 +304,8 @@ struct WorkoutTrackingView: View {
                     VStack(spacing: metricSpacing(for: screen.size.height)) {
                         Spacer(minLength: 0)
 
+                        trackingHealthBanner
+
                         distanceDisplay
 
                         progressRing(diameter: ringDiameter(for: screen.size.height))
@@ -691,6 +693,98 @@ struct WorkoutTrackingView: View {
                     .font(.caption)
                     .foregroundColor(.white.opacity(0.7))
             }
+        }
+    }
+
+    /// The reason GPS tracking is NOT working right now, when there is one.
+    /// Nil = healthy (or indoor mode, where the pedometer needs none of it).
+    /// Re-evaluated every second by the elapsed-time tick. The worst feeling
+    /// in this app is finishing a mile and discovering nothing was tracked —
+    /// each of these states used to be completely silent.
+    private var trackingIssue: (icon: String, title: String, detail: String, showsSettings: Bool)? {
+        guard isTracking, !locationManager.isUsingPedometer else { return nil }
+        let auth = locationManager.authorizationStatus
+        if auth == .denied || auth == .restricted {
+            return (
+                icon: "location.slash.fill",
+                title: "Location access is off",
+                detail: "Distance can't track without it. Tap to open Settings.",
+                showsSettings: true
+            )
+        }
+        // Approximate location (~5 km fixes) fails the accuracy gate on every
+        // fix — the workout would sit at 0.00 forever while looking alive.
+        if auth != .notDetermined, locationManager.accuracyAuthorization == .reducedAccuracy {
+            return (
+                icon: "location.circle",
+                title: "Precise Location is off",
+                detail: "Approximate location can't measure distance. Tap to open Settings.",
+                showsSettings: true
+            )
+        }
+        // Fixes stopped arriving (or never arrived): garage, tunnel, deep
+        // indoors. Give GPS 30s to lock at start before declaring silence.
+        let sinceStart = workoutStartDate.map { Date().timeIntervalSince($0) } ?? 0
+        if let lastFix = locationManager.lastFixAt {
+            if Date().timeIntervalSince(lastFix) > 60 {
+                return (
+                    icon: "antenna.radiowaves.left.and.right.slash",
+                    title: "No GPS signal",
+                    detail: "Nothing is being received right now — head for open sky.",
+                    showsSettings: false
+                )
+            }
+        } else if sinceStart > 30 {
+            return (
+                icon: "antenna.radiowaves.left.and.right.slash",
+                title: "Waiting for GPS",
+                detail: "No signal yet — distance starts counting once GPS locks.",
+                showsSettings: false
+            )
+        }
+        return nil
+    }
+
+    @ViewBuilder
+    private var trackingHealthBanner: some View {
+        if let issue = trackingIssue {
+            Button {
+                guard issue.showsSettings,
+                      let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                UIApplication.shared.open(url)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: issue.icon)
+                        .font(.system(size: 18, weight: .bold))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(issue.title)
+                            .font(.system(size: 14, weight: .heavy, design: .rounded))
+                        Text(issue.detail)
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                            .opacity(0.85)
+                            .multilineTextAlignment(.leading)
+                    }
+                    Spacer(minLength: 0)
+                    if issue.showsSettings {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .opacity(0.7)
+                    }
+                }
+                .foregroundColor(.white)
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.orange.opacity(0.28))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(Color.orange.opacity(0.6), lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 20)
+            .transition(.opacity.combined(with: .move(edge: .top)))
         }
     }
 
@@ -1452,7 +1546,10 @@ struct WorkoutTrackingView: View {
         do {
             let activity = try Activity.request(
                 attributes: attributes,
-                content: .init(state: initialState, staleDate: nil),
+                // staleDate from the FIRST content: if iOS kills the app
+                // before the first 30s update ever lands, the activity still
+                // flips to its "tracking interrupted" rendering.
+                content: .init(state: initialState, staleDate: Date().addingTimeInterval(180)),
                 pushType: nil
             )
             workoutActivity = activity
