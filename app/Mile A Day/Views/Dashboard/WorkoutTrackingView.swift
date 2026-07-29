@@ -85,6 +85,69 @@ struct WorkoutTrackingView: View {
         let ok: Bool
     }
 
+    // Ghost race: opt-in per session from the pre-start card (never a
+    // default). `raceGhost` is resolved once at startWorkout; nil = not
+    // racing. The verdict freezes at the 1.0-mile crossing. Session-local by
+    // design: recovery relaunches skip the pre-start flow, so a recovered
+    // workout never races (its effort curve starts mid-distance anyway).
+    @State private var raceArmed = false
+    @State private var raceGhost: BestEffortStore.BestMileEffort?
+    @State private var raceGhostIsSeeded = false
+    @State private var raceFinalDelta: TimeInterval?
+    /// Drops the NEW pill on the arming card after the first ever arm.
+    @AppStorage("hasArmedGhostRaceOnce") private var hasArmedGhostRaceOnce = false
+
+    private var raceActivityKey: String {
+        selectedActivityType == .running ? "running" : "walking"
+    }
+
+    /// Seed pace for a run ghost when no recorded best exists — the backend
+    /// fastest-mile PR (minutes/mile on the user model → seconds/mile).
+    private var raceSeedPaceSeconds: Double? {
+        let pace = userManager.currentUser.fastestMilePace
+        guard pace > 0 else { return nil }
+        return pace * 60
+    }
+
+    private var availableGhost: (effort: BestEffortStore.BestMileEffort, isSeeded: Bool)? {
+        BestEffortStore.ghost(for: raceActivityKey, seedPaceSecondsPerMile: raceSeedPaceSeconds)
+    }
+
+    /// Live ahead(+)/behind(−) seconds vs the ghost at the current distance,
+    /// or the frozen verdict once the mile completes. Nil while not racing or
+    /// in the first steps (no meaningful delta yet).
+    private var raceDeltaSeconds: TimeInterval? {
+        guard let ghost = raceGhost else { return nil }
+        if let frozen = raceFinalDelta { return frozen }
+        let d = min(locationManager.currentDistance, 1.0)
+        guard d > 0.02 else { return nil }
+        return BestEffortStore.timeAtDistance(d, in: ghost) - locationManager.raceClockSeconds
+    }
+
+    /// Freeze the verdict the moment the live mile completes, using the
+    /// interpolated crossing time from the effort curve — accurate no matter
+    /// when the tick that notices runs.
+    private func updateRaceFreezeIfNeeded() {
+        guard let ghost = raceGhost, raceFinalDelta == nil,
+            locationManager.currentDistance >= 1.0
+        else { return }
+        let curve = locationManager.effortCurve
+        guard let crossing = curve.firstIndex(where: { $0.d >= 1.0 }) else { return }
+        let b = curve[crossing]
+        var myMileSeconds = b.t
+        if crossing > 0 {
+            let a = curve[crossing - 1]
+            let span = b.d - a.d
+            if span > 0 {
+                myMileSeconds = a.t + (b.t - a.t) * ((1.0 - a.d) / span)
+            }
+        }
+        withAnimation(.spring(response: 0.4)) {
+            raceFinalDelta = ghost.seconds - myMileSeconds
+        }
+        MADHaptics.action()
+    }
+
     // Workout distance only (starts at 0)
     private var currentDistance: Double {
         locationManager.currentDistance
@@ -227,11 +290,115 @@ struct WorkoutTrackingView: View {
                     workoutOptionButton(icon: indoorLocationIcon, title: "Indoor", subtitle: "Treadmill or indoors — uses motion sensors") {
                         selectLocationType(.indoor)
                     }
+
+                    ghostRaceCard
                 }
                 .padding(.horizontal, 32)
 
                 Spacer()
             }
+        }
+    }
+
+    /// Ghost-race arming card: lives on the pre-start path every session so
+    /// it can't be missed, but never arms itself. Runs always have a ghost
+    /// (recorded best, else PR-seeded); walks without a recorded mile get the
+    /// set-your-baseline framing instead of racing an unbeatable run PR.
+    @ViewBuilder
+    private var ghostRaceCard: some View {
+        if let ghost = availableGhost {
+            Button {
+                MADHaptics.action()
+                withAnimation(.spring(response: 0.3)) {
+                    raceArmed.toggle()
+                }
+                if raceArmed { hasArmedGhostRaceOnce = true }
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "flag.checkered")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundColor(raceArmed ? .white : MADTheme.Colors.madRed)
+                        .frame(width: 34)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text("Race your best mile — \(BestEffortStore.formatSeconds(ghost.effort.seconds))")
+                                .font(.system(size: 16, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                            if !hasArmedGhostRaceOnce {
+                                Text("NEW")
+                                    .font(.system(size: 9, weight: .black, design: .rounded))
+                                    .tracking(0.8)
+                                    .foregroundColor(.black.opacity(0.8))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 3)
+                                    .background(Capsule().fill(Color.yellow))
+                            }
+                        }
+                        Text(
+                            raceArmed
+                                ? "Racing your ghost — live ahead/behind on screen and Live Activity"
+                                : (ghost.isSeeded
+                                    ? "Your fastest-mile PR, live against you. Tap to race."
+                                    : "Tap to race it this session")
+                        )
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.75))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    Image(systemName: raceArmed ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundColor(raceArmed ? .white : .white.opacity(0.35))
+                }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(raceArmed ? MADTheme.Colors.madRed.opacity(0.85) : Color.white.opacity(0.10))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(
+                                    raceArmed ? Color.white.opacity(0.35) : Color.white.opacity(0.15),
+                                    lineWidth: 1
+                                )
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+        } else {
+            // Walk with no recorded mile yet: explain how the ghost is born.
+            // Informational — the baseline records automatically once this
+            // session finishes a fresh mile.
+            HStack(spacing: 14) {
+                Image(systemName: "stopwatch")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.7))
+                    .frame(width: 34)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("First mile sets your ghost")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                    Text("Finish a mile this session and it becomes the walk time you race next time.")
+                        .font(.system(size: 12, weight: .medium, design: .rounded))
+                        .foregroundColor(.white.opacity(0.7))
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.white.opacity(0.07))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                    )
+            )
         }
     }
 
@@ -818,8 +985,46 @@ struct WorkoutTrackingView: View {
                 .background(Capsule().fill(Color.orange.opacity(0.15)))
                 .transition(.opacity.combined(with: .scale))
             }
+
+            if raceGhost != nil, let delta = raceDeltaSeconds {
+                raceDeltaChip(delta: delta, frozen: raceFinalDelta != nil)
+                    .transition(.opacity.combined(with: .scale))
+            }
         }
         .animation(.spring(response: 0.3), value: locationManager.isAutoPaused)
+        .animation(.spring(response: 0.3), value: raceFinalDelta != nil)
+    }
+
+    /// Ghost race readout: live ahead/behind while the mile is in progress,
+    /// frozen verdict once it completes. Moving-time based, so auto-pauses
+    /// can't cheat it.
+    private func raceDeltaChip(delta: TimeInterval, frozen: Bool) -> some View {
+        let ahead = delta >= 0
+        let magnitude = Int(abs(delta).rounded())
+        let text: String
+        if frozen {
+            text = ahead ? "Beat your best by \(magnitude)s" : "\(magnitude)s off your best"
+        } else if magnitude < 2 {
+            text = "Even with your best"
+        } else {
+            text = ahead ? "\(magnitude)s ahead of your best" : "\(magnitude)s behind your best"
+        }
+        return HStack(spacing: 5) {
+            Image(
+                systemName: frozen
+                    ? (ahead ? "trophy.fill" : "flag.checkered")
+                    : (ahead ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
+            )
+            .font(.system(size: 9, weight: .bold))
+            Text(text)
+                .font(.system(size: 11, weight: .heavy, design: .rounded))
+                .tracking(0.4)
+                .monospacedDigit()
+        }
+        .foregroundColor(ahead ? .green : .orange)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Capsule().fill((ahead ? Color.green : Color.orange).opacity(0.15)))
     }
 
     private var stopButton: some View {
@@ -1195,6 +1400,17 @@ struct WorkoutTrackingView: View {
 
         workoutStartDate = Date()
 
+        // Resolve the ghost the user armed on the location step (resolved
+        // once, so a best set MID-session doesn't morph the target).
+        raceFinalDelta = nil
+        if raceArmed, let ghost = availableGhost {
+            raceGhost = ghost.effort
+            raceGhostIsSeeded = ghost.isSeeded
+        } else {
+            raceGhost = nil
+            raceGhostIsSeeded = false
+        }
+
         // Fresh session: drop mid-run snaps left over from a previous workout
         // ONLY when today's goal was already met before this one. A workout on
         // an already-completed day is "extra", so a stale snap shouldn't hijack
@@ -1285,6 +1501,55 @@ struct WorkoutTrackingView: View {
         let finalDistance = locationManager.reconciledFinalDistance(
             isWalk: selectedActivityType != .running
         )
+
+        // Ghost race bookkeeping — runs for EVERY session (an unraced mile
+        // still quietly becomes the baseline/best, keeping future ghosts
+        // honest); racing only changes what gets celebrated. The curve is
+        // rescaled to the reconciled distance so it agrees with the number
+        // this workout actually saves.
+        let liveDistance = locationManager.currentDistance
+        let raceOutcome = BestEffortStore.recordFinish(
+            activityKey: raceActivityKey,
+            rawCurve: locationManager.effortCurve,
+            distanceScale: liveDistance > 0 ? finalDistance / liveDistance : 1.0,
+            workoutId: nil
+        )
+        if raceGhost != nil {
+            switch raceOutcome {
+            case .newBest(let seconds, let improvedBy):
+                CelebrationManager.shared.addCelebration(
+                    .milestone(
+                        title: "New Best Mile!",
+                        description:
+                            "You beat your ghost by \(max(1, Int(improvedBy.rounded())))s — \(BestEffortStore.formatSeconds(seconds)) is the new time to beat.",
+                        icon: "flag.checkered"
+                    ))
+            case .baselineSet(let seconds):
+                if raceGhostIsSeeded, let ghost = raceGhost, seconds < ghost.seconds {
+                    // Raced the PR-seeded ghost and won — this recorded effort
+                    // is the first REAL curve, but the story is the win.
+                    CelebrationManager.shared.addCelebration(
+                        .milestone(
+                            title: "New Best Mile!",
+                            description:
+                                "You beat your ghost by \(max(1, Int((ghost.seconds - seconds).rounded())))s — \(BestEffortStore.formatSeconds(seconds)) is the new time to beat.",
+                            icon: "flag.checkered"
+                        ))
+                } else if !raceGhostIsSeeded {
+                    CelebrationManager.shared.addCelebration(
+                        .milestone(
+                            title: "Baseline Mile Set",
+                            description:
+                                "\(BestEffortStore.formatSeconds(seconds)) is your mile to beat. The ghost race is on from your next session.",
+                            icon: "stopwatch"
+                        ))
+                }
+            case .slower, .notAMile:
+                // The frozen chip already told the story mid-workout; no popup
+                // for a miss — the ghost lives another day.
+                break
+            }
+        }
 
         // Freeze the recap stats now, before anything refreshes underneath us
         recapDistance = finalDistance
@@ -1442,6 +1707,13 @@ struct WorkoutTrackingView: View {
         isStopping = false
         isTracking = false
 
+        // Ghost race is opt-in PER SESSION: disarm so the next workout starts
+        // clean (this view instance survives across sessions).
+        raceArmed = false
+        raceGhost = nil
+        raceGhostIsSeeded = false
+        raceFinalDelta = nil
+
         // Show result to user. The mile counts via GPS/pedometer sync whether
         // or not the HealthKit write succeeded, so a failed save is never a lost
         // workout — tailor the messaging to the cause instead of alarming.
@@ -1534,7 +1806,8 @@ struct WorkoutTrackingView: View {
             timerStartDate: Date().addingTimeInterval(-realTimeElapsed),
             streak: userManager.currentUser.streak,
             movingSeconds: locationManager.movingSeconds,
-            isAutoPaused: locationManager.isAutoPaused
+            isAutoPaused: locationManager.isAutoPaused,
+            ghostDeltaSeconds: raceDeltaSeconds
         )
 
         // If the goal was already met before this workout (post-goal extra
@@ -1571,6 +1844,10 @@ struct WorkoutTrackingView: View {
     private func updateLiveActivity() {
         // CRITICAL: Never persist state while stopping — finishCleanup may have already cleared it.
         guard !isStopping else { return }
+
+        // Ghost race: settle the verdict as soon as the mile completes, so
+        // this update (and the on-screen chip) carry the frozen result.
+        updateRaceFreezeIfNeeded()
 
         let freshDistance = locationManager.currentDistance
         let freshTotalDaily = startingDistance + freshDistance
@@ -1610,7 +1887,8 @@ struct WorkoutTrackingView: View {
                     timerStartDate: Date().addingTimeInterval(-realTimeElapsed),
                     streak: userManager.currentUser.streak,
                     movingSeconds: locationManager.movingSeconds,
-                    isAutoPaused: locationManager.isAutoPaused
+                    isAutoPaused: locationManager.isAutoPaused,
+                    ghostDeltaSeconds: raceDeltaSeconds
                 )
                 // staleDate lets the system dim the activity if the app dies and
                 // stops sending updates, instead of showing confident stale data.

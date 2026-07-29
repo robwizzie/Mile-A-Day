@@ -115,6 +115,36 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// span BOTH instruments actually measured.
     private var sessionStartDistance: Double = 0
 
+    /// Cumulative (raceClockSeconds, miles) samples for the ghost race —
+    /// appended on accrual, throttled to every ≥0.02 mi or ≥10 s. Session-
+    /// local; consumed at finish by BestEffortStore.recordFinish. Seeded with
+    /// the session's starting distance so a recovered workout's curve visibly
+    /// starts mid-distance (recordFinish refuses those — no time history).
+    private(set) var effortCurve: [(t: TimeInterval, d: Double)] = []
+    private var lastEffortSample: (t: TimeInterval, d: Double) = (0, 0)
+
+    /// The ghost-race clock: witnessed-movement seconds outdoors (auto-pauses
+    /// can't cheat the race), wall elapsed indoors — the treadmill pedometer
+    /// doesn't witness segments, and a treadmill session rarely pauses.
+    var raceClockSeconds: TimeInterval {
+        if isUsingPedometer {
+            guard let start = trackingStartedAt else { return 0 }
+            return Date().timeIntervalSince(start)
+        }
+        return movingSeconds
+    }
+
+    /// Append an effort-curve point when enough distance or time has passed.
+    /// Called on the main queue right after currentDistance updates.
+    private func sampleEffortCurve() {
+        let t = raceClockSeconds
+        let d = currentDistance
+        guard d > lastEffortSample.d else { return }
+        guard d - lastEffortSample.d >= 0.02 || t - lastEffortSample.t >= 10 else { return }
+        lastEffortSample = (t, d)
+        effortCurve.append((t, d))
+    }
+
     // For indoor pedometer mode: the pedometer reports cumulative distance from its
     // start date. When recovering a workout, we set this offset to the previously
     // accumulated distance so the pedometer's new readings ADD to it instead of
@@ -166,6 +196,8 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         trackingStartedAt = Date()
         dopplerMovingMiles = 0
         movingSeconds = 0
+        effortCurve = [(0, initialDistance)]
+        lastEffortSample = (0, initialDistance)
         lastAccrualAt = nil
         isAutoPaused = false
         isConfidentlyAutomotive = false
@@ -186,6 +218,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
                         let newTotal = self.pedometerOffset + distanceInMiles
                         DispatchQueue.main.async {
                             self.currentDistance = newTotal
+                            self.sampleEffortCurve()
                             self.persistDistanceThrottled()
                             self.armTrackingWatchdog()
                         }
@@ -491,6 +524,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             lastAccrualAt = Date()
             DispatchQueue.main.async {
                 self.currentDistance += distanceInMiles
+                self.sampleEffortCurve()
                 self.persistDistanceThrottled()
             }
         }

@@ -24,6 +24,10 @@ struct WorkoutActivityAttributes: ActivityAttributes {
         var movingSeconds: TimeInterval? = nil
         /// The tracker's movement gate is closed (standing, sitting, riding).
         var isAutoPaused: Bool? = nil
+        /// Ghost race: seconds ahead (+) / behind (−) the user's best mile at
+        /// the current distance. nil = not racing this session. Optional so
+        /// an in-flight activity from an older build still decodes.
+        var ghostDeltaSeconds: Double? = nil
     }
 
     var startTime: Date
@@ -58,6 +62,14 @@ private extension WorkoutActivityAttributes.ContentState {
         let minutes = Int(pace) / 60
         let seconds = Int(pace) % 60
         return String(format: "%d:%02d /mi", minutes, seconds)
+    }
+
+    /// "▲ 12s" / "▼ 8s" ghost-race delta, with ahead-ness for tinting.
+    var ghostDeltaText: (text: String, ahead: Bool)? {
+        guard let delta = ghostDeltaSeconds, delta.isFinite else { return nil }
+        let ahead = delta >= 0
+        let magnitude = Int(abs(delta).rounded())
+        return ("\(ahead ? "▲" : "▼") \(magnitude)s", ahead)
     }
 }
 
@@ -153,6 +165,13 @@ struct WorkoutLiveActivity: Widget {
                                 Text(pace)
                                     .font(.system(size: 11, weight: .medium, design: .rounded))
                                     .foregroundColor(.white.opacity(0.7))
+                                    .monospacedDigit()
+                            }
+
+                            if let ghost = context.state.ghostDeltaText {
+                                Text(ghost.text)
+                                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                    .foregroundColor(ghost.ahead ? .green : .orange)
                                     .monospacedDigit()
                             }
                         }
@@ -371,6 +390,13 @@ struct WorkoutLiveActivityView: View {
                         Text(pace)
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.7))
+                            .monospacedDigit()
+                    }
+
+                    if let ghost = context.state.ghostDeltaText {
+                        Text(ghost.text)
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .foregroundColor(ghost.ahead ? .green : .orange)
                             .monospacedDigit()
                     }
                 }
