@@ -341,6 +341,25 @@ enum CelebrationDismissAction: Equatable {
 class CelebrationManager: ObservableObject {
     static let shared = CelebrationManager()
 
+    /// Posted when queued celebrations are DROPPED without being seen (the
+    /// navigate-away clear in dismissWithAction, a replay reset). userInfo
+    /// carries "ids": [String]. Enqueue-side session stamps — DashboardView's
+    /// goalCelebrationEnqueuedDay — listen and reset, so a flame that was
+    /// queued behind a badge popup and then cleared by "View badges" can
+    /// re-fire from the next level-trigger instead of being lost until the
+    /// next cold launch (hasShownGoalCelebrationToday never stamped, but the
+    /// session gate blocked every re-check).
+    static let droppedUnseenNotification = Notification.Name("MAD_CelebrationsDroppedUnseen")
+
+    private func reportDroppedUnseen(_ dropped: [CelebrationType]) {
+        guard !dropped.isEmpty else { return }
+        NotificationCenter.default.post(
+            name: Self.droppedUnseenNotification,
+            object: nil,
+            userInfo: ["ids": dropped.map(\.id)]
+        )
+    }
+
     @Published private(set) var celebrationQueue: [CelebrationType] = []
     @Published var currentCelebration: CelebrationType?
     @Published var isShowingCelebration = false
@@ -470,9 +489,11 @@ class CelebrationManager: ObservableObject {
     /// user can re-watch (and re-share) the same celebration from anywhere in the app.
     /// Clears any pending queue first so the replay shows immediately.
     func replayCelebration(_ celebration: CelebrationType) {
+        let dropped = celebrationQueue
         celebrationQueue.removeAll()
         currentCelebration = nil
         isShowingCelebration = false
+        reportDroppedUnseen(dropped)
 
         print("[CelebrationManager] 🔁 Replay requested: \(celebration.id)")
         celebrationQueue.append(celebration)
@@ -514,9 +535,12 @@ class CelebrationManager: ObservableObject {
     /// Dismiss the current celebration with a specific action
     func dismissWithAction(_ action: CelebrationDismissAction) {
         markConsumed(currentCelebration)
-        // Clear remaining queue when user wants to navigate away
+        // Clear remaining queue when user wants to navigate away — but report
+        // what was dropped, so still-unseen one-shots can re-arm.
         if action != .none {
+            let dropped = celebrationQueue
             celebrationQueue.removeAll()
+            reportDroppedUnseen(dropped)
         }
 
         isShowingCelebration = false

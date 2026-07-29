@@ -185,9 +185,9 @@ struct MainTabView: View {
                 Task { await refreshUnreadCount() }
                 return
             }
-            // Your own "mile complete" — the celebration home is the
-            // Dashboard itself, not the inbox.
-            if type == "goal_reached" {
+            // Your own "mile complete" / "streak ended" — both land on the
+            // Dashboard itself (celebration home, streak flame), not the inbox.
+            if type == "goal_reached" || type == "streak_lost" {
                 selectedTab = 0
                 Task { await refreshUnreadCount() }
                 return
@@ -437,9 +437,9 @@ struct MainTabView: View {
                 selectedTab = 0
                 showNotificationInbox = true
                 notificationService.pendingNotificationType = nil
-            case "goal_reached":
-                // Straight to the Dashboard — the celebration home — with no
-                // inbox sheet covering it.
+            case "goal_reached", "streak_lost":
+                // Straight to the Dashboard — celebration home / streak flame
+                // — with no inbox sheet covering it.
                 selectedTab = 0
                 notificationService.pendingNotificationType = nil
             default:

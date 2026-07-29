@@ -785,6 +785,40 @@ export async function checkStreaksBroken(): Promise<void> {
         );
 
         const streakLength = parseInt(streakResult[0]?.streak_length ?? "0");
+
+        // The OWNER hears about their own break — friends-only was backwards
+        // (friends got "send them encouragement!" while the runner discovered
+        // it from a zeroed flame). 3+ days is worth a kind heads-up; the 10+
+        // gate below exists to limit FRIEND spam, not to keep the owner in
+        // the dark. Own atomic claim so it can never double-send. The outer
+        // query already skips token-bridged streaks, and a later friend
+        // Assist follows up with its own streak_assisted push — the story
+        // stays coherent if a rescue lands.
+        if (streakLength >= 3) {
+          const selfKey = `streak_lost_self_${user_id}_${yesterdayStr}`;
+          const selfClaim = await db.query(
+            `INSERT INTO milestone_notifications (milestone_key, user_id) VALUES ($1, $2)
+						ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
+            [selfKey, user_id],
+          );
+          if (selfClaim.length > 0) {
+            await sendPush(user_id, {
+              title: "Your streak ended",
+              body: `Your ${streakLength}-day streak ended yesterday. One mile today starts the next one — day 1 is waiting.`,
+              type: "streak_lost",
+              data: {
+                local_date: yesterdayStr,
+                streak_length: String(streakLength),
+              },
+            }).catch((err: any) =>
+              console.error(
+                "[Notifications] streak_lost push failed:",
+                err?.message ?? err,
+              ),
+            );
+          }
+        }
+
         if (streakLength < 10) continue;
 
         const milestoneKey = `streak_broken_${user_id}_${yesterdayStr}`;

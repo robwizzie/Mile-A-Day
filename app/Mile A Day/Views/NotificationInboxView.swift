@@ -962,6 +962,7 @@ struct NotificationInboxView: View {
         case "competition_flex": return "FLEX"
         case "competition_milestone": return "MILESTONE"
         case "streak_broken": return "STREAK"
+        case "streak_lost": return "STREAK ENDED"
         case "goal_reached": return "GOAL DONE"
         case "personal_best": return "PERSONAL BEST"
         case "badge_earned": return "BADGE"
@@ -995,6 +996,7 @@ struct NotificationInboxView: View {
         case "competition_flex": return ("flame.fill", .red)
         case "competition_milestone": return ("star.fill", .yellow)
         case "streak_broken": return ("flame.fill", .red)
+        case "streak_lost": return ("flame", .orange)
         case "goal_reached": return ("checkmark.seal.fill", .green)
         case "personal_best": return ("medal.fill", .yellow)
         case "lead_change": return ("arrow.up.right", .green)

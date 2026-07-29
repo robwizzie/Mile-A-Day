@@ -872,6 +872,18 @@ struct DashboardView: View {
                 // A workout finishing may leave a mid-run snap waiting.
                 refreshMidRunPhotoWaiting()
             }
+            .onReceive(NotificationCenter.default.publisher(for: CelebrationManager.droppedUnseenNotification)) { note in
+                // The flame was queued but cleared before anyone saw it (e.g.
+                // a badge popup's "View badges" wipes the queue). Un-stamp the
+                // session gate and re-check, so the celebration re-fires
+                // instead of being lost until the next cold launch.
+                guard let ids = note.userInfo?["ids"] as? [String],
+                      ids.contains(where: { $0.hasPrefix("goal-completed-") }) else { return }
+                goalCelebrationEnqueuedDay = ""
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    checkAndShowGoalCelebration()
+                }
+            }
             .confetti(isShowing: $showConfetti)
             // CelebrationContainerView is hosted by MainTabView at the app root
             // (above the tab bar, visible on every tab) — hosting it here played
