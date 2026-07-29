@@ -92,20 +92,17 @@ export function dateStrPlus(dateStr: string, days: number): string {
 }
 
 /**
- * The coverage-aware streak walk: identical anchor/grace/consecutive semantics
- * to the legacy walks (today counts if present but isn't required; stop at the
- * first uncovered miss), over the UNION of qualifying workout days and covered
- * days. Paginates the same qualifying-days query the legacy walk uses.
- *
- * Only ever called for enrolled users with the env switch on.
+ * Descending, de-duped stream over the UNION of the user's qualifying workout
+ * days and the given covered days (YYYY-MM-DD strings). Pass coverage=[] and
+ * the stream degenerates to the plain qualifying-day sequence — byte-identical
+ * input to the legacy walks. Extracted verbatim from computeCoveredStreak so
+ * every consumer (active streak, streak eras) walks THE same stream; per the
+ * house rule, streak recomputes must never fork this.
  */
-export async function computeCoveredStreak(
+export function mergedQualifyingDayStream(
   userId: string,
-  userToday: string,
-): Promise<{ streak: number; start: string | undefined }> {
-  const coverage = await fetchCoverageDates(userId); // DESC
-  const yesterday = dateStrMinus(userToday, 1);
-
+  coverage: string[], // DESC
+): { next: () => Promise<string | undefined> } {
   const qualifyingDaysQuery = `
     SELECT to_char(local_date, 'YYYY-MM-DD') AS local_date
     FROM workouts
@@ -122,16 +119,15 @@ export async function computeCoveredStreak(
   // list, descending, de-duped — a backfilled workout can land on an
   // already-covered day and must not count twice.
   let pageIndex = 0;
-  let page: { local_date: string }[] = await db.query(qualifyingDaysQuery, [
-    userId,
-    LIMIT,
-    0,
-  ]);
+  let page: { local_date: string }[] | null = null;
   let pi = 0; // cursor into page
   let ci = 0; // cursor into coverage
   let last: string | undefined;
 
   const next = async (): Promise<string | undefined> => {
+    if (page === null) {
+      page = await db.query(qualifyingDaysQuery, [userId, LIMIT, 0]);
+    }
     while (true) {
       if (pi >= page.length && page.length === LIMIT) {
         pageIndex++;
@@ -161,6 +157,25 @@ export async function computeCoveredStreak(
     }
   };
 
+  return { next };
+}
+
+/**
+ * The coverage-aware streak walk: identical anchor/grace/consecutive semantics
+ * to the legacy walks (today counts if present but isn't required; stop at the
+ * first uncovered miss), over the UNION of qualifying workout days and covered
+ * days. Paginates the same qualifying-days query the legacy walk uses.
+ *
+ * Only ever called for enrolled users with the env switch on.
+ */
+export async function computeCoveredStreak(
+  userId: string,
+  userToday: string,
+): Promise<{ streak: number; start: string | undefined }> {
+  const coverage = await fetchCoverageDates(userId); // DESC
+  const yesterday = dateStrMinus(userToday, 1);
+  const { next } = mergedQualifyingDayStream(userId, coverage);
+
   let streak = 0;
   let streakStartDay: string | undefined;
   let expectedDate: string | undefined;
@@ -186,6 +201,62 @@ export async function computeCoveredStreak(
   }
 
   return { streak, start: streakStartDay };
+}
+
+export interface StreakEra {
+  start_date: string; // YYYY-MM-DD
+  end_date: string; // YYYY-MM-DD
+  length: number;
+  is_current: boolean;
+}
+
+/**
+ * The user's ENTIRE qualified-or-covered day history grouped into consecutive
+ * runs ("eras"), newest first. Covered days count exactly when the live walks
+ * would count them (same enrollment + env gate via coverageActiveFor), so the
+ * current era's length always agrees with getActiveStreak /
+ * refreshCurrentStreak — un-enrolled users get the plain qualifying-day
+ * grouping, legacy parity. `is_current` uses the walks' today/yesterday grace,
+ * and by descending construction only the first era can carry it.
+ */
+export async function computeStreakEras(
+  userId: string,
+  userToday: string,
+): Promise<{ eras: StreakEra[]; longest: number }> {
+  const coverage = (await coverageActiveFor(userId))
+    ? await fetchCoverageDates(userId)
+    : [];
+  const { next } = mergedQualifyingDayStream(userId, coverage);
+  const yesterday = dateStrMinus(userToday, 1);
+
+  const eras: StreakEra[] = [];
+  let open: StreakEra | null = null;
+  let expected: string | undefined;
+
+  while (true) {
+    const date = await next();
+    if (date === undefined) break;
+    if (open !== null && date === expected) {
+      open.start_date = date;
+      open.length++;
+    } else {
+      if (open !== null) eras.push(open);
+      open = {
+        start_date: date,
+        end_date: date,
+        length: 1,
+        is_current: date === userToday || date === yesterday,
+      };
+    }
+    expected = dateStrMinus(date, 1);
+  }
+  if (open !== null) eras.push(open);
+
+  let longest = 0;
+  for (const era of eras) {
+    if (era.length > longest) longest = era.length;
+  }
+  return { eras, longest };
 }
 
 /**

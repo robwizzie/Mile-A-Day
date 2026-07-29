@@ -4,6 +4,8 @@ import { VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL } from "./visibilityService.js";
 import {
   coverageActiveFor,
   computeCoveredStreak,
+  computeStreakEras,
+  type StreakEra,
 } from "./streakFeatureCore.js";
 
 const db = PostgresService.getInstance();
@@ -479,6 +481,18 @@ export async function getUserLocalToday(userId: string): Promise<string> {
   return todayResult[0].user_today;
 }
 
+/**
+ * All of a user's streak runs ("eras"), newest first, plus the longest length
+ * seen in them. Delegates to streakFeatureCore so covered days count exactly
+ * when getActiveStreak would count them.
+ */
+export async function getStreakErasForUser(
+  userId: string,
+): Promise<{ eras: StreakEra[]; longest: number }> {
+  const userToday = await getUserLocalToday(userId);
+  return computeStreakEras(userId, userToday);
+}
+
 export async function getActiveStreak(userId: string) {
   const userToday = await getUserLocalToday(userId);
 
@@ -584,12 +598,13 @@ export async function getBestMilesDay(userId: string, startDate?: string) {
 
 export async function getBestSplit(userId: string, startDate?: string) {
   let bestSplitQuery = `
-    SELECT 
+    SELECT
       ws.split_pace AS best_split_time,
       w.*
     FROM workout_splits ws
     JOIN workouts w ON ws.workout_id = w.workout_id
     WHERE w.user_id = $1
+	AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
 	AND split_distance >= 0.95
 	AND ws.split_pace > 0
 	`;

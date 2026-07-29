@@ -252,6 +252,32 @@ struct DashboardView: View {
     }
 
     /// Check if goal is completed and show celebration if appropriate
+    /// Queue the record-crossing and day-3/7 comeback moments when their
+    /// conditions hold (from the cached era history). Safe to call repeatedly:
+    /// addCelebration dedups the live queue, and the persisted one-shots —
+    /// stamped at dismissal — gate replays across sessions.
+    private func enqueueComebackAndRecordMoments() {
+        let store = StreakErasStore.shared
+        if let record = store.recordContext() {
+            celebrationManager.addCelebration(
+                .newRecordStreak(
+                    days: record.days,
+                    previousBest: record.previousBest,
+                    eraStart: record.eraStart
+                ))
+        }
+        if let comeback = store.comebackContext(), comeback.day == 3 || comeback.day == 7 {
+            celebrationManager.addCelebration(
+                .comeback(
+                    day: comeback.day,
+                    priorLength: comeback.priorLength,
+                    recordLength: comeback.recordLength,
+                    eraNumber: comeback.eraNumber,
+                    eraStart: comeback.eraStart
+                ))
+        }
+    }
+
     private func checkAndShowGoalCelebration() {
         // Only show if:
         // 1. Initial data has fully loaded (prevents premature celebration on cold launch)
@@ -341,8 +367,21 @@ struct DashboardView: View {
             celebrationManager.lastPostGoalWorkoutCount = goalCompletionWorkoutCount
 
             print("[Dashboard] 🎉 Goal completion detected! Distance: \(healthManager.todaysDistance), Goal: \(userManager.currentUser.goalMiles)")
-            let completionStats = buildGoalCompletionStats()
+            // Fresh era history for the comeback/record moments below. The
+            // streak refresh above already landed, so the current era is
+            // today-inclusive. Failure just means no comeback framing today.
+            await StreakErasStore.shared.refresh()
+
+            var completionStats = buildGoalCompletionStats()
+            if let comeback = StreakErasStore.shared.comebackContext(), comeback.day == 1 {
+                // Day 1 rides INSIDE the flame celebration — a second popup on
+                // the most fragile day of a comeback would be noise.
+                completionStats.comebackLine =
+                    "\(comeback.priorLength) days came before. Day 1 of the next run starts now."
+            }
             celebrationManager.addCelebration(.goalCompleted(stats: completionStats))
+            // Record-crossing and day-3/7 comeback moments, right behind the flame.
+            enqueueComebackAndRecordMoments()
             // Right after the fire/streak screen: show where you land on today's
             // friends leaderboard, animating your climb (Duolingo-style).
             celebrationManager.addCelebration(.leaderboardMoveUp(stats: completionStats))
@@ -877,8 +916,16 @@ struct DashboardView: View {
                 // a badge popup's "View badges" wipes the queue). Un-stamp the
                 // session gate and re-check, so the celebration re-fires
                 // instead of being lost until the next cold launch.
-                guard let ids = note.userInfo?["ids"] as? [String],
-                      ids.contains(where: { $0.hasPrefix("goal-completed-") }) else { return }
+                guard let ids = note.userInfo?["ids"] as? [String] else { return }
+                // Dropped-unseen comeback/record moments re-enqueue directly —
+                // their one-shots stamp at dismissal, and the goal re-check
+                // below can't rebuild them once the flame has been seen.
+                if ids.contains(where: { $0.hasPrefix("comeback-") || $0.hasPrefix("record-") }) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        enqueueComebackAndRecordMoments()
+                    }
+                }
+                guard ids.contains(where: { $0.hasPrefix("goal-completed-") }) else { return }
                 goalCelebrationEnqueuedDay = ""
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     checkAndShowGoalCelebration()
@@ -1034,7 +1081,13 @@ struct DashboardView: View {
                         print("[Dashboard] ✅ Updating fastest pace from backend → \(paceMinutesPerMile) min/mi")
                         userManager.updateFastestPaceFromBackend(paceMinutesPerMile)
                     }
+                    if let longest = stats.longestStreak {
+                        userManager.updateLongestStreakFromBackend(longest)
+                    }
                 }
+                // Warm the era history (hall of streaks, hero ghost target,
+                // comeback/record moments). Tolerant of failure; never blocks.
+                await StreakErasStore.shared.refreshIfStale()
             } catch {
                 print("[Dashboard] ⚠️ Failed to fetch stats from backend: \(error)")
             }

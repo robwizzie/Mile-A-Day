@@ -136,6 +136,12 @@ export const users = pgTable(
     role: varchar({ length: 20 }).default("user"),
     goalMiles: numeric("goal_miles").default("1.0").notNull(),
     currentStreak: integer("current_streak").default(0).notNull(),
+    // All-time longest streak. RATCHETED: only ever raised, via
+    // GREATEST(longest_streak, …) at the current_streak write sites
+    // (refreshCurrentStreak) and the streak-eras read path. Historical values
+    // are filled by db/backfillLongestStreaks.ts after boot; until it lands a
+    // row reads 0 and API responses degrade to max(0, current streak).
+    longestStreak: integer("longest_streak").default(0).notNull(),
     // One-time acceptance of the UGC terms / EULA, required before a user can
     // post photos (App Store Guideline 1.2). Null = not yet accepted.
     termsAcceptedAt: timestamp("terms_accepted_at", {
@@ -188,6 +194,12 @@ export const users = pgTable(
     index("idx_users_current_streak_desc").using(
       "btree",
       table.currentStreak.desc().nullsFirst(),
+    ),
+    // Built CONCURRENTLY by backfillLongestStreaks as its completion marker —
+    // stripped from the generated migration (0034), 0029 precedent.
+    index("idx_users_longest_streak_desc").using(
+      "btree",
+      table.longestStreak.desc().nullsFirst(),
     ),
     index("idx_users_email_trgm").using(
       "gin",

@@ -453,6 +453,7 @@ struct UserProfileDetailView: View {
                     ownerImageURL: user.profile_image_url
                 )
             }
+            HallOfStreaksSection(userId: user.user_id, isSelf: isCurrentUser())
             if !friendWorkouts.isEmpty {
                 VStack(spacing: MADTheme.Spacing.md) {
                     FriendWorkoutsSection(

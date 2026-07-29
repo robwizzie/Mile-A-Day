@@ -43,6 +43,7 @@ import {
   getMigrationReport,
 } from "./db/runMigrations.js";
 import { backfillFeedRoles } from "./db/backfillFeedRoles.js";
+import { backfillLongestStreaks } from "./db/backfillLongestStreaks.js";
 import {
   getUnifiedFeed,
   getStoriesRail,
@@ -356,6 +357,10 @@ runPendingMigrations()
       // migration (see backfillFeedRoles for why) and must not delay readiness.
       // Rows it hasn't reached yet read 'extra', i.e. the pre-feature feed.
       void backfillFeedRoles();
+      // Same contract: post-listen, not awaited, resumable. Fills
+      // users.longest_streak from workout history; rows it hasn't reached
+      // read 0, which every API surface degrades to max(0, current streak).
+      void backfillLongestStreaks();
     });
   });
 

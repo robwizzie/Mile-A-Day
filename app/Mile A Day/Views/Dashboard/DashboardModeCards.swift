@@ -414,6 +414,11 @@ private struct ModernHeroCard: View {
                 .frame(maxWidth: .infinity)
             }
 
+            RecordGhostRow(
+                streak: userManager.currentUser.streak,
+                longest: userManager.currentUser.longestStreak ?? 0
+            )
+
             DashboardMilestoneBar(streak: userManager.currentUser.streak, title: "Next milestone")
         }
         .padding(18)
@@ -556,6 +561,72 @@ private struct ModernHeroCard: View {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.095), lineWidth: 1)
             )
+    }
+}
+
+/// The longest-ever streak, rendered under the hero flame in one of two moods:
+/// a faint "ghost" target while the current run chases the record, or a gold
+/// LONGEST EVER chip while the user is living it (streak >= 7 so brand-new
+/// accounts don't get a record chip on day 1). Renders nothing when there's
+/// no meaningful record yet — both heroes share this row.
+private struct RecordGhostRow: View {
+    let streak: Int
+    let longest: Int
+
+    private var atRecord: Bool { longest > 0 && streak >= longest && streak >= 7 }
+    private var chasing: Bool { longest > streak && longest >= 3 }
+    private let gold = Color(red: 1.0, green: 0.78, blue: 0.25)
+
+    var body: some View {
+        if atRecord {
+            HStack(spacing: 6) {
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 11, weight: .black))
+                    .foregroundColor(gold)
+                Text("LONGEST EVER")
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .tracking(1.4)
+                    .foregroundColor(gold)
+                Text("\(streak) days and counting")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.72))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                Capsule()
+                    .fill(gold.opacity(0.12))
+                    .overlay(Capsule().strokeBorder(gold.opacity(0.35), lineWidth: 1))
+            )
+        } else if chasing {
+            HStack(spacing: 6) {
+                Image(systemName: "flame")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white.opacity(0.38))
+                Text("Best \(longest)")
+                    .font(.system(size: 11, weight: .heavy, design: .rounded))
+                    .foregroundColor(.white.opacity(0.45))
+                    .monospacedDigit()
+                Spacer(minLength: 0)
+                Text("\(longest - streak) to your record")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.34))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.05))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
+            )
+        }
     }
 }
 
@@ -1283,6 +1354,12 @@ private struct FlameBuddyHeroCard: View {
                 label: trustedDone ? "Safe" : "Left today",
                 tint: statusColor
             )
+
+            RecordGhostRow(
+                streak: userManager.currentUser.streak,
+                longest: userManager.currentUser.longestStreak ?? 0
+            )
+            .padding(.top, 10)
         }
     }
 

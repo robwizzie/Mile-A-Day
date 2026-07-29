@@ -108,6 +108,10 @@ struct ModernGoalCompletedCelebrationView: View {
                 }
             }
 
+            if let line = stats.comebackLine {
+                comebackRow(line)
+            }
+
             milestoneRow
 
             if tokensState.payload != nil {
@@ -141,6 +145,31 @@ struct ModernGoalCompletedCelebrationView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.white.opacity(0.055))
                 .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.white.opacity(0.085), lineWidth: 1))
+        )
+    }
+
+    /// Day-1 comeback framing — "96 days came before. Day 1 of the next run
+    /// starts now." Only present when today restarted a broken streak.
+    private func comebackRow(_ line: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.counterclockwise.circle.fill")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.orange)
+            Text(line)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.orange.opacity(0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.orange.opacity(0.25), lineWidth: 1)
+                )
         )
     }
 

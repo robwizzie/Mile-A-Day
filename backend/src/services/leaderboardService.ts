@@ -696,10 +696,12 @@ export async function refreshCurrentStreak(userId: string): Promise<number> {
   // the untouched legacy loop below, byte-identical to before.
   if (await coverageActiveFor(userId)) {
     const covered = await computeCoveredStreak(userId, userToday);
-    await db.query(`UPDATE users SET current_streak = $1 WHERE user_id = $2`, [
-      covered.streak,
-      userId,
-    ]);
+    await db.query(
+      `UPDATE users SET current_streak = $1,
+              longest_streak = GREATEST(longest_streak, $1)
+       WHERE user_id = $2`,
+      [covered.streak, userId],
+    );
     return covered.streak;
   }
 
@@ -738,11 +740,32 @@ export async function refreshCurrentStreak(userId: string): Promise<number> {
     }
   }
 
-  await db.query(`UPDATE users SET current_streak = $1 WHERE user_id = $2`, [
-    streak,
-    userId,
-  ]);
+  await db.query(
+    `UPDATE users SET current_streak = $1,
+            longest_streak = GREATEST(longest_streak, $1)
+     WHERE user_id = $2`,
+    [streak, userId],
+  );
   return streak;
+}
+
+/**
+ * Raise (never lower) users.longest_streak. Lives next to refreshCurrentStreak
+ * because this file owns the users streak columns; the streak-eras read path
+ * calls it fire-and-forget so a freshly computed record is never read back
+ * stale. GREATEST evaluates inside the UPDATE, so concurrent refreshes can't
+ * regress it.
+ */
+export async function ratchetLongestStreak(
+  userId: string,
+  candidate: number,
+): Promise<void> {
+  if (!Number.isFinite(candidate) || candidate <= 0) return;
+  await db.query(
+    `UPDATE users SET longest_streak = GREATEST(longest_streak, $1)
+     WHERE user_id = $2`,
+    [Math.floor(candidate), userId],
+  );
 }
 
 /**

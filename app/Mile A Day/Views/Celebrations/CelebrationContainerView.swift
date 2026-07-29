@@ -59,6 +59,17 @@ struct CelebrationContainerView: View {
 
         case .postRunPhotoPrompt(let workoutId, let workoutType):
             PostRunPhotoPromptView(workoutId: workoutId, workoutType: workoutType)
+
+        case .comeback(let day, let priorLength, let recordLength, let eraNumber, _):
+            ComebackCelebrationView(
+                day: day,
+                priorLength: priorLength,
+                recordLength: recordLength,
+                eraNumber: eraNumber
+            )
+
+        case .newRecordStreak(let days, let previousBest, _):
+            RecordStreakCelebrationView(days: days, previousBest: previousBest)
         }
     }
 }
