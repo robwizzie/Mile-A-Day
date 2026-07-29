@@ -1,89 +1,103 @@
-import Image from 'next/image'
-import Link from 'next/link'
-import type { Metadata } from 'next'
-import { notFound } from 'next/navigation'
-import { Flame, Apple } from 'lucide-react'
-import { Footer } from '@/components/footer'
+import Image from "next/image";
+import Link from "next/link";
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { Flame, Apple } from "lucide-react";
+import { Footer } from "@/components/footer";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://mad.mindgoblin.tech'
-const APP_STORE_URL = 'https://apps.apple.com/us/app/mile-a-day/id6746970905'
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "https://mad.mindgoblin.tech";
+const APP_STORE_URL = "https://apps.apple.com/us/app/mile-a-day/id6746970905";
 
 type PublicProfile = {
-  user_id: string
-  username: string | null
-  first_name: string | null
-  last_name: string | null
-  bio: string | null
-  profile_image_url: string | null
-  current_streak: number
-}
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  bio: string | null;
+  profile_image_url: string | null;
+  current_streak: number;
+};
 
 function displayName(profile: PublicProfile): string {
-  if (profile.first_name && profile.last_name) return `${profile.first_name} ${profile.last_name}`
-  if (profile.first_name) return profile.first_name
-  return profile.username ?? 'A runner'
+  if (profile.first_name && profile.last_name)
+    return `${profile.first_name} ${profile.last_name}`;
+  if (profile.first_name) return profile.first_name;
+  return profile.username ?? "A runner";
 }
 
 async function getProfile(username: string): Promise<PublicProfile | null> {
   try {
-    const res = await fetch(`${API_URL}/public/users/${encodeURIComponent(username)}`, {
-      next: { revalidate: 300 },
-    })
-    if (!res.ok) return null
-    return res.json()
+    const res = await fetch(
+      `${API_URL}/public/users/${encodeURIComponent(username)}`,
+      {
+        next: { revalidate: 300 },
+      },
+    );
+    if (!res.ok) return null;
+    return res.json();
   } catch {
-    return null
+    return null;
   }
 }
 
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ username: string }>
+  params: Promise<{ username: string }>;
 }): Promise<Metadata> {
-  const { username } = await params
-  const profile = await getProfile(username)
+  const { username } = await params;
+  const profile = await getProfile(username);
 
   if (!profile) {
-    return { title: 'Mile A Day' }
+    return { title: "Mile A Day" };
   }
 
-  const title = `@${profile.username} on Mile A Day`
+  const title = `@${profile.username} on Mile A Day`;
   const description = `${displayName(profile)} is building a daily mile habit${
-    profile.current_streak > 0 ? ` — ${profile.current_streak} day streak and counting` : ''
-  }. Add them on Mile A Day and keep each other moving.`
+    profile.current_streak > 0
+      ? ` — ${profile.current_streak} day streak and counting`
+      : ""
+  }. Add them on Mile A Day and keep each other moving.`;
 
   return {
     title,
     description,
-    openGraph: { title, description, type: 'profile', siteName: 'Mile A Day' },
-    twitter: { card: 'summary', title, description },
+    openGraph: { title, description, type: "profile", siteName: "Mile A Day" },
+    twitter: { card: "summary", title, description },
     // Smart App Banner: iOS Safari shows an "Open in app" banner, which is
     // the fallback path when the universal link opens in the browser.
-    itunes: { appId: '6746970905' },
-  }
+    // app-argument hands this exact profile to the app, so the banner's
+    // OPEN lands on the person instead of just launching the app.
+    itunes: {
+      appId: "6746970905",
+      appArgument: `https://mileaday.run/u/${profile.username}`,
+    },
+  };
 }
 
 export default async function ProfilePage({
   params,
 }: {
-  params: Promise<{ username: string }>
+  params: Promise<{ username: string }>;
 }) {
-  const { username } = await params
-  const profile = await getProfile(username)
+  const { username } = await params;
+  const profile = await getProfile(username);
 
   if (!profile) {
-    notFound()
+    notFound();
   }
 
-  const name = displayName(profile)
-  const imageSrc = profile.profile_image_url ? `${API_URL}${profile.profile_image_url}` : null
+  const name = displayName(profile);
+  const imageSrc = profile.profile_image_url
+    ? `${API_URL}${profile.profile_image_url}`
+    : null;
   const initials = name
-    .split(' ')
+    .split(" ")
     .map((part) => part[0])
     .slice(0, 2)
-    .join('')
-    .toUpperCase()
+    .join("")
+    .toUpperCase();
 
   return (
     <main className="relative min-h-screen overflow-x-hidden bg-[#0a0a0a]">
@@ -97,7 +111,9 @@ export default async function ProfilePage({
               height={44}
               className="rounded-full"
             />
-            <span className="font-heading text-[22px] tracking-[2px] text-[#f5f5f5]">MILE A DAY</span>
+            <span className="font-heading text-[22px] tracking-[2px] text-[#f5f5f5]">
+              MILE A DAY
+            </span>
           </Link>
           <Link
             href="/"
@@ -127,7 +143,9 @@ export default async function ProfilePage({
           <h1 className="mt-6 font-heading text-[36px] leading-none tracking-[0.5px] text-[#f5f5f5]">
             {name}
           </h1>
-          <p className="mt-1 text-[15px] font-medium text-[#a0a0a0]">@{profile.username}</p>
+          <p className="mt-1 text-[15px] font-medium text-[#a0a0a0]">
+            @{profile.username}
+          </p>
 
           {profile.current_streak > 0 && (
             <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#c72554]/15 px-4 py-2">
@@ -139,12 +157,14 @@ export default async function ProfilePage({
           )}
 
           {profile.bio && (
-            <p className="mt-5 text-[15px] leading-relaxed text-[#a0a0a0]">{profile.bio}</p>
+            <p className="mt-5 text-[15px] leading-relaxed text-[#a0a0a0]">
+              {profile.bio}
+            </p>
           )}
 
           <div className="mt-9 space-y-3">
             <a
-              href={`mileaday://u/${encodeURIComponent(profile.username ?? '')}`}
+              href={`mileaday://u/${encodeURIComponent(profile.username ?? "")}`}
               className="glass-button flex w-full items-center justify-center gap-2 rounded-2xl bg-[#c72554] px-6 py-4 text-[16px] font-semibold text-white transition-transform hover:scale-[1.02]"
             >
               Open in Mile A Day
@@ -157,9 +177,9 @@ export default async function ProfilePage({
               Get the app on the App Store
             </a>
             <p className="text-[13px] text-[#a0a0a0]/70">
-              Have the app? &ldquo;Open in Mile A Day&rdquo; jumps straight to{' '}
-              {profile.first_name ? `${profile.first_name}’s` : 'their'} profile with an Add
-              Friend button.
+              Have the app? &ldquo;Open in Mile A Day&rdquo; jumps straight to{" "}
+              {profile.first_name ? `${profile.first_name}’s` : "their"} profile
+              with an Add Friend button.
             </p>
           </div>
         </div>
@@ -167,5 +187,5 @@ export default async function ProfilePage({
 
       <Footer />
     </main>
-  )
+  );
 }

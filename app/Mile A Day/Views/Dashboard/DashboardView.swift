@@ -534,7 +534,10 @@ struct DashboardView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .navigationDestination(isPresented: $showNotificationInbox) {
-            NotificationInboxView(competitionService: competitionService) { newCount in
+            NotificationInboxView(
+                competitionService: competitionService,
+                friendService: friendService
+            ) { newCount in
                 unreadNotificationCount = newCount
             }
         }

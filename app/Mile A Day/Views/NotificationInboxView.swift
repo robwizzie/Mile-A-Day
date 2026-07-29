@@ -1,7 +1,13 @@
 import SwiftUI
+import UIKit
 
 struct NotificationInboxView: View {
     @ObservedObject var competitionService: CompetitionService
+    /// The app-wide FriendService (MainTabView's instance) — inline request
+    /// accepts must mutate the SAME instance the Friends tab badge and
+    /// requests sheet read, or an accepted request keeps showing as pending
+    /// everywhere else until the next full refresh.
+    @ObservedObject var friendService: FriendService
     var onUnreadCountChanged: ((Int) -> Void)?
 
     /// Rows that open a post close the inbox first — the post presents from
@@ -9,17 +15,19 @@ struct NotificationInboxView: View {
     /// drop the presentation or bury it.
     @Environment(\.dismiss) private var dismiss
 
-    @StateObject private var friendService = FriendService()
     @State private var notifications: [InAppNotification] = []
     @State private var unreadCount = 0
     @State private var isLoading = true
     @State private var hasMore = true
     @State private var selectedCompetition: Competition?
     @State private var hypedRowIds: Set<String> = []
-    @State private var hypeToast: String?
+    @State private var toast: String?
     @State private var hypesRemaining: Int?
     /// Admin/founder roles bypass the daily hype cap — pill shows ∞.
     @State private var hypesUnlimited = false
+    /// Friend requests accepted inline this visit — keeps the row's "Friends ✓"
+    /// confirmation up after the request leaves `friendService.friendRequests`.
+    @State private var acceptedRequestIds: Set<String> = []
 
     /// Active category filter. `all` shows everything; the others narrow
     /// the feed to a related cluster of notification types so users can
@@ -54,7 +62,12 @@ struct NotificationInboxView: View {
             case .all:
                 return true
             case .friends:
+                // Streak rescues are friend activity too — without these two
+                // they'd only ever surface under All (nothing else matches
+                // the streak_ prefix).
                 return type.hasPrefix("friend_")
+                    || type == "streak_assist_opportunity"
+                    || type == "streak_assisted"
             case .comps:
                 return type.hasPrefix("competition_") || type == "lead_change" || type == "clash_tie"
             case .achievements:
@@ -88,6 +101,9 @@ struct NotificationInboxView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task {
             await loadNotifications()
+            // Refresh pending requests so friend_request rows can offer the
+            // inline Accept — usually already warm from MainTabView's refresh.
+            try? await friendService.loadFriendRequests()
         }
         .refreshable {
             // Pull-to-refresh also settles the unread state in place, so the
@@ -103,7 +119,7 @@ struct NotificationInboxView: View {
             }
         }
         .overlay(alignment: .top) {
-            if let msg = hypeToast {
+            if let msg = toast {
                 Text(msg)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundColor(.white)
@@ -114,7 +130,7 @@ struct NotificationInboxView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(.spring(response: 0.3), value: hypeToast)
+        .animation(.spring(response: 0.3), value: toast)
     }
 
     // MARK: - Feed shell
@@ -338,11 +354,11 @@ struct NotificationInboxView: View {
         }
     }
 
-    private func showHypeToast(_ message: String) {
-        hypeToast = message
+    private func showToast(_ message: String) {
+        toast = message
         Task {
             try? await Task.sleep(nanoseconds: 2_500_000_000)
-            await MainActor.run { hypeToast = nil }
+            await MainActor.run { toast = nil }
         }
     }
 
@@ -493,7 +509,7 @@ struct NotificationInboxView: View {
                 await MainActor.run {
                     hypedRowIds.remove(notification.id)
                     hypesRemaining = 0
-                    showHypeToast(msg.isEmpty ? "You're out of hypes today" : msg)
+                    showToast(msg.isEmpty ? "You're out of hypes today" : msg)
                 }
             } catch APIError.badRequest(let msg) {
                 // Older backend that doesn't accept context fields will reject — fall back
@@ -503,13 +519,13 @@ struct NotificationInboxView: View {
                 } else {
                     await MainActor.run {
                         hypedRowIds.remove(notification.id)
-                        showHypeToast(msg)
+                        showToast(msg)
                     }
                 }
             } catch {
                 await MainActor.run {
                     hypedRowIds.remove(notification.id)
-                    showHypeToast("Couldn't send hype")
+                    showToast("Couldn't send hype")
                 }
             }
         }
@@ -527,17 +543,35 @@ struct NotificationInboxView: View {
             await MainActor.run {
                 hypedRowIds.remove(notification.id)
                 hypesRemaining = 0
-                showHypeToast(msg.isEmpty ? "You're out of hypes today" : msg)
+                showToast(msg.isEmpty ? "You're out of hypes today" : msg)
             }
         } catch {
             await MainActor.run {
                 hypedRowIds.remove(notification.id)
-                showHypeToast("Couldn't send hype")
+                showToast("Couldn't send hype")
             }
         }
     }
 
     // MARK: - Notification Row
+
+    private func switchTab(_ tab: Int) {
+        NotificationCenter.default.post(
+            name: NSNotification.Name("MAD_SwitchTab"),
+            object: nil,
+            userInfo: ["tab": tab]
+        )
+    }
+
+    /// Lands on the actor's profile — parked on DeepLinkRouter for
+    /// FriendsListView to resolve and present (it may not be mounted yet).
+    /// Falls back to the Friends tab when the username is unknown.
+    private func openActorProfileOrFriends(_ notification: InAppNotification) {
+        if let username = notification.actor?.username, !username.isEmpty {
+            DeepLinkRouter.shared.pendingProfileUsername = username.lowercased()
+        }
+        switchTab(3)
+    }
 
     private func handleNotificationTap(_ notification: InAppNotification) {
         if !notification.is_read {
@@ -560,22 +594,14 @@ struct NotificationInboxView: View {
                 userId: notification.data?["user_id"],
                 storyUserId: kind == "story" ? notification.data?["user_id"] : nil
             )
-            NotificationCenter.default.post(
-                name: NSNotification.Name("MAD_SwitchTab"),
-                object: nil,
-                userInfo: ["tab": 2]
-            )
+            switchTab(2)
             NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
         case "story_reaction":
             // Someone reacted to MY story — replay my own story.
             FeedDeepLink.pending = FeedDeepLink.Target(
                 storyUserId: UserDefaults.standard.string(forKey: "backendUserId")
             )
-            NotificationCenter.default.post(
-                name: NSNotification.Name("MAD_SwitchTab"),
-                object: nil,
-                userInfo: ["tab": 2]
-            )
+            switchTab(2)
             NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
         case "coauthor_invite", "coauthor_accepted", "mention", "post_comment":
             // Collab invites/accepts, @mentions, and comment activity all live
@@ -593,61 +619,73 @@ struct NotificationInboxView: View {
                 workoutId: notification.data?["workout_id"],
                 userId: notification.data?["user_id"]
             )
-            NotificationCenter.default.post(
-                name: NSNotification.Name("MAD_SwitchTab"),
-                object: nil,
-                userInfo: ["tab": 2]
-            )
+            switchTab(2)
             NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
+        case "hype_received":
+            // A hype on a post opens the post itself — newer rows carry the
+            // post uuid in context_id, and the server-resolved preview covers
+            // rows where the post is still visible. Mile/badge/PR hypes have
+            // no permalink; the hyped thing lives on the feed.
+            let postId = notification.post_preview?.post_id
+                ?? (notification.data?["context_type"] == "post" ? notification.data?["context_id"] : nil)
+            if let postId, !postId.isEmpty {
+                dismiss()
+                PostDeepLink.shared.openAfterDismiss(postId)
+                return
+            }
+            switchTab(2)
         case "friend_activity" where isWorkoutActivity(notification):
-            // A friend's completed walk/run/mile lives on the FEED — land on
-            // its entry, not the Friends list. The target is parked statically
-            // because the Feed tab may not be mounted yet; the poke wakes it
-            // when it is.
+            // A merged mile+photo push (upgraded in the 10-min window) carries
+            // a post id — open that post DIRECTLY, same as mention/comment
+            // rows (scrolling the feed to it only works while the post is
+            // still on the loaded page, which an inbox row read later isn't).
+            if let postId = notification.data?["post_id"], !postId.isEmpty {
+                dismiss()
+                PostDeepLink.shared.openAfterDismiss(postId)
+                return
+            }
+            // A raw walk/run has no permalink — its feed entry is the target.
+            // Parked statically because the Feed tab may not be mounted yet;
+            // the poke wakes it when it is.
             FeedDeepLink.pending = FeedDeepLink.Target(
                 workoutId: notification.data?["workout_id"],
                 userId: notification.data?["user_id"],
-                localDate: notification.data?["local_date"],
-                // A merged mile+photo push (upgraded in the 10-min window)
-                // carries the post id — the most precise landing target.
-                postId: notification.data?["post_id"]
+                localDate: notification.data?["local_date"]
             )
-            NotificationCenter.default.post(
-                name: NSNotification.Name("MAD_SwitchTab"),
-                object: nil,
-                userInfo: ["tab": 2]
-            )
+            switchTab(2)
             NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
         case "friend_request", "friend_request_reminder":
             // Ask the Friends tab to open the requests sheet. Switching tabs
             // alone dropped the user on the friends list with the sheet closed
             // and no hint where the request went — the row looked broken.
             DeepLinkRouter.shared.requestOpenFriendRequests()
-            NotificationCenter.default.post(
-                name: NSNotification.Name("MAD_SwitchTab"),
-                object: nil,
-                userInfo: ["tab": 3]
+            switchTab(3)
+        case "friend_request_accepted", "friend_activity":
+            // A new friendship / a friend's streak news — land on the person,
+            // not just the friends list.
+            openActorProfileOrFriends(notification)
+        case "friend_nudge":
+            switchTab(3)
+        case "friend_badge_earned", "friend_challenge_completed":
+            // The medal case / their challenge run lives on their profile.
+            openActorProfileOrFriends(notification)
+        case "friend_personal_best":
+            // The PR is a concrete workout — land on its feed entry.
+            FeedDeepLink.pending = FeedDeepLink.Target(
+                workoutId: notification.data?["workout_id"],
+                userId: notification.data?["sender_id"]
             )
-        case "friend_request_accepted", "friend_nudge", "friend_activity":
-            // No sheet to open — these are about an existing friendship.
-            NotificationCenter.default.post(
-                name: NSNotification.Name("MAD_SwitchTab"),
-                object: nil,
-                userInfo: ["tab": 3]
-            )
+            switchTab(2)
+            NotificationCenter.default.post(name: FeedDeepLink.poke, object: nil)
         case "competition_invite", "competition_accepted", "competition_started",
-             "competition_finished", "competition_nudge", "competition_flex",
-             "competition_milestone", "lead_change", "clash_tie":
+             "competition_finished", "competition_updates", "competition_nudge",
+             "competition_flex", "competition_milestone", "lead_change", "clash_tie":
             // A Head-to-Head lead change reuses `lead_change` (every shipped
             // build routes it; a new type would tap to nothing on all of
             // them). It has no competition, so send it to the Dashboard where
             // the duel card lives rather than the Compete tab.
             if notification.data?["challenge_key"] == "head_to_head" {
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("MAD_SwitchTab"),
-                    object: nil,
-                    userInfo: ["tab": 0]
-                )
+                switchTab(0)
                 return
             }
             if let compId = notification.data?["competition_id"],
@@ -655,20 +693,27 @@ struct NotificationInboxView: View {
                        ?? competitionService.invites.first(where: { $0.competition_id == compId }) {
                 selectedCompetition = comp
             } else {
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("MAD_SwitchTab"),
-                    object: nil,
-                    userInfo: ["tab": 1]
-                )
+                switchTab(1)
             }
-        case "personal_best":
-            NotificationCenter.default.post(
-                name: NSNotification.Name("MAD_SwitchTab"),
-                object: nil,
-                userInfo: ["tab": 4]
-            )
+        case "challenge_won":
+            // The overnight Head-to-Head verdict — the duel card lives on the
+            // Dashboard.
+            switchTab(0)
+        case "badge_earned", "personal_best":
+            // Your own award — the trophy case is on your profile.
+            switchTab(4)
+        case "streak_assist_opportunity":
+            // The push copy says "save it from their profile" — land on the
+            // broken friend's profile, where SaveFriendStreakView fetches a
+            // fresh rescue status. (The Friends-tab row button also works but
+            // depends on a tokensState refresh that a tab switch alone
+            // doesn't guarantee.) Legacy rows without an actor fall back to
+            // the Friends tab.
+            openActorProfileOrFriends(notification)
         default:
-            break
+            // Streak token outcomes, reminders, recaps, and any future type:
+            // land on the Dashboard rather than dead-ending the tap.
+            switchTab(0)
         }
     }
 
@@ -689,23 +734,7 @@ struct NotificationInboxView: View {
             handleNotificationTap(notification)
         } label: {
             HStack(alignment: .top, spacing: MADTheme.Spacing.md) {
-                // Larger type icon with colored gradient disc — reads as a
-                // "feed event avatar" rather than a small system glyph.
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [accent.opacity(0.30), accent.opacity(0.12)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 44, height: 44)
-                        .overlay(Circle().strokeBorder(accent.opacity(0.35), lineWidth: 1))
-                    notificationIcon(for: notification.type)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(accent)
-                }
+                leadingIdentity(for: notification, accent: accent)
 
                 VStack(alignment: .leading, spacing: 4) {
                     // Type label + time — small caption row that makes
@@ -723,16 +752,18 @@ struct NotificationInboxView: View {
                             .foregroundColor(.white.opacity(0.45))
                     }
 
-                    Text(notification.title)
+                    Text(emphasized(notification.title, name: notification.actor?.displayName))
                         .font(.system(size: 14, weight: isUnread ? .heavy : .semibold, design: .rounded))
                         .foregroundColor(.white)
                         .multilineTextAlignment(.leading)
 
-                    Text(notification.body)
+                    Text(emphasized(notification.body, name: notification.actor?.displayName))
                         .font(.system(size: 12, weight: .medium, design: .rounded))
                         .foregroundColor(.white.opacity(0.6))
                         .lineLimit(3)
                         .multilineTextAlignment(.leading)
+
+                    friendRequestActions(notification)
 
                     if canShowHypeButton(notification) {
                         let hyped = isAlreadyHyped(notification)
@@ -753,6 +784,13 @@ struct NotificationInboxView: View {
                 }
 
                 Spacer(minLength: 4)
+
+                // Instagram-style trailing thumbnail of the post the row is
+                // about — instantly answers "which post?" and reinforces that
+                // tapping lands on it.
+                if let thumbURL = thumbnailURL(for: notification) {
+                    NotificationPostThumb(url: thumbURL)
+                }
 
                 if isUnread {
                     Circle()
@@ -783,6 +821,129 @@ struct NotificationInboxView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    /// Row identity, Instagram-style: WHO it's about (their avatar) with a
+    /// small type badge for the "what kind of event" color signal the old
+    /// icon disc carried. Rows with no actor — reminders, competition
+    /// lifecycle, streak tokens — keep the type-icon disc.
+    @ViewBuilder
+    private func leadingIdentity(for notification: InAppNotification, accent: Color) -> some View {
+        if let actor = notification.actor {
+            AvatarView(name: actor.initialsName, imageURL: actor.profile_image_url, size: 44)
+                // Badge lives INSIDE the 44pt bounds (overlay alignment, no
+                // .offset) so the row measures exactly what it draws.
+                .overlay(alignment: .bottomTrailing) {
+                    ZStack {
+                        Circle()
+                            .fill(accent)
+                            .frame(width: 17, height: 17)
+                            .overlay(Circle().strokeBorder(Color.black.opacity(0.6), lineWidth: 1.5))
+                        notificationIcon(for: notification.type)
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
+        } else {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.30), accent.opacity(0.12)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 44, height: 44)
+                    .overlay(Circle().strokeBorder(accent.opacity(0.35), lineWidth: 1))
+                notificationIcon(for: notification.type)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(accent)
+            }
+        }
+    }
+
+    /// Bolds the actor's name inside the server-baked copy ("dave hyped your
+    /// post" → "**dave** hyped your post") — Instagram's pattern, without
+    /// changing any server strings. No-op when the name isn't in the text.
+    private func emphasized(_ text: String, name: String?) -> AttributedString {
+        var attributed = AttributedString(text)
+        if let name, !name.isEmpty,
+           let range = attributed.range(of: name, options: [.caseInsensitive]) {
+            attributed[range].inlinePresentationIntent = .stronglyEmphasized
+            attributed[range].foregroundColor = .white
+        }
+        return attributed
+    }
+
+    /// Trailing post thumbnail — the server only sends `post_preview` for
+    /// posts this viewer may still see (feed visibility rules), signed the
+    /// same way feed media is.
+    private func thumbnailURL(for notification: InAppNotification) -> URL? {
+        guard let media = notification.post_preview?.media_url, !media.isEmpty else { return nil }
+        return ProfileImageService.fullImageURL(for: media)
+    }
+
+    /// Inline Accept for a still-pending friend request — Instagram's "Follow
+    /// back" pattern. The row tap keeps opening the requests sheet (where
+    /// decline lives); this is the fast path. Nothing renders once the
+    /// request is no longer pending, except the "Friends ✓" confirmation for
+    /// accepts made right here.
+    @ViewBuilder
+    private func friendRequestActions(_ notification: InAppNotification) -> some View {
+        if notification.type == "friend_request" || notification.type == "friend_request_reminder",
+           let actor = notification.actor {
+            if acceptedRequestIds.contains(actor.user_id) {
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .heavy))
+                    Text("Friends")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                }
+                .foregroundColor(.green)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(Color.green.opacity(0.15)))
+                .padding(.top, 4)
+            } else if friendService.friendRequests.contains(where: { $0.user_id == actor.user_id }) {
+                Button {
+                    acceptRequest(notification)
+                } label: {
+                    Text("Accept")
+                        .font(.system(size: 12, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(MADTheme.Colors.madRed))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    private func acceptRequest(_ notification: InAppNotification) {
+        guard
+            let actor = notification.actor,
+            let requester = friendService.friendRequests.first(where: { $0.user_id == actor.user_id })
+        else { return }
+
+        // Optimistic — flip to "Friends ✓" immediately; roll back on failure.
+        acceptedRequestIds.insert(actor.user_id)
+
+        Task {
+            do {
+                try await friendService.acceptFriendRequest(from: requester)
+                await MainActor.run {
+                    showToast("You're now friends with \(actor.displayName) 🎉")
+                }
+            } catch {
+                await MainActor.run {
+                    acceptedRequestIds.remove(actor.user_id)
+                    showToast("Couldn't accept the request — try again")
+                }
+            }
+        }
     }
 
     /// Friendly category label paired with each row's icon. Matches the
@@ -817,11 +978,10 @@ struct NotificationInboxView: View {
 
     // MARK: - Helpers
 
-    private func notificationIcon(for type: String) -> some View {
-        let (icon, color) = iconForType(type)
-        return Image(systemName: icon)
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundColor(color)
+    /// Bare glyph for the type — callers pick size/color (big disc vs the
+    /// small avatar badge).
+    private func notificationIcon(for type: String) -> Image {
+        Image(systemName: iconForType(type).0)
     }
 
     private func iconForType(_ type: String) -> (String, Color) {
@@ -957,14 +1117,78 @@ struct NotificationInboxView: View {
             is_hyped: n.is_hyped,
             // Dropping this defaulted the tally to nil — marking an unread
             // hypeable row read wiped its displayed count until next reload.
-            hype_count: n.hype_count
+            hype_count: n.hype_count,
+            // Same trap as hype_count: these default to nil in the memberwise
+            // init, and dropping them would strip the avatar + thumbnail off
+            // a row the moment it was marked read.
+            actor: n.actor,
+            post_preview: n.post_preview
         )
     }
 
 }
 
+/// Small trailing thumbnail of the post a notification is about. Uses the
+/// feed's image cache (keyed by URL path) so a photo already seen in the feed
+/// never re-downloads here — and signed-URL query rotation doesn't bust it.
+private struct NotificationPostThumb: View {
+    let url: URL
+
+    @State private var image: UIImage?
+    @State private var failed = false
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Color.white.opacity(0.06)
+                if failed {
+                    Image(systemName: "photo")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.3))
+                }
+            }
+        }
+        .frame(width: 48, height: 48)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+        )
+        .task(id: url) { await load() }
+    }
+
+    private func load() async {
+        if let cached = FeedImageCache.image(for: url) {
+            image = cached
+            return
+        }
+        // Recycled row with a new url: drop the previous photo instead of
+        // showing someone else's post while the right one downloads.
+        image = nil
+        failed = false
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            guard let loaded = UIImage(data: data) else {
+                failed = true
+                return
+            }
+            FeedImageCache.store(loaded, for: url)
+            image = loaded
+        } catch {
+            failed = true
+        }
+    }
+}
+
 #Preview {
     NavigationStack {
-        NotificationInboxView(competitionService: CompetitionService())
+        NotificationInboxView(
+            competitionService: CompetitionService(),
+            friendService: FriendService()
+        )
     }
 }

@@ -24,6 +24,7 @@ type ReminderCandidate = {
   user_id: string;
   pending_count: string;
   requester_name: string | null;
+  requester_id: string | null;
 };
 
 /**
@@ -60,7 +61,8 @@ export async function sendPendingFriendRequestReminders(): Promise<void> {
   const candidates = await db.query<ReminderCandidate>(
     `SELECT f.friend_id AS user_id,
 			COUNT(*)::text AS pending_count,
-			MIN(u.username) AS requester_name
+			MIN(u.username) AS requester_name,
+			MIN(f.user_id) AS requester_id
 		FROM friendships f
 		JOIN users u ON u.user_id = f.user_id
 		LEFT JOIN notification_settings ns ON ns.user_id = f.friend_id
@@ -102,16 +104,23 @@ export async function sendPendingFriendRequestReminders(): Promise<void> {
     if (count === 0) continue;
 
     const name = candidate.requester_name;
-    const body =
-      count === 1 && name
-        ? `${name} is waiting to be your friend`
-        : `${count} people are waiting to be your friend`;
+    const single = count === 1 && !!name;
+    const body = single
+      ? `${name} is waiting to be your friend`
+      : `${count} people are waiting to be your friend`;
 
     try {
       await sendPush(candidate.user_id, {
         title: "Still waiting on you",
         body,
         type: "friend_request_reminder",
+        // Single-requester reminders name a person, so carry their id — the
+        // inbox row then shows their avatar and can offer inline Accept.
+        // Coalesced multi-request reminders are about several people; MIN()
+        // could name one and id another, so they stay actor-less.
+        ...(single && candidate.requester_id
+          ? { data: { user_id: candidate.requester_id } }
+          : {}),
       });
     } catch (err: any) {
       // The claim already landed, so a delivery failure costs this user one

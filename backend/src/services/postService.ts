@@ -1811,22 +1811,11 @@ export interface VisiblePostAuthors {
 }
 
 /**
- * The post's authors IF the viewer may see the post: viewer is one of the two
- * authors or an accepted friend of one of them, the post is live on the feed,
- * and no block exists in either direction. Null when not visible — callers map
- * that to 404 so post existence isn't leaked. Shared by comments, mentions and
- * hypes, so all three agree on who can touch a collab post.
+ * Guard tail shared by visiblePostAuthors (single) and visiblePostPreviews
+ * (batch) — ONE copy so direct access and inbox previews can't drift. `$1`
+ * is the viewer; the post predicate (`p.post_id = ...`) is the caller's.
  */
-export async function visiblePostAuthors(
-  viewerId: string,
-  postId: string,
-): Promise<VisiblePostAuthors | null> {
-  const rows = await db.query<VisiblePostAuthors>(
-    `SELECT p.user_id AS author_id,
-				CASE WHEN ${COLLAB_ACTIVE} THEN p.coauthor_user_id END
-					AS coauthor_user_id
-		 FROM posts p
-		 WHERE p.post_id = $2 AND p.deleted_at IS NULL AND p.share_to_feed
+const DIRECT_POST_ACCESS_SQL = `p.deleted_at IS NULL AND p.share_to_feed
 			 AND ${AUTHOR_VISIBLE_TO_VIEWER}
 			 AND (p.user_id = $1
 				 OR p.coauthor_user_id = $1
@@ -1848,10 +1837,52 @@ export async function visiblePostAuthors(
 							(b.blocker_id = $1 AND b.blocked_id = p.coauthor_user_id)
 							OR (b.blocker_id = p.coauthor_user_id AND b.blocked_id = $1)
 						))
-			 )`,
+			 )`;
+
+/**
+ * The post's authors IF the viewer may see the post: viewer is one of the two
+ * authors or an accepted friend of one of them, the post is live on the feed,
+ * and no block exists in either direction. Null when not visible — callers map
+ * that to 404 so post existence isn't leaked. Shared by comments, mentions and
+ * hypes, so all three agree on who can touch a collab post.
+ */
+export async function visiblePostAuthors(
+  viewerId: string,
+  postId: string,
+): Promise<VisiblePostAuthors | null> {
+  const rows = await db.query<VisiblePostAuthors>(
+    `SELECT p.user_id AS author_id,
+				CASE WHEN ${COLLAB_ACTIVE} THEN p.coauthor_user_id END
+					AS coauthor_user_id
+		 FROM posts p
+		 WHERE p.post_id = $2 AND ${DIRECT_POST_ACCESS_SQL}`,
     [viewerId, postId],
   );
   return rows[0] ?? null;
+}
+
+const POST_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Batch: the subset of `postIds` the viewer may see (same guards as
+ * visiblePostAuthors) with each post's media path — feeds the notification
+ * inbox's per-row post thumbnails. Non-uuid strings are filtered out here
+ * (the ANY cast would 500 on garbage), so ids straight from untrusted push
+ * payload data are safe to pass. Sign media urls before responding.
+ */
+export async function visiblePostPreviews(
+  viewerId: string,
+  postIds: string[],
+): Promise<Array<{ post_id: string; media_url: string }>> {
+  const ids = postIds.filter((id) => POST_UUID_RE.test(id));
+  if (ids.length === 0) return [];
+  return db.query<{ post_id: string; media_url: string }>(
+    `SELECT p.post_id, p.media_url
+		 FROM posts p
+		 WHERE p.post_id = ANY($2::uuid[]) AND ${DIRECT_POST_ACCESS_SQL}`,
+    [viewerId, ids],
+  );
 }
 
 /** The post's PRIMARY author if the viewer may see it — see visiblePostAuthors. */

@@ -1006,6 +1006,41 @@ struct FriendNotificationSettingsResponse: Codable {
 
 // MARK: - In-App Notification Models
 
+/// The user a notification is about — server-resolved from the row's payload.
+/// Drives the row's avatar and bold-name treatment (Instagram-style).
+struct NotificationActor: Codable {
+    let user_id: String
+    let username: String?
+    let first_name: String?
+    let last_name: String?
+    let profile_image_url: String?
+
+    /// Name shown/bolded in row copy — matches the server's push copy, which
+    /// leads with the username.
+    var displayName: String {
+        if let username, !username.isEmpty { return username }
+        if let first = first_name, !first.isEmpty { return first }
+        return "Someone"
+    }
+
+    /// Fuller name for avatar initials (first+last → two letters).
+    var initialsName: String {
+        let full = [first_name, last_name]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return full.isEmpty ? displayName : full
+    }
+}
+
+/// The post a notification is about, when the viewer may still see it —
+/// server-authorized with the same circle+block rules as the feed. Feeds the
+/// row's trailing thumbnail; `post_id` is the row's direct tap target.
+struct NotificationPostPreview: Codable {
+    let post_id: String
+    let media_url: String?
+}
+
 struct InAppNotification: Codable, Identifiable {
     let id: String
     let title: String
@@ -1026,6 +1061,11 @@ struct InAppNotification: Codable, Identifiable {
     /// SAME canonical context keys as the feed so both surfaces agree.
     /// Absent on older backends / non-hypeable rows.
     var hype_count: Int?
+
+    // Instagram-style row furniture — absent on older backends and on rows
+    // with no actor/post, where the type-icon rendering remains.
+    var actor: NotificationActor?
+    var post_preview: NotificationPostPreview?
 }
 
 struct InAppNotificationResponse: Codable {
