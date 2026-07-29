@@ -242,7 +242,11 @@ struct FeedEntry: Codable, Identifiable {
         case entryId = "id"
         case sort_ts, user_id, username, first_name, last_name, profile_image_url
         case media_url, caption, stats_snapshot, story_photo_url, is_auto
-        case workout_id, workout_type, distance, total_duration, calories, steps, route
+        // With an explicit CodingKeys enum, EVERY stored property must be
+        // listed (or defaulted) — a new field left out kills Codable
+        // synthesis for the whole struct (Xcode Cloud build 413).
+        case workout_id, workout_type, feed_role, distance, total_duration
+        case moving_seconds, calories, steps, route
         case segment_count, segments
         case is_self, is_hyped, hype_count, comment_count, photo_locked, is_fresh
         case coauthor_user_id, coauthor_status, coauthor_username

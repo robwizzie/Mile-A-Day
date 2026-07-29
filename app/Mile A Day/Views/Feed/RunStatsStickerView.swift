@@ -400,12 +400,11 @@ struct PostStatStrip: View {
         }
         if let d = stats.distance, d > 0 {
             let miles = String(format: "%.2f", d)
-            switch feedRole {
-            case "extra":
+            if feedRole == "extra" {
                 out.append(Item(icon: "plus.circle.fill", text: "+\(miles) mi extra", tint: .green))
-            case "daily_mile":
+            } else if feedRole == "daily_mile" {
                 out.append(Item(icon: "checkmark.circle.fill", text: "\(miles) mi · goal", tint: .green))
-            default:
+            } else {
                 out.append(Item(icon: "figure.run", text: "\(miles) mi", tint: .white.opacity(0.85)))
             }
         }
