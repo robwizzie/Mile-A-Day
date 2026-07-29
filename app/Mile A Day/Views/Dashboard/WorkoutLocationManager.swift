@@ -20,8 +20,21 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// dashboard deallocated it and silently stopped GPS/pedometer mid-workout.
     static let shared = WorkoutLocationManager()
 
+    /// HKWorkout metadata key carrying the tracker's moving time (seconds).
+    /// Written at save, read back by the sync (display pace divides by it) —
+    /// Watch/third-party workouts simply don't have it.
+    static let movingSecondsMetadataKey = "MAD_moving_seconds"
+
     private let locationManager = CLLocationManager()
     private let pedometer = CMPedometer()
+    /// Motion-classifier second witness: catches a walk left tracking in a
+    /// car, which SPEED can't (25 mph city driving implies ~11 m/s — under
+    /// the on-foot teleport cap, with perfectly valid doppler).
+    private let activityClassifier = CMMotionActivityManager()
+    /// Latest classifier verdict at medium+ confidence. While true, nothing
+    /// accrues and no route points are kept. Fail-open: stays false whenever
+    /// the classifier is unavailable or silent.
+    private var isConfidentlyAutomotive = false
     /// Anchor fix for distance accrual. Deliberately NOT advanced on sub-noise
     /// displacements — see accrueDistance.
     private var lastLocation: CLLocation?
@@ -63,6 +76,18 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// phone sitting through a ballgame drifts with NO doppler — this is what
     /// lets reconciliation tell those apart.
     private(set) var dopplerMovingMiles: Double = 0
+    /// Seconds of witnessed movement this session — the DISPLAY-pace divisor
+    /// (elapsed time stays the truth for records; a race clock doesn't
+    /// pause). Sum of accepted segments' dt, capped per segment so a red
+    /// light waited out at a held anchor doesn't ride in on the resume fix.
+    private(set) var movingSeconds: TimeInterval = 0
+    /// When distance last accrued — drives the visible auto-pause state.
+    private var lastAccrualAt: Date?
+    /// True while tracking outdoors with nothing accruing for 45s (standing,
+    /// sitting, riding). The longest legit gap while walking is ~21s (a 30m
+    /// bad-signal floor at 1.4 m/s), so this can't false-positive mid-walk —
+    /// and the next counted segment clears it immediately.
+    @Published private(set) var isAutoPaused = false
     /// Distance carried into this session by a recovery (miles). The pedometer
     /// cross-check starts at resume time, so reconciliation only compares the
     /// span BOTH instruments actually measured.
@@ -118,6 +143,10 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         pedometerErrored = false
         trackingStartedAt = Date()
         dopplerMovingMiles = 0
+        movingSeconds = 0
+        lastAccrualAt = nil
+        isAutoPaused = false
+        isConfidentlyAutomotive = false
         lastLocation = nil
         lastRoutePoint = nil
         isUsingPedometer = (locationType == .indoor)
@@ -152,6 +181,19 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         } else {
             startGPSTracking()
             startOutdoorPedometerCrossCheck()
+            startActivityClassifier()
+        }
+    }
+
+    /// Movement-type second witness for outdoor sessions. Uses the same
+    /// Motion & Fitness permission the pedometer already holds; when the
+    /// classifier can't run (old hardware, denied), nothing arrives and the
+    /// automotive gate simply never engages.
+    private func startActivityClassifier() {
+        guard CMMotionActivityManager.isActivityAvailable() else { return }
+        activityClassifier.startActivityUpdates(to: .main) { [weak self] activity in
+            guard let self, let activity else { return }
+            self.isConfidentlyAutomotive = activity.automotive && activity.confidence != .low
         }
     }
 
@@ -214,11 +256,13 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // Pedometer runs in BOTH modes now (distance source indoors, cross-
         // check odometer outdoors) — always stop it.
         pedometer.stopUpdates()
+        activityClassifier.stopActivityUpdates()
         // Location runs in both modes (distance source for GPS, keep-alive
         // for pedometer) — always stop it.
         locationManager.stopUpdatingLocation()
         lastLocation = nil
         lastRoutePoint = nil
+        isAutoPaused = false
     }
 
     /// The distance a finished workout should SAVE (miles). Raw GPS sums
@@ -302,6 +346,19 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
                 lastRoutePoint = newLocation
             }
         }
+
+        refreshAutoPauseState()
+    }
+
+    /// Visible movement-gate state — never flips mid-stride (see the
+    /// property's threshold rationale), clears on the next counted segment.
+    private func refreshAutoPauseState() {
+        guard isTracking, !isUsingPedometer else { return }
+        let reference = lastAccrualAt ?? trackingStartedAt ?? Date()
+        let paused = Date().timeIntervalSince(reference) > 45
+        if paused != isAutoPaused {
+            DispatchQueue.main.async { self.isAutoPaused = paused }
+        }
     }
 
     /// Add a fix's contribution to `currentDistance` — with the noise floor
@@ -335,6 +392,12 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             lastLocation = newLocation
             return
         }
+        // Riding, not walking: the classifier is the only witness that can
+        // tell city driving (~11 m/s, valid doppler) from a hard run.
+        if isConfidentlyAutomotive {
+            lastLocation = newLocation
+            return
+        }
         if doppler < 0, !stepsCorroborateMovement {
             lastLocation = newLocation
             return
@@ -355,6 +418,12 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             if doppler >= Self.stationarySpeed {
                 dopplerMovingMiles += distanceInMiles
             }
+            // Per-segment dt cap: accepted segments arrive every ~6-21s while
+            // walking, so 20s covers them — but a resume fix after a held-
+            // anchor wait (red light) can't ride the whole wait in as
+            // "moving".
+            movingSeconds += min(max(dt, 0), 20)
+            lastAccrualAt = Date()
             DispatchQueue.main.async {
                 self.currentDistance += distanceInMiles
                 self.persistDistanceThrottled()
@@ -375,6 +444,8 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // onto the pitcher's mound after you sit down): only keep points
         // while doppler says moving, or the pedometer vouches for steps.
         if location.speed < Self.stationarySpeed, !stepsCorroborateMovement { return false }
+        // A drive isn't path either.
+        if isConfidentlyAutomotive { return false }
 
         guard let last = lastRoutePoint else { return true }
         let displacement = location.distance(from: last)

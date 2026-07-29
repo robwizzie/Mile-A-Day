@@ -65,11 +65,12 @@ export async function uploadWorkouts(
         device_end_date,
         calories,
         total_duration,
+        moving_seconds,
         source,
         exclusion_reason,
         speed_flagged
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
       ON CONFLICT (workout_id)
       DO UPDATE SET
         distance = EXCLUDED.distance,
@@ -80,6 +81,7 @@ export async function uploadWorkouts(
         device_end_date = EXCLUDED.device_end_date,
         calories = EXCLUDED.calories,
         total_duration = EXCLUDED.total_duration,
+        moving_seconds = EXCLUDED.moving_seconds,
         source = CASE
           WHEN workouts.source IN ('manual', 'edited') THEN workouts.source
           ELSE EXCLUDED.source
@@ -131,6 +133,13 @@ export async function uploadWorkouts(
           workout.deviceEndDate,
           workout.calories,
           workout.totalDuration,
+          // Display-pace divisor: must be a sane number of seconds, never
+          // exceeding elapsed (a malformed value must not 500 the sync or
+          // mint faster-than-elapsed pace).
+          Number.isFinite(workout.movingSeconds) &&
+          (workout.movingSeconds as number) > 0
+            ? Math.min(workout.movingSeconds as number, workout.totalDuration)
+            : null,
           workout.source || "healthkit",
           speed.exclusionReason,
           speed.speedFlagged,

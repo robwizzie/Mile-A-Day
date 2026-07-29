@@ -222,6 +222,11 @@ export const workouts = pgTable(
     }).notNull(),
     calories: doublePrecision().notNull(),
     totalDuration: doublePrecision("total_duration").notNull(),
+    // Seconds the tracker saw actual movement (in-app workouts only; null for
+    // Watch/third-party syncs). DISPLAY pace divides by this so stop-heavy
+    // walks don't read 82:47/mi — while total_duration stays the elapsed
+    // truth for PRs, races, and recaps (a race clock doesn't pause).
+    movingSeconds: doublePrecision("moving_seconds"),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "string",

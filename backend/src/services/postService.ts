@@ -152,8 +152,12 @@ const POST_COLUMNS = `
 			THEN p.stats_snapshot || jsonb_build_object(
 				'distance', roll_.distance,
 				'duration', roll_.duration,
+				-- Display pace divides by MOVING time where the tracker
+				-- recorded it (falling back per-row to elapsed), so a
+				-- stop-heavy day doesn't restate to an absurd pace. The
+				-- 'duration' key above stays the elapsed truth.
 				'pace', CASE WHEN roll_.distance > 0
-					THEN roll_.duration / roll_.distance END
+					THEN roll_.moving_duration / roll_.distance END
 			)
 			ELSE p.stats_snapshot
 		END
@@ -162,7 +166,8 @@ const POST_COLUMNS = `
 			SELECT
 				COUNT(*) FILTER (WHERE m.feed_role <> 'hidden')::int AS segment_count,
 				SUM(m.distance)::double precision AS distance,
-				SUM(m.total_duration)::double precision AS duration
+				SUM(m.total_duration)::double precision AS duration,
+				SUM(COALESCE(m.moving_seconds, m.total_duration))::double precision AS moving_duration
 			FROM workouts m
 			WHERE m.user_id = w_.user_id AND m.local_date = w_.local_date
 				AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
@@ -1041,6 +1046,8 @@ export interface FeedEntryRow {
   workout_type: string | null;
   distance: number | null;
   total_duration: number | null;
+  // Moving-time display-pace divisor (rollup-aware); null on rows without it.
+  moving_seconds: number | null;
   calories: number | null;
   steps: number | null;
   // How many real workouts the daily mile was stitched together from. 1 (or
@@ -1099,8 +1106,10 @@ const FEED_ENTRY_PROJECTION = `
 				THEN p.stats_snapshot || jsonb_build_object(
 					'distance', roll.distance,
 					'duration', roll.total_duration,
+					-- Same moving-time display pace as POST_COLUMNS' restating —
+					-- these two blocks must stay in lockstep (see that comment).
 					'pace', CASE WHEN roll.distance > 0
-						THEN roll.total_duration / roll.distance END
+						THEN roll.moving_duration / roll.distance END
 				)
 				ELSE p.stats_snapshot
 			END AS stats_snapshot,
@@ -1134,6 +1143,11 @@ const FEED_ENTRY_PROJECTION = `
 				THEN COALESCE(roll.distance, wt.distance)::double precision END AS distance,
 			CASE WHEN page.kind = 'workout'
 				THEN COALESCE(roll.total_duration, wt.total_duration)::double precision END AS total_duration,
+			-- Additive: moving-time display-pace divisor for workout entries
+			-- (rollup-aware on anchors). Null on old rows/Watch syncs — clients
+			-- fall back to total_duration.
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.moving_duration, wt.moving_seconds)::double precision END AS moving_seconds,
 			CASE WHEN page.kind = 'workout'
 				THEN COALESCE(roll.calories, wt.calories)::double precision END AS calories,
 			CASE WHEN page.kind = 'workout'
@@ -1250,6 +1264,9 @@ const FEED_ENTRY_PROJECTION = `
 				COUNT(*) FILTER (WHERE m.feed_role <> 'hidden')::int AS segment_count,
 				SUM(m.distance)::double precision AS distance,
 				SUM(m.total_duration)::double precision AS total_duration,
+				-- Per-row fallback to elapsed: a day mixing in-app legs (which
+				-- carry moving time) with Watch legs (which don't) still sums.
+				SUM(COALESCE(m.moving_seconds, m.total_duration))::double precision AS moving_duration,
 				SUM(m.calories)::double precision AS calories,
 				SUM(m.steps)::int AS steps,
 				jsonb_agg(

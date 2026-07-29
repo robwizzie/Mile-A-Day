@@ -197,6 +197,9 @@ struct FeedEntry: Codable, Identifiable {
     let workout_type: String?
     let distance: Double?
     let total_duration: Double?
+    /// Moving-time display-pace divisor (rollup-aware on anchors). Absent on
+    /// old rows and Watch/third-party syncs — fall back to total_duration.
+    let moving_seconds: Double?
     let calories: Double?
     let steps: Int?
     /// How many walks/runs the daily mile was stitched together from. nil on an

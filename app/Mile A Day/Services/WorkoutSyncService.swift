@@ -676,6 +676,14 @@ class WorkoutSyncService: ObservableObject {
                 "source": "healthkit",
             ]
 
+            // In-app tracked workouts carry their moving time as metadata —
+            // the display-pace divisor server-side. Absent on Watch/third-
+            // party workouts; the server treats null as "use elapsed".
+            if let movingSeconds = workout.metadata?[WorkoutLocationManager.movingSecondsMetadataKey] as? Double,
+               movingSeconds > 0 {
+                workoutDict["movingSeconds"] = movingSeconds
+            }
+
             // Attach the simplified GPS path when the workout has one, so the
             // backend can store it and feed cards can draw the mile's route.
             if fetchRoutes, let route = await simplifiedRoute(for: workout) {

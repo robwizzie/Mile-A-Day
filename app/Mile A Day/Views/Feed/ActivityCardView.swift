@@ -52,8 +52,12 @@ struct ActivityCardView: View {
     }
 
     private var pace: Double? {
-        guard let duration = entry.total_duration, duration > 0, distance > 0 else { return nil }
-        return duration / distance
+        // Moving time when the tracker recorded it (additive server field),
+        // elapsed otherwise — the same fallback the server bakes into
+        // restated snapshots, so post and workout cards agree.
+        guard let divisor = entry.moving_seconds ?? entry.total_duration,
+              divisor > 0, distance > 0 else { return nil }
+        return divisor / distance
     }
 
     /// Stats band input for the route slide — same band the auto post bakes
