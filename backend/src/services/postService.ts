@@ -1903,14 +1903,26 @@ const POST_UUID_RE =
  * (the ANY cast would 500 on garbage), so ids straight from untrusted push
  * payload data are safe to pass. Sign media urls before responding.
  */
+export interface VisiblePostPreview {
+  post_id: string;
+  media_url: string;
+  // Fields lockUnearnedPhotos needs to apply the "run to see today's
+  // photos" gate to inbox thumbnails exactly as the feed applies it.
+  user_id: string;
+  local_date: string | null;
+  is_auto: boolean;
+  photo_locked?: boolean;
+}
+
 export async function visiblePostPreviews(
   viewerId: string,
   postIds: string[],
-): Promise<Array<{ post_id: string; media_url: string }>> {
+): Promise<VisiblePostPreview[]> {
   const ids = postIds.filter((id) => POST_UUID_RE.test(id));
   if (ids.length === 0) return [];
-  return db.query<{ post_id: string; media_url: string }>(
-    `SELECT p.post_id, p.media_url
+  return db.query<VisiblePostPreview>(
+    `SELECT p.post_id, p.media_url, p.user_id,
+				p.local_date::text AS local_date, p.is_auto
 		 FROM posts p
 		 WHERE p.post_id = ANY($2::uuid[]) AND ${DIRECT_POST_ACCESS_SQL}`,
     [viewerId, ids],
