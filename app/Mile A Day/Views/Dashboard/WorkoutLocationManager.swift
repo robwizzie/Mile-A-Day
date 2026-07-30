@@ -55,12 +55,11 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     private static let maxPlausibleSpeed: Double = 12
 
     /// OUTDOOR pedometer odometer: the phone's per-user-calibrated pedometer
-    /// distance across this tracking session (miles). The pedometer measures
-    /// the WALKER (steps × calibrated stride), not satellite geometry, so it
-    /// agrees across people walking together far better than raw GPS sums.
-    /// For walks it is the distance shown AND saved (see `liveDistance`);
-    /// nil until CoreMotion actually delivers. Published so the tracking UI
-    /// refreshes on step progress while a GPS anchor holds.
+    /// distance across this tracking session (miles) — the same estimator
+    /// Apple Fitness uses for phone-only walking/running distance. One of
+    /// the two spans `liveDistance` takes the max of; nil until CoreMotion
+    /// actually delivers. Published so the tracking UI refreshes on step
+    /// progress while a GPS anchor holds.
     @Published private(set) var outdoorPedometerMiles: Double?
     /// When the cross-check odometer last gained ≥ ~2 m — the live "is the
     /// walker actually stepping?" witness the movement gate consults.
@@ -72,12 +71,6 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// Session start — grace window for the movement gate while the first
     /// pedometer batch is still in flight.
     private var trackingStartedAt: Date?
-    /// Miles accrued from fixes whose VALID doppler said "moving" — evidence
-    /// that GPS distance was real locomotion: a phone riding a stroller/cart
-    /// covers ground with doppler speed but no steps, while a phone sitting
-    /// through a ballgame drifts with NO doppler. This is what arms the
-    /// walk→GPS latch in `refreshLiveDistance`.
-    private(set) var dopplerMovingMiles: Double = 0
     /// Seconds of witnessed movement this session — the DISPLAY-pace divisor
     /// (elapsed time stays the truth for records; a race clock doesn't
     /// pause). Sum of accepted segments' dt, capped per segment so a red
@@ -126,30 +119,29 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// the pedometer only at Finish, so a jitter-inflated walk read "100%"
     /// and then dropped to 80% the moment it saved.)
     ///
-    /// One estimator per session, ratcheted monotonic (never ticks down):
-    ///   - Outdoor WALK, healthy pedometer → the calibrated pedometer span.
-    ///     It measures the WALKER (steps × per-user stride), agrees across
-    ///     friends on the same walk, reads ~0 when you stood still, and is
-    ///     immune to the additive GPS jitter that inflated live numbers.
-    ///   - Outdoor RUN → the GPS span (pace/route fidelity at speed).
-    ///   - Indoor, or pedometer can't testify (no Motion permission,
-    ///     errored, silent) → raw accrual (`currentDistance`), as before.
-    /// Plus two ONE-WAY latches for the known failure shapes — one-way so a
-    /// source switch can only ever step the number UP, never claw it back:
-    ///   - Walk latched → GPS when doppler-verified miles reach 1.5× steps
-    ///     (stroller/cart covers ground without stepping; also the fail-open
-    ///     if the pedometer goes silent mid-walk).
-    ///   - Run latched → pedometer when GPS clearly starves under cover
-    ///     (lost fixes measure SHORT, never long).
+    /// Outdoors this is the ratcheted MAX of the two instruments' session
+    /// spans — the jitter-gated GPS sum and the calibrated pedometer
+    /// odometer:
+    ///   - The pedometer term is the same estimator Apple's own Fitness app
+    ///     uses for phone-only walking/running distance (steps × per-user
+    ///     stride, OS-calibrated against GPS) — so MAD never reads SHORTER
+    ///     than the Fitness app the user checks us against.
+    ///   - The GPS term is what GPS-first apps (Strava et al.) show, and it
+    ///     covers every real shape where ground outruns steps: stroller,
+    ///     cart, GPS-healthy runs — and a pedometer that went silent.
+    ///   - max() is the product rule made math: when two credible
+    ///     estimators disagree, credit the FARTHER one — an undercounted
+    ///     mile breaks a streak; a slightly generous one never hurt anyone.
+    ///     Absurd GPS (seated drift, driving) never reaches this point: the
+    ///     accrual gates (doppler-stationary skip, steps corroboration,
+    ///     teleport cap, automotive suspension) kill it at the source.
+    /// Both spans are monotonic, so their max is too; the outer ratchet
+    /// keeps the displayed number monotonic across every remaining edge
+    /// (mid-walk Motion grant, pedometer error fallback). Indoor sessions —
+    /// and any session where the pedometer can't testify — remain raw
+    /// accrual, exactly as before.
     @Published private(set) var liveDistance: Double = 0.0
     @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
-
-    /// Whether this session is a walk (vs run) — selects the estimator above.
-    private var sessionIsWalk = true
-    /// One-way session latches (see `liveDistance`). Both reset at start;
-    /// at most one can engage per session (they belong to opposite modes).
-    private var walkLatchedToGPS = false
-    private var runLatchedToPedometer = false
 
     private override init() {
         super.init()
@@ -172,9 +164,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     ///   - initialDistance: Distance already accumulated in a prior session (0 for new workouts).
     ///     For GPS mode, this becomes the starting value that incremental updates add to.
     ///     For pedometer mode, this becomes the offset added to the pedometer's readings.
-    ///   - isWalk: Whether the session is a walk (vs run) — selects the
-    ///     distance estimator (walks: pedometer span; runs: GPS span).
-    func startTracking(locationType: HKWorkoutSessionLocationType = .outdoor, initialDistance: Double = 0.0, isWalk: Bool = true) {
+    func startTracking(locationType: HKWorkoutSessionLocationType = .outdoor, initialDistance: Double = 0.0) {
         // Prevent double-start
         guard !isTracking else { return }
         isTracking = true
@@ -182,15 +172,11 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         currentDistance = initialDistance
         liveDistance = initialDistance
         sessionStartDistance = initialDistance
-        sessionIsWalk = isWalk
-        walkLatchedToGPS = false
-        runLatchedToPedometer = false
         outdoorPedometerMiles = nil
         lastPedometerProgressAt = nil
         lastPedometerProgressMiles = 0
         pedometerErrored = false
         trackingStartedAt = Date()
-        dopplerMovingMiles = 0
         movingSeconds = 0
         lastAccrualAt = nil
         lastMovingDopplerAt = nil
@@ -255,11 +241,11 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         locationManager.startUpdatingLocation()
     }
 
-    /// Run the pedometer ALONGSIDE outdoor GPS: for walks it IS the distance
-    /// shown and saved (see `liveDistance`); for runs it's the starvation
-    /// rescue. Deliberately left nil until CoreMotion actually delivers —
-    /// nil means "can't testify", so a silently-dead pedometer keeps the
-    /// session on GPS instead of pinning a walk's display at zero.
+    /// Run the pedometer ALONGSIDE outdoor GPS — the second span in
+    /// `liveDistance`'s max(), covering everything GPS starves on.
+    /// Deliberately left nil until CoreMotion actually delivers — nil means
+    /// "can't testify", so a silently-dead pedometer simply contributes
+    /// nothing instead of masquerading as a measured zero.
     private func startOutdoorPedometerCrossCheck() {
         guard CMPedometer.isDistanceAvailable() else { return }
         pedometer.startUpdates(from: Date()) { [weak self] pedometerData, error in
@@ -328,54 +314,29 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// only). This IS the save: the finish persists `liveDistance` verbatim,
     /// so everything here holds for the recap and HealthKit too.
     ///
-    /// A HEALTHY pedometer near zero is itself the measurement — "you stood
-    /// still" — and walks believe it: the old finish-time `span > 0.05` and
-    /// `ratio > 0.6` guards bailed to GPS in exactly the worst cases
-    /// (3 hours seated at a ballgame = 2.28 GPS "miles", pedometer ~0). The
-    /// one walk shape that legitimately out-runs its steps — phone riding a
-    /// stroller/cart — is what the doppler latch is for.
-    ///
-    /// The final `max` ratchet makes the displayed number monotonic across
-    /// every remaining edge (mid-walk Motion grant, pedometer error
-    /// fallback): a source switch may freeze the count until the new source
-    /// catches up, but it can never tick a walked mile backwards.
+    /// max(GPS span, pedometer span): each instrument misses real distance
+    /// the other catches — GPS starves under tree cover and on un-warmed
+    /// cold starts (lost fixes measure SHORT, never long); the pedometer
+    /// misses ground covered without steps (stroller, cart) and can go
+    /// silent. Their absurd-OVERcount shapes (seated multipath drift,
+    /// driving) are killed at accrual time by the gates — doppler-stationary
+    /// skip, steps corroboration, teleport cap, automotive suspension — not
+    /// here. So the larger surviving span is the better estimate, and it's
+    /// the generous one: in a streak app, never show LESS than a credible
+    /// instrument measured. The outer ratchet keeps the number monotonic
+    /// across the remaining edges (mid-walk Motion grant, pedometer error
+    /// dropping its term): the count may briefly hold, never tick back.
     private func refreshLiveDistance() {
-        let pedometerHealthy = !pedometerErrored
-            && CMPedometer.authorizationStatus() == .authorized
-            && outdoorPedometerMiles != nil
-        guard !isUsingPedometer, pedometerHealthy else {
-            // Indoor (currentDistance already IS the pedometer) or the
-            // cross-check can't testify — raw accrual, as before.
+        guard !isUsingPedometer else {
+            // Indoor: currentDistance already IS the pedometer.
             liveDistance = max(liveDistance, currentDistance)
             return
         }
-
+        let pedometerTestifies = !pedometerErrored
+            && CMPedometer.authorizationStatus() == .authorized
         let gpsSpan = max(0, currentDistance - sessionStartDistance)
-        let pedometerSpan = outdoorPedometerMiles ?? 0
-        let span: Double
-        if sessionIsWalk {
-            // Doppler-verified locomotion far beyond what steps account for:
-            // the phone genuinely covered ground without stepping (stroller,
-            // cart — or a pedometer that went silent while doppler kept
-            // witnessing real movement). One-way: gpsSpan ≥ dopplerMovingMiles
-            // ≥ 1.5× steps at latch time, so the switch steps UP.
-            if !walkLatchedToGPS, dopplerMovingMiles >= max(0.1, pedometerSpan * 1.5) {
-                walkLatchedToGPS = true
-                print("[WorkoutLocationManager] 📏 Walk latched to GPS (doppler \(String(format: "%.2f", dopplerMovingMiles)) mi vs steps \(String(format: "%.2f", pedometerSpan)) mi)")
-            }
-            span = walkLatchedToGPS ? gpsSpan : pedometerSpan
-        } else {
-            // Runs keep GPS (pace/route fidelity at speed) unless it clearly
-            // starved under cover — lost fixes measure SHORT, never long.
-            // One-way and only on a meaningful span, so an un-warmed GPS
-            // during the first minute can't trip it; the switch steps UP.
-            if !runLatchedToPedometer, pedometerSpan >= 0.1, gpsSpan < pedometerSpan * 0.75 {
-                runLatchedToPedometer = true
-                print("[WorkoutLocationManager] 📏 Run latched to pedometer (GPS \(String(format: "%.2f", gpsSpan)) mi vs steps \(String(format: "%.2f", pedometerSpan)) mi)")
-            }
-            span = runLatchedToPedometer ? pedometerSpan : gpsSpan
-        }
-        liveDistance = max(liveDistance, sessionStartDistance + span)
+        let pedometerSpan = pedometerTestifies ? (outdoorPedometerMiles ?? 0) : 0
+        liveDistance = max(liveDistance, sessionStartDistance + max(gpsSpan, pedometerSpan))
     }
 
     // MARK: - CLLocationManagerDelegate
@@ -488,9 +449,6 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         let distanceInMiles = meters * 0.000621371
         // Backstop against anything the speed cap missed (e.g. huge dt gaps).
         if distanceInMiles < 0.1 {
-            if doppler >= Self.stationarySpeed {
-                dopplerMovingMiles += distanceInMiles
-            }
             // Per-segment dt cap: accepted segments arrive every ~6-21s while
             // walking, so 20s covers them — but a resume fix after a held-
             // anchor wait (red light) can't ride the whole wait in as

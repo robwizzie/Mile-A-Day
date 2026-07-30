@@ -1028,11 +1028,7 @@ struct WorkoutTrackingView: View {
             // Resume tracking with the saved distance as the starting point.
             // For pedometer: new pedometer readings will ADD to saved.currentDistance.
             // For GPS: new GPS deltas will add to saved.currentDistance.
-            locationManager.startTracking(
-                locationType: selectedLocationType,
-                initialDistance: saved.currentDistance,
-                isWalk: selectedActivityType != .running
-            )
+            locationManager.startTracking(locationType: selectedLocationType, initialDistance: saved.currentDistance)
 
             // Restart HKWorkoutBuilder (non-blocking, best-effort)
             healthManager.requestAuthorization { authorized in
@@ -1152,11 +1148,7 @@ struct WorkoutTrackingView: View {
         InProgressWorkoutStore.save(initialState)
 
         // Start location/pedometer tracking (fresh workout, initialDistance = 0)
-        locationManager.startTracking(
-            locationType: selectedLocationType,
-            initialDistance: 0,
-            isWalk: selectedActivityType != .running
-        )
+        locationManager.startTracking(locationType: selectedLocationType, initialDistance: 0)
 
         // Start Live Activity
         startLiveActivity()
@@ -1199,10 +1191,9 @@ struct WorkoutTrackingView: View {
         isStopping = true
 
         // Final distance IS the displayed distance — no finish-time
-        // re-arbitration. `liveDistance` already runs the right estimator per
-        // session (walks: calibrated pedometer span; runs: GPS; one-way
-        // latches for stroller/starvation; raw accrual when the pedometer
-        // can't testify), so what the user watched is what saves, verbatim.
+        // re-arbitration. `liveDistance` (ratcheted max of the jitter-gated
+        // GPS span and the calibrated pedometer span; raw accrual indoors)
+        // is the number the user watched, so it saves verbatim.
         let finalDistance = locationManager.liveDistance
 
         // Freeze the recap stats now, before anything refreshes underneath us
