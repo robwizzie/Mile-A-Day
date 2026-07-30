@@ -85,11 +85,12 @@ struct WorkoutTrackingView: View {
         let ok: Bool
     }
 
-    // Workout distance only (starts at 0). The RECONCILED live estimate —
-    // the same GPS-vs-pedometer arbitration the finish saves — so the number
-    // (and ring, and celebration) on screen is the number that persists.
-    // Showing raw GPS accrual here is how a jitter-inflated walk read "100%"
-    // live and then dropped to 80% the moment Finish reconciled it.
+    // Workout distance only (starts at 0). `liveDistance` is THE number:
+    // monotonic (never ticks down) and saved verbatim at Finish, so the
+    // ring, the celebration, the recap, and HealthKit all agree by
+    // construction. Showing raw GPS accrual here is how a jitter-inflated
+    // walk read "100%" live and then dropped to 80% the moment Finish
+    // reconciled it against the pedometer.
     private var currentDistance: Double {
         locationManager.liveDistance
     }
@@ -97,14 +98,6 @@ struct WorkoutTrackingView: View {
     // Total daily distance (starting + workout)
     private var totalDailyDistance: Double {
         startingDistance + currentDistance
-    }
-
-    // Goal-crossing checks (completion overlay + Live Activity alert) use the
-    // conservative floor — min of the GPS and pedometer spans, which only
-    // ever grow — so "Goal Complete!" can never be shown for a distance the
-    // finish-time save might still walk back.
-    private var conservativeTotalDailyDistance: Double {
-        startingDistance + locationManager.conservativeLiveDistance()
     }
 
     private var progress: Double {
@@ -935,18 +928,15 @@ struct WorkoutTrackingView: View {
                     }
                 }
             }
-        }
-        // Goal check keys on the CONSERVATIVE total (min of GPS/pedometer
-        // spans, monotonically non-decreasing): once it crosses the goal, no
-        // finish-time reconciliation can land below what was celebrated. It
-        // moves on pedometer ticks as well as GPS accruals, so it gets its
-        // own onChange rather than riding currentDistance.
-        .onChange(of: conservativeTotalDailyDistance) { _, newTotal in
+
+            // Check if we've reached the goal (using total daily distance).
+            // `currentDistance` is monotonic and IS the saved number, so a
+            // celebration fired here can never be taken back by the finish.
             // Only show completion if:
             // 1. We haven't shown it yet
             // 2. The goal wasn't already completed when we started (startingDistance < goalDistance)
             // 3. We've now reached the goal with total daily distance
-            if !hasShownCompletion && startingDistance < goalDistance && newTotal >= goalDistance {
+            if !hasShownCompletion && startingDistance < goalDistance && totalDailyDistance >= goalDistance {
                 hasShownCompletion = true // Mark as shown so it doesn't loop
 
                 // Show completion celebration
@@ -1208,14 +1198,12 @@ struct WorkoutTrackingView: View {
         guard !isStopping else { return }
         isStopping = true
 
-        // Final distance: outdoor sessions reconcile the live GPS sum against
-        // the phone's calibrated pedometer (see reconciledFinalDistance) so
-        // the SAME walk saves nearly the same number on everyone's phone.
-        // Indoor sessions already are the pedometer; failures fall back to
-        // the live figure unchanged.
-        let finalDistance = locationManager.reconciledFinalDistance(
-            isWalk: selectedActivityType != .running
-        )
+        // Final distance IS the displayed distance — no finish-time
+        // re-arbitration. `liveDistance` already runs the right estimator per
+        // session (walks: calibrated pedometer span; runs: GPS; one-way
+        // latches for stroller/starvation; raw accrual when the pedometer
+        // can't testify), so what the user watched is what saves, verbatim.
+        let finalDistance = locationManager.liveDistance
 
         // Freeze the recap stats now, before anything refreshes underneath us
         recapDistance = finalDistance
@@ -1500,8 +1488,8 @@ struct WorkoutTrackingView: View {
         // CRITICAL: Never persist state while stopping — finishCleanup may have already cleared it.
         guard !isStopping else { return }
 
-        // Reconciled live figure — same estimator the finish saves, so the
-        // lock screen / Dynamic Island never outruns what will persist.
+        // The displayed figure — saved verbatim at Finish — so the lock
+        // screen / Dynamic Island never outruns what will persist.
         let freshDistance = locationManager.liveDistance
         let freshTotalDaily = startingDistance + freshDistance
         let realTimeElapsed = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
@@ -1513,11 +1501,10 @@ struct WorkoutTrackingView: View {
         if let activity = workoutActivity {
             // Goal crossed during THIS workout → one celebratory alert update
             // that briefly expands the Dynamic Island / lights up the watch.
-            // Gated on the CONSERVATIVE floor (like the in-app overlay): the
-            // "Mile complete! Your streak is safe" alert is a promise the
-            // finish-time save must always be able to keep.
+            // freshTotalDaily rides the monotonic saved-verbatim estimator,
+            // so this "streak safe" promise can never be walked back.
             let goalJustCompleted = goalDistance > 0
-                && conservativeTotalDailyDistance >= goalDistance
+                && freshTotalDaily >= goalDistance
                 && !hasSentGoalAlert
 
             // Throttle: push on goal-cross, when distance moved ≥ 0.01 mi, or
@@ -1584,7 +1571,7 @@ struct WorkoutTrackingView: View {
         // for clearing state after confirming HealthKit save status.
         print("🔚 Ending Live Activity...")
 
-        // Use FRESH data for the final state (reconciled, same as the save)
+        // Use FRESH data for the final state (identical to what Finish saves)
         let freshDistance = locationManager.liveDistance
         let freshTotalDaily = startingDistance + freshDistance
         let realTimeElapsed = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
