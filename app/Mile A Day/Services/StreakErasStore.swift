@@ -18,7 +18,6 @@ final class StreakErasStore: ObservableObject {
 
     @Published private(set) var response: StreakErasResponse?
     private(set) var lastRefreshAt: Date?
-    private let workoutService = WorkoutService()
 
     private init() {}
 
@@ -46,16 +45,22 @@ final class StreakErasStore: ObservableObject {
     func refresh() async {
         guard let userId = UserDefaults.standard.string(forKey: "backendUserId") else { return }
         do {
-            let fresh = try await workoutService.getStreakEras(userId: userId)
-            await MainActor.run {
-                self.response = fresh
-                self.lastRefreshAt = Date()
-            }
+            try await fetchAndStore(userId: userId)
         } catch {
             // Tolerated: comeback/record moments and the hall simply don't
             // render this session. Never block the goal celebration on this.
             print("[StreakErasStore] refresh failed: \(error)")
         }
+    }
+
+    /// `WorkoutService` is @MainActor, so it's built and called here rather than
+    /// held as a stored property — the store itself stays nonisolated so the
+    /// derivations below remain callable synchronously from any context.
+    @MainActor
+    private func fetchAndStore(userId: String) async throws {
+        let fresh = try await WorkoutService().getStreakEras(userId: userId)
+        response = fresh
+        lastRefreshAt = Date()
     }
 
     func refreshIfStale(maxAge: TimeInterval = 300) async {
