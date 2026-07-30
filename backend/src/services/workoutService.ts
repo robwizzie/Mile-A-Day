@@ -811,6 +811,55 @@ export async function getTodayMiles(userId: string) {
 }
 
 /**
+ * Per-day mile totals for the user's last 7 LOCAL days (their "today" plus
+ * the 6 before it, derived from their latest workout's timezone offset the
+ * same way getTodayMiles does). Every day is present — zero-mile days
+ * included — so clients can render a week without inferring gaps.
+ *
+ * This exists because profile "last 7 days" charts were being derived from
+ * the capped recent-workouts LIST: a user logging several workouts a day
+ * pushed the week's early days out of the cap and their chart showed empty
+ * days mid-400-day-streak. Counting matches getTodayMiles exactly
+ * (deleted_at IS NULL AND exclusion_reason IS NULL); feed_role is display-
+ * only and must never gate a SUM.
+ */
+export async function getLast7DayMiles(
+  userId: string,
+): Promise<{ date: string; miles: number }[]> {
+  const query = `
+	WITH user_tz AS (
+		SELECT COALESCE(
+			(SELECT timezone_offset FROM workouts WHERE user_id = $1 ORDER BY device_end_date DESC LIMIT 1),
+			0
+		) AS tz_offset
+	),
+	days AS (
+		SELECT ((NOW() + (user_tz.tz_offset || ' minutes')::interval)::date - offs.n) AS day
+		FROM user_tz, generate_series(0, 6) AS offs(n)
+	)
+	SELECT to_char(d.day, 'YYYY-MM-DD') AS date,
+		COALESCE(SUM(w.distance), 0) AS miles
+	FROM days d
+	LEFT JOIN workouts w
+		ON w.user_id = $1
+		AND w.local_date = d.day
+		AND w.deleted_at IS NULL
+		AND w.exclusion_reason IS NULL
+	GROUP BY d.day
+	ORDER BY d.day
+	`;
+
+  const rows = await db.query<{ date: string; miles: string | number | null }>(
+    query,
+    [userId],
+  );
+  return rows.map((r) => ({
+    date: r.date,
+    miles: r.miles == null ? 0 : Number(r.miles),
+  }));
+}
+
+/**
  * Total miles a user logged on a specific local date (their timezone).
  * Used to validate "did they complete their mile that day?" for historical
  * events like an old mile-completion notification being hyped.
