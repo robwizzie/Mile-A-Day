@@ -81,12 +81,22 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// pause). Sum of accepted segments' dt, capped per segment so a red
     /// light waited out at a held anchor doesn't ride in on the resume fix.
     private(set) var movingSeconds: TimeInterval = 0
-    /// When distance last accrued — drives the visible auto-pause state.
+    /// When distance last accrued — one of the auto-pause evidence sources.
     private var lastAccrualAt: Date?
-    /// True while tracking outdoors with nothing accruing for 45s (standing,
-    /// sitting, riding). The longest legit gap while walking is ~21s (a 30m
-    /// bad-signal floor at 1.4 m/s), so this can't false-positive mid-walk —
-    /// and the next counted segment clears it immediately.
+    /// Last fix whose VALID doppler cleared the stationary bar while not
+    /// classified automotive — the freshest "in motion" witness there is.
+    /// Tracked apart from accrual because a held anchor stalls accrual while
+    /// the walker is plainly moving (see isAutoPaused).
+    private var lastMovingDopplerAt: Date?
+    /// True while tracking outdoors with no movement EVIDENCE for 45s: no
+    /// counted segment, no moving-doppler fix, no step progress (standing,
+    /// sitting, riding, seated multipath drift). Accrual alone was the old
+    /// trigger and it false-positives mid-walk: an out-and-back turnaround
+    /// holds the anchor while displacement shrinks and regrows, so accrual
+    /// legitimately stalls for up to ~3× the noise floor of real walking
+    /// (60-100m in mediocre accuracy ≈ 45-70s) — which flashed AUTO-PAUSED
+    /// at 0.99 mi on a user mid-stride. Someone stepping or carrying doppler
+    /// speed is never "paused"; fresh evidence clears the chip immediately.
     @Published private(set) var isAutoPaused = false
     /// Distance carried into this session by a recovery (miles). The pedometer
     /// cross-check starts at resume time, so reconciliation only compares the
@@ -145,6 +155,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         dopplerMovingMiles = 0
         movingSeconds = 0
         lastAccrualAt = nil
+        lastMovingDopplerAt = nil
         isAutoPaused = false
         isConfidentlyAutomotive = false
         lastLocation = nil
@@ -335,6 +346,13 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
                 continue
             }
 
+            // Moving-doppler witness for the auto-pause chip. Dopplerless
+            // (speed == -1) fixes deliberately don't count — seated multipath
+            // drift is exactly that shape and must still read as paused.
+            if newLocation.speed >= Self.stationarySpeed, !isConfidentlyAutomotive {
+                lastMovingDopplerAt = Date()
+            }
+
             accrueDistance(to: newLocation)
 
             // Route trace: a STRICTER quality bar than distance accrual —
@@ -350,12 +368,15 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         refreshAutoPauseState()
     }
 
-    /// Visible movement-gate state — never flips mid-stride (see the
-    /// property's threshold rationale), clears on the next counted segment.
+    /// Visible movement-gate state — paused only when EVERY movement witness
+    /// has gone quiet (see the property's rationale). Distance accrual is NOT
+    /// consulted alone: held-anchor stalls (turnarounds) aren't stillness.
     private func refreshAutoPauseState() {
         guard isTracking, !isUsingPedometer else { return }
-        let reference = lastAccrualAt ?? trackingStartedAt ?? Date()
-        let paused = Date().timeIntervalSince(reference) > 45
+        let evidence = [lastAccrualAt, lastMovingDopplerAt, lastPedometerProgressAt, trackingStartedAt]
+            .compactMap { $0 }
+            .max() ?? Date()
+        let paused = Date().timeIntervalSince(evidence) > 45
         if paused != isAutoPaused {
             DispatchQueue.main.async { self.isAutoPaused = paused }
         }
