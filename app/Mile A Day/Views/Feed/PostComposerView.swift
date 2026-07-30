@@ -284,7 +284,21 @@ final class PostComposerViewModel: ObservableObject {
             }
             return true
         } catch let APIError.apiError(message) where message == "mile_not_completed" {
-            errorMessage = "Finish today's mile before you post."
+            // The server recomputes this gate from ITS workouts table, so this
+            // 403 while local HealthKit already shows the mile done means the
+            // workout just hasn't reached the backend (sync failed or hasn't
+            // fired) — tell the user that instead of "finish your mile", and
+            // kick a sync so an immediate retry can succeed.
+            let localDone = ProgressCalculator.isGoalCompleted(
+                current: HealthKitManager.shared.todaysDistance,
+                goal: UserManager.shared.currentUser.goalMiles
+            )
+            if localDone {
+                errorMessage = "Your mile is still syncing — give it a few seconds and try again."
+                Task { try? await WorkoutSyncService.shared.syncNewWorkouts() }
+            } else {
+                errorMessage = "Finish today's mile before you post."
+            }
             return false
         } catch let APIError.apiError(message) where message == "terms_not_accepted" {
             // Stale local acceptance — clear the memo and re-gate.

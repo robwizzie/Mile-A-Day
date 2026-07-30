@@ -176,13 +176,21 @@ class WorkoutSyncService: ObservableObject {
 
         isSyncing = true
         errorMessage = nil
+        // CRITICAL: clear the in-flight flag on EVERY exit. This used to be a
+        // plain assignment after the do/catch, which the catch's rethrow
+        // skipped — so one failed sync (network blip, locked-device HealthKit
+        // error) left isSyncing stuck true for the life of the process, and
+        // every later trigger (observer, foreground, BGTask, launch) silently
+        // no-op'd at the guard above. That's the "dashboard says mile done,
+        // friends list says 0.00 until Sync Streak" wedge: recalibrateStreak
+        // was the only upload path that didn't pass through this gate.
+        defer { isSyncing = false }
 
         do {
             let unsyncedWorkouts = try await getUnsyncedWorkouts()
 
             if unsyncedWorkouts.isEmpty {
                 print("[WorkoutSyncService] ✅ No new workouts to sync")
-                isSyncing = false
                 return
             }
 
@@ -203,8 +211,6 @@ class WorkoutSyncService: ObservableObject {
             print("[WorkoutSyncService] ❌ Sync failed: \(error)")
             throw error
         }
-
-        isSyncing = false
     }
 
     /// Check if this is a first-time sync (no previous sync date)
@@ -439,10 +445,17 @@ class WorkoutSyncService: ObservableObject {
             return allWorkouts
         }
 
-        // Filter workouts newer than last sync
-        let unsyncedWorkouts = allWorkouts.filter { $0.endDate > lastSync }
+        // Look back 48h behind the watermark, not strictly past it: a Watch
+        // workout can land in phone HealthKit MINUTES-TO-HOURS late with an
+        // endDate already behind lastSyncDate, and a strict `endDate >
+        // lastSync` filter would drop it forever (the same late-arrival trap
+        // WorkoutIndex hit — see ios.md). The uploaded-ids set below is what
+        // actually dedupes; the backend upsert is idempotent regardless.
+        let cutoff = min(lastSync, Date().addingTimeInterval(-48 * 3600))
+        let unsyncedWorkouts = allWorkouts.filter { $0.endDate > cutoff }
 
-        // Also check against uploaded IDs set (in case of partial failures)
+        // Skip everything this device already uploaded (partial failures,
+        // and the 48h window re-surfacing already-synced workouts).
         let uploadedIds = getUploadedWorkoutIds()
         let filteredWorkouts = unsyncedWorkouts.filter { !uploadedIds.contains($0.uuid.uuidString) }
 
@@ -752,8 +765,11 @@ class WorkoutSyncService: ObservableObject {
     // MARK: - Tracking Methods
 
     private func updateLastSyncDate(_ date: Date) {
-        lastSyncDate = date
-        UserDefaults.standard.set(date, forKey: lastSyncedWorkoutDateKey)
+        // Monotonic: when the 48h lookback uploads a late-arriving OLD workout,
+        // its endDate must not drag the watermark backwards.
+        let advanced = max(date, lastSyncDate ?? .distantPast)
+        lastSyncDate = advanced
+        UserDefaults.standard.set(advanced, forKey: lastSyncedWorkoutDateKey)
     }
 
     private func markWorkoutsAsSynced(_ workoutIds: [String]) {

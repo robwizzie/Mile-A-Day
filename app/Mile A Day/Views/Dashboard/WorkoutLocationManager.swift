@@ -58,8 +58,10 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// distance across this tracking session (miles). The pedometer measures
     /// the WALKER (steps × calibrated stride), not satellite geometry, so it
     /// agrees across people walking together far better than raw GPS sums.
-    /// Read at finish via reconciledFinalDistance(); nil when unavailable.
-    private(set) var outdoorPedometerMiles: Double?
+    /// Consulted live (liveDistance) and at finish via
+    /// reconciledFinalDistance(); nil when unavailable. Published so the
+    /// tracking UI keeps refreshing on step progress while a GPS anchor holds.
+    @Published private(set) var outdoorPedometerMiles: Double?
     /// When the cross-check odometer last gained ≥ ~2 m — the live "is the
     /// walker actually stepping?" witness the movement gate consults.
     private var lastPedometerProgressAt: Date?
@@ -117,7 +119,29 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     private let distancePersistInterval: TimeInterval = 2.0
 
     @Published var currentDistance: Double = 0.0 // Distance in miles
+    /// The distance every LIVE surface shows (tracker screen, Live Activity,
+    /// in-progress banner, recovery store): the same GPS-vs-pedometer
+    /// reconciliation the finish saves, evaluated continuously. Keeping the
+    /// live figure and the saved figure on one estimator is what stops
+    /// "100% → finish → 80%" take-backs: the old UI showed raw GPS accrual
+    /// while the save preferred the pedometer span, so a jitter-inflated walk
+    /// celebrated a mile the save then refused. Equals `currentDistance`
+    /// whenever the cross-check can't testify (indoor mode, no Motion
+    /// permission, errored).
+    @Published private(set) var liveDistance: Double = 0.0
     @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
+
+    /// Whether this session is a walk (vs run) — reconciliation branches on it,
+    /// and the live estimate must branch identically. Set at startTracking.
+    private var sessionIsWalk = true
+    /// Sticky reconciliation source (false = GPS span, true = pedometer span).
+    /// Switches on a hysteresis band (walks: to pedometer above 12%
+    /// disagreement, back to GPS below 8%; runs: pedometer rescue below
+    /// 0.72×, back above 0.78×) instead of the old hard 10%/0.75 cutoffs, so
+    /// the displayed number doesn't yo-yo when a session hovers at the
+    /// boundary. reconciledFinalDistance() shares this state — the finish
+    /// saves the number that was on screen.
+    private var liveSourcePedometer = false
 
     private override init() {
         super.init()
@@ -140,13 +164,18 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     ///   - initialDistance: Distance already accumulated in a prior session (0 for new workouts).
     ///     For GPS mode, this becomes the starting value that incremental updates add to.
     ///     For pedometer mode, this becomes the offset added to the pedometer's readings.
-    func startTracking(locationType: HKWorkoutSessionLocationType = .outdoor, initialDistance: Double = 0.0) {
+    ///   - isWalk: Whether the session is a walk (vs run) — selects the
+    ///     reconciliation branch for both the live estimate and the finish.
+    func startTracking(locationType: HKWorkoutSessionLocationType = .outdoor, initialDistance: Double = 0.0, isWalk: Bool = true) {
         // Prevent double-start
         guard !isTracking else { return }
         isTracking = true
 
         currentDistance = initialDistance
+        liveDistance = initialDistance
         sessionStartDistance = initialDistance
+        sessionIsWalk = isWalk
+        liveSourcePedometer = false
         outdoorPedometerMiles = nil
         lastPedometerProgressAt = nil
         lastPedometerProgressMiles = 0
@@ -173,6 +202,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
                         let newTotal = self.pedometerOffset + distanceInMiles
                         DispatchQueue.main.async {
                             self.currentDistance = newTotal
+                            self.refreshLiveDistance()
                             self.persistDistanceThrottled()
                         }
                     }
@@ -241,6 +271,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
                     self.lastPedometerProgressAt = Date()
                 }
                 self.outdoorPedometerMiles = miles
+                self.refreshLiveDistance()
             }
         }
     }
@@ -295,35 +326,75 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// stroller/cart — shows up as doppler-verified GPS miles, which is the
     /// evidence that now keeps GPS instead of a blind ratio clamp.
     func reconciledFinalDistance(isWalk: Bool) -> Double {
+        sessionIsWalk = isWalk
+        guard let span = reconciledSpan() else { return currentDistance }
+        let gpsSpan = max(0, currentDistance - sessionStartDistance)
+        if span != gpsSpan, let pedometerSpan = outdoorPedometerMiles {
+            print("[WorkoutLocationManager] 📏 Outdoor distance reconciled: GPS \(String(format: "%.3f", gpsSpan)) mi → pedometer \(String(format: "%.3f", pedometerSpan)) mi")
+        }
+        return sessionStartDistance + span
+    }
+
+    /// GPS-vs-pedometer span choice for the current session, updating the
+    /// sticky source. Returns nil when the cross-check can't testify (indoor
+    /// mode = the pedometer already IS the source, no Motion permission,
+    /// errored) — callers fall back to the raw live figure unchanged.
+    private func reconciledSpan() -> Double? {
         guard !isUsingPedometer,
               !pedometerErrored,
               CMPedometer.authorizationStatus() == .authorized,
-              let pedometerSpan = outdoorPedometerMiles else {
-            return currentDistance
-        }
+              let pedometerSpan = outdoorPedometerMiles else { return nil }
         let gpsSpan = max(0, currentDistance - sessionStartDistance)
-        guard gpsSpan > 0 else { return sessionStartDistance + pedometerSpan }
+        guard gpsSpan > 0 else { return pedometerSpan }
 
         let disagreement = abs(gpsSpan - pedometerSpan) / max(pedometerSpan, 0.01)
-        let chosenSpan: Double
-        if isWalk {
-            if disagreement <= 0.10 {
-                chosenSpan = gpsSpan
-            } else if dopplerMovingMiles >= max(0.1, pedometerSpan * 1.5) {
+        if sessionIsWalk {
+            if dopplerMovingMiles >= max(0.1, pedometerSpan * 1.5) {
                 // Doppler-verified locomotion far beyond what steps account
-                // for: the phone genuinely covered ground without stepping.
-                chosenSpan = gpsSpan
-            } else {
-                chosenSpan = pedometerSpan
+                // for: the phone genuinely covered ground without stepping
+                // (stroller, cart) — GPS stays authoritative.
+                liveSourcePedometer = false
+            } else if liveSourcePedometer {
+                if disagreement < 0.08 { liveSourcePedometer = false }
+            } else if disagreement > 0.12 {
+                liveSourcePedometer = true
             }
         } else {
-            // Runs: rescue only clear GPS starvation.
-            chosenSpan = gpsSpan < pedometerSpan * 0.75 ? pedometerSpan : gpsSpan
+            // Runs: rescue only clear GPS starvation (lost fixes under cover
+            // measure SHORT, never long).
+            if liveSourcePedometer {
+                if gpsSpan > pedometerSpan * 0.78 { liveSourcePedometer = false }
+            } else if gpsSpan < pedometerSpan * 0.72 {
+                liveSourcePedometer = true
+            }
         }
-        if chosenSpan != gpsSpan {
-            print("[WorkoutLocationManager] 📏 Outdoor distance reconciled: GPS \(String(format: "%.3f", gpsSpan)) mi → pedometer \(String(format: "%.3f", pedometerSpan)) mi")
+        return liveSourcePedometer ? pedometerSpan : gpsSpan
+    }
+
+    /// Re-derive `liveDistance` after either instrument moved. Main thread only.
+    private func refreshLiveDistance() {
+        let value: Double
+        if let span = reconciledSpan() {
+            value = sessionStartDistance + span
+        } else {
+            value = currentDistance
         }
-        return sessionStartDistance + chosenSpan
+        if value != liveDistance { liveDistance = value }
+    }
+
+    /// Floor estimate for goal celebrations: the smaller of the GPS and
+    /// pedometer spans. Both spans only ever grow, and the finish saves one
+    /// of the two — so a goal celebrated against this floor can NEVER be
+    /// taken back by finish-time reconciliation, whichever way it resolves.
+    /// Equals `liveDistance` when the cross-check can't testify. Pure — does
+    /// not touch the sticky source.
+    func conservativeLiveDistance() -> Double {
+        guard !isUsingPedometer,
+              !pedometerErrored,
+              CMPedometer.authorizationStatus() == .authorized,
+              let pedometerSpan = outdoorPedometerMiles else { return liveDistance }
+        let gpsSpan = max(0, currentDistance - sessionStartDistance)
+        return sessionStartDistance + min(gpsSpan, pedometerSpan)
     }
 
     // MARK: - CLLocationManagerDelegate
@@ -447,6 +518,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             lastAccrualAt = Date()
             DispatchQueue.main.async {
                 self.currentDistance += distanceInMiles
+                self.refreshLiveDistance()
                 self.persistDistanceThrottled()
             }
         }
@@ -483,12 +555,15 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// Persist live distance straight to the recovery store from the background
     /// data callbacks, so distance survives app termination even when the
     /// foreground timer is suspended. Throttled; no-op when not tracking.
+    /// Persists the RECONCILED figure: recovery re-seeds the session from it,
+    /// so a pre-kill GPS-inflated span no longer survives reconciliation by
+    /// riding in as the recovered baseline.
     private func persistDistanceThrottled() {
         guard isTracking else { return }
         let now = Date()
         guard now.timeIntervalSince(lastDistancePersist) >= distancePersistInterval else { return }
         lastDistancePersist = now
-        InProgressWorkoutStore.updateDistance(currentDistance)
+        InProgressWorkoutStore.updateDistance(liveDistance)
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
