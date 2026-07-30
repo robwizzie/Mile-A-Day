@@ -1257,10 +1257,16 @@ struct WorkoutTrackingView: View {
                         }
                     }
                     // Write the tracked GPS trace as the workout's
-                    // HKWorkoutRoute BEFORE finalizing — fetchAllWorkoutData
-                    // kicks off the backend sync, which reads the route back
-                    // from HealthKit to draw feed maps. Best-effort: a failed
-                    // route write still finalizes the workout itself.
+                    // HKWorkoutRoute, then re-upload THIS workout with the
+                    // route attached. The HealthKit observer fires the moment
+                    // finishWorkout writes the workout — usually BEFORE the
+                    // route exists — so the observer-raced sync uploads it
+                    // route-less and marks it synced, and the feed map never
+                    // appears (while Apple Fitness, reading HealthKit
+                    // directly, shows the route fine). The targeted re-push
+                    // after finishRoute is what actually lands the map;
+                    // best-effort: a failed route write still finalizes the
+                    // workout itself.
                     guard let workout, saved, routeLocations.count >= 2 else {
                         finalize()
                         return
@@ -1277,6 +1283,9 @@ struct WorkoutTrackingView: View {
                         routeBuilder.finishRoute(with: workout, metadata: nil) { route, finishError in
                             if route == nil {
                                 print("[WorkoutTracking] ⚠️ Route finish failed: \(String(describing: finishError))")
+                            } else {
+                                let workoutId = workout.uuid
+                                Task { await WorkoutSyncService.shared.uploadWorkout(withId: workoutId) }
                             }
                             finalize()
                         }

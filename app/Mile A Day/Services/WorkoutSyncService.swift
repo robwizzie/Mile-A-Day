@@ -213,6 +213,63 @@ class WorkoutSyncService: ObservableObject {
         }
     }
 
+    /// Upload ONE workout by HealthKit UUID, route included, regardless of
+    /// whether an earlier upload already marked it synced.
+    ///
+    /// This exists to lose a race gracefully: `builder.finishWorkout` writes
+    /// the HKWorkout and the HealthKit OBSERVER fires on that write — often
+    /// starting a sync BEFORE `HKWorkoutRouteBuilder.finishRoute` has
+    /// attached the GPS trace. That first upload finds no route, the workout
+    /// gets marked synced, and the feed never draws the map — while Apple
+    /// Fitness (reading HealthKit directly, where the route lands a moment
+    /// later) shows it fine. The in-app finish calls this AFTER the route
+    /// write completes: the backend workout upsert is idempotent and
+    /// `workout_routes` only updates when a payload HAS a route, so this
+    /// re-push is safe no matter which upload won.
+    func uploadWorkout(withId workoutId: UUID) async {
+        guard currentUserId != nil else { return }
+        do {
+            guard let workout = try await fetchWorkout(byUUID: workoutId) else {
+                print("[WorkoutSyncService] ⚠️ Targeted upload: workout \(workoutId) not found in HealthKit")
+                return
+            }
+            // uploadBatchWithRetry(fullSync: false) fetches routes for
+            // batches ≤ maxRouteFetchBatch — a single workout always
+            // qualifies.
+            try await uploadBatchWithRetry([workout])
+            markWorkoutsAsSynced([workout.uuid.uuidString])
+            updateLastSyncDate(workout.endDate)
+            print("[WorkoutSyncService] ✅ Route-bearing upload complete for \(workoutId)")
+        } catch {
+            // Best-effort: the regular sync paths still cover the workout
+            // itself; only the route enrichment is deferred to Sync Streak.
+            print("[WorkoutSyncService] ⚠️ Targeted upload failed: \(error)")
+        }
+    }
+
+    /// Fetch a single workout by UUID from HealthKit.
+    private func fetchWorkout(byUUID uuid: UUID) async throws -> HKWorkout? {
+        try await withCheckedThrowingContinuation { continuation in
+            guard HKHealthStore.isHealthDataAvailable() else {
+                continuation.resume(throwing: SyncError.healthKitNotAvailable)
+                return
+            }
+            let query = HKSampleQuery(
+                sampleType: HKObjectType.workoutType(),
+                predicate: HKQuery.predicateForObject(with: uuid),
+                limit: 1,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error = error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: (samples as? [HKWorkout])?.first)
+            }
+            healthStore.execute(query)
+        }
+    }
+
     /// Check if this is a first-time sync (no previous sync date)
     func isFirstTimeSync() -> Bool {
         return lastSyncDate == nil
