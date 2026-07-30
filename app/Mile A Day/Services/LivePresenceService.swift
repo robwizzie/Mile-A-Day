@@ -97,7 +97,10 @@ final class LivePresenceService: ObservableObject {
         seenHypeIds = []
         sessionId = nil
         lastBeatAt = .distantPast
-        Task { [weak self] in
+        // Strong `self` throughout: this is a `shared` singleton, so a weak
+        // capture buys nothing and reads as a captured `var` inside the
+        // MainActor hop (an error in Swift 6).
+        Task {
             do {
                 struct Body: Encodable { let workout_type: String }
                 let body = try JSONEncoder().encode(Body(workout_type: workoutType))
@@ -107,10 +110,12 @@ final class LivePresenceService: ObservableObject {
                     body: body,
                     responseType: StartResponse.self
                 )
-                await MainActor.run { self?.sessionId = resp.session_id }
-                // First beat right away so a friend already out pulses
-                // within seconds of starting, not after 45s.
-                self?.tick(force: true)
+                await MainActor.run {
+                    self.sessionId = resp.session_id
+                    // First beat right away so a friend already out pulses
+                    // within seconds of starting, not after 45s.
+                    self.tick(force: true)
+                }
             } catch {
                 print("[LivePresence] start failed (non-fatal): \(error)")
             }
@@ -125,8 +130,8 @@ final class LivePresenceService: ObservableObject {
         guard !inFlight else { return }
         inFlight = true
         lastBeatAt = Date()
-        Task { [weak self] in
-            defer { self?.inFlight = false }
+        Task {
+            defer { self.inFlight = false }
             do {
                 struct Body: Encodable { let session_id: String }
                 let body = try JSONEncoder().encode(Body(session_id: sessionId))
@@ -137,7 +142,8 @@ final class LivePresenceService: ObservableObject {
                     responseType: HeartbeatResponse.self
                 )
                 await MainActor.run {
-                    guard let self, self.sessionId == sessionId else { return }
+                    // Session may have ended/restarted mid-flight; drop stale beats.
+                    guard self.sessionId == sessionId else { return }
                     self.friendsOut = resp.friends_out
                     let fresh = resp.hypes.filter { !self.seenHypeIds.contains($0.id) }
                     if !fresh.isEmpty {
