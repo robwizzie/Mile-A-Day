@@ -914,6 +914,13 @@ struct BestSplitTime: Codable {
     }
 }
 
+/// One day of the server's exact last-7-days mile series. `date` is the
+/// user's `local_date` ("yyyy-MM-dd"); zero-mile days are included.
+struct FriendDayMiles: Codable {
+    let date: String
+    let miles: Double
+}
+
 /// Stats data for a friend
 struct FriendStats: Codable {
     let streak: Int
@@ -923,6 +930,12 @@ struct FriendStats: Codable {
     let bestSplitTime: BestSplitTime?
     let recentWorkouts: [FriendWorkout]?
     let todayMiles: Double?
+    /// Exact per-day totals for the last 7 days, straight from the server.
+    /// The week chart must use THIS, not `recentWorkouts` — that list is
+    /// capped, so a heavy logger's older days would read as zero (a 400-day
+    /// streak showed an empty Fri-Sun because 10 workouts only reached back
+    /// to Monday). Optional: nil until the server ships the field.
+    let last7DayMiles: [FriendDayMiles]?
     let goalMiles: Double?
     /// True when this user's current streak is 100% natural. Read from the
     /// gated `streak_features` payload — absent for un-enrolled users, so it
@@ -937,6 +950,7 @@ struct FriendStats: Codable {
         case bestSplitTime = "best_split_time"
         case recentWorkouts = "recent_workouts"
         case todayMiles = "today_miles"
+        case last7DayMiles = "last_7_day_miles"
         case goalMiles = "goal_miles"
     }
 
@@ -972,6 +986,7 @@ struct FriendStats: Codable {
         
         recentWorkouts = try? container.decode([FriendWorkout].self, forKey: .recentWorkouts)
         todayMiles = try? container.decode(Double.self, forKey: .todayMiles)
+        last7DayMiles = try? container.decode([FriendDayMiles].self, forKey: .last7DayMiles)
         goalMiles = try? container.decode(Double.self, forKey: .goalMiles)
         if let gated = try? decoder.container(keyedBy: GatedKeys.self),
            let features = try? gated.decode(GatedStreakFeatures.self, forKey: .streakFeatures) {
