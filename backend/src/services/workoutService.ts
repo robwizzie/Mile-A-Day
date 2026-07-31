@@ -692,10 +692,43 @@ export async function getRecentWorkouts(
 			pw.workout_id IS NOT NULL
 			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$1", "$3")},
 			false
-		) AS has_photo
+		) AS has_photo,
+		-- Restate a day's 'daily_mile' anchor with the whole day's rollup, exactly
+		-- like every other read surface (getUnifiedFeed, getFriendsWorkoutFeed in
+		-- friendshipService.ts). The anchor is the leg that CROSSED the mile and
+		-- carries only its own distance, so a 0.95 mi day otherwise renders as its
+		-- 0.20 mi final leg with the earlier legs hidden. These trailing columns
+		-- intentionally shadow r.*'s raw values (node-pg keeps the last of a
+		-- duplicate column name). The lateral is gated to visitors only, so the
+		-- OWNER — who sees every individual leg in this same list — keeps raw
+		-- per-workout numbers and it never reads as double-counting.
+		COALESCE(roll.distance, r.distance) AS distance,
+		COALESCE(roll.total_duration, r.total_duration) AS total_duration,
+		COALESCE(roll.calories, r.calories) AS calories,
+		COALESCE(roll.steps, r.steps) AS steps
 	FROM recent r
 	LEFT JOIN workout_routes wr ON wr.workout_id = r.workout_id
 	LEFT JOIN photo_workouts pw ON pw.workout_id = r.workout_id
+	LEFT JOIN LATERAL (
+		SELECT
+			SUM(m.distance)::float AS distance,
+			SUM(m.total_duration)::float AS total_duration,
+			SUM(m.calories)::float AS calories,
+			SUM(m.steps)::int AS steps
+		FROM workouts m
+		WHERE r.feed_role = 'daily_mile'
+			-- Visitors only: $1 (owner) is never null, so IS DISTINCT FROM is true
+			-- for any other viewer AND for a null viewer (a fail-closed stranger
+			-- still gets the feed-accurate number, matching the row filter above).
+			AND $1 IS DISTINCT FROM $3
+			AND m.user_id = r.user_id
+			AND m.local_date = r.local_date
+			AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
+			AND (
+				m.feed_role IN ('rolled_up', 'daily_mile')
+				OR (m.feed_role = 'hidden' AND m.device_end_date <= r.device_end_date)
+			)
+	) roll ON TRUE
 	ORDER BY r.device_end_date DESC
 	`;
 
