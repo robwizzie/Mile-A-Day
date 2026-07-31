@@ -686,6 +686,9 @@ struct SocialFeedView: View {
                 onShare: { sharingURL = ShareURL(url: PostShareLink.url(for: post.post_id)) },
                 onLeaveCollab: isMyAcceptedCollab
                     ? { Task { await respondToCoauthor(post, accept: false) } }
+                    : nil,
+                onSetCollabOnProfile: isMyAcceptedCollab
+                    ? { onProfile in Task { await setCollabOnProfile(entry, onProfile: onProfile) } }
                     : nil
             )
         } else {
@@ -1133,6 +1136,26 @@ struct SocialFeedView: View {
             try await PostService.respondToCoauthor(postId: post.post_id, accept: accept)
             await refresh()
         } catch {}
+    }
+
+    /// Pin a collab I'm tagged in on/off MY profile grid. Nothing about the
+    /// feed changes — the post keeps its place here and in everyone else's
+    /// feed — so this updates the card's state in place rather than refreshing
+    /// and yanking the reader's scroll position for a change they can't see.
+    private func setCollabOnProfile(_ entry: FeedEntry, onProfile: Bool) async {
+        await MainActor.run {
+            MADHaptics.tap()
+            updateEntry(entry.id) { $0.coauthor_on_profile = onProfile }
+        }
+        do {
+            try await PostService.setCoauthorOnProfile(
+                postId: entry.entryId, onProfile: onProfile
+            )
+        } catch {
+            await MainActor.run {
+                updateEntry(entry.id) { $0.coauthor_on_profile = !onProfile }
+            }
+        }
     }
 
     private func updateEntry(_ id: String, _ mutate: (inout FeedEntry) -> Void) {

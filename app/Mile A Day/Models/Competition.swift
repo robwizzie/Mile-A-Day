@@ -988,6 +988,10 @@ struct NotificationSettingsResponse: Codable {
     /// "public" | "friends" | "private" — who may see my routes and photos.
     /// Optional: absent on older server builds (treat as "friends").
     let workout_visibility: String?
+    /// Do collabs I'm tagged in join my profile's Posts grid? Server-enforced
+    /// (the grid is a SQL query), so this is the authority, not the local copy.
+    /// Optional: absent on older server builds (treat as on).
+    let tagged_posts_on_profile: Bool?
 }
 
 struct FriendNotificationSetting: Codable, Identifiable {

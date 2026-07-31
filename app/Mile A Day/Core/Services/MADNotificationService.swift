@@ -91,9 +91,18 @@ final class MADNotificationService: NSObject, ObservableObject {
         )
 
         // Collab tags are applied immediately, so there's nothing to accept —
-        // the only action is the way out. Not .foreground for the same reason
-        // as the friend-request actions: opting out of someone else's post
-        // shouldn't require opening the app.
+        // both actions are ways out, softest first. Not .foreground for the
+        // same reason as the friend-request actions: curating someone else's
+        // post shouldn't require opening the app.
+        //
+        // Actions are declared entirely client-side, so adding one here is
+        // safe for shipped builds: the server names the category and nothing
+        // else, and an older install simply renders the one button it knows.
+        let hideCollabAction = UNNotificationAction(
+            identifier: "COAUTHOR_HIDE_PROFILE_ACTION",
+            title: "Keep off my profile",
+            options: []
+        )
         let removeCollabAction = UNNotificationAction(
             identifier: "COAUTHOR_REMOVE_ACTION",
             title: "Remove me",
@@ -101,7 +110,7 @@ final class MADNotificationService: NSObject, ObservableObject {
         )
         let coauthorTag = UNNotificationCategory(
             identifier: "COAUTHOR_TAG",
-            actions: [removeCollabAction],
+            actions: [hideCollabAction, removeCollabAction],
             intentIdentifiers: [],
             options: []
         )
@@ -502,6 +511,10 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             await handleRemoveCollabAction(userInfo: userInfo)
             return
         }
+        if response.actionIdentifier == "COAUTHOR_HIDE_PROFILE_ACTION" {
+            await handleHideCollabFromProfileAction(userInfo: userInfo)
+            return
+        }
 
         guard let type = userInfo["type"] as? String else { return }
         let data = userInfo["data"] as? [String: String] ?? [:]
@@ -605,6 +618,37 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             await postLocalToast(
                 title: "Couldn't remove you",
                 body: "Open the app to remove yourself from this post."
+            )
+        }
+    }
+
+    /// "Keep off my profile" on a collab-tag push: the tag stays — it's still
+    /// in their Tagged tab and still on the author's post — but it doesn't
+    /// join their profile grid. The soft alternative to removing themselves,
+    /// resolvable from the banner for the same reason.
+    ///
+    /// Same suspended-app constraints as `handleRemoveCollabAction`: a static
+    /// service call and a local toast, nothing view-owned.
+    @MainActor
+    private func handleHideCollabFromProfileAction(userInfo: [AnyHashable: Any]) async {
+        let data = userInfo["data"] as? [String: String]
+        guard let postId = data?["post_id"], !postId.isEmpty else {
+            await postLocalToast(
+                title: "Couldn't update that post",
+                body: "Open the app to keep it off your profile."
+            )
+            return
+        }
+        do {
+            try await PostService.setCoauthorOnProfile(postId: postId, onProfile: false)
+            await postLocalToast(
+                title: "Kept off your profile",
+                body: "You're still tagged — find it in your Tagged tab."
+            )
+        } catch {
+            await postLocalToast(
+                title: "Couldn't update that post",
+                body: "Open the app to keep it off your profile."
             )
         }
     }

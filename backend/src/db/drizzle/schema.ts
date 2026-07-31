@@ -387,6 +387,11 @@ export const notificationSettings = pgTable(
     friendRequestReminderEnabled: boolean(
       "friend_request_reminder_enabled",
     ).default(true),
+    // tagged_posts_on_profile: do collabs I'm tagged in land on my profile's
+    // Posts grid? Off = they live in the Tagged tab only (Instagram's model).
+    // The default stays ON so nothing moves for existing users. Read through
+    // posts.coauthor_on_profile, which overrides it per post.
+    taggedPostsOnProfile: boolean("tagged_posts_on_profile").default(true),
   },
   (table) => [
     check(
@@ -1328,6 +1333,14 @@ export const posts = pgTable(
     coauthorUserId: text("coauthor_user_id"),
     coauthorStatus: text("coauthor_status"),
     coauthorWorkoutId: varchar("coauthor_workout_id", { length: 255 }),
+    // Does this collab show on the COAUTHOR's own profile grid? Instagram
+    // keeps tags off your grid; here they landed on both. Tri-state on
+    // purpose: NULL = "follow my `tagged_posts_on_profile` setting", so
+    // flipping that switch retroactively covers every tag the user already
+    // has, while an explicit true/false is a per-post override that survives
+    // later setting changes. Grid ONLY — the Tagged tab, the author's own
+    // profile and both circles' feeds are deliberately untouched.
+    coauthorOnProfile: boolean("coauthor_on_profile"),
     // "Posted live": the author shared this inside the 10-minute fresh window
     // after finishing the run. Client-claimed at create time (the client owns
     // the window — it's anchored to when the app SAW the finished workout);

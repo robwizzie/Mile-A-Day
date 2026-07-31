@@ -376,13 +376,66 @@ struct PostShareStepView: View {
                 .font(.system(size: 12, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.5))
                 .fixedSize(horizontal: false, vertical: true)
+            if vm.includeRoute { routePreviewCard }
         }
         .padding(MADTheme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                 .fill(Color.white.opacity(0.04))
         )
+        // The coordinates are only fetched here, on the screen that draws
+        // them — the edit step just needs to know a route EXISTS.
+        .task { await vm.loadRoutePreview() }
     }
+
+    /// The route slide as friends will actually get it: the same 4:5 frame,
+    /// the same map, the same stats band. Shown at a fraction of the width —
+    /// this is a "yes, that's my run" check, not a second copy of the post,
+    /// and the caption has to stay the first thing on this screen.
+    ///
+    /// Silent when there's nothing to draw: the toggle's own copy already
+    /// explains what it does, and an error card for a map nobody asked to see
+    /// would be noise.
+    @ViewBuilder
+    private var routePreviewCard: some View {
+        if let coords = vm.routePreview, coords.count >= 2 {
+            WorkoutRouteMapView(
+                coordinates: coords,
+                routeColor: ActivityCardView.color(vm.routeWorkoutType)
+            )
+            .frame(width: routePreviewWidth, height: routePreviewWidth * 5 / 4)
+            .overlay {
+                // Matches PostCardView's route slide: the band lays out at the
+                // baked card's design width, so scaling by width alone
+                // reproduces it at any size.
+                GeometryReader { geo in
+                    RouteStatsOverlayView(stats: vm.stats, workoutType: vm.routeWorkoutType)
+                        .scaleEffect(geo.size.width / RunStatsCardView.designSize.width,
+                                     anchor: .topLeading)
+                }
+                .allowsHitTesting(false)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium,
+                                        style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium,
+                                 style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+            )
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, MADTheme.Spacing.sm)
+            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        } else if vm.isLoadingRoutePreview {
+            RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium, style: .continuous)
+                .fill(Color.white.opacity(0.05))
+                .frame(width: routePreviewWidth, height: routePreviewWidth * 5 / 4)
+                .overlay(ProgressView().tint(.white.opacity(0.4)))
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, MADTheme.Spacing.sm)
+        }
+    }
+
+    private var routePreviewWidth: CGFloat { 176 }
 
     private func sectionLabel(_ text: String) -> some View {
         Text(text)

@@ -239,6 +239,13 @@
       "when": 1785283916925,
       "tag": "0033_parched_wong",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1785503344479,
+      "tag": "0034_sparkling_thor_girl",
+      "breakpoints": true
     }
   ]
 }

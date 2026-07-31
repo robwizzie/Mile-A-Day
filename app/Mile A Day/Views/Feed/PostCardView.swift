@@ -50,6 +50,11 @@ struct PostCardView: View {
     var onShare: (() -> Void)? = nil
     /// Accepted coauthor: leave this post (remove self as coauthor).
     var onLeaveCollab: (() -> Void)? = nil
+    /// Accepted coauthor: pin this collab on/off MY profile grid, called with
+    /// the new value. The lighter sibling of `onLeaveCollab` — the tag stays,
+    /// only my grid changes. Wired alongside it; the menu still gates on the
+    /// server having sent `coauthor_on_profile`.
+    var onSetCollabOnProfile: ((Bool) -> Void)? = nil
 
     @State private var hypeBurst = 0
     /// Collapses the same physical double-tap arriving from two recognizers
@@ -236,6 +241,19 @@ struct PostCardView: View {
                     // Accepted coauthor: the post is the AUTHOR's to edit or
                     // delete, but leaving it is theirs. Reporting/blocking a
                     // post you're an author of makes no sense, so neither shows.
+                    //
+                    // Curating comes BEFORE leaving, and isn't destructive:
+                    // most people who don't want a tag on their grid still
+                    // want the tag. `coauthor_on_profile` is nil on servers
+                    // that don't know about the grid split — no toggle then.
+                    if let onSetCollabOnProfile, let onProfile = post.coauthor_on_profile {
+                        Button {
+                            onSetCollabOnProfile(!onProfile)
+                        } label: {
+                            Label(onProfile ? "Hide from my profile" : "Show on my profile",
+                                  systemImage: onProfile ? "eye.slash" : "square.grid.2x2")
+                        }
+                    }
                     Button(role: .destructive, action: onLeaveCollab) {
                         Label("Remove me from this post", systemImage: "person.badge.minus")
                     }

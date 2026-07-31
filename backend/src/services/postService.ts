@@ -72,6 +72,10 @@ export interface PostRow {
   coauthor_first_name?: string | null;
   coauthor_last_name?: string | null;
   coauthor_profile_image_url?: string | null;
+  // Resolved "is this collab on MY profile grid?" — only populated when the
+  // VIEWER is the coauthor (it's their setting to read), null otherwise.
+  // Drives the card's Hide/Show-on-profile action. Additive field.
+  coauthor_on_profile?: boolean | null;
   is_viewed?: boolean;
   // The viewer's own emoji reaction to this story (getUserActiveStories only),
   // so re-opening a story they already reacted to shows the reaction. null/absent
@@ -242,6 +246,30 @@ const COLLAB_REACH_SQL = collabReachSql("p");
 const COLLAB_ACTIVE = collabActiveSql("p");
 
 /**
+ * SQL: does this collab belong on the COAUTHOR's own profile GRID?
+ *
+ * Scope is deliberately narrow — the grid and nothing else. A collab still
+ * reaches both circles' feeds (collabReachSql), still shows on the author's
+ * profile, and still lands in the coauthor's Tagged tab; this only answers
+ * "is it part of the curated Posts grid", which is the one place Instagram
+ * keeps tags OUT of and we were putting them IN.
+ *
+ * Tri-state resolution, in order: the per-post override, then the coauthor's
+ * `tagged_posts_on_profile` setting, then TRUE. NULL (every pre-existing row,
+ * and every new tag) means "follow my setting", so flipping that one switch
+ * covers the tags a user ALREADY has — the actual complaint — instead of only
+ * future ones. Writing the override is what pins a single post either way.
+ *
+ * `coauthorParam` must be the id of the person whose grid is being built.
+ */
+const coauthorOnProfileSql = (a: string, coauthorParam: string) => `COALESCE(
+	${a}.coauthor_on_profile,
+	(SELECT ns.tagged_posts_on_profile FROM notification_settings ns
+		WHERE ns.user_id = ${coauthorParam}),
+	TRUE
+)`;
+
+/**
  * SQL: may viewer `$1` see post `p` given the AUTHOR's visibility? Both authors
  * always see their own collab (a private author's post leaves everyone else's
  * feed, but never their own or their coauthor's).
@@ -257,7 +285,13 @@ const COAUTHOR_COLUMNS = `
 	(SELECT cu.username FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_username,
 	(SELECT cu.first_name FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_first_name,
 	(SELECT cu.last_name FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_last_name,
-	(SELECT cu.profile_image_url FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_profile_image_url`;
+	(SELECT cu.profile_image_url FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_profile_image_url,
+	-- Only meaningful to the coauthor themselves (it's their grid), so it's
+	-- NULL for everyone else rather than leaking one user's curation choice
+	-- to the other. CASE guarantees the subquery only runs on collab rows the
+	-- viewer is actually part of.
+	CASE WHEN p.coauthor_user_id = $1
+		THEN ${coauthorOnProfileSql("p", "$1")} END AS coauthor_on_profile`;
 
 // SELECT list shared by feed + story-detail reads so both shapes match PostRow.
 // `$1` must be the viewer id (drives is_self / is_hyped).
@@ -1082,6 +1116,9 @@ export interface FeedEntryRow {
   coauthor_first_name: string | null;
   coauthor_last_name: string | null;
   coauthor_profile_image_url: string | null;
+  // Resolved "is this collab on MY profile grid?", populated only when the
+  // viewer is the coauthor (null otherwise, and on every workout entry).
+  coauthor_on_profile?: boolean | null;
   // Microsecond-precise sort_ts (Postgres text form) for keyset pagination.
   cursor?: string;
 }
@@ -1564,7 +1601,14 @@ export async function getUserPosts(
 		FROM posts p
 		JOIN users u ON u.user_id = p.user_id
 		WHERE (p.user_id = $2
-				OR (p.coauthor_user_id = $2 AND ${COLLAB_ACTIVE}))
+				-- Tags are the Tagged tab's job, not the grid's: a collab only
+				-- joins the coauthor's Posts grid while they haven't opted out
+				-- (per-post override, else their tagged_posts_on_profile).
+				-- Hiding it here removes it from NOWHERE else — it stays in
+				-- their Tagged tab, on the author's grid, and in both circles'
+				-- feeds.
+				OR (p.coauthor_user_id = $2 AND ${COLLAB_ACTIVE}
+					AND ${coauthorOnProfileSql("p", "$2")}))
 			AND p.deleted_at IS NULL
 			AND (
 				p.share_to_feed
@@ -2025,6 +2069,45 @@ export async function respondToCoauthorInvite(
 }
 
 /**
+ * The coauthor pins this collab on or off their own profile GRID. Distinct
+ * from respondToCoauthorInvite(accept:false), which severs the tag outright:
+ * here the tag stays live everywhere it already was — the Tagged tab, the
+ * author's grid, both circles' feeds, the card's "alice & bob" header — and
+ * only the coauthor's curated Posts grid changes.
+ *
+ * Writes an explicit override, so a later flip of `tagged_posts_on_profile`
+ * leaves this post where the user put it. Returns null when the caller isn't
+ * this post's coauthor.
+ */
+export async function setCoauthorProfileVisibility(
+  userId: string,
+  postId: string,
+  onProfile: boolean,
+): Promise<{ author_id: string } | null> {
+  const rows = await db.query<{ author_id: string }>(
+    `UPDATE posts SET coauthor_on_profile = $3
+		 WHERE post_id = $2 AND coauthor_user_id = $1 AND deleted_at IS NULL
+		 RETURNING user_id AS author_id`,
+    [userId, postId, onProfile],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Would a NEW tag on `coauthorId` land on their profile grid? Reads the
+ * setting alone — a brand-new tag has no per-post override yet. Only used to
+ * word the tag push truthfully; the grid query resolves this itself.
+ */
+async function taggedPostsLandOnProfile(coauthorId: string): Promise<boolean> {
+  const rows = await db.query<{ on_profile: boolean | null }>(
+    `SELECT tagged_posts_on_profile AS on_profile
+		 FROM notification_settings WHERE user_id = $1`,
+    [coauthorId],
+  );
+  return rows[0]?.on_profile ?? true;
+}
+
+/**
  * Push "you've been tagged" to the coauthor. Never throws.
  *
  * The post is ALREADY on their profile by the time this sends — there's no
@@ -2048,9 +2131,15 @@ export async function notifyCoauthorInvite(
       coauthorId,
       CLIENT_FEATURES.collabTagV1,
     );
+    // Say where it actually went. Telling someone with tags-off-my-grid that
+    // it's "on your profile now" is simply false, and it's the one line that
+    // would send them hunting for a post that isn't there.
+    const onProfile = await taggedPostsLandOnProfile(coauthorId);
     await sendPush(coauthorId, {
       title: `${name} tagged you in their post 🤝`,
-      body: "It's on your profile now — you can remove yourself any time.",
+      body: onProfile
+        ? "It's on your profile now — you can remove yourself any time."
+        : "It's in your Tagged tab — you can remove yourself any time.",
       // Type unchanged: every shipped build routes `coauthor_invite`, and a new
       // string would tap to nothing on all of them.
       type: "coauthor_invite",

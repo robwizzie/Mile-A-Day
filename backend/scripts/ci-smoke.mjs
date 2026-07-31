@@ -17,6 +17,7 @@ const {
   getUserPosts,
   getUserTaggedPosts,
   respondToCoauthorInvite,
+  setCoauthorProfileVisibility,
   visiblePostAuthors,
   acceptedCoauthor,
   lockUnearnedPhotos,
@@ -54,10 +55,12 @@ async function cleanup() {
     `DELETE FROM workout_routes WHERE workout_id LIKE 'ci-workout-%'`,
   );
   await db.query(`DELETE FROM workouts WHERE user_id LIKE 'ci-%'`);
-  // The collab-permission assertions flip users to 'private' mid-run; a failed
-  // run must not leave that behind to poison the next one.
+  // The collab-permission assertions flip users to 'private' mid-run, and the
+  // grid-vs-tagged ones flip tags off the grid; a failed run must not leave
+  // either behind to poison the next one.
   await db.query(
-    `UPDATE notification_settings SET workout_visibility = 'friends'
+    `UPDATE notification_settings
+		 SET workout_visibility = 'friends', tagged_posts_on_profile = TRUE
 		 WHERE user_id LIKE 'ci-%'`,
   );
 }
@@ -241,6 +244,79 @@ assert.ok(
   ),
   "a tagged collab lands on the coauthor's own profile grid",
 );
+
+// --- Tags on the grid vs the Tagged tab ---------------------------------
+// Hiding a collab from your grid must move NOTHING else: the tag stays live,
+// the Tagged tab keeps it, the author's grid keeps it, and both circles still
+// get it in the feed. That separation is the whole feature — a regression
+// here reads as "the app deleted my friend's post".
+const bobGridHas = async (postId) =>
+  (await getUserPosts(BOB, BOB, 24)).some((p) => p.post_id === postId);
+const bobTaggedHas = async (postId) =>
+  (await getUserTaggedPosts(BOB, BOB, 20, null)).some(
+    (p) => p.post_id === postId,
+  );
+
+// The setting alone, with no per-post override (every existing tag's state).
+await updateNotificationPreferences(BOB, { tagged_posts_on_profile: false });
+assert.equal(
+  await bobGridHas(collabPost.post_id),
+  false,
+  "tags-off-my-grid retroactively covers tags the user already had",
+);
+assert.ok(
+  await bobTaggedHas(collabPost.post_id),
+  "…while the Tagged tab keeps it (that's where it's supposed to live)",
+);
+assert.ok(
+  (await getUserPosts(BOB, ALICE, 24)).some(
+    (p) => p.post_id === collabPost.post_id,
+  ),
+  "…and it never leaves the AUTHOR's grid — it's their post",
+);
+assert.ok(
+  (await getUnifiedFeed(CARL, 30, null)).some(
+    (r) => r.kind === "post" && r.id === collabPost.post_id,
+  ),
+  "…and collab reach to the coauthor's circle is untouched",
+);
+// A per-post override beats the setting, in both directions.
+assert.ok(
+  await setCoauthorProfileVisibility(BOB, collabPost.post_id, true),
+  "the coauthor may pin one collab back onto their grid",
+);
+assert.ok(
+  await bobGridHas(collabPost.post_id),
+  "…and an explicit override wins over the setting being off",
+);
+await updateNotificationPreferences(BOB, { tagged_posts_on_profile: true });
+assert.ok(
+  await setCoauthorProfileVisibility(BOB, collabPost.post_id, false),
+  "…and the reverse override applies with the setting on",
+);
+assert.equal(
+  await bobGridHas(collabPost.post_id),
+  false,
+  "…hiding one collab leaves the setting alone",
+);
+assert.ok(
+  await bobTaggedHas(collabPost.post_id),
+  "…and a per-post hide still isn't an untag",
+);
+// Only the coauthor may curate their own grid.
+assert.equal(
+  await setCoauthorProfileVisibility(CARL, collabPost.post_id, false),
+  null,
+  "a third party can't touch someone else's collab visibility",
+);
+assert.equal(
+  await setCoauthorProfileVisibility(ALICE, collabPost.post_id, false),
+  null,
+  "…and neither can the post's own author",
+);
+// Restore the default state for everything downstream.
+await setCoauthorProfileVisibility(BOB, collabPost.post_id, true);
+
 // An older build still sends accept:true. That has to succeed as a no-op
 // rather than 404 on a collab the user is already part of.
 const collabAccept = await respondToCoauthorInvite(
