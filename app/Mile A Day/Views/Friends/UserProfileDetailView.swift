@@ -1162,7 +1162,7 @@ struct FriendWorkoutDetailSheet: View {
     @State private var routeCoordinates: [CLLocationCoordinate2D]?
     /// Retained map snapshot so the route map's pinch-zoom can compose its
     /// floating copy on demand (same mechanism as the feed cards).
-    @State private var routeSnapshot: UIImage?
+    @State private var routeSnapshot: RouteMapSnapshot?
     @State private var isLoadingRoute = false
 
     /// The same rule your own detail uses, sanity guard included.
@@ -1219,7 +1219,9 @@ struct FriendWorkoutDetailSheet: View {
             snapshot: snapshot,
             coordinates: coords,
             routeColor: workoutColor,
-            size: CGSize(width: 900, height: 600)
+            // Derived from the card's own aspect so the lift is a pure
+            // upscale — a fixed size that didn't match would crop the route.
+            size: WorkoutRouteMapView.zoomSize(for: snapshot, targetWidth: 900)
         ) {
             EmptyView()
         }

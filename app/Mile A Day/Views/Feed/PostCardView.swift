@@ -63,7 +63,7 @@ struct PostCardView: View {
     @State private var lastDoubleTapAt = Date.distantPast
     /// The route slide's raw map snapshot (~400×300) — the only piece kept
     /// around; the zoom's floating composite is rendered on demand from it.
-    @State private var routeSnapshot: UIImage?
+    @State private var routeSnapshot: RouteMapSnapshot?
 
     /// True if the current user is the post author.
     private var isMine: Bool {
