@@ -1,20 +1,55 @@
 import SwiftUI
 import MapKit
 
+/// A finished map snapshot plus the only projection that registers route
+/// coordinates onto it.
+///
+/// Why this exists: MapKit draws in Web Mercator AND — more importantly — it
+/// ADJUSTS the `MKCoordinateRegion` it was handed to fit the requested image's
+/// aspect ratio, expanding whichever axis is short. So neither the requested
+/// region nor a linear lat/lon → pixel mapping describes where a coordinate
+/// actually landed in the image. `MKMapSnapshotter.Snapshot.point(for:)` is
+/// the snapshot's own answer, and it is what keeps our line on the same
+/// streets Apple Fitness draws it on.
+struct RouteMapSnapshot {
+    let image: UIImage
+    /// Point size the snapshot was rendered at (== `options.size`, which is
+    /// also the space `snapshot.point(for:)` answers in).
+    let size: CGSize
+    fileprivate let snapshot: MKMapSnapshotter.Snapshot
+
+    /// Where `coordinate` sits in a view of `viewSize` that displays `image`
+    /// with `.aspectRatio(contentMode: .fill)` — scaled to cover, centered,
+    /// cropped. Snapshots are requested at the view's own size, so the scale
+    /// is normally 1 and the crop zero; the math stays correct if the view
+    /// resizes (rotation, re-layout) before a fresh snapshot lands.
+    func point(for coordinate: CLLocationCoordinate2D, in viewSize: CGSize) -> CGPoint {
+        let raw = snapshot.point(for: coordinate)
+        guard size.width > 0, size.height > 0 else { return raw }
+        let scale = max(viewSize.width / size.width, viewSize.height / size.height)
+        return CGPoint(
+            x: raw.x * scale + (viewSize.width - size.width * scale) / 2,
+            y: raw.y * scale + (viewSize.height - size.height * scale) / 2
+        )
+    }
+}
+
 struct WorkoutRouteMapView: View {
     let coordinates: [CLLocationCoordinate2D]
     let routeColor: Color
     /// Fired once the map snapshot lands — lets containers build a static
     /// composite (map + fully-drawn route) for the pinch-zoom floating copy.
-    var onSnapshot: ((UIImage) -> Void)? = nil
+    /// Carries the projection, not just the image: a `UIImage` alone can't say
+    /// where a coordinate belongs on it.
+    var onSnapshot: ((RouteMapSnapshot) -> Void)? = nil
 
-    @State private var snapshotImage: UIImage?
+    @State private var snapshot: RouteMapSnapshot?
     @State private var trimProgress: CGFloat = 0
     @State private var showMarkers = false
-    @State private var hasLoaded = false
+    @State private var hasAnimated = false
 
-    /// Region math is static so the zoom composite can reproject the same
-    /// framing without an instance.
+    /// Region math is static so the zoom composite can reproduce the framing
+    /// without an instance.
     static func region(for coordinates: [CLLocationCoordinate2D]) -> MKCoordinateRegion {
         guard !coordinates.isEmpty else {
             return MKCoordinateRegion()
@@ -51,25 +86,24 @@ struct WorkoutRouteMapView: View {
     /// caller overlay, e.g. the stats band) at `size` — what the Instagram
     /// pinch-zoom floats. Composed ON DEMAND at pinch-begin (never eagerly
     /// per card — a feed of routes would retain megabytes for gestures that
-    /// mostly never happen); pixel-equivalent to the live view because the
-    /// overlay projection is purely proportional to the view size.
+    /// mostly never happen). Callers pass a `size` matching the card's aspect
+    /// ratio, so this is pixel-equivalent to the live view.
     static func zoomComposite<Overlay: View>(
-        snapshot: UIImage,
+        snapshot: RouteMapSnapshot,
         coordinates: [CLLocationCoordinate2D],
         routeColor: Color,
         size: CGSize,
         @ViewBuilder overlay: () -> Overlay
     ) -> UIImage? {
         let content = ZStack(alignment: .topLeading) {
-            Image(uiImage: snapshot)
+            Image(uiImage: snapshot.image)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
                 .frame(width: size.width, height: size.height)
                 .clipped()
             RouteOverlay(
                 coordinates: coordinates,
-                region: region(for: coordinates),
-                viewSize: size,
+                project: { snapshot.point(for: $0, in: size) },
                 routeColor: routeColor,
                 trimProgress: 1,
                 showMarkers: true
@@ -84,21 +118,32 @@ struct WorkoutRouteMapView: View {
         return renderer.uiImage
     }
 
+    /// A composite size that keeps the card's own aspect ratio, so the zoom
+    /// copy is a pure upscale. A hardcoded size whose aspect doesn't match the
+    /// card center-crops, which can lop the ends off the route.
+    static func zoomSize(for snapshot: RouteMapSnapshot, targetWidth: CGFloat) -> CGSize {
+        guard snapshot.size.width > 0, snapshot.size.height > 0 else {
+            return CGSize(width: targetWidth, height: targetWidth)
+        }
+        let scale = targetWidth / snapshot.size.width
+        return CGSize(width: targetWidth, height: (snapshot.size.height * scale).rounded())
+    }
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
-                if let image = snapshotImage {
+                if let snapshot {
                     // Static map snapshot — no lag in scroll
-                    Image(uiImage: image)
+                    Image(uiImage: snapshot.image)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .frame(width: geo.size.width, height: geo.size.height)
+                        .clipped()
 
-                    // Animated route overlay
+                    // Animated route overlay, projected THROUGH the snapshot.
                     RouteOverlay(
                         coordinates: coordinates,
-                        region: region,
-                        viewSize: geo.size,
+                        project: { snapshot.point(for: $0, in: geo.size) },
                         routeColor: routeColor,
                         trimProgress: trimProgress,
                         showMarkers: showMarkers
@@ -113,36 +158,54 @@ struct WorkoutRouteMapView: View {
                         )
                 }
             }
-        }
-        .task {
-            guard !hasLoaded else { return }
-            hasLoaded = true
-            await generateSnapshot()
+            // Keyed on the size the snapshot must be taken at, so a view that
+            // lays out at zero first (or rotates later) re-snapshots at the
+            // right dimensions instead of stretching a stale one.
+            .task(id: Self.renderSize(geo.size)) {
+                let size = Self.renderSize(geo.size)
+                guard size.width > 1, size.height > 1 else { return }
+                await generateSnapshot(size: size)
 
-            // Animate route after snapshot loads
-            try? await Task.sleep(for: .milliseconds(300))
-            withAnimation(.easeOut(duration: 0.3)) {
-                showMarkers = true
-            }
-            withAnimation(.easeInOut(duration: 1.2)) {
-                trimProgress = 1.0
+                // Animate the route in once, on the first snapshot only — a
+                // re-snapshot after a resize must not replay the draw-on.
+                guard !hasAnimated, snapshot != nil else { return }
+                hasAnimated = true
+                try? await Task.sleep(for: .milliseconds(300))
+                withAnimation(.easeOut(duration: 0.3)) {
+                    showMarkers = true
+                }
+                withAnimation(.easeInOut(duration: 1.2)) {
+                    trimProgress = 1.0
+                }
             }
         }
     }
 
-    private func generateSnapshot() async {
+    /// Whole-point size: sub-pixel layout jitter must not re-trigger the
+    /// snapshot task on every scroll frame.
+    private static func renderSize(_ size: CGSize) -> CGSize {
+        CGSize(width: size.width.rounded(), height: size.height.rounded())
+    }
+
+    private func generateSnapshot(size: CGSize) async {
         let options = MKMapSnapshotter.Options()
         options.region = region
-        options.size = CGSize(width: 400, height: 300)
+        // MUST match the view this draws into. The image is displayed
+        // aspect-fill while the route is drawn in the VIEW's coordinate
+        // space, so a fixed 400×300 snapshot inside a 4:5 card had a third of
+        // its width cropped away while the line still spanned the full frame
+        // — which is how a shoreline walk got drawn out in the bay.
+        options.size = size
         options.mapType = .standard
         options.traitCollection = UITraitCollection(userInterfaceStyle: .dark)
         options.pointOfInterestFilter = .excludingAll
 
         let snapshotter = MKMapSnapshotter(options: options)
         do {
-            let snapshot = try await snapshotter.start()
-            snapshotImage = snapshot.image
-            onSnapshot?(snapshot.image)
+            let snap = try await snapshotter.start()
+            let made = RouteMapSnapshot(image: snap.image, size: size, snapshot: snap)
+            snapshot = made
+            onSnapshot?(made)
         } catch {
             print("[WorkoutRouteMapView] Snapshot failed: \(error)")
         }
@@ -153,30 +216,22 @@ struct WorkoutRouteMapView: View {
 
 private struct RouteOverlay: View {
     let coordinates: [CLLocationCoordinate2D]
-    let region: MKCoordinateRegion
-    let viewSize: CGSize
+    /// Coordinate → view point. Always the snapshot's own projection; never
+    /// re-derived from the requested region (see `RouteMapSnapshot`).
+    let project: (CLLocationCoordinate2D) -> CGPoint
     let routeColor: Color
     let trimProgress: CGFloat
     let showMarkers: Bool
 
-    private func coordToPoint(_ coord: CLLocationCoordinate2D) -> CGPoint {
-        let latRange = region.span.latitudeDelta
-        let lonRange = region.span.longitudeDelta
-        let centerLat = region.center.latitude
-        let centerLon = region.center.longitude
-
-        let x = (coord.longitude - (centerLon - lonRange / 2)) / lonRange * viewSize.width
-        let y = ((centerLat + latRange / 2) - coord.latitude) / latRange * viewSize.height
-
-        return CGPoint(x: x, y: y)
-    }
-
     private var points: [CGPoint] {
-        coordinates.map { coordToPoint($0) }
+        coordinates.map(project)
     }
 
     var body: some View {
-        ZStack {
+        // Projected once, not per-stroke: the glow, the line and both markers
+        // all read the same array.
+        let points = self.points
+        return ZStack {
             if points.count >= 2 {
                 // Glow
                 RoutePath(points: points)
