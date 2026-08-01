@@ -798,6 +798,14 @@ extension WidgetDataStore {
         sharedDefaults?.removeObject(forKey: "daily_goal")
         sharedDefaults?.removeObject(forKey: "streak_count")
         sharedDefaults?.removeObject(forKey: "streak_completed_today")
+        // Also drop the day stamp and derived values, or load() keeps serving
+        // "today's data" built from the cleared keys, and lift the reload
+        // throttle so the widgets actually rebuild from the cleared store.
+        sharedDefaults?.removeObject(forKey: "widget_data_day")
+        sharedDefaults?.removeObject(forKey: "current_progress")
+        sharedDefaults?.removeObject(forKey: "total_current_distance")
+        sharedDefaults?.removeObject(forKey: "last_forced_widget_reload")
+        WidgetDataStore.requestFullReload()
     }
 }
 

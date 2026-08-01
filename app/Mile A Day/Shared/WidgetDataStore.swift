@@ -113,6 +113,31 @@ struct WidgetDataStore {
         return defaults.integer(forKey: streakKey)
     }
 
+    // MARK: - Recovery
+
+    private static let lastForcedReloadKey = "last_forced_widget_reload"
+
+    /// Rebuild every MAD widget, at most once per `minimumInterval`.
+    ///
+    /// The per-value saves above deliberately skip no-op writes, which means a
+    /// widget whose *rendered timeline* has drifted — a reload iOS dropped, a
+    /// background sync that never ran — never recovers on its own, because the
+    /// stored values it would be rebuilt from are already correct. This is the
+    /// escape hatch: cheap, throttled, and called when the user brings the app
+    /// forward, which is exactly when a wrong widget has just been noticed.
+    static func requestFullReload(minimumInterval: TimeInterval = 900) {
+        guard let defaults = UserDefaults(suiteName: suiteName) else { return }
+        let now = Date()
+        if let last = defaults.object(forKey: lastForcedReloadKey) as? Date,
+           now.timeIntervalSince(last) < minimumInterval {
+            return
+        }
+        defaults.set(now, forKey: lastForcedReloadKey)
+        DispatchQueue.main.async {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+    }
+
     // MARK: - Dashboard style (streak flame widget)
 
     /// Mirrors the user's chosen dashboard style ("fun" / "modern") into the

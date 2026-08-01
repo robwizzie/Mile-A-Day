@@ -7,7 +7,10 @@ struct StreakCountEntry: TimelineEntry {
     let liveProgress: Double
     let isGoalCompleted: Bool
     let isAtRisk: Bool
-    let timeUntilReset: String?
+    /// Deadline for today's mile (next local midnight); nil once it's done.
+    /// Rendered as a live countdown rather than a baked string — see
+    /// `MADWidgetCountdown`.
+    let dayEnd: Date?
     /// Sun–Sat goal-completion flags for the current week (empty when unknown).
     var weekCompletions: [Bool] = []
     /// Total miles this week, for the medium widget's status line (0 = unknown).
@@ -17,102 +20,82 @@ struct StreakCountEntry: TimelineEntry {
 }
 
 struct StreakCountProvider: TimelineProvider {
+    private struct Snapshot {
+        let streak: Int
+        /// `var` so the timeline can derive a fresh-day copy for the entry it
+        /// bakes at midnight (see getTimeline).
+        var progress: Double
+        var isGoalCompleted: Bool
+        let weekCompletions: [Bool]
+        let weekMiles: Double
+        let tokensReady: Int
+    }
+
     func placeholder(in context: Context) -> StreakCountEntry {
         StreakCountEntry(
-            date: Date(), 
-            streak: 5, 
-            liveProgress: 0.3, 
+            date: Date(),
+            streak: 5,
+            liveProgress: 0.3,
             isGoalCompleted: false,
             isAtRisk: false,
-            timeUntilReset: "6h 30m remaining"
+            dayEnd: MADWidgetClock.endOfDay()
         )
     }
 
     func getSnapshot(in context: Context, completion: @escaping (StreakCountEntry) -> Void) {
-        let streak = WidgetDataStore.loadStreak()
-        let widgetData = WidgetDataStore.load()
-        
-        // Calculate status
-        let isGoalCompleted = widgetData.streakCompleted
-        let progress = widgetData.progress
-        
-        // Calculate risk status and time remaining
-        let currentHour = Calendar.current.component(.hour, from: Date())
-        let isAtRisk = currentHour >= 18 && !isGoalCompleted
-        
-        // Calculate time until reset if not completed
-        let timeUntilReset = calculateTimeUntilReset(isCompleted: isGoalCompleted)
-                
-        completion(StreakCountEntry(
-            date: Date(),
-            streak: streak,
-            liveProgress: progress,
-            isGoalCompleted: isGoalCompleted,
-            isAtRisk: isAtRisk,
-            timeUntilReset: timeUntilReset,
-            tokensReady: WidgetDataStore.loadTokensReady()
-        ))
+        completion(makeEntry(date: Date(), snapshot: loadSnapshot()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<StreakCountEntry>) -> Void) {
-        let streak = WidgetDataStore.loadStreak()
+        let snapshot = loadSnapshot()
+
+        // Pre-baked hour-boundary entries instead of a polling refresh policy.
+        // The only thing that moves without the app is the clock — the 6 PM
+        // at-risk switch — and a baked entry flips it exactly on the hour for
+        // free. The old policy asked for a reload every 30-60 minutes (~30/day)
+        // for a value the app rewrites (and force-reloads) whenever it changes;
+        // that budget, once spent, takes the app's own reloads down with it and
+        // freezes the widget on a stale streak.
+        let dayEnd = MADWidgetClock.endOfDay()
+        var entries = MADWidgetClock.hourlyEntryDates().map { makeEntry(date: $0, snapshot: snapshot) }
+        if entries.isEmpty { entries = [makeEntry(date: Date(), snapshot: snapshot)] }
+
+        // Safety net at the day boundary: the store would read as a fresh empty
+        // day here anyway, so bake that entry now. If iOS drops the midnight
+        // reload the widget still rolls over instead of showing yesterday's
+        // "Mile done — streak safe" through the next morning.
+        var freshDay = snapshot
+        freshDay.progress = 0
+        freshDay.isGoalCompleted = false
+        entries.append(makeEntry(date: dayEnd, snapshot: freshDay))
+
+        completion(Timeline(entries: entries, policy: .after(dayEnd)))
+    }
+
+    private func loadSnapshot() -> Snapshot {
         let widgetData = WidgetDataStore.load()
-        
-        // Calculate status
-        let isGoalCompleted = widgetData.streakCompleted
-        let progress = widgetData.progress
-        
-        // Calculate risk status and time remaining
-        let currentHour = Calendar.current.component(.hour, from: Date())
-        let isAtRisk = currentHour >= 18 && !isGoalCompleted
-        
-        // Calculate time until reset if not completed
-        let timeUntilReset = calculateTimeUntilReset(isCompleted: isGoalCompleted)
-                
-        let entry = StreakCountEntry(
-            date: Date(),
-            streak: streak,
-            liveProgress: progress,
-            isGoalCompleted: isGoalCompleted,
-            isAtRisk: isAtRisk,
-            timeUntilReset: timeUntilReset,
+        return Snapshot(
+            streak: WidgetDataStore.loadStreak(),
+            progress: widgetData.progress,
+            isGoalCompleted: widgetData.streakCompleted,
             weekCompletions: WidgetDataStore.loadWeekCompletions(),
             weekMiles: WidgetDataStore.loadWeekMiles(),
             tokensReady: WidgetDataStore.loadTokensReady()
         )
-
-        // Refresh more frequently if streak is at risk
-        let refreshInterval: TimeInterval = isAtRisk ? 1800 : 3600 // 30 minutes if at risk, 1 hour otherwise
-
-        // Cap the sleep at the next midnight so the "completed today" state
-        // resets at the day boundary even if the app is never opened.
-        let intervalRefresh = Date().addingTimeInterval(refreshInterval)
-        let startOfToday = Calendar.current.startOfDay(for: Date())
-        let nextMidnight = Calendar.current.date(byAdding: .day, value: 1, to: startOfToday) ?? intervalRefresh
-        let nextRefresh = min(intervalRefresh, nextMidnight)
-        completion(Timeline(entries: [entry], policy: .after(nextRefresh)))
     }
-    
-    private func calculateTimeUntilReset(isCompleted: Bool) -> String? {
-        if isCompleted { return nil }
-        
-        let calendar = Calendar.current
-        let now = Date()
-        
-        // Get end of today
-        guard let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: now) else {
-            return nil
-        }
-        
-        let timeRemaining = endOfDay.timeIntervalSince(now)
-        let hours = Int(timeRemaining) / 3600
-        let minutes = Int(timeRemaining) % 3600 / 60
-        
-        if hours > 0 {
-            return "\(hours)h \(minutes)m remaining"
-        } else {
-            return "\(minutes)m remaining"
-        }
+
+    private func makeEntry(date: Date, snapshot: Snapshot) -> StreakCountEntry {
+        StreakCountEntry(
+            date: date,
+            streak: snapshot.streak,
+            liveProgress: snapshot.progress,
+            isGoalCompleted: snapshot.isGoalCompleted,
+            isAtRisk: MADWidgetClock.isAtRisk(at: date, isCompleted: snapshot.isGoalCompleted),
+            dayEnd: snapshot.isGoalCompleted ? nil : MADWidgetClock.endOfDay(after: date),
+            weekCompletions: snapshot.weekCompletions,
+            weekMiles: snapshot.weekMiles,
+            tokensReady: snapshot.tokensReady
+        )
     }
 }
 
@@ -271,11 +254,11 @@ struct MediumStreakView: View {
     // otherwise this week's tally as a nudge.
     @ViewBuilder
     private var statusLine: some View {
-        if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
+        if entry.isAtRisk, let dayEnd = entry.dayEnd {
             HStack(spacing: 4) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 9, weight: .semibold))
-                Text(timeRemaining)
+                MADWidgetCountdown.text(to: dayEnd, suffix: " remaining")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -401,8 +384,8 @@ struct RectangularStreakView: View {
                     .foregroundColor(entry.streakColor)
                 
                 // Show time remaining if at risk - use same color as streak
-                if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
-                    Text(timeRemaining)
+                if entry.isAtRisk, let dayEnd = entry.dayEnd {
+                    MADWidgetCountdown.text(to: dayEnd, suffix: " remaining")
                         .font(.system(size: 8))
                         .foregroundColor(entry.streakColor.opacity(0.8))
                         .lineLimit(1)
@@ -508,20 +491,26 @@ struct HomeScreenStreakView: View {
 
     @ViewBuilder
     private var statusChip: some View {
-        if entry.isAtRisk, let timeRemaining = entry.timeUntilReset {
-            StreakStatusChip(icon: "exclamationmark.triangle.fill", text: timeRemaining, color: .red)
+        if entry.isAtRisk, let dayEnd = entry.dayEnd {
+            StreakStatusChip(
+                icon: "exclamationmark.triangle.fill",
+                text: MADWidgetCountdown.text(to: dayEnd, suffix: " left"),
+                color: .red
+            )
         } else if entry.isGoalCompleted {
-            StreakStatusChip(icon: "flame.fill", text: "Streak safe", color: MADWidgetStyle.green)
+            StreakStatusChip(icon: "flame.fill", text: Text("Streak safe"), color: MADWidgetStyle.green)
         } else {
-            StreakStatusChip(icon: nil, text: "\(Int(entry.liveProgress * 100))% today", color: MADWidgetStyle.secondaryText)
+            StreakStatusChip(icon: nil, text: Text("\(Int(entry.liveProgress * 100))% today"), color: MADWidgetStyle.secondaryText)
         }
     }
 }
 
 /// Compact tinted status pill used at the bottom of the streak widget.
+/// Takes a `Text` rather than a `String` so callers can pass a self-updating
+/// countdown (`MADWidgetCountdown`) instead of a value baked at build time.
 private struct StreakStatusChip: View {
     let icon: String?
-    let text: String
+    let text: Text
     let color: Color
 
     var body: some View {
@@ -530,7 +519,7 @@ private struct StreakStatusChip: View {
                 Image(systemName: icon)
                     .font(.system(size: 9, weight: .semibold))
             }
-            Text(text)
+            text
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
@@ -559,7 +548,7 @@ struct StreakCountWidget: Widget {
 #Preview(as: .systemSmall) {
     StreakCountWidget()
 } timeline: {
-    StreakCountEntry(date: .now, streak: 10, liveProgress: 0.7, isGoalCompleted: false, isAtRisk: false, timeUntilReset: "4h 23m remaining")
-    StreakCountEntry(date: .now, streak: 7, liveProgress: 0.3, isGoalCompleted: false, isAtRisk: true, timeUntilReset: "2h 15m remaining")
-    StreakCountEntry(date: .now, streak: 15, liveProgress: 1.0, isGoalCompleted: true, isAtRisk: false, timeUntilReset: nil)
+    StreakCountEntry(date: .now, streak: 10, liveProgress: 0.7, isGoalCompleted: false, isAtRisk: false, dayEnd: .now.addingTimeInterval(4 * 3600))
+    StreakCountEntry(date: .now, streak: 7, liveProgress: 0.3, isGoalCompleted: false, isAtRisk: true, dayEnd: .now.addingTimeInterval(2 * 3600))
+    StreakCountEntry(date: .now, streak: 15, liveProgress: 1.0, isGoalCompleted: true, isAtRisk: false, dayEnd: nil)
 }

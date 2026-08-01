@@ -10,8 +10,21 @@ final class MADBackgroundService: NSObject, ObservableObject {
     static let shared = MADBackgroundService()
     
     private let healthStore = HKHealthStore()
-    private let healthManager = HealthKitManager()
-    private let userManager = UserManager()
+    // The app's singletons, NOT private instances.
+    //
+    // A private `UserManager()` decodes `currentUser` once, at the moment this
+    // service is first touched, and never learns about anything the app writes
+    // afterwards. Every background sync then re-persisted (and pushed into the
+    // App Group) that frozen copy: `updateFromHealthKit` assigns the streak
+    // unconditionally, and `vettedHealthKitStreak` compares against its own
+    // stale `currentUser.streak` — so a HealthKit observer firing after the app
+    // had already advanced the streak wrote the OLD number back over it, and
+    // the widget sat days behind a dashboard that was correct.
+    //
+    // The private `HealthKitManager()` had the same shape of problem plus a
+    // duplicate copy of every query and cache.
+    private var healthManager: HealthKitManager { HealthKitManager.shared }
+    private var userManager: UserManager { UserManager.shared }
     private let notificationService = MADNotificationService.shared
     // Live workout functionality removed
     private func log(_ message: String) {}
@@ -227,11 +240,11 @@ final class MADBackgroundService: NSObject, ObservableObject {
     private func requestHealthKitAuthorizationIfNeeded() async -> Bool {
         if healthManager.isAuthorized { return true }
 
-        // Resolve WITHOUT prompting first. This service holds its own
-        // HealthKitManager, so its flag starts false in every process no matter
-        // what the UI's instance already knows — and in a background launch
-        // there's no UI to prompt with anyway. A user who granted access long
-        // ago needs no prompt, just a fresh process asking the right question.
+        // Resolve WITHOUT prompting first. In a background launch the manager
+        // is freshly constructed, so its flag starts false no matter what the
+        // user granted long ago — and there's no UI to prompt with anyway. A
+        // user who already granted access needs no prompt, just a fresh process
+        // asking the right question.
         let resolved = await withCheckedContinuation { continuation in
             healthManager.refreshAuthorizationStatus { continuation.resume(returning: $0) }
         }
@@ -311,8 +324,11 @@ final class MADBackgroundService: NSObject, ObservableObject {
                 notificationService.sendMileCompletedNotification()
             }
 
-            // Update user completion status
-            userManager.completeRun(miles: todaysDistance)
+            // No completeRun() here: fetchLatestWorkoutData() has already run
+            // updateUserWithHealthKitData(), which stamps lastCompletionDate on
+            // exactly this condition. completeRun() would only ADD today's
+            // miles onto lifetime totalMiles a second time — every background
+            // sync, all day, on the shared user model.
 
             // Switch to congratulatory message
             notificationService.updateDailyReminder(
