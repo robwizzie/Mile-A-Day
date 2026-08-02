@@ -984,7 +984,13 @@ class WorkoutSyncService: ObservableObject {
             markWorkoutsAsSynced(batch.map { $0.uuid.uuidString })
         }
 
-        // 3. Ask the backend to recompute the streak synchronously and return it.
+        // 3. Remove backend workouts that were deleted from Apple Health.
+        //    Build the HK UUID set from what we just fetched, then compare
+        //    against the backend's list for the same window.
+        let hkUUIDs = Set(workouts.map { $0.uuid.uuidString })
+        await removeOrphanedBackendWorkouts(since: since, hkUUIDs: hkUUIDs, userId: userId)
+
+        // 4. Ask the backend to recompute the streak synchronously and return it.
         let response: RecalibrateStreakResponse = try await APIClient.fancyFetch(
             endpoint: "/workouts/\(userId)/recalibrate-streak",
             method: .POST,
@@ -993,6 +999,70 @@ class WorkoutSyncService: ObservableObject {
         )
 
         return RecalibrateOutcome(streak: response.streak, workoutsPushed: workouts.count)
+    }
+
+    /// Compare the backend's workout list against `hkUUIDs` (the set of HealthKit
+    /// UUIDs for the recalibrate window) and soft-delete any backend workouts that
+    /// no longer exist in Apple Health. Best-effort: per-workout failures are logged
+    /// and skipped rather than surfaced to the caller.
+    ///
+    /// Manual workouts (source = "manual") are never auto-deleted — the user
+    /// entered them explicitly and they may not have a matching HK entry.
+    private func removeOrphanedBackendWorkouts(since: Date, hkUUIDs: Set<String>, userId: String) async {
+        struct BackendWorkout: Decodable {
+            let workoutId: String
+            let deviceEndDate: String
+            let source: String?
+            enum CodingKeys: String, CodingKey {
+                case workoutId = "workout_id"
+                case deviceEndDate = "device_end_date"
+                case source
+            }
+        }
+
+        let backend: [BackendWorkout]
+        do {
+            backend = try await APIClient.fancyFetch(
+                endpoint: "/workouts/\(userId)/recent?limit=500",
+                method: .GET,
+                responseType: [BackendWorkout].self
+            )
+        } catch {
+            print("[WorkoutSyncService] ⚠️ Orphan check: couldn't fetch backend workouts: \(error)")
+            return
+        }
+
+        // node-pg serializes timestamptz as "…Z" with milliseconds; try that first,
+        // fall back to the no-fractional-seconds variant for any stored string values.
+        let isoWithMs = ISO8601DateFormatter()
+        isoWithMs.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoPlain = ISO8601DateFormatter()
+        func parseDate(_ s: String) -> Date? { isoWithMs.date(from: s) ?? isoPlain.date(from: s) }
+
+        let orphans = backend.filter { w in
+            guard w.source != "manual" else { return false }
+            guard let endDate = parseDate(w.deviceEndDate) else { return false }
+            guard endDate >= since else { return false }
+            return !hkUUIDs.contains(w.workoutId)
+        }
+
+        guard !orphans.isEmpty else { return }
+        print("[WorkoutSyncService] 🗑️ \(orphans.count) workout(s) deleted from Apple Health — removing from backend")
+
+        struct DeleteAck: Decodable { let message: String? }
+        for orphan in orphans {
+            do {
+                let _: DeleteAck = try await APIClient.fancyFetch(
+                    endpoint: "/workouts/\(userId)/workout/\(orphan.workoutId)",
+                    method: .DELETE,
+                    responseType: DeleteAck.self
+                )
+                DeletedWorkoutRegistry.markDeleted(orphan.workoutId)
+                print("[WorkoutSyncService] ✅ Removed orphaned workout \(orphan.workoutId)")
+            } catch {
+                print("[WorkoutSyncService] ⚠️ Could not remove orphan \(orphan.workoutId): \(error)")
+            }
+        }
     }
 
     /// Fetch running + walking workouts ending on/after `since` from HealthKit.

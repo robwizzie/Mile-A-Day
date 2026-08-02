@@ -480,6 +480,10 @@ class WorkoutService: ObservableObject {
     /// resurrect it), recomputes the streak, and revokes any badges the user no
     /// longer qualifies for. On success the id is tombstoned locally so app-side
     /// aggregates drop it immediately.
+    ///
+    /// Also attempts to delete the matching HKWorkout from Apple Health. This only
+    /// succeeds for workouts written by this app; Watch/third-party workouts are
+    /// silently skipped (HealthKit enforces source ownership).
     func deleteWorkout(workoutId: String) async throws -> WorkoutDeleteResponse {
         guard let currentUserId = getCurrentUserId() else {
             throw WorkoutServiceError.notAuthenticated
@@ -493,7 +497,42 @@ class WorkoutService: ObservableObject {
         )
 
         DeletedWorkoutRegistry.markDeleted(workoutId)
+
+        // Mirror the delete into Apple Health (best-effort).
+        if let uuid = UUID(uuidString: workoutId), HKHealthStore.isHealthDataAvailable() {
+            await deleteFromHealthKit(uuid: uuid)
+        }
+
         return response
+    }
+
+    /// Find a HKWorkout by UUID and delete it from HealthKit.
+    /// Silently no-ops if the workout doesn't exist or wasn't written by this app.
+    private func deleteFromHealthKit(uuid: UUID) async {
+        let store = healthStore
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let query = HKSampleQuery(
+                sampleType: HKObjectType.workoutType(),
+                predicate: HKQuery.predicateForObject(with: uuid),
+                limit: 1,
+                sortDescriptors: nil
+            ) { _, samples, _ in
+                guard let workout = (samples as? [HKWorkout])?.first else {
+                    continuation.resume()
+                    return
+                }
+                store.delete(workout) { _, error in
+                    if let error {
+                        // ponytail: not our workout or HK unavailable — safe to ignore
+                        print("[WorkoutService] ⚠️ HealthKit delete skipped: \(error.localizedDescription)")
+                    } else {
+                        print("[WorkoutService] ✅ Deleted from Apple Health: \(uuid)")
+                    }
+                    continuation.resume()
+                }
+            }
+            store.execute(query)
+        }
     }
 }
 
