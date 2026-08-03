@@ -43,7 +43,7 @@ struct ProfileView: View {
     // undercounts heavy-logging weeks (see Last7DaysChart).
     @State private var ownDayTotals: [FriendDayMiles]?
     /// Days a token carried, so the chart can show them as saved not missed.
-    @State private var ownCoveredDays: [CoveredDay]?
+    @State private var ownCoveredDays: [CoveredDate]?
 
     // Section tabs — mirrors UserProfileDetailView's structure so navigating
     // between own profile and friend profile feels consistent. Own profile

@@ -1,15 +1,9 @@
 import SwiftUI
 
-/// A day a streak token carried, as the API reports it.
-///
-/// Decoded from the additive `covered_days` on `/stats` and `/streak-eras`.
-/// Absent for the overwhelming majority of users and on older servers, so
-/// every field is read through optionals and an empty list is the norm.
-struct CoveredDay: Codable, Equatable, Hashable {
-    let local_date: String  // YYYY-MM-DD
-    let kind: String
-    let source_username: String?
-}
+// The covered-day model itself is `CoveredDate` in StreakFeatureService — the
+// gated `streak_features.frozen_dates` already carried it, and the server
+// already sends that payload for FRIEND stats fetches too, so nothing here
+// needs a second field on the wire.
 
 /// ONE visual language for "this day was saved, not missed".
 ///
@@ -47,7 +41,7 @@ enum SavedDayStyle {
 
     /// Full sentence for a detail panel. `isSelf` changes the voice — on a
     /// friend's profile "You used a Streak Save" would be plainly wrong.
-    static func explanation(for day: CoveredDay, isSelf: Bool) -> String {
+    static func explanation(for day: CoveredDate, isSelf: Bool) -> String {
         let subject = isSelf ? "You" : "They"
         switch day.kind {
         case "double_down_recover":
@@ -108,10 +102,10 @@ enum SavedDayStyle {
 
 /// Lookup keyed by YYYY-MM-DD, so a view can ask "was this day saved?" without
 /// re-scanning an array per row.
-struct CoveredDayIndex {
-    private let byDate: [String: CoveredDay]
+struct CoveredDateIndex {
+    private let byDate: [String: CoveredDate]
 
-    init(_ days: [CoveredDay]?) {
+    init(_ days: [CoveredDate]?) {
         byDate = Dictionary(
             (days ?? []).map { ($0.local_date, $0) },
             uniquingKeysWith: { first, _ in first }
@@ -120,12 +114,12 @@ struct CoveredDayIndex {
 
     var isEmpty: Bool { byDate.isEmpty }
 
-    subscript(dateKey: String) -> CoveredDay? { byDate[dateKey] }
+    subscript(dateKey: String) -> CoveredDate? { byDate[dateKey] }
 
     /// Convenience for views that hold `Date` rather than the API string.
     /// Formats in UTC to match the server's calendar-date semantics — the same
     /// trap that made Hall of Streaks render every date a day early.
-    func day(for date: Date) -> CoveredDay? {
+    func day(for date: Date) -> CoveredDate? {
         byDate[Self.key(for: date)]
     }
 

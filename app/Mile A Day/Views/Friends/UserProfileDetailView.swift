@@ -32,6 +32,10 @@ struct UserProfileDetailView: View {
     /// Server-exact per-day totals for the week chart (see Last7DaysChart —
     /// the capped workout list must not drive the bars).
     @State private var last7DayMiles: [FriendDayMiles]?
+    /// Days a token carried, straight off the stats payload. Held here rather
+    /// than on `userStats` because that is a locally-built view model, not the
+    /// decoded response.
+    @State private var friendCoveredDays: [CoveredDate]?
     @State private var isLoadingStats = false
     @State private var isPrivate = false
     @State private var actionInProgress = false
@@ -451,7 +455,7 @@ struct UserProfileDetailView: View {
                     workouts: friendWorkouts,
                     dayTotals: last7DayMiles,
                     goalMiles: userStats?.goalMiles ?? 1.0,
-                    coveredDays: userStats?.coveredDays,
+                    coveredDays: friendCoveredDays,
                     isSelf: false
                 )
             }
@@ -1038,6 +1042,7 @@ struct UserProfileDetailView: View {
 
                     friendWorkouts = workouts
                     last7DayMiles = stats.last7DayMiles
+                    friendCoveredDays = stats.coveredDays
                     hasLoadedInitial = true
                     isLoadingStats = false
                 }
@@ -1605,7 +1610,7 @@ struct Last7DaysChart: View {
     /// Days a streak token carried. Without this the chart paints a saved day
     /// exactly like a missed one — the 0.57 mi bar that made a correct Save
     /// Streak offer look like a lie.
-    var coveredDays: [CoveredDay]? = nil
+    var coveredDays: [CoveredDate]? = nil
     /// Whose chart this is, so the saved-day copy uses the right voice.
     var isSelf: Bool = false
 
