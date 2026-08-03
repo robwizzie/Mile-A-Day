@@ -156,13 +156,21 @@ final class BuddySessionService: ObservableObject {
         }
     }
 
+    /// Silent on failure, for the same reason refreshJoinableFriendSessions is:
+    /// nobody ASKED for this list, it loads itself when the sheet appears. It
+    /// used to publish `errorMessage`, which meant an alert slid over the sheet
+    /// on every open whenever the endpoint was unreachable — and while an alert
+    /// is presenting or dismissing, taps underneath it are swallowed, so the
+    /// whole screen reads as laggy. The empty-friends card already says the
+    /// right thing when the list comes back empty.
     func loadCandidates() async {
         do {
             candidates = try await request(
                 "/buddy/candidates", responseType: BuddyCandidatesResponse.self
             ).candidates
         } catch {
-            errorMessage = friendly(error)
+            candidates = []
+            print("[BuddySessionService] loadCandidates failed: \(error)")
         }
     }
 

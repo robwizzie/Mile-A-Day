@@ -149,8 +149,11 @@ struct BuddyStartSheet: View {
         let isOn = lane == option
         return Button {
             MADHaptics.tap()
-            withAnimation(MADTheme.Animation.quick) { lane = option }
-            codeFocused = option == .join
+            // No withAnimation and no focus write here, deliberately. Animating
+            // this cross-fades two whole subtrees, and toggling focus from the
+            // chip drove a keyboard present/dismiss cycle on every tap — both
+            // land as input lag. The join lane focuses itself once it exists.
+            lane = option
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: option.icon).font(.system(size: 13, weight: .semibold))
@@ -202,6 +205,7 @@ struct BuddyStartSheet: View {
                 .onChange(of: joinCode) { _, newValue in
                     joinCode = String(newValue.uppercased().prefix(6))
                 }
+                .onAppear { codeFocused = true }
         }
     }
 
