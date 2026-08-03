@@ -336,6 +336,17 @@ struct HallOfStreaksSection: View {
 
     // MARK: - Date formatting
 
+    /// `local_date` is a CALENDAR DATE, not an instant — "2026-08-01" means
+    /// that day in the user's own timezone, and the server already did that
+    /// resolution. So both formatters pin to UTC: parse at UTC midnight, print
+    /// at UTC.
+    ///
+    /// Printing in the DEVICE timezone (which is what a bare DateFormatter
+    /// does) rewinds UTC midnight into the previous evening for every zone west
+    /// of Greenwich, so every date in this section rendered ONE DAY EARLY
+    /// across the Americas: a streak that really ran Jul 23 – Aug 1 was shown
+    /// as "Jul 22 – Jul 31", which then contradicted the week chart and made a
+    /// perfectly correct Save Streak offer look like it was lying.
     private static let apiFormat: DateFormatter = {
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd"
@@ -343,11 +354,23 @@ struct HallOfStreaksSection: View {
         return fmt
     }()
 
+    private static let dayFormat: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MMM d"
+        fmt.timeZone = TimeZone(identifier: "UTC")
+        return fmt
+    }()
+
+    private static let dayYearFormat: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MMM d, yyyy"
+        fmt.timeZone = TimeZone(identifier: "UTC")
+        return fmt
+    }()
+
     private func display(_ dateStr: String, includeYear: Bool) -> String {
         guard let date = Self.apiFormat.date(from: dateStr) else { return dateStr }
-        let fmt = DateFormatter()
-        fmt.dateFormat = includeYear ? "MMM d, yyyy" : "MMM d"
-        return fmt.string(from: date)
+        return (includeYear ? Self.dayYearFormat : Self.dayFormat).string(from: date)
     }
 
     private func startText(_ era: StreakEraAPI) -> String {
