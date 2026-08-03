@@ -27,8 +27,18 @@ struct WorkoutTrackingView: View {
     // Shared singleton — tracking keeps running when this view is dismissed
     // (e.g. user navigates back to the dashboard mid-workout).
     @ObservedObject private var locationManager = WorkoutLocationManager.shared
+    // Pre-start wizard, in order: activity → location → race mode → ghost
+    // options (only when the race is chosen) → presence consent (once ever) →
+    // countdown. Each step owns exactly one question, and every one of these
+    // flags must be cleared by anything that jumps straight to tracking (the
+    // buddy hand-off and workout recovery both do).
     @State private var showActivitySelection = true
     @State private var showLocationTypeSelection = false
+    @State private var showRaceModeSelection = false
+    @State private var showGhostOptions = false
+    /// Which way the next step transition should slide. Set immediately before
+    /// the `withAnimation` that changes the step.
+    @State private var wizardGoingBack = false
     @State private var selectedActivityType: HKWorkoutActivityType?
     @State private var selectedLocationType: HKWorkoutSessionLocationType = .outdoor
     @State private var countdownNumber = 3
@@ -116,23 +126,22 @@ struct WorkoutTrackingView: View {
     // workout never races (its effort curve starts mid-distance anyway).
     //
     // WHAT is raced is the user's choice — recorded best, PR pace, or a time
-    // they typed — held in `raceTarget` and set in GhostRaceSetupSheet. It
-    // persists across sessions per activity, so a walker who races 12:00 gets
-    // 12:00 offered again next time rather than re-deciding every walk.
+    // they typed — held in `raceTarget` and picked on the ghost-options step.
+    // It persists across sessions per activity, so a walker who races 12:00
+    // gets 12:00 offered again next time rather than re-deciding every walk.
     @State private var raceArmed = false
     @State private var raceGhost: BestEffortStore.BestMileEffort?
     /// How to name the ghost in copy ("your best mile", "your target").
     @State private var raceGhostName = "your best mile"
     @State private var raceFinalDelta: TimeInterval?
-    @State private var showGhostSetup = false
     /// Chosen target, per activity, remembered between sessions.
     @AppStorage("ghostTargetV1.running") private var runTargetStorage = ""
     @AppStorage("ghostTargetV1.walking") private var walkTargetStorage = ""
     /// Drops the NEW pill on the arming card until the race is first set up.
     @AppStorage("hasArmedGhostRaceOnce") private var hasArmedGhostRaceOnce = false
     /// Set in `BuddyLobbyView` — the only screen a buddy session passes
-    /// through, since the hand-off below skips the location picker where the
-    /// solo arming card lives. Read once on the buddy hand-off.
+    /// through, since the hand-off below skips the whole pre-start wizard
+    /// where the solo race steps live. Read once on the buddy hand-off.
     @AppStorage("buddyGhostArmedV1") private var buddyGhostArmed = false
 
     private var raceActivityKey: String {
@@ -240,12 +249,16 @@ struct WorkoutTrackingView: View {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
-    // MARK: - Activity Selection
+    // MARK: - Pre-start wizard chrome
 
-    private var activitySelectionContent: some View {
-        VStack(spacing: 0) {
+    /// Back chevron + progress. Every pre-start step uses this so the three
+    /// screens read as one flow rather than three views that happen to share a
+    /// gradient. `step` is 1-based; the ghost-options screen passes 3 as well,
+    /// because it's a sub-step of the race choice, not a fourth question.
+    private func wizardTopBar(step: Int, onBack: @escaping () -> Void) -> some View {
+        ZStack {
             HStack {
-                Button(action: { dismiss() }) {
+                Button(action: onBack) {
                     HStack(spacing: 8) {
                         Image(systemName: "chevron.left")
                             .font(.title3)
@@ -265,211 +278,188 @@ struct WorkoutTrackingView: View {
                 .buttonStyle(.plain)
                 Spacer()
             }
-            .padding(.top, 16)
+
+            HStack(spacing: 6) {
+                ForEach(1...3, id: \.self) { index in
+                    Capsule()
+                        .fill(Color.white.opacity(index <= step ? 0.9 : 0.25))
+                        .frame(width: 22, height: 4)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+        .padding(.top, 16)
+    }
+
+    /// Glyph + question, identical on every step.
+    private func wizardHeader(glyph: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: glyph)
+                .font(.system(size: 60))
+                .foregroundColor(.white)
+
+            Text(title)
+                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .multilineTextAlignment(.center)
+
+            Text(subtitle)
+                .font(.title3)
+                .foregroundColor(.white.opacity(0.8))
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 32)
+    }
+
+    /// The shared layout of a "pick one of these" step.
+    private func wizardStep<Options: View>(
+        step: Int,
+        glyph: String,
+        title: String,
+        subtitle: String,
+        onBack: @escaping () -> Void,
+        @ViewBuilder options: () -> Options
+    ) -> some View {
+        VStack(spacing: 0) {
+            wizardTopBar(step: step, onBack: onBack)
 
             VStack(spacing: 40) {
                 Spacer()
-
-                VStack(spacing: 16) {
-                    Image(systemName: "figure.walk")
-                        .font(.system(size: 60))
-                        .foregroundColor(.white)
-
-                    Text("Choose Activity Type")
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .multilineTextAlignment(.center)
-
-                    Text("Select how you'll complete your mile")
-                        .font(.title3)
-                        .foregroundColor(.white.opacity(0.8))
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.horizontal, 32)
-
+                wizardHeader(glyph: glyph, title: title, subtitle: subtitle)
                 Spacer()
-
-                VStack(spacing: 20) {
-                    workoutOptionButton(icon: "figure.run", title: "Run", subtitle: "Track as a running workout") {
-                        selectActivity(.running)
-                    }
-                    workoutOptionButton(icon: "figure.walk", title: "Walk", subtitle: "Track as a walking workout") {
-                        selectActivity(.walking)
-                    }
-                }
-                .padding(.horizontal, 32)
-
+                VStack(spacing: 20) { options() }
+                    .padding(.horizontal, 32)
                 Spacer()
             }
         }
     }
 
-    // MARK: - Location Type Selection
+    /// Forward slides in from the trailing edge, Back from the leading edge —
+    /// so the wizard reads as depth rather than as unrelated crossfades.
+    private var wizardTransition: AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: wizardGoingBack ? .leading : .trailing)
+                .combined(with: .opacity),
+            removal: .move(edge: wizardGoingBack ? .trailing : .leading)
+                .combined(with: .opacity)
+        )
+    }
+
+    // MARK: - Step 1: Activity
+
+    private var activitySelectionContent: some View {
+        wizardStep(
+            step: 1,
+            glyph: "figure.walk",
+            title: "Choose Activity Type",
+            subtitle: "Select how you'll complete your mile",
+            onBack: { dismiss() }
+        ) {
+            workoutOptionButton(icon: "figure.run", title: "Run", subtitle: "Track as a running workout") {
+                selectActivity(.running)
+            }
+            workoutOptionButton(icon: "figure.walk", title: "Walk", subtitle: "Track as a walking workout") {
+                selectActivity(.walking)
+            }
+        }
+    }
+
+    // MARK: - Step 2: Location
 
     private var locationTypeSelectionContent: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button(action: {
-                    withAnimation {
-                        showLocationTypeSelection = false
-                        showActivitySelection = true
-                    }
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "chevron.left")
-                            .font(.title3)
-                            .fontWeight(.semibold)
-                        Text("Back")
-                            .font(.body)
-                            .fontWeight(.medium)
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                Spacer()
+        wizardStep(
+            step: 2,
+            glyph: selectedActivityType == .running ? "figure.run" : "figure.walk",
+            title: "Choose Location",
+            subtitle: "Where will you be working out?",
+            onBack: { goBack(to: { showActivitySelection = true }, from: { showLocationTypeSelection = false }) }
+        ) {
+            workoutOptionButton(icon: "location.fill", title: "Outdoor", subtitle: "Uses GPS for accurate tracking") {
+                selectLocationType(.outdoor)
             }
-            .padding(.top, 16)
-
-            VStack(spacing: 40) {
-                Spacer()
-
-                VStack(spacing: 16) {
-                    Image(systemName: selectedActivityType == .running ? "figure.run" : "figure.walk")
-                        .font(.system(size: 60))
-                        .foregroundColor(.white)
-
-                    Text("Choose Location")
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                        .multilineTextAlignment(.center)
-
-                    Text("Where will you be working out?")
-                        .font(.title3)
-                        .foregroundColor(.white.opacity(0.8))
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.horizontal, 32)
-
-                Spacer()
-
-                VStack(spacing: 20) {
-                    workoutOptionButton(icon: "location.fill", title: "Outdoor", subtitle: "Uses GPS for accurate tracking") {
-                        selectLocationType(.outdoor)
-                    }
-                    workoutOptionButton(icon: indoorLocationIcon, title: "Indoor", subtitle: "Treadmill or indoors — uses motion sensors") {
-                        selectLocationType(.indoor)
-                    }
-
-                    ghostRaceCard
-                }
-                .padding(.horizontal, 32)
-
-                Spacer()
-            }
-        }
-        .sheet(isPresented: $showGhostSetup) {
-            GhostRaceSetupSheet(
-                activityKey: raceActivityKey,
-                seedPaceSeconds: raceSeedPaceSeconds,
-                current: raceArmed ? raceTarget : nil
-            ) { chosen in
-                withAnimation(.spring(response: 0.3)) {
-                    if let chosen {
-                        storeRaceTarget(chosen)
-                        raceArmed = true
-                        hasArmedGhostRaceOnce = true
-                    } else {
-                        raceArmed = false
-                    }
-                }
+            workoutOptionButton(icon: indoorLocationIcon, title: "Indoor", subtitle: "Treadmill or indoors — uses motion sensors") {
+                selectLocationType(.indoor)
             }
         }
     }
 
-    /// Ghost-race entry point on the pre-start path. Always present, always
-    /// showing the exact time it would race, and never arming itself.
+    // MARK: - Step 3: Race mode
+
+    /// "Am I racing?" as a step of its own.
     ///
-    /// It used to be a toggle over whatever single ghost the store happened to
-    /// have — which meant a walker with no history had nothing to race and got
-    /// an explanation instead of a feature. Now it opens a picker, and a
-    /// custom time is always one of the choices, so the answer to "can I race
-    /// this?" is yes on the very first walk.
-    private var ghostRaceCard: some View {
-        Button {
-            MADHaptics.action()
-            showGhostSetup = true
-        } label: {
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(raceArmed ? Color.white.opacity(0.2) : MADTheme.Colors.madRed.opacity(0.18))
-                        .frame(width: 40, height: 40)
-                    Image(systemName: "flag.checkered")
-                        .font(.system(size: 19, weight: .semibold))
-                        .foregroundColor(raceArmed ? .white : MADTheme.Colors.madRed)
-                }
-
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text("Ghost Race")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                        if !hasArmedGhostRaceOnce {
-                            Text("NEW")
-                                .font(.system(size: 9, weight: .black, design: .rounded))
-                                .tracking(0.8)
-                                .foregroundColor(.black.opacity(0.8))
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(Capsule().fill(Color.yellow))
-                        }
-                    }
-                    Text(ghostRaceSubtitle)
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.78))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                }
-
-                Spacer(minLength: 8)
-
-                if raceArmed, let ghost = resolvedGhost {
-                    VStack(spacing: 0) {
-                        Text(BestEffortStore.formatSeconds(ghost.effort.seconds))
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .monospacedDigit()
-                        Text("TO BEAT")
-                            .font(.system(size: 8, weight: .black, design: .rounded))
-                            .tracking(0.6)
-                            .foregroundColor(.white.opacity(0.65))
-                    }
-                } else {
-                    Text("Set up")
-                        .font(.system(size: 13, weight: .bold, design: .rounded))
-                        .foregroundColor(.white.opacity(0.9))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(Color.white.opacity(0.15)))
-                }
+    /// It used to be a small card wedged under the Indoor/Outdoor buttons on a
+    /// screen about something else, opening a modal sheet — which read as an
+    /// add-on rather than a choice the flow cares about. Asking it here also
+    /// means the activity is already locked in, so the target on offer is
+    /// always the one for the activity being started.
+    private var raceModeSelectionContent: some View {
+        wizardStep(
+            step: 3,
+            glyph: "flag.checkered",
+            title: "Choose Your Mode",
+            subtitle: "Race a time, or just log the miles.",
+            onBack: { goBack(to: { showLocationTypeSelection = true }, from: { showRaceModeSelection = false }) }
+        ) {
+            workoutOptionButton(
+                icon: selectedActivityType == .running ? "figure.run" : "figure.walk",
+                title: "Just Track It",
+                subtitle: "No clock to chase — every mile still counts."
+            ) {
+                chooseRaceMode(ghost: false)
             }
-            .padding(16)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(raceArmed ? MADTheme.Colors.madRed.opacity(0.85) : Color.white.opacity(0.10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(
-                                raceArmed ? Color.white.opacity(0.35) : Color.white.opacity(0.15),
-                                lineWidth: 1
-                            )
-                    )
+
+            workoutOptionButton(
+                icon: "flag.checkered",
+                title: "Ghost Race",
+                subtitle: ghostRaceSubtitle,
+                featured: true,
+                badge: hasArmedGhostRaceOnce ? nil : "NEW",
+                accessory: {
+                    if let ghost = resolvedGhost {
+                        VStack(spacing: 0) {
+                            Text(BestEffortStore.formatSeconds(ghost.effort.seconds))
+                                .font(.system(size: 18, weight: .bold, design: .rounded))
+                                .foregroundColor(.white)
+                                .monospacedDigit()
+                            Text("TO BEAT")
+                                .font(.system(size: 8, weight: .black, design: .rounded))
+                                .tracking(0.6)
+                                .foregroundColor(.white.opacity(0.65))
+                        }
+                    } else {
+                        optionChevron
+                    }
+                }
+            ) {
+                chooseRaceMode(ghost: true)
+            }
+        }
+    }
+
+    // MARK: - Step 4: Ghost options
+
+    /// The picker, inline. Same content the buddy lobby shows as a sheet — it
+    /// just gets the wizard's back bar and background instead of modal chrome.
+    private var ghostOptionsContent: some View {
+        VStack(spacing: 0) {
+            wizardTopBar(step: 3) {
+                goBack(to: { showRaceModeSelection = true }, from: { showGhostOptions = false })
+            }
+
+            GhostRaceOptionsContent(
+                activityKey: raceActivityKey,
+                seedPaceSeconds: raceSeedPaceSeconds,
+                current: raceArmed ? raceTarget : nil,
+                // White, not the workout color: this renders on the tracker's
+                // red gradient, where a red CTA would vanish. Matches the
+                // presence-consent step's primary button on the same screen.
+                accent: .white,
+                accentForeground: Color(red: 0.5, green: 0.15, blue: 0.2),
+                declineTitle: "Skip the race",
+                onRace: { armGhost($0) },
+                onDecline: { chooseRaceMode(ghost: false) }
             )
         }
-        .buttonStyle(.plain)
     }
 
     /// What to say about the finished mile.
@@ -522,11 +512,14 @@ struct WorkoutTrackingView: View {
             ))
     }
 
+    /// Copy for the Ghost Race option. `resolvedGhost` is what makes the
+    /// promise concrete — the card shows the exact time it would race, so a
+    /// repeat racer knows what tapping means before they tap.
     private var ghostRaceSubtitle: String {
-        guard raceArmed, let ghost = resolvedGhost else {
+        guard let ghost = resolvedGhost else {
             return "Chase your best mile, your PR, or a time you pick."
         }
-        return "Racing \(ghost.shortName) — live ahead/behind on screen."
+        return "Chase \(ghost.shortName) for one mile — live ahead/behind on screen."
     }
 
     // MARK: - Countdown
@@ -1401,6 +1394,32 @@ struct WorkoutTrackingView: View {
     }
 
     private func workoutOptionButton(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
+        workoutOptionButton(
+            icon: icon, title: title, subtitle: subtitle,
+            accessory: { optionChevron }, action: action)
+    }
+
+    /// The wizard's option card.
+    ///
+    /// `featured` brightens the surface so one option can read as the special
+    /// one, `badge` is the small pill beside the title (the ghost race's NEW
+    /// flag), and `accessory` replaces the trailing chevron with a readout.
+    /// All three default off, so the plain overload above renders exactly what
+    /// the Run/Walk and Indoor/Outdoor steps have always shown.
+    ///
+    /// Featuring is deliberately a BRIGHTNESS shift, not a hue one: this whole
+    /// screen sits on the red gradient, and `MADTheme.workoutColor("running")`
+    /// is that gradient's own top stop — a red-tinted border and glyph would
+    /// go muddy on exactly the workout type most people pick.
+    private func workoutOptionButton<Accessory: View>(
+        icon: String,
+        title: String,
+        subtitle: String,
+        featured: Bool = false,
+        badge: String? = nil,
+        @ViewBuilder accessory: () -> Accessory,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             HStack(spacing: 16) {
                 Image(systemName: icon)
@@ -1408,31 +1427,48 @@ struct WorkoutTrackingView: View {
                     .frame(width: 50)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                    HStack(spacing: 8) {
+                        Text(title)
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                        if let badge {
+                            Text(badge)
+                                .font(.system(size: 9, weight: .black, design: .rounded))
+                                .tracking(0.8)
+                                .foregroundColor(.black.opacity(0.8))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(Color.yellow))
+                        }
+                    }
                     Text(subtitle)
                         .font(.subheadline)
                         .opacity(0.9)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
 
-                Image(systemName: "chevron.right")
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                accessory()
             }
             .foregroundColor(.white)
             .padding(24)
             .background(
                 RoundedRectangle(cornerRadius: 20)
-                    .fill(Color.white.opacity(0.15))
+                    .fill(Color.white.opacity(featured ? 0.24 : 0.15))
                     .overlay(
                         RoundedRectangle(cornerRadius: 20)
-                            .stroke(Color.white.opacity(0.3), lineWidth: 2)
+                            .stroke(Color.white.opacity(featured ? 0.6 : 0.3), lineWidth: 2)
                     )
             )
         }
         .buttonStyle(PlainButtonStyle())
+    }
+
+    private var optionChevron: some View {
+        Image(systemName: "chevron.right")
+            .font(.title2)
+            .fontWeight(.semibold)
     }
 
     var body: some View {
@@ -1452,8 +1488,16 @@ struct WorkoutTrackingView: View {
 
             if showActivitySelection {
                 activitySelectionContent
+                    .transition(wizardTransition)
             } else if showLocationTypeSelection {
                 locationTypeSelectionContent
+                    .transition(wizardTransition)
+            } else if showRaceModeSelection {
+                raceModeSelectionContent
+                    .transition(wizardTransition)
+            } else if showGhostOptions {
+                ghostOptionsContent
+                    .transition(wizardTransition)
             } else if showPresenceConsent {
                 presenceConsentContent
             } else if showCountdown {
@@ -1579,13 +1623,11 @@ struct WorkoutTrackingView: View {
                 selectedActivityType =
                     (buddyService.session?.isRunning ?? false) ? .running : .walking
                 selectedLocationType = .outdoor
-                showActivitySelection = false
-                showLocationTypeSelection = false
-                showCountdown = false
-                // Ghost race, armed from the lobby. This branch skips the
-                // location screen, which is the only place `ghostRaceCard`
-                // lives — so without this a buddy walk could never race,
-                // even though it already feeds BestEffortStore on finish.
+                clearPreStartSteps()
+                // Ghost race, armed from the lobby. This branch skips the whole
+                // pre-start wizard, which is the only place the solo race steps
+                // live — so without this a buddy walk could never race, even
+                // though it already feeds BestEffortStore on finish.
                 // Everything downstream (resolvedGhost, the delta chip, the
                 // 1-mile freeze, the celebration) only ever needed raceArmed.
                 raceArmed = buddyGhostArmed
@@ -1611,9 +1653,7 @@ struct WorkoutTrackingView: View {
             }
 
             // Jump directly into the tracking UI
-            showActivitySelection = false
-            showLocationTypeSelection = false
-            showCountdown = false
+            clearPreStartSteps()
             isTracking = true
 
             // Restore the snap chip (count + thumbnail) — mid-run photos
@@ -1646,14 +1686,42 @@ struct WorkoutTrackingView: View {
         }
     }
 
+    // MARK: - Pre-start navigation
+
+    /// Every pre-start step off at once. Used by anything that jumps straight
+    /// to tracking (the buddy hand-off, workout recovery) — a single call so a
+    /// new step can never be forgotten in one of them.
+    private func clearPreStartSteps() {
+        showActivitySelection = false
+        showLocationTypeSelection = false
+        showRaceModeSelection = false
+        showGhostOptions = false
+        showPresenceConsent = false
+        showCountdown = false
+    }
+
+    /// Forward one step: haptic, slide direction, animate.
+    private func advance(_ change: @escaping () -> Void) {
+        MADHaptics.action()
+        wizardGoingBack = false
+        withAnimation(.easeInOut(duration: 0.28)) { change() }
+    }
+
+    /// Back one step. `from` turns the current step off, `to` turns the
+    /// previous one on — kept as two closures so call sites read in the
+    /// direction the user is travelling.
+    private func goBack(to: @escaping () -> Void, from: @escaping () -> Void) {
+        MADHaptics.tap()
+        wizardGoingBack = true
+        withAnimation(.easeInOut(duration: 0.28)) {
+            from()
+            to()
+        }
+    }
+
     private func selectActivity(_ activityType: HKWorkoutActivityType) {
         selectedActivityType = activityType
-
-        // Haptic feedback
-        MADHaptics.action()
-
-        // Hide activity selection and show location type selection
-        withAnimation {
+        advance {
             showActivitySelection = false
             showLocationTypeSelection = true
         }
@@ -1661,27 +1729,56 @@ struct WorkoutTrackingView: View {
 
     private func selectLocationType(_ locationType: HKWorkoutSessionLocationType) {
         selectedLocationType = locationType
+        advance {
+            showLocationTypeSelection = false
+            showRaceModeSelection = true
+        }
+    }
 
-        // Haptic feedback
-        MADHaptics.action()
-
-        // First tracked workout on this build: one explicit presence choice
-        // before the countdown. Asked exactly once, ever — after that the
-        // toggle lives in notification settings.
-        if !hasAnsweredLivePresenceConsent {
-            withAnimation {
-                showLocationTypeSelection = false
-                showPresenceConsent = true
+    /// Step 3's answer. Choosing the race opens its options rather than arming
+    /// anything — nothing is armed until a target is actually picked. Also the
+    /// "Skip the race" exit from step 4, hence both flags being cleared.
+    private func chooseRaceMode(ghost: Bool) {
+        guard ghost else {
+            raceArmed = false
+            advance {
+                showRaceModeSelection = false
+                showGhostOptions = false
+                proceedPastRaceChoice()
             }
             return
         }
-
-        // Hide location type selection and show countdown
-        withAnimation {
-            showLocationTypeSelection = false
-            showCountdown = true
-            countdownNumber = 3 // Reset countdown
+        advance {
+            showRaceModeSelection = false
+            showGhostOptions = true
         }
+    }
+
+    /// Step 4's answer: arm this target and start.
+    private func armGhost(_ target: BestEffortStore.GhostTarget) {
+        storeRaceTarget(target)
+        raceArmed = true
+        hasArmedGhostRaceOnce = true
+        advance {
+            showGhostOptions = false
+            proceedPastRaceChoice()
+        }
+    }
+
+    /// The single door out of the race choice, so the once-ever presence
+    /// question can't be skipped by whichever step happens to come last.
+    /// Called from INSIDE an `advance` block — it flips flags, it doesn't
+    /// animate.
+    private func proceedPastRaceChoice() {
+        // First tracked workout on this build: one explicit presence choice
+        // before the countdown. Asked exactly once, ever — after that the
+        // toggle lives in notification settings.
+        guard hasAnsweredLivePresenceConsent else {
+            showPresenceConsent = true
+            return
+        }
+        showCountdown = true
+        countdownNumber = 3 // Reset countdown
     }
 
     private func resolvePresenceConsent(share: Bool) {
