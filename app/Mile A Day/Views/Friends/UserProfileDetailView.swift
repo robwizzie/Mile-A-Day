@@ -1614,7 +1614,7 @@ struct Last7DaysChart: View {
     /// Whose chart this is, so the saved-day copy uses the right voice.
     var isSelf: Bool = false
 
-    private var covered: CoveredDayIndex { CoveredDayIndex(coveredDays) }
+    private var covered: CoveredDateIndex { CoveredDateIndex(coveredDays) }
 
     private let calendar = Calendar.current
 
