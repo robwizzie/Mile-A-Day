@@ -584,29 +584,30 @@ private struct ModernHeroCard: View {
 private struct RecordGhostRow: View {
     let streak: Int
     let longest: Int
+    /// False where the hero already crowns the streak itself (the Modern
+    /// hero's headline box), so the record is never stated twice.
+    var showsRecord: Bool = true
 
     private var atRecord: Bool { longest > 0 && streak >= longest && streak >= 7 }
     private var chasing: Bool { longest > streak && longest >= 3 }
     private let gold = Color(red: 1.0, green: 0.78, blue: 0.25)
 
     var body: some View {
-        if atRecord {
+        if atRecord, showsRecord {
+            // Deliberately NOT a filled capsule. As one it was a third pill in
+            // a column that already had a bordered box and a pill, and it read
+            // as tacked on. A bare crown + label sits quietly next to the
+            // stats instead of competing with them.
             HStack(spacing: 5) {
                 Image(systemName: "crown.fill")
-                    .font(.system(size: 10, weight: .black))
+                    .font(.system(size: 9, weight: .black))
                 Text("ALL-TIME BEST")
                     .font(.system(size: 10, weight: .black, design: .rounded))
                     .tracking(0.8)
             }
             .foregroundColor(gold)
             .fixedSize()
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(gold.opacity(0.14))
-                    .overlay(Capsule().strokeBorder(gold.opacity(0.38), lineWidth: 1))
-            )
+            .padding(.top, 10)
         } else if chasing {
             // One Text, not two competing ones: in a narrow column a pair of
             // labels with a Spacer between them both truncate rather than one
@@ -628,6 +629,7 @@ private struct RecordGhostRow: View {
                     .fill(Color.white.opacity(0.05))
                     .overlay(Capsule().strokeBorder(Color.white.opacity(0.09), lineWidth: 1))
             )
+            .padding(.top, 10)
         }
     }
 }
@@ -1238,8 +1240,27 @@ private struct FlameBuddyHeroCard: View {
         }
     }
 
+    /// Living the longest streak they have ever had. `>= 7` so a brand-new
+    /// account isn't crowned on day 1.
+    private var atAllTimeBest: Bool {
+        let longest = userManager.currentUser.longestStreak ?? 0
+        let streak = userManager.currentUser.streak
+        return longest > 0 && streak >= longest && streak >= 7
+    }
+
+    /// The record lives ON the streak, not beside it.
+    ///
+    /// It used to be a separate gold capsule below the stat lines — a third
+    /// pill in a column that already had a bordered box and a pill, floating
+    /// in the gap above the milestone bar. Too many competing capsules, and
+    /// it read as tacked on. Decorating the number the record BELONGS to says
+    /// the same thing with no new element: gold frame, crown, and a second
+    /// label line, all inside the box that was already there.
     private var streakHeadline: some View {
-        HStack(alignment: .center, spacing: 8) {
+        let gold = Color(red: 1.0, green: 0.78, blue: 0.25)
+        let accent = atAllTimeBest ? gold : statusColor
+
+        return HStack(alignment: .center, spacing: 8) {
             Text("\(userManager.currentUser.streak)")
                 .font(.system(size: 35, weight: .black, design: .rounded))
                 .monospacedDigit()
@@ -1249,26 +1270,42 @@ private struct FlameBuddyHeroCard: View {
                 .minimumScaleFactor(0.62)
 
             Rectangle()
-                .fill(statusColor.opacity(0.45))
+                .fill(accent.opacity(0.45))
                 .frame(width: 1, height: 26)
 
-            Text("Day Streak")
-                .font(.system(size: 9, weight: .black, design: .rounded))
-                .tracking(1.1)
-                .textCase(.uppercase)
-                .foregroundColor(statusColor)
-                .lineLimit(1)
-                .minimumScaleFactor(0.58)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Day Streak")
+                    .font(.system(size: 9, weight: .black, design: .rounded))
+                    .tracking(1.1)
+                    .textCase(.uppercase)
+                    .foregroundColor(atAllTimeBest ? .white.opacity(0.75) : statusColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.58)
+
+                if atAllTimeBest {
+                    HStack(spacing: 3) {
+                        Image(systemName: "crown.fill")
+                            .font(.system(size: 8, weight: .black))
+                        Text("Best ever")
+                            .font(.system(size: 9, weight: .black, design: .rounded))
+                            .tracking(0.9)
+                            .textCase(.uppercase)
+                    }
+                    .foregroundColor(gold)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                }
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 17, style: .continuous)
-                .fill(Color.black.opacity(0.18))
+                .fill(atAllTimeBest ? gold.opacity(0.10) : Color.black.opacity(0.18))
                 .overlay(
                     RoundedRectangle(cornerRadius: 17, style: .continuous)
-                        .strokeBorder(statusColor.opacity(0.20), lineWidth: 1)
+                        .strokeBorder(accent.opacity(atAllTimeBest ? 0.45 : 0.20), lineWidth: 1)
                 )
         )
     }
@@ -1359,9 +1396,9 @@ private struct FlameBuddyHeroCard: View {
 
             RecordGhostRow(
                 streak: userManager.currentUser.streak,
-                longest: userManager.currentUser.longestStreak ?? 0
+                longest: userManager.currentUser.longestStreak ?? 0,
+                showsRecord: false
             )
-            .padding(.top, 10)
         }
     }
 
