@@ -148,7 +148,7 @@ struct HallOfStreaksSection: View {
                     streakRow(
                         item,
                         recordLength: response.longest_streak,
-                        covered: CoveredDayIndex(response.covered_days))
+                        covered: CoveredDateIndex(response.covered_days))
                 }
             }
 
@@ -272,7 +272,7 @@ struct HallOfStreaksSection: View {
 
     // MARK: - Rows
 
-    private func streakRow(_ item: RankedStreak, recordLength: Int, covered: CoveredDayIndex)
+    private func streakRow(_ item: RankedStreak, recordLength: Int, covered: CoveredDateIndex)
         -> some View
     {
         let era = item.era
