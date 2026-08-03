@@ -145,7 +145,13 @@ final class RemoteChallengeService: ChallengeServiceProtocol {
                 self.save(completions)
                 NotificationCenter.default.post(name: ChallengeService.changedNotification, object: nil)
             }
+        } catch is CancellationError {
+            // Hosting task was cancelled (view disappeared / userId changed).
         } catch {
+            // Same guard refreshToday uses: a cancelled URL task is not a
+            // failure, and logging it as one filled the console with
+            // NSURLErrorCancelled -999 blocks that read like a bug.
+            if (error as? URLError)?.code == .cancelled { return }
             print("[RemoteChallengeService] refreshCompletions failed: \(error)")
         }
     }
