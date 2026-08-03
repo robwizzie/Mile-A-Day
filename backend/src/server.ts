@@ -19,6 +19,7 @@ import badgesRoutes, { publicBadgesRouter } from "./routes/badgesRoutes.js";
 import dailyChallengesRoutes from "./routes/dailyChallengesRoutes.js";
 import dailyStepsRoutes from "./routes/dailyStepsRoutes.js";
 import leaderboardRoutes from "./routes/leaderboardRoutes.js";
+import liveTrackingRoutes from "./routes/liveTrackingRoutes.js";
 import publicRoutes from "./routes/publicRoutes.js";
 import buddyRoutes from "./routes/buddyRoutes.js";
 import {
@@ -45,6 +46,7 @@ import {
   getMigrationReport,
 } from "./db/runMigrations.js";
 import { backfillFeedRoles } from "./db/backfillFeedRoles.js";
+import { backfillLongestStreaks } from "./db/backfillLongestStreaks.js";
 import {
   getUnifiedFeed,
   getStoriesRail,
@@ -311,6 +313,7 @@ app.use("/posts", postsRoutes);
 app.use("/blocks", blocksRoutes);
 app.use("/leaderboard", leaderboardRoutes);
 app.use("/buddy", buddyRoutes);
+app.use("/live", liveTrackingRoutes);
 
 app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   console.error("Error:", err.message);
@@ -359,6 +362,10 @@ runPendingMigrations()
       // migration (see backfillFeedRoles for why) and must not delay readiness.
       // Rows it hasn't reached yet read 'extra', i.e. the pre-feature feed.
       void backfillFeedRoles();
+      // Same contract: post-listen, not awaited, resumable. Fills
+      // users.longest_streak from workout history; rows it hasn't reached
+      // read 0, which every API surface degrades to max(0, current streak).
+      void backfillLongestStreaks();
     });
   });
 

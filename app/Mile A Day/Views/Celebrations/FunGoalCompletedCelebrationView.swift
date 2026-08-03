@@ -123,6 +123,10 @@ struct FunGoalCompletedCelebrationView: View {
                 }
             }
 
+            if let line = stats.comebackLine {
+                comebackRow(line)
+            }
+
             milestoneProgress
 
             if tokensState.payload != nil {
@@ -157,6 +161,30 @@ struct FunGoalCompletedCelebrationView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.white.opacity(0.065))
                 .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+        )
+    }
+
+    /// Day-1 comeback framing — mirrors the Modern goal view's row.
+    private func comebackRow(_ line: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.counterclockwise.circle.fill")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.orange)
+            Text(line)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .foregroundColor(.white.opacity(0.85))
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.orange.opacity(0.12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Color.orange.opacity(0.28), lineWidth: 1)
+                )
         )
     }
 

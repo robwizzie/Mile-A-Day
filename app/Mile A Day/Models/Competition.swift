@@ -1043,6 +1043,10 @@ struct NotificationActor: Codable {
 struct NotificationPostPreview: Codable {
     let post_id: String
     let media_url: String?
+    /// The feed's "run to see today's photos" gate applied to the thumbnail:
+    /// true = the photo is withheld until the viewer finishes their own mile,
+    /// so the row draws a lock tile instead (media_url arrives blanked).
+    let photo_locked: Bool?
 }
 
 struct InAppNotification: Codable, Identifiable {

@@ -328,6 +328,17 @@ class WorkoutService: ObservableObject {
             endpoint: endpoint, method: .GET, responseType: UserStatsAPIResponse.self)
     }
 
+    // MARK: - Streak Eras
+
+    /// Full streak history ("eras") + longest-ever streak. Readable for self
+    /// AND friends (same auth as /stats), so the Hall of Streaks works on both
+    /// profiles.
+    func getStreakEras(userId: String) async throws -> StreakErasResponse {
+        let endpoint = "/workouts/\(userId)/streak-eras"
+        return try await makeRequest(
+            endpoint: endpoint, method: .GET, responseType: StreakErasResponse.self)
+    }
+
     // MARK: - Manual Workout Upload
 
     /// Upload a manually entered workout to the backend
@@ -504,6 +515,25 @@ struct WorkoutUploadResponse: Codable {
     let message: String
 }
 
+// MARK: - Streak Eras API Models
+
+/// One consecutive streak run in a user's history.
+struct StreakEraAPI: Decodable, Equatable, Identifiable {
+    let start_date: String  // YYYY-MM-DD
+    let end_date: String  // YYYY-MM-DD
+    let length: Int
+    let is_current: Bool
+
+    var id: String { start_date }
+}
+
+/// GET /workouts/:userId/streak-eras — eras newest first.
+struct StreakErasResponse: Decodable, Equatable {
+    let eras: [StreakEraAPI]
+    let longest_streak: Int
+    let current_is_longest: Bool
+}
+
 // MARK: - Stats API Models
 // Note: RecentWorkout and StreakResponse are defined in FriendComponents.swift
 struct UserStatsAPIResponse: Decodable {
@@ -532,6 +562,8 @@ struct UserStatsAPIResponse: Decodable {
     let recentWorkouts: [RecentWorkout]
     let todayMiles: Double?
     let goalMiles: Double?
+    /// All-time longest streak (additive server field; nil from older servers).
+    let longestStreak: Int?
     /// Gated streak-tokens payload — absent (nil) until the server enables the
     /// feature for this user. Only apply it to local state for the CURRENT
     /// user's own stats; this response type is also used for friends.
@@ -546,6 +578,7 @@ struct UserStatsAPIResponse: Decodable {
         case recentWorkouts = "recent_workouts"
         case todayMiles = "today_miles"
         case goalMiles = "goal_miles"
+        case longestStreak = "longest_streak"
         case streakFeatures = "streak_features"
     }
 
@@ -578,6 +611,7 @@ struct UserStatsAPIResponse: Decodable {
             (try? container.decode([RecentWorkout].self, forKey: .recentWorkouts)) ?? []
         self.todayMiles = try? container.decode(Double.self, forKey: .todayMiles)
         self.goalMiles = try? container.decode(Double.self, forKey: .goalMiles)
+        self.longestStreak = try? container.decode(Int.self, forKey: .longestStreak)
         self.streakFeatures = try? container.decode(
             StreakFeaturesPayload.self, forKey: .streakFeatures)
     }

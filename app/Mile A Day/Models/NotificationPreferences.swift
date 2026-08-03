@@ -94,6 +94,15 @@ struct NotificationPreferences: Codable {
         get { shareRouteMapsRaw ?? true }
         set { shareRouteMapsRaw = newValue }
     }
+    /// Friends may see I'm out on a walk/run RIGHT NOW while I track in-app —
+    /// presence only, never location. Same optional-backing pattern as
+    /// shareRouteMapsRaw: prefs saved by older builds (no key) must still
+    /// decode instead of silently resetting everything to defaults.
+    private var shareLivePresenceRaw: Bool?
+    var shareLivePresence: Bool {
+        get { shareLivePresenceRaw ?? true }
+        set { shareLivePresenceRaw = newValue }
+    }
 
     /// Surface the shareable "Your Week" recap (feed teaser card on
     /// Sunday/Monday). Same optional-backing pattern as shareRouteMaps so

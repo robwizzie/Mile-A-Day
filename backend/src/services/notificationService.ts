@@ -159,6 +159,36 @@ export async function notifyFriendsOfMileCompletion(
     // evening miles (e.g. 11pm ET) and collides with the next day's mile.
     const localDate = await getUserLocalDate(userId);
 
+    // The runner's OWN "you did it" — sent from this exact spot because the
+    // claim above is the app's one atomic, once-per-day detection of the
+    // goal crossing, and it fires no matter which device recorded the mile
+    // (Watch sync, locked phone, third-party app). Client-side celebrations
+    // only play with the app open; this is the reliable path. Deliberately
+    // BEFORE the outgoing-audience branch: telling friends is optional,
+    // telling the runner is not.
+    try {
+      let selfBody = "Your daily goal is done — streak safe for today.";
+      try {
+        const selfStats = await getTodayStats(userId);
+        if (selfStats.miles > 0) {
+          selfBody = `${formatMiles(selfStats.miles)} · ${formatDuration(selfStats.durationSeconds)} — your streak is safe for today.`;
+        }
+      } catch {
+        // Stats are garnish; the celebration still goes out.
+      }
+      await sendPush(userId, {
+        title: "Mile complete! 🔥",
+        body: selfBody,
+        type: "goal_reached",
+        data: { local_date: localDate },
+      });
+    } catch (err: any) {
+      console.error(
+        "[Notifications] goal_reached self-push failed:",
+        err?.message ?? err,
+      );
+    }
+
     // Activity for audience resolution: the workout that completed the mile —
     // approximated as today's most recent running/walking workout. Default 'run'.
     const [recentWorkout] = await db.query<{
@@ -755,6 +785,40 @@ export async function checkStreaksBroken(): Promise<void> {
         );
 
         const streakLength = parseInt(streakResult[0]?.streak_length ?? "0");
+
+        // The OWNER hears about their own break — friends-only was backwards
+        // (friends got "send them encouragement!" while the runner discovered
+        // it from a zeroed flame). 3+ days is worth a kind heads-up; the 10+
+        // gate below exists to limit FRIEND spam, not to keep the owner in
+        // the dark. Own atomic claim so it can never double-send. The outer
+        // query already skips token-bridged streaks, and a later friend
+        // Assist follows up with its own streak_assisted push — the story
+        // stays coherent if a rescue lands.
+        if (streakLength >= 3) {
+          const selfKey = `streak_lost_self_${user_id}_${yesterdayStr}`;
+          const selfClaim = await db.query(
+            `INSERT INTO milestone_notifications (milestone_key, user_id) VALUES ($1, $2)
+						ON CONFLICT (milestone_key) DO NOTHING RETURNING id`,
+            [selfKey, user_id],
+          );
+          if (selfClaim.length > 0) {
+            await sendPush(user_id, {
+              title: "Your streak ended",
+              body: `Your ${streakLength}-day streak ended yesterday. One mile today starts the next one — day 1 is waiting.`,
+              type: "streak_lost",
+              data: {
+                local_date: yesterdayStr,
+                streak_length: String(streakLength),
+              },
+            }).catch((err: any) =>
+              console.error(
+                "[Notifications] streak_lost push failed:",
+                err?.message ?? err,
+              ),
+            );
+          }
+        }
+
         if (streakLength < 10) continue;
 
         const milestoneKey = `streak_broken_${user_id}_${yesterdayStr}`;

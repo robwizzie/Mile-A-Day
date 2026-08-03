@@ -429,6 +429,14 @@ class UserManager: ObservableObject {
         saveUserData()
     }
 
+    // Set longest-ever streak from the backend (ratcheted server-side, so it
+    // only ever rises there; mirror that here and never lower a cached value).
+    func updateLongestStreakFromBackend(_ longest: Int) {
+        guard longest > 0, longest > (currentUser.longestStreak ?? 0) else { return }
+        currentUser.longestStreak = longest
+        saveUserData()
+    }
+
     // Legacy method for backward compatibility
     func completeRun(miles: Double) {
         currentUser.updateStreak(miles: miles)

@@ -60,6 +60,10 @@ struct GoalCompletionStats: Equatable {
     let todaysWorkoutCount: Int // Number of workouts completed today
     let workoutBreakdowns: [WorkoutBreakdown] // Today's workouts grouped by type
     let latestWorkout: WorkoutBreakdown? // Most recent workout details
+    /// Day-1 comeback framing ("96 days came before. Day 1 of the next run
+    /// starts now.") — rendered by both goal celebration views when present.
+    /// Defaulted so every existing construction site compiles unchanged.
+    var comebackLine: String? = nil
 
     var percentOver: Double {
         guard goalDistance > 0 else { return 0 }
@@ -281,6 +285,12 @@ enum CelebrationType: Identifiable, Equatable {
     case challengeCompleted(info: ChallengeCelebrationInfo)
     /// BeReal-style prompt to add a photo to the just-finished mile.
     case postRunPhotoPrompt(workoutId: String, workoutType: String)
+    /// Comeback arc: day 3 / day 7 of a new streak that started within 30 days
+    /// of a broken run of 3+ days. (Day 1 rides inside goalCompleted via
+    /// GoalCompletionStats.comebackLine instead of a second popup.)
+    case comeback(day: Int, priorLength: Int, recordLength: Int, eraNumber: Int, eraStart: String)
+    /// The current streak just PASSED the user's all-time record.
+    case newRecordStreak(days: Int, previousBest: Int, eraStart: String)
 
     var id: String {
         switch self {
@@ -302,6 +312,10 @@ enum CelebrationType: Identifiable, Equatable {
             return "challenge-completed-\(info.key)"
         case .postRunPhotoPrompt(let workoutId, _):
             return "post-run-photo-\(workoutId)"
+        case .comeback(let day, _, _, _, let eraStart):
+            return "comeback-\(eraStart)-\(day)"
+        case .newRecordStreak(_, _, let eraStart):
+            return "record-\(eraStart)"
         }
     }
 
@@ -325,6 +339,10 @@ enum CelebrationType: Identifiable, Equatable {
             return i1.key == i2.key // one celebration per challenge per day
         case (.postRunPhotoPrompt(let w1, _), .postRunPhotoPrompt(let w2, _)):
             return w1 == w2 // one prompt per workout
+        case (.comeback(let d1, _, _, _, let s1), .comeback(let d2, _, _, _, let s2)):
+            return d1 == d2 && s1 == s2 // one per era-day
+        case (.newRecordStreak(_, _, let s1), .newRecordStreak(_, _, let s2)):
+            return s1 == s2 // one record moment per era
         default:
             return false
         }
@@ -340,6 +358,25 @@ enum CelebrationDismissAction: Equatable {
 /// Manages queuing and displaying celebration screens
 class CelebrationManager: ObservableObject {
     static let shared = CelebrationManager()
+
+    /// Posted when queued celebrations are DROPPED without being seen (the
+    /// navigate-away clear in dismissWithAction, a replay reset). userInfo
+    /// carries "ids": [String]. Enqueue-side session stamps — DashboardView's
+    /// goalCelebrationEnqueuedDay — listen and reset, so a flame that was
+    /// queued behind a badge popup and then cleared by "View badges" can
+    /// re-fire from the next level-trigger instead of being lost until the
+    /// next cold launch (hasShownGoalCelebrationToday never stamped, but the
+    /// session gate blocked every re-check).
+    static let droppedUnseenNotification = Notification.Name("MAD_CelebrationsDroppedUnseen")
+
+    private func reportDroppedUnseen(_ dropped: [CelebrationType]) {
+        guard !dropped.isEmpty else { return }
+        NotificationCenter.default.post(
+            name: Self.droppedUnseenNotification,
+            object: nil,
+            userInfo: ["ids": dropped.map(\.id)]
+        )
+    }
 
     @Published private(set) var celebrationQueue: [CelebrationType] = []
     @Published var currentCelebration: CelebrationType?
@@ -370,6 +407,25 @@ class CelebrationManager: ObservableObject {
         ids.append(workoutId)
         if ids.count > maxPromptedPhotoIds { ids = Array(ids.suffix(maxPromptedPhotoIds)) }
         promptedPhotoWorkoutIdsRaw = ids.joined(separator: "\n")
+    }
+
+    /// Comeback + record one-shots (keys "comeback-<eraStart>-<day>" and
+    /// "record-<eraStart>"). Persisted newline-joined like the photo-prompt
+    /// ids, stamped at DISMISSAL in markConsumed() — a moment the user never
+    /// saw is never spent. Bounded; each era contributes at most 3 keys.
+    @AppStorage("comebackRecordShownKeysV1") private var comebackRecordShownKeysRaw: String = ""
+    private let maxComebackRecordKeys = 60
+
+    func hasShownComebackOrRecord(id: String) -> Bool {
+        comebackRecordShownKeysRaw.split(separator: "\n").contains(where: { String($0) == id })
+    }
+
+    private func markComebackOrRecordShown(id: String) {
+        var ids = comebackRecordShownKeysRaw.split(separator: "\n").map(String.init)
+        guard !ids.contains(id) else { return }
+        ids.append(id)
+        if ids.count > maxComebackRecordKeys { ids = Array(ids.suffix(maxComebackRecordKeys)) }
+        comebackRecordShownKeysRaw = ids.joined(separator: "\n")
     }
 
     /// Backing store for the extra-mile workout-count baseline. Scoped to a single
@@ -446,6 +502,17 @@ class CelebrationManager: ObservableObject {
             }
         }
 
+        // Comeback day-3/7 and record moments fire once per era, ever.
+        switch celebration {
+        case .comeback, .newRecordStreak:
+            guard !hasShownComebackOrRecord(id: celebration.id) else {
+                print("[CelebrationManager] ⏭️  \(celebration.id) already shown, skipping")
+                return
+            }
+        default:
+            break
+        }
+
         // Avoid duplicates in queue
         guard !celebrationQueue.contains(where: { $0 == celebration }) else {
             print("[CelebrationManager] ⏭️  Celebration already in queue, skipping")
@@ -470,9 +537,11 @@ class CelebrationManager: ObservableObject {
     /// user can re-watch (and re-share) the same celebration from anywhere in the app.
     /// Clears any pending queue first so the replay shows immediately.
     func replayCelebration(_ celebration: CelebrationType) {
+        let dropped = celebrationQueue
         celebrationQueue.removeAll()
         currentCelebration = nil
         isShowingCelebration = false
+        reportDroppedUnseen(dropped)
 
         print("[CelebrationManager] 🔁 Replay requested: \(celebration.id)")
         celebrationQueue.append(celebration)
@@ -497,6 +566,12 @@ class CelebrationManager: ObservableObject {
         if case .postRunPhotoPrompt(let workoutId, _) = celebration {
             markPromptedPhoto(for: workoutId)
         }
+        switch celebration {
+        case .comeback, .newRecordStreak:
+            markComebackOrRecordShown(id: celebration.id)
+        default:
+            break
+        }
     }
 
     /// Dismiss the current celebration and show the next one if available
@@ -514,9 +589,12 @@ class CelebrationManager: ObservableObject {
     /// Dismiss the current celebration with a specific action
     func dismissWithAction(_ action: CelebrationDismissAction) {
         markConsumed(currentCelebration)
-        // Clear remaining queue when user wants to navigate away
+        // Clear remaining queue when user wants to navigate away — but report
+        // what was dropped, so still-unseen one-shots can re-arm.
         if action != .none {
+            let dropped = celebrationQueue
             celebrationQueue.removeAll()
+            reportDroppedUnseen(dropped)
         }
 
         isShowingCelebration = false
@@ -539,12 +617,14 @@ class CelebrationManager: ObservableObject {
         case .badgeSummary: return -2 // One-time welcome — show first
         case .yearMilestone: return -1 // Headline moment
         case .goalCompleted: return 0
-        case .leaderboardMoveUp: return 1 // right after the fire/streak screen
-        case .postGoalWorkout: return 2
-        case .badgeUnlocked: return 3
-        case .milestone: return 4
-        case .challengeCompleted: return 5 // celebrate the daily challenge as a finale
-        case .postRunPhotoPrompt: return 6 // BeReal photo prompt — the very last step
+        case .newRecordStreak: return 1 // crown lands right after the flame
+        case .comeback: return 2 // the emotional beat before the leaderboard
+        case .leaderboardMoveUp: return 3 // right after the fire/streak screen
+        case .postGoalWorkout: return 4
+        case .badgeUnlocked: return 5
+        case .milestone: return 6
+        case .challengeCompleted: return 7 // celebrate the daily challenge as a finale
+        case .postRunPhotoPrompt: return 8 // BeReal photo prompt — the very last step
         }
     }
 

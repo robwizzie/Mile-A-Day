@@ -24,6 +24,15 @@ struct WorkoutActivityAttributes: ActivityAttributes {
         var movingSeconds: TimeInterval? = nil
         /// The tracker's movement gate is closed (standing, sitting, riding).
         var isAutoPaused: Bool? = nil
+        /// Ghost race: seconds ahead (+) / behind (−) the user's best mile at
+        /// the current distance. nil = not racing this session. Optional so
+        /// an in-flight activity from an older build still decodes.
+        var ghostDeltaSeconds: Double? = nil
+        /// Mid-workout hypes from friends (live presence): how many landed
+        /// this session and who sent the latest. Defaulted optionals for the
+        /// same decode-safety reason as above.
+        var hypeCount: Int? = nil
+        var latestHypeName: String? = nil
     }
 
     var startTime: Date
@@ -58,6 +67,23 @@ private extension WorkoutActivityAttributes.ContentState {
         let minutes = Int(pace) / 60
         let seconds = Int(pace) % 60
         return String(format: "%d:%02d /mi", minutes, seconds)
+    }
+
+    /// "▲ 12s" / "▼ 8s" ghost-race delta, with ahead-ness for tinting.
+    var ghostDeltaText: (text: String, ahead: Bool)? {
+        guard let delta = ghostDeltaSeconds, delta.isFinite else { return nil }
+        let ahead = delta >= 0
+        let magnitude = Int(abs(delta).rounded())
+        return ("\(ahead ? "▲" : "▼") \(magnitude)s", ahead)
+    }
+
+    /// "🔥 Davey" — the latest mid-workout hype, when any landed.
+    var hypeLineText: String? {
+        guard let count = hypeCount, count > 0 else { return nil }
+        if let name = latestHypeName, !name.isEmpty {
+            return count > 1 ? "🔥 \(name) +\(count - 1)" : "🔥 \(name)"
+        }
+        return "🔥 ×\(count)"
     }
 }
 
@@ -120,26 +146,55 @@ struct WorkoutLiveActivity: Widget {
 
                 DynamicIslandExpandedRegion(.trailing) {
                     VStack(alignment: .trailing, spacing: 4) {
-                        Text("TIME")
-                            .font(.caption2)
-                            .foregroundColor(.white.opacity(0.6))
+                        // Stale = the app stopped sending updates (iOS likely
+                        // terminated it mid-workout). Say so instead of
+                        // letting the self-ticking clock imply all is well.
+                        if context.isStale {
+                            Text("TRACKING")
+                                .font(.caption2)
+                                .foregroundColor(.yellow)
+                            Text("INTERRUPTED")
+                                .font(.system(size: 14, weight: .heavy, design: .rounded))
+                                .foregroundColor(.yellow)
+                            Text("Open to resume")
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                                .foregroundColor(.white.opacity(0.8))
+                        } else {
+                            Text("TIME")
+                                .font(.caption2)
+                                .foregroundColor(.white.opacity(0.6))
 
-                        LiveTimerText(
-                            state: context.state,
-                            font: .system(size: 20, weight: .semibold, design: .rounded)
-                        )
-                        .foregroundColor(.white)
-                        .frame(maxWidth: 70, alignment: .trailing)
+                            LiveTimerText(
+                                state: context.state,
+                                font: .system(size: 20, weight: .semibold, design: .rounded)
+                            )
+                            .foregroundColor(.white)
+                            .frame(maxWidth: 70, alignment: .trailing)
 
-                        if context.state.showsAutoPaused {
-                            Text("PAUSED")
-                                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                                .foregroundColor(.orange)
-                        } else if let pace = context.state.paceText {
-                            Text(pace)
-                                .font(.system(size: 11, weight: .medium, design: .rounded))
-                                .foregroundColor(.white.opacity(0.7))
-                                .monospacedDigit()
+                            if context.state.showsAutoPaused {
+                                Text("PAUSED")
+                                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                    .foregroundColor(.orange)
+                            } else if let pace = context.state.paceText {
+                                Text(pace)
+                                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .monospacedDigit()
+                            }
+
+                            if let ghost = context.state.ghostDeltaText {
+                                Text(ghost.text)
+                                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                    .foregroundColor(ghost.ahead ? .green : .orange)
+                                    .monospacedDigit()
+                            }
+
+                            if let hype = context.state.hypeLineText {
+                                Text(hype)
+                                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                    .foregroundColor(.orange)
+                                    .lineLimit(1)
+                            }
                         }
                     }
                 }
@@ -215,8 +270,13 @@ struct WorkoutLiveActivity: Widget {
             } compactTrailing: {
                 // Compact trailing — the question mid-mile is "how close am
                 // I?", so show daily progress, not the clock (time lives in
-                // the expanded view).
-                if context.state.isGoalComplete {
+                // the expanded view). A stale activity outranks both: the
+                // app died and the user should know at a glance.
+                if context.isStale {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.yellow)
+                } else if context.state.isGoalComplete {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.green)
@@ -227,7 +287,11 @@ struct WorkoutLiveActivity: Widget {
                 }
             } minimal: {
                 // Minimal (when multiple Live Activities are active)
-                if context.state.isGoalComplete {
+                if context.isStale {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.yellow)
+                } else if context.state.isGoalComplete {
                     Image(systemName: "flame.fill")
                         .font(.system(size: 12))
                         .foregroundColor(.green)
@@ -305,7 +369,24 @@ struct WorkoutLiveActivityView: View {
 
             // Right side - Time & Progress
             VStack(alignment: .trailing, spacing: 10) {
-                // Time
+                // Time — unless the activity went stale (the app stopped
+                // sending updates, i.e. iOS likely terminated it). The
+                // system-rendered clock would keep ticking forever on a dead
+                // workout; the warning is the honest thing to show.
+                if context.isStale {
+                    VStack(alignment: .trailing, spacing: 3) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11, weight: .bold))
+                            Text("TRACKING INTERRUPTED")
+                                .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        }
+                        .foregroundColor(.yellow)
+                        Text("Open Mile A Day to resume")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundColor(.white.opacity(0.85))
+                    }
+                } else {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("TIME")
                         .font(.caption2)
@@ -332,6 +413,21 @@ struct WorkoutLiveActivityView: View {
                             .foregroundColor(.white.opacity(0.7))
                             .monospacedDigit()
                     }
+
+                    if let ghost = context.state.ghostDeltaText {
+                        Text(ghost.text)
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .foregroundColor(ghost.ahead ? .green : .orange)
+                            .monospacedDigit()
+                    }
+
+                    if let hype = context.state.hypeLineText {
+                        Text(hype)
+                            .font(.system(size: 11, weight: .heavy, design: .rounded))
+                            .foregroundColor(.orange)
+                            .lineLimit(1)
+                    }
+                }
                 }
 
                 // Progress ring

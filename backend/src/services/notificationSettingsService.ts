@@ -27,6 +27,7 @@ export interface NotificationPreferences {
   share_workouts_to_feed: boolean; // include my raw walks/runs in friends' feed
   friend_posts_enabled: boolean; // notify me when a friend shares a new post
   share_route_maps: boolean; // show my GPS route maps on my feed entries/posts
+  share_live_presence: boolean; // friends may see I'm out on a walk RIGHT NOW (never location)
   weekly_recap_enabled: boolean; // Sunday-evening weekly recap push + story card
   h2h_close_friends_only: boolean; // Head-to-Head rivals only from my close friends
   // friend_request_reminder_enabled: the weekly "N people are waiting to be
@@ -67,6 +68,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   share_workouts_to_feed: true,
   friend_posts_enabled: true,
   share_route_maps: true,
+  share_live_presence: true,
   weekly_recap_enabled: true,
   h2h_close_friends_only: false,
   friend_request_reminder_enabled: true,
@@ -104,6 +106,7 @@ export async function getNotificationPreferences(
     share_workouts_to_feed: row.share_workouts_to_feed ?? true,
     friend_posts_enabled: row.friend_posts_enabled ?? true,
     share_route_maps: row.share_route_maps ?? true,
+    share_live_presence: row.share_live_presence ?? true,
     weekly_recap_enabled: row.weekly_recap_enabled ?? true,
     h2h_close_friends_only: row.h2h_close_friends_only ?? false,
     friend_request_reminder_enabled:
@@ -158,6 +161,7 @@ export async function updateNotificationPreferences(
     { key: "share_workouts_to_feed", value: prefs.share_workouts_to_feed },
     { key: "friend_posts_enabled", value: prefs.friend_posts_enabled },
     { key: "share_route_maps", value: prefs.share_route_maps },
+    { key: "share_live_presence", value: prefs.share_live_presence },
     { key: "weekly_recap_enabled", value: prefs.weekly_recap_enabled },
     { key: "h2h_close_friends_only", value: prefs.h2h_close_friends_only },
     {
