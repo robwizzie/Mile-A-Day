@@ -12,7 +12,9 @@ import {
   getBestMilesDay,
   getBestSplit,
   getTodayMiles,
+  getLast7DayMiles,
   DAILY_GOAL_TOLERANCE,
+  isFeedWorthyWorkout,
   updateWorkout as updateWorkoutDb,
   computePersonalRecords,
   computeRaceRecords,
@@ -46,6 +48,7 @@ import {
   getStreakFeaturesPayload,
 } from "../services/streakFeatureService.js";
 import { reconcileBuddySessions } from "../services/buddySessionService.js";
+import { notifyH2hLeadChanges } from "../services/h2hMatchupService.js";
 
 export async function uploadWorkouts(req: Request, res: Response) {
   if (!hasRequiredKeys(["userId"], req, res)) return;
@@ -121,6 +124,16 @@ export async function uploadWorkouts(req: Request, res: Response) {
     reconcileBuddySessions(userId, uploadedWorkoutIds).catch((err) =>
       console.error("Error reconciling buddy sessions:", err.message),
     );
+    // Head-to-Head standings: tell whoever this upload just overtook (and the
+    // syncer, when they took the lead) while there's still a day left to
+    // answer. Skipped on the account-setup backfill and on pure history
+    // uploads — neither changes today's duel. Fire-and-forget: a duel push
+    // must never delay or fail a workout sync.
+    if (!isFullSync && hasRecentWorkout) {
+      notifyH2hLeadChanges(userId).catch((err) =>
+        console.error("Error notifying H2H lead change:", err.message),
+      );
+    }
 
     try {
       await checkRaceCompletions(userId);
@@ -162,7 +175,11 @@ export async function uploadWorkouts(req: Request, res: Response) {
             for (const w of req.body as Workout[]) {
               if (
                 (w.workoutType === "running" || w.workoutType === "walking") &&
-                recentWorkoutIds.has(w.workoutId)
+                recentWorkoutIds.has(w.workoutId) &&
+                // Same floor the feed uses. Without it a 3-second phantom pushes
+                // "just logged an extra workout" to every friend and then leads
+                // them to a feed with no card for it.
+                isFeedWorthyWorkout(w.distance, w.totalDuration)
               ) {
                 notifyFriendsOfExtraWorkout(userId, w.workoutId).catch((err) =>
                   console.error("Error notifying extra workout:", err.message),
@@ -177,7 +194,10 @@ export async function uploadWorkouts(req: Request, res: Response) {
           // completes the mile takes the >= 1.0 branch (mile_completed only),
           // so the two never double-fire for the same workout.
           for (const w of req.body as Workout[]) {
-            if (w.workoutType === "running" || w.workoutType === "walking") {
+            if (
+              (w.workoutType === "running" || w.workoutType === "walking") &&
+              isFeedWorthyWorkout(w.distance, w.totalDuration)
+            ) {
               notifyFriendsOfWorkout(userId, w.workoutId).catch((err) =>
                 console.error("Error notifying pre-goal workout:", err.message),
               );
@@ -561,6 +581,7 @@ export async function getUserStats(req: AuthenticatedRequest, res: Response) {
       best_split_time,
       recent_workouts,
       today_miles,
+      last_7_day_miles,
     ] = await Promise.all([
       getTotalMiles(userId, startDateParam),
       getBestMilesDay(userId, startDateParam),
@@ -570,6 +591,9 @@ export async function getUserStats(req: AuthenticatedRequest, res: Response) {
       // including the owner looking at their own stats.
       getRecentWorkoutsDb(userId, 10, req.userId),
       getTodayMiles(userId),
+      // Exact per-day series for profile week charts — recent_workouts is
+      // capped, so heavy loggers' older days would otherwise read as zero.
+      getLast7DayMiles(userId),
     ]);
 
     // Default goal miles is 1.0 (can be updated when user preferences are stored)
@@ -591,6 +615,7 @@ export async function getUserStats(req: AuthenticatedRequest, res: Response) {
       best_split_time,
       recent_workouts,
       today_miles,
+      last_7_day_miles,
       goal_miles,
       ...(streak_features ? { streak_features } : {}),
     });

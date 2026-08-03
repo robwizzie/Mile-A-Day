@@ -232,6 +232,11 @@ export const workouts = pgTable(
     }).notNull(),
     calories: doublePrecision().notNull(),
     totalDuration: doublePrecision("total_duration").notNull(),
+    // Seconds the tracker saw actual movement (in-app workouts only; null for
+    // Watch/third-party syncs). DISPLAY pace divides by this so stop-heavy
+    // walks don't read 82:47/mi — while total_duration stays the elapsed
+    // truth for PRs, races, and recaps (a race clock doesn't pause).
+    movingSeconds: doublePrecision("moving_seconds"),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "string",
@@ -251,6 +256,20 @@ export const workouts = pgTable(
     // Soft flag for the suspicious-but-possible speed band — still counts, just
     // surfaced in the UI for the user to review.
     speedFlagged: boolean("speed_flagged").default(false).notNull(),
+    // How this workout shows up in the FEED — never whether it counts. A tiny
+    // accidental walk still adds to today's miles and can still complete a
+    // streak day (that's what `exclusion_reason` is for, and why this is a
+    // separate column); it just doesn't get to spam a card.
+    //   'hidden'     — under the feed floor, or its day never reached the mile
+    //   'rolled_up'  — a pre-mile segment, folded into the anchor's card
+    //   'daily_mile' — the workout that crossed the mile; the ANCHOR whose card
+    //                  represents the whole day's rollup
+    //   'extra'      — logged after the mile was done; gets its own card
+    // Recomputed for the whole (user, local_date) on every workout mutation by
+    // recomputeFeedRolesForDay (workoutService). Defaults to 'extra' so an
+    // unclassified row stays VISIBLE — failing open beats silently swallowing
+    // someone's run.
+    feedRole: text("feed_role").default("extra").notNull(),
   },
   (table) => [
     index("idx_workouts_local_date_user_id").using(
@@ -268,7 +287,24 @@ export const workouts = pgTable(
       table.userId.asc().nullsLast(),
       table.localDate.desc().nullsFirst(),
     ),
+    // The unified feed's workout candidates, in the order it reads them. The
+    // predicate mirrors that query's WHERE exactly so the planner can prove the
+    // partial index applies; keep the two in sync if either changes.
+    index("idx_workouts_feed_candidates")
+      .on(
+        table.userId.asc().nullsLast(),
+        table.deviceEndDate.desc().nullsFirst(),
+      )
+      .where(
+        sql`(deleted_at IS NULL AND exclusion_reason IS NULL AND feed_role IN ('daily_mile', 'extra'))`,
+      ),
     unique("workouts_user_workout_unique").on(table.workoutId, table.userId),
+    // A typo in any writer would silently hide someone's whole feed, and the
+    // column is only ever written by one function — cheap insurance.
+    check(
+      "workouts_feed_role_check",
+      sql`${table.feedRole} IN ('hidden', 'rolled_up', 'daily_mile', 'extra')`,
+    ),
   ],
 );
 
@@ -367,6 +403,11 @@ export const notificationSettings = pgTable(
     // toggle is the ONLY thing standing between a user and an unmutable push.
     // Guideline 4.5.4 requires it, and it must ship WITH the feature, not after.
     buddyInvitesEnabled: boolean("buddy_invites_enabled").default(true),
+    // tagged_posts_on_profile: do collabs I'm tagged in land on my profile's
+    // Posts grid? Off = they live in the Tagged tab only (Instagram's model).
+    // The default stays ON so nothing moves for existing users. Read through
+    // posts.coauthor_on_profile, which overrides it per post.
+    taggedPostsOnProfile: boolean("tagged_posts_on_profile").default(true),
   },
   (table) => [
     check(
@@ -410,6 +451,10 @@ export const competitions = pgTable(
     workouts: jsonb().notNull(),
     type: varchar({ length: 20 }).notNull(),
     options: jsonb().notNull(),
+    // Optional team play: { member_pick: boolean, teams: [{ id, name }] }.
+    // Deliberately NOT inside options — clients PATCH options wholesale and
+    // would silently erase teams. NULL = no teams for this competition.
+    teams: jsonb(),
     ended: boolean().default(false),
     winner: text(),
     owner: text(),
@@ -831,6 +876,16 @@ export const h2hMatchups = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // Live lead-change pushes: the standing THIS ROW'S USER was last told
+    // about ('ahead' | 'behind'). The duel is scored end-of-day, so without a
+    // record of what was already announced every sync by either side would
+    // re-push the same "you're behind". A flip only notifies when the new
+    // standing differs from what's stored here.
+    leadNotifiedState: text("lead_notified_state"),
+    leadNotifiedAt: timestamp("lead_notified_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
   },
   (table) => [
     foreignKey({
@@ -1195,6 +1250,9 @@ export const competitionUsers = pgTable(
     userId: text("user_id").notNull(),
     progress: jsonb(),
     inviteStatus: varchar("invite_status", { length: 20 }),
+    // Team membership within the competition (id from competitions.teams).
+    // NULL = unassigned; cleared when the team is deleted.
+    teamId: text("team_id"),
     placement: integer(),
     lastKnownRank: integer("last_known_rank"),
     lastKnownScore: doublePrecision("last_known_score"),
@@ -1291,6 +1349,14 @@ export const posts = pgTable(
     coauthorUserId: text("coauthor_user_id"),
     coauthorStatus: text("coauthor_status"),
     coauthorWorkoutId: varchar("coauthor_workout_id", { length: 255 }),
+    // Does this collab show on the COAUTHOR's own profile grid? Instagram
+    // keeps tags off your grid; here they landed on both. Tri-state on
+    // purpose: NULL = "follow my `tagged_posts_on_profile` setting", so
+    // flipping that switch retroactively covers every tag the user already
+    // has, while an explicit true/false is a per-post override that survives
+    // later setting changes. Grid ONLY — the Tagged tab, the author's own
+    // profile and both circles' feeds are deliberately untouched.
+    coauthorOnProfile: boolean("coauthor_on_profile"),
     // "Posted live": the author shared this inside the 10-minute fresh window
     // after finishing the run. Client-claimed at create time (the client owns
     // the window — it's anchored to when the app SAW the finished workout);

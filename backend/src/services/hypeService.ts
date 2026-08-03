@@ -234,13 +234,43 @@ export function mileHypeKeyMatchSql(
  */
 export function runHypeMatchSql(h: string, w: string): string {
   return `(
-		(${h}.context_type = 'mile' AND (${mileHypeKeyMatchSql(h, w)} OR ${h}.context_id = ${w}.workout_id::text))
+		(${h}.context_type = 'mile' AND (
+			${mileHypeKeyMatchSql(h, w)}
+			OR ${h}.context_id = ${w}.workout_id::text
+			OR ${rollupMemberHypeMatchSql(h, w)}
+		))
 		OR (${h}.context_type = 'post' AND ${h}.context_id IN (
 			SELECT p_.post_id::text FROM posts p_
 			WHERE p_.workout_id = ${w}.workout_id AND p_.user_id = ${w}.user_id
 				AND p_.deleted_at IS NULL
 		))
 	)`;
+}
+
+/**
+ * The rollup arm of the run rule: when `w` is a day's `daily_mile` anchor, hypes
+ * keyed to any workout that folded into it count as hypes on the anchor.
+ *
+ * Needed in both directions. Without it the tally DROPS — a mile a friend
+ * completed across three walks, hyped on the second walk before this feature
+ * shipped, would lose that hype the moment the walk stopped having a card of its
+ * own. And the dedupe LEAKS — the pre-existing hyper is no longer recognised, so
+ * they can spend a second hype on the same mile from the anchor's card.
+ *
+ * Deliberately excludes 'extra': a post-mile run is its own card and must stay
+ * independently hypeable, or hyping the mile would silently consume it too.
+ *
+ * Written as EXISTS on the workouts PK rather than `context_id IN (SELECT …)`
+ * so it stays a single index probe per hype row.
+ */
+function rollupMemberHypeMatchSql(h: string, w: string): string {
+  return `(${w}.feed_role = 'daily_mile' AND EXISTS (
+		SELECT 1 FROM workouts m_
+		WHERE m_.workout_id = ${h}.context_id
+			AND m_.user_id = ${w}.user_id
+			AND m_.local_date = ${w}.local_date
+			AND m_.feed_role IN ('rolled_up', 'daily_mile')
+	))`;
 }
 
 /**

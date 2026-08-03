@@ -17,3 +17,38 @@ Each entry: one-line rule + brief why.
 **Source**: session 2026-06-11
 
 When you correct Claude on something non-obvious, run `/remember "rule"` to add it. After a feature ships, run `/learn` to sweep corrections from the session into here.
+
+## Unified feed is slow in the CTE, not the projection
+**Rule**: Do NOT try to speed up `getUnifiedFeed` by stripping columns out of `FEED_ENTRY_PROJECTION`. The heavy columns already sit behind the `LIMIT` barrier (`candidates` unions cheap keys → `page` sorts+limits → outer SELECT projects). The remaining cost is the `candidates` CTE: two large scans UNION ALL'd, a correlated `NOT EXISTS` on `posts p2` per workout row, and two `NOT IN (SELECT uid FROM blocked)` anti-joins. Profile with `EXPLAIN (ANALYZE, BUFFERS)` before changing anything.
+**Why**: The projection was replaced with hardcoded `false`/`null` and the feed was still 22s — no speedup, and it shipped to prod with no route maps, no hype/comment counts, no story photos, and (worst) no `COALESCE(roll.distance, wt.distance)`, so multi-segment days under-reported distance (3x0.33 read "0.33 mi"). It also diverged `getUnifiedFeed` from `getFeedEntryForPost`, which shares that projection. `tsc` catches none of this.
+**Source**: reverted in 226a340, session 2026-07-27
+
+## Never cache rows that a controller mutates in place
+**Rule**: An in-memory cache must return a deep copy, or nothing downstream may mutate the rows. `lockUnearnedPhotos` mutates feed rows in place (`media_url = ""`, `photo_locked = true`); `signMediaUrlsDeep` is safe (it deep-copies and re-signs). Any such cache also needs bounded eviction — a plain `Map` keyed by user id leaks on a live server.
+**Why**: A 60s feed cache returned `cached.items` by reference, so the photo-lock mutation stuck: completing your mile mid-TTL still showed blanked photos.
+**Source**: reverted in 226a340, session 2026-07-27
+
+## Don't widen statement_timeout to paper over a slow query
+**Rule**: If you must change `statement_timeout` per query, use `SET LOCAL` inside a transaction — never `SET` on a pooled client with the reset in a `finally`. `await client.query()` in a `finally` runs on a possibly-faulted connection; if it throws, `client.release()` never runs and the connection leaks. Pool max is 20, so ~20 failures hang every endpoint, not just the slow one.
+**Why**: `queryWithExtendedTimeout` did exactly this to give the 22s feed query a 60s rope.
+**Source**: reverted in 226a340, session 2026-07-27
+
+## APNs token is nil at launch — don't unregister against it
+**Rule**: `MADNotificationService.currentDeviceToken` is only assigned in the `didRegisterForRemoteNotifications` callback, so it is nil anywhere in `AppDelegate`'s launch task. Never compare a stored token against it to decide what to unregister.
+**Why**: A DEBUG-only "stale token cleanup" guarded on `oldToken != currentDeviceToken`, which is always true at launch — so it `DELETE`d the user's valid token every dev launch, racing the new registration and making "I never get notifications" worse.
+**Source**: reverted in 226a340, session 2026-07-27
+
+## An OR across two columns in NOT EXISTS silently disables both indexes
+**Rule**: Never OR two different columns inside a `NOT EXISTS`/`EXISTS` correlated subquery. Postgres cannot serve `a.x = $outer OR a.y = $outer` from an index on either column, so it falls back to scanning every qualifying row of the inner table once per outer row. Split it: `NOT EXISTS(A OR B)` = `NOT EXISTS(A) AND NOT EXISTS(B)` (distribute the shared predicates over the OR, then De Morgan the existential) — exact, and each arm can then use its own index.
+**Why**: `getUnifiedFeed`'s workouts arm ORed `p2.workout_id = w.workout_id` with `p2.coauthor_workout_id = w.workout_id`. That scanned all 232 shared posts per candidate workout — 857 x 232 = ~198k executions of the privacy/block subplans nested inside — for a 5,484ms feed on a viewer with THREE friends. Splitting it: 267ms, a 20x win, with `uq_posts_workout_active` and `idx_posts_coauthor_workout` (both of which already existed) finally being used.
+**Source**: 542fc76, session 2026-07-27
+
+## "Seq Scan" in a plan is not automatically a missing index
+**Rule**: Read `loops` before reacting to a node type. A seq scan of a small table is the CORRECT plan once and a catastrophe 195,720 times — the fix is to remove the loops, not to index the table. Check whether the column is already a PK/unique before proposing an index.
+**Why**: The hot node above was `Seq Scan on notification_settings`, whose `user_id` is already a PRIMARY KEY. The planner picks a seq scan because the table is ~114 rows and that is genuinely cheaper per execution. Adding an index — the reflex response — would have changed nothing.
+**Source**: 542fc76, session 2026-07-27
+
+## Profile the feed with /status/schema?profile=feed
+**Rule**: Before touching feed performance, GET `https://mad.mindgoblin.tech/status/schema?profile=feed`. It returns planning/execution ms, the 12 hottest plan nodes (with `loops`, `discarded`, `subplan`) and scale counts, by running `EXPLAIN (ANALYZE, BUFFERS)` on `UNIFIED_FEED_SQL` — the byte-identical string `getUnifiedFeed` runs. Opt-in param, throttled to one run per 20s. Note the DEFAULT `/status/schema` response also runs a real feed query, so do not poll it on a short timer.
+**Why**: Five plausible hypotheses (missing posts index, NOT IN on blocked, LIMIT not pushed into the UNION, data volume, projection cost) were all wrong, and one EXPLAIN killed all five in seconds.
+**Source**: dae2e72 / 4c5d2d5, session 2026-07-27

@@ -1,4 +1,5 @@
 import { PostgresService } from "./DbService.js";
+import { CLIENT_FEATURES, userSupports } from "./clientFeatures.js";
 import { sendPush } from "./pushNotificationService.js";
 import { shouldSendNotification } from "./notificationSettingsService.js";
 import {
@@ -64,6 +65,9 @@ export interface PostRow {
   media_url: string;
   caption: string | null;
   workout_id: string | null;
+  // Linked workout's feed_role — display framing only (see the projection
+  // comments); null when the post has no workout.
+  feed_role: string | null;
   stats_snapshot: PostStatsSnapshot | null;
   local_date: string;
   share_to_feed: boolean;
@@ -89,6 +93,10 @@ export interface PostRow {
   // feature, so the payload shape is unchanged for the legacy corpus and old
   // clients go on reading the scalar fields above.
   coauthors?: PostCoauthor[] | null;
+  // Resolved "is this collab on MY profile grid?" — only populated when the
+  // VIEWER is the coauthor (it's their setting to read), null otherwise.
+  // Drives the card's Hide/Show-on-profile action. Additive field.
+  coauthor_on_profile?: boolean | null;
   is_viewed?: boolean;
   // The viewer's own emoji reaction to this story (getUserActiveStories only),
   // so re-opening a story they already reacted to shows the reaction. null/absent
@@ -158,7 +166,50 @@ const POST_COLUMNS = `
 	p.media_url,
 	p.caption,
 	p.workout_id,
-	p.stats_snapshot,
+	-- Linked workout's feed_role, display framing only (extra vs goal
+	-- entry) — same additive field the unified feed carries.
+	(SELECT w0.feed_role FROM workouts w0 WHERE w0.workout_id = p.workout_id)
+		AS feed_role,
+	-- Restated in rollup terms when this post is attached to the workout that
+	-- completed a mile made of several walks — the SAME projection the unified
+	-- feed applies (getUnifiedFeed). Shared here so the profile grid, story
+	-- viewer and memories can't report 0.33 mi for a run the feed calls 1.06.
+	-- A post on a non-anchor workout keeps its own exact stats.
+	-- COALESCE, not a bare subquery: a post with no linked workout matches no
+	-- row and would otherwise come back with its stats nulled out entirely.
+	COALESCE((
+		SELECT CASE
+			WHEN w_.feed_role = 'daily_mile' AND p.stats_snapshot IS NOT NULL
+				AND roll_.segment_count > 1
+			THEN p.stats_snapshot || jsonb_build_object(
+				'distance', roll_.distance,
+				'duration', roll_.duration,
+				-- Display pace divides by MOVING time where the tracker
+				-- recorded it (falling back per-row to elapsed), so a
+				-- stop-heavy day doesn't restate to an absurd pace. The
+				-- 'duration' key above stays the elapsed truth.
+				'pace', CASE WHEN roll_.distance > 0
+					THEN roll_.moving_duration / roll_.distance END
+			)
+			ELSE p.stats_snapshot
+		END
+		FROM workouts w_
+		CROSS JOIN LATERAL (
+			SELECT
+				COUNT(*) FILTER (WHERE m.feed_role <> 'hidden')::int AS segment_count,
+				SUM(m.distance)::double precision AS distance,
+				SUM(m.total_duration)::double precision AS duration,
+				SUM(COALESCE(m.moving_seconds, m.total_duration))::double precision AS moving_duration
+			FROM workouts m
+			WHERE m.user_id = w_.user_id AND m.local_date = w_.local_date
+				AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
+				AND (
+					m.feed_role IN ('rolled_up', 'daily_mile')
+					OR (m.feed_role = 'hidden' AND m.device_end_date <= w_.device_end_date)
+				)
+		) roll_
+		WHERE w_.workout_id = p.workout_id
+	), p.stats_snapshot) AS stats_snapshot,
 	p.local_date::text AS local_date,
 	p.share_to_feed,
 	p.share_to_story,
@@ -168,10 +219,76 @@ const POST_COLUMNS = `
 	p.include_route,
 	(SELECT w.workout_type FROM workouts w WHERE w.workout_id = p.workout_id) AS workout_type`;
 
-// Collab-post columns. `$1` must be the viewer id: a PENDING coauthor is
-// visible only to the two people involved; accepted collabs are public to
-// whoever can see the post.
-const COAUTHOR_VISIBLE = `(p.coauthor_user_id IS NOT NULL AND (p.coauthor_status = 'accepted' OR p.user_id = $1 OR p.coauthor_user_id = $1))`;
+/**
+ * SQL: is the collab on `a` still a real collab AT ALL? Viewer-independent:
+ * accepted, and neither author has blocked the other. A block between the two
+ * ENDS the collab for everybody — it already drops the row from the coauthor's
+ * tagged tab (getUserTaggedPosts), and leaving the feed showing "alice & bob"
+ * after bob blocked alice contradicts that. Severing the tag, not the post: the
+ * media and the run are the author's, so it simply reverts to a solo post.
+ */
+const collabActiveSql = (a: string) => `(${a}.coauthor_status = 'accepted'
+	AND NOT EXISTS (
+		SELECT 1 FROM user_blocks cb
+		WHERE (cb.blocker_id = ${a}.user_id AND cb.blocked_id = ${a}.coauthor_user_id)
+			OR (cb.blocker_id = ${a}.coauthor_user_id AND cb.blocked_id = ${a}.user_id)
+	))`;
+
+/**
+ * SQL: is the collab TAG on `a` shown to viewer `$1`?
+ *
+ * The two people involved always see a LIVE collab (that's how a pending
+ * invite reaches the person who has to answer it). For everyone else it also
+ * needs the coauthor not set to 'private' — "Only me" promises a user their
+ * name never appears in someone else's feed, and a collab tag is exactly that.
+ * A withheld tag doesn't remove the post: it stays the AUTHOR's post, shown to
+ * the author's circle with no coauthor on it (collabReachSql drops the matching
+ * reach). Viewer-side blocks are handled separately and hide the whole post.
+ */
+const coauthorVisibleSql = (
+  a: string,
+) => `(${a}.coauthor_user_id IS NOT NULL AND (
+	${a}.user_id = $1
+	OR ${a}.coauthor_user_id = $1
+	OR (${collabActiveSql(a)} AND ${OWNER_NOT_PRIVATE_SQL(`${a}.coauthor_user_id`)})
+))`;
+const COAUTHOR_VISIBLE = coauthorVisibleSql("p");
+
+/**
+ * SQL: may the collab on `a` extend the post's reach to the COAUTHOR's circle?
+ * Same rule as the tag above — a live collab with a non-private coauthor.
+ * Written as its own fragment because the reach checks sit in circle semi-joins
+ * while the tag check sits in the SELECT list.
+ */
+const collabReachSql = (a: string) => `(${collabActiveSql(a)} AND (
+	${a}.coauthor_user_id = $1 OR ${OWNER_NOT_PRIVATE_SQL(`${a}.coauthor_user_id`)}
+))`;
+const COLLAB_REACH_SQL = collabReachSql("p");
+const COLLAB_ACTIVE = collabActiveSql("p");
+
+/**
+ * SQL: does this collab belong on the COAUTHOR's own profile GRID?
+ *
+ * Scope is deliberately narrow — the grid and nothing else. A collab still
+ * reaches both circles' feeds (collabReachSql), still shows on the author's
+ * profile, and still lands in the coauthor's Tagged tab; this only answers
+ * "is it part of the curated Posts grid", which is the one place Instagram
+ * keeps tags OUT of and we were putting them IN.
+ *
+ * Tri-state resolution, in order: the per-post override, then the coauthor's
+ * `tagged_posts_on_profile` setting, then TRUE. NULL (every pre-existing row,
+ * and every new tag) means "follow my setting", so flipping that one switch
+ * covers the tags a user ALREADY has — the actual complaint — instead of only
+ * future ones. Writing the override is what pins a single post either way.
+ *
+ * `coauthorParam` must be the id of the person whose grid is being built.
+ */
+const coauthorOnProfileSql = (a: string, coauthorParam: string) => `COALESCE(
+	${a}.coauthor_on_profile,
+	(SELECT ns.tagged_posts_on_profile FROM notification_settings ns
+		WHERE ns.user_id = ${coauthorParam}),
+	TRUE
+)`;
 
 // ─── Multi-person collabs (post_coauthors) ──────────────────────────────
 //
@@ -183,37 +300,64 @@ const COAUTHOR_VISIBLE = `(p.coauthor_user_id IS NOT NULL AND (p.coauthor_status
 //
 // EVERY fragment below is an EXISTS over post_coauthors, so it evaluates FALSE
 // for any post without rows there — which is every post that existed before
-// this feature. That is what keeps `visiblePostAuthor` byte-equivalent for the
-// legacy corpus: these clauses can only ever GRANT reach to a genuine
+// this feature. That is what keeps the direct-access guard byte-equivalent for
+// the legacy corpus: these clauses can only ever GRANT reach to a genuine
 // multi-collab, or DENY it on a block. `$1` must be the viewer id.
+//
+// Each one is the multi-person mirror of the scalar fragment above it, and
+// must STAY a mirror: a participant is a coauthor by another name, so the
+// active/privacy/block rules are the same rules.
+
+/**
+ * SQL: is participant `pca` still really on the post? The multi-person mirror
+ * of `collabActiveSql` — accepted, and no block between the author and that
+ * participant (a block between them ends the tag for everyone).
+ */
+const MULTI_COLLAB_ACTIVE = `(pca.status = 'accepted'
+	AND NOT EXISTS (
+		SELECT 1 FROM user_blocks mcb
+		WHERE (mcb.blocker_id = p.user_id AND mcb.blocked_id = pca.user_id)
+			OR (mcb.blocker_id = pca.user_id AND mcb.blocked_id = p.user_id)
+	))`;
+
+// Is the viewer themselves credited on this post? Un-answered invites count —
+// that's how a pending invite reaches the person who has to answer it.
 const VIEWER_IS_MULTI_COAUTHOR = `EXISTS (
 	SELECT 1 FROM post_coauthors pca
 	WHERE pca.post_id = p.post_id AND pca.user_id = $1
 		AND pca.status <> 'declined'
 )`;
 
-// An accepted multi-collab reaches every participant's friend circle, exactly
-// as an accepted legacy collab reaches the coauthor's.
+// A live multi-collab reaches every participant's friend circle, exactly as a
+// live legacy collab reaches the coauthor's — and stops at the same place, a
+// participant whose own visibility is 'private' (collabReachSql's rule).
 const FRIEND_OF_MULTI_COAUTHOR = `EXISTS (
 	SELECT 1 FROM post_coauthors pca
 	JOIN friendships f ON f.friend_id = pca.user_id
-	WHERE pca.post_id = p.post_id AND pca.status = 'accepted'
+	WHERE pca.post_id = p.post_id AND ${MULTI_COLLAB_ACTIVE}
 		AND f.user_id = $1 AND f.status = 'accepted'
+		AND (pca.user_id = $1 OR ${OWNER_NOT_PRIVATE_SQL("pca.user_id")})
 )`;
 
-// Blocks are checked against every ACCEPTED participant, in both directions —
-// the same rule the legacy coauthor block check applies.
+// Blocks are checked against every LIVE participant, in both directions — the
+// same rule (and the same COLLAB_ACTIVE gate) the legacy coauthor block check
+// applies, so a participant the author has already blocked off the post can't
+// go on hiding it from third parties.
 const BLOCKED_VS_MULTI_COAUTHOR = `EXISTS (
 	SELECT 1 FROM post_coauthors pca
 	JOIN user_blocks b
 		ON (b.blocker_id = $1 AND b.blocked_id = pca.user_id)
 		OR (b.blocker_id = pca.user_id AND b.blocked_id = $1)
-	WHERE pca.post_id = p.post_id AND pca.status = 'accepted'
+	WHERE pca.post_id = p.post_id AND ${MULTI_COLLAB_ACTIVE}
 )`;
 
-// Accepted participants, as a JSON array for the client. NULL when the post has
+// Credited participants, as a JSON array for the client. NULL when the post has
 // none, which is every pre-existing post — so the payload shape is unchanged
 // for the entire legacy corpus and old clients keep reading the scalar columns.
+//
+// Tag visibility mirrors coauthorVisibleSql: the author and the participant
+// themselves always see the row (pending included, so an invite is answerable);
+// everyone else sees only live, non-private participants.
 const MULTI_COAUTHORS_JSON = `(
 	SELECT jsonb_agg(jsonb_build_object(
 		'user_id', mcu.user_id,
@@ -221,12 +365,25 @@ const MULTI_COAUTHORS_JSON = `(
 		'first_name', mcu.first_name,
 		'last_name', mcu.last_name,
 		'profile_image_url', mcu.profile_image_url,
-		'status', mca.status
-	) ORDER BY mca.created_at)
-	FROM post_coauthors mca
-	JOIN users mcu ON mcu.user_id = mca.user_id
-	WHERE mca.post_id = p.post_id
-		AND (mca.status = 'accepted' OR p.user_id = $1 OR mca.user_id = $1)
+		'status', pca.status
+	) ORDER BY pca.created_at)
+	FROM post_coauthors pca
+	JOIN users mcu ON mcu.user_id = pca.user_id
+	WHERE pca.post_id = p.post_id
+		AND (p.user_id = $1 OR pca.user_id = $1
+			OR (${MULTI_COLLAB_ACTIVE} AND ${OWNER_NOT_PRIVATE_SQL("pca.user_id")}))
+)`;
+
+/**
+ * SQL: may viewer `$1` see post `p` given the AUTHOR's visibility? Every
+ * credited person always sees their own collab (a private author's post leaves
+ * everyone else's feed, but never their own or their coauthors').
+ */
+const AUTHOR_VISIBLE_TO_VIEWER = `(
+	p.user_id = $1
+	OR p.coauthor_user_id = $1
+	OR ${VIEWER_IS_MULTI_COAUTHOR}
+	OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
 )`;
 const COAUTHOR_COLUMNS = `
 	CASE WHEN ${COAUTHOR_VISIBLE} THEN p.coauthor_user_id END AS coauthor_user_id,
@@ -235,7 +392,13 @@ const COAUTHOR_COLUMNS = `
 	(SELECT cu.first_name FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_first_name,
 	(SELECT cu.last_name FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_last_name,
 	(SELECT cu.profile_image_url FROM users cu WHERE cu.user_id = p.coauthor_user_id AND ${COAUTHOR_VISIBLE}) AS coauthor_profile_image_url,
-	${MULTI_COAUTHORS_JSON} AS coauthors`;
+	${MULTI_COAUTHORS_JSON} AS coauthors,
+	-- Only meaningful to the coauthor themselves (it's their grid), so it's
+	-- NULL for everyone else rather than leaking one user's curation choice
+	-- to the other. CASE guarantees the subquery only runs on collab rows the
+	-- viewer is actually part of.
+	CASE WHEN p.coauthor_user_id = $1
+		THEN ${coauthorOnProfileSql("p", "$1")} END AS coauthor_on_profile`;
 
 // SELECT list shared by feed + story-detail reads so both shapes match PostRow.
 // `$1` must be the viewer id (drives is_self / is_hyped).
@@ -435,12 +598,25 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 				user_id, media_url, caption, workout_id, stats_snapshot,
 				local_date, share_to_feed, share_to_story, story_expires_at,
 				is_auto, include_route, coauthor_user_id, coauthor_status,
-				posted_fresh
+				coauthor_workout_id, posted_fresh
 			)
 			VALUES (
 				$1, $2, $3, $4, $5::jsonb, $6::date, $7, $8,
 				CASE WHEN $8 THEN NOW() + INTERVAL '24 hours' ELSE NULL END,
-				$9, $10, $11, CASE WHEN $11::text IS NULL THEN NULL ELSE 'pending' END,
+				-- Tagging is IMMEDIATE, Instagram-style: a collab lands on the
+				-- coauthor's profile the moment it's posted, and their way out is
+				-- to remove themselves (respondToCoauthorInvite with accept=false).
+				-- It used to insert 'pending' and wait for an accept that most
+				-- people never saw, so collabs simply never appeared.
+				$9, $10, $11, CASE WHEN $11::text IS NULL THEN NULL ELSE 'accepted' END,
+				-- Their side of the day's run, picked the same way the old accept
+				-- path picked it. Stamped here now that there's no accept step.
+				(
+					SELECT w.workout_id FROM workouts w
+					WHERE w.user_id = $11 AND w.local_date = $6::date
+						AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+					ORDER BY w.distance DESC LIMIT 1
+				),
 				$12
 			)
 				ON CONFLICT ${conflictTarget}
@@ -455,6 +631,7 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
 					-- carries a coauthor — so taking EXCLUDED wholesale is safe.
 					coauthor_user_id = EXCLUDED.coauthor_user_id,
 					coauthor_status = EXCLUDED.coauthor_status,
+					coauthor_workout_id = EXCLUDED.coauthor_workout_id,
 					posted_fresh = EXCLUDED.posted_fresh${flagUpdates}
 				${updateGuard}
 			RETURNING *
@@ -529,8 +706,13 @@ export async function createPost(input: CreatePostInput): Promise<PostRow> {
  * so post_coauthors is the COMPLETE list — code reading it never has to union
  * it with the scalars to know who is on a post.
  *
- * Each row starts 'pending'; reach and block rules only apply once accepted,
- * exactly like the single-coauthor flow.
+ * Rows start 'accepted', Instagram-style, matching what the scalar path does at
+ * insert: tagging is immediate and the way out is removing yourself
+ * (respondToMultiCoauthorInvite with accept=false). 'pending' would be worse
+ * here than it ever was for the scalar path — there is no accept step left in
+ * the app, so every participant past the mirrored one would sit un-credited
+ * forever and a four-person buddy recap would publicly credit exactly one
+ * person.
  */
 async function attachMultiCoauthors(
   postId: string,
@@ -542,7 +724,7 @@ async function attachMultiCoauthors(
   for (const coauthorId of coauthorIds) {
     await db.query(
       `INSERT INTO post_coauthors (post_id, user_id, status, buddy_session_id)
-			 VALUES ($1, $2, 'pending', $3)
+			 VALUES ($1, $2, 'accepted', $3)
 			 ON CONFLICT (post_id, user_id) DO NOTHING`,
       [postId, coauthorId, buddySessionId],
     );
@@ -608,14 +790,32 @@ export async function respondToMultiCoauthorInvite(
   );
   if (updated.length === 0) return false;
 
-  // Keep the legacy mirror in step when this responder is the mirrored one.
-  await db.query(
-    `UPDATE posts
-		    SET coauthor_status = $3,
-		        coauthor_user_id = CASE WHEN $3::text IS NULL THEN NULL ELSE coauthor_user_id END
-		  WHERE post_id = $1 AND coauthor_user_id = $2 AND deleted_at IS NULL`,
-    [postId, userId, accept ? "accepted" : null],
-  );
+  // Keep the legacy mirror in step when this responder is the mirrored one —
+  // byte-for-byte the same writes respondToCoauthorInvite makes, including
+  // clearing coauthor_workout_id on the way out. Leaving that id behind keeps
+  // the departed person's own mile suppressed in the unified feed forever,
+  // which is the opposite of what removing yourself should do.
+  if (accept) {
+    await db.query(
+      `UPDATE posts SET
+					coauthor_status = 'accepted',
+					coauthor_workout_id = (
+						SELECT w.workout_id FROM workouts w
+						WHERE w.user_id = $2 AND w.local_date = posts.local_date
+							AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+						ORDER BY w.distance DESC LIMIT 1
+					)
+			  WHERE post_id = $1 AND coauthor_user_id = $2 AND deleted_at IS NULL`,
+      [postId, userId],
+    );
+  } else {
+    await db.query(
+      `UPDATE posts SET
+					coauthor_user_id = NULL, coauthor_status = NULL, coauthor_workout_id = NULL
+			  WHERE post_id = $1 AND coauthor_user_id = $2 AND deleted_at IS NULL`,
+      [postId, userId],
+    );
+  }
 
   return true;
 }
@@ -798,6 +998,37 @@ export async function getOwnedWorkoutDistance(
 ): Promise<number | null> {
   const rows = await db.query<{ distance: number | string | null }>(
     `SELECT distance FROM workouts WHERE workout_id = $1 AND user_id = $2`,
+    [workoutId, userId],
+  );
+  const distance = Number(rows[0]?.distance);
+  return Number.isFinite(distance) ? distance : null;
+}
+
+/**
+ * The DAY's rollup distance for a post's linked workout — i.e. the number every
+ * read surface already restates a `daily_mile` anchor with (see POST_COLUMNS).
+ * Null when the workout isn't the day's anchor, so callers fall back to the
+ * workout's own distance.
+ *
+ * Exists so the auto-post stats guard accepts a card that bakes the day's total
+ * (what the feed will display) as well as one that bakes the single leg. Same
+ * membership rule as the feed lateral: everything rolled into the anchor, plus
+ * sub-floor junk logged up to it.
+ */
+export async function getOwnedWorkoutRollupDistance(
+  userId: string,
+  workoutId: string,
+): Promise<number | null> {
+  const rows = await db.query<{ distance: number | string | null }>(
+    `SELECT SUM(m.distance)::double precision AS distance
+		 FROM workouts w
+		 JOIN workouts m ON m.user_id = w.user_id AND m.local_date = w.local_date
+			 AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
+			 AND (
+				 m.feed_role IN ('rolled_up', 'daily_mile')
+				 OR (m.feed_role = 'hidden' AND m.device_end_date <= w.device_end_date)
+			 )
+		 WHERE w.workout_id = $1 AND w.user_id = $2 AND w.feed_role = 'daily_mile'`,
     [workoutId, userId],
   );
   const distance = Number(rows[0]?.distance);
@@ -1086,10 +1317,11 @@ export async function getFeed(
 			AND EXISTS (
 				SELECT 1 FROM circle c
 				WHERE c.uid = p.user_id
-					OR (p.coauthor_status = 'accepted' AND c.uid = p.coauthor_user_id)
+					OR (c.uid = p.coauthor_user_id AND ${COLLAB_REACH_SQL})
 			)
+			AND ${AUTHOR_VISIBLE_TO_VIEWER}
 			AND p.user_id NOT IN (SELECT uid FROM blocked)
-			AND (p.coauthor_status IS DISTINCT FROM 'accepted'
+			AND (NOT ${COLLAB_ACTIVE}
 				OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
 			AND ($2::timestamptz IS NULL OR p.created_at < $2::timestamptz)
 		ORDER BY p.created_at DESC
@@ -1098,6 +1330,14 @@ export async function getFeed(
     [viewerId, before ?? null, limit],
   );
   return rows;
+}
+
+/** One leg of a daily mile that was completed across several workouts. */
+export interface FeedSegment {
+  workout_id: string;
+  workout_type: string;
+  distance: number;
+  duration: number;
 }
 
 // One row of the unified feed — either a photo `post` or a raw `workout`
@@ -1133,12 +1373,25 @@ export interface FeedEntryRow {
   // the workout itself for workout entries. Lets the client know which of
   // today's runs already carry a deliberate post.
   workout_id: string | null;
-  // workout columns (also populated for posts via their linked workout)
+  // workout columns (also populated for posts via their linked workout).
+  // On a 'daily_mile' anchor these are the DAY's rollup across every workout up
+  // to and including it, not that one workout's figures.
   workout_type: string | null;
+  // Entry/linked workout's feed_role — display framing only ('daily_mile'
+  // = goal-completing entry, 'extra' = post-goal bonus). Never summed.
+  feed_role: string | null;
   distance: number | null;
   total_duration: number | null;
+  // Moving-time display-pace divisor (rollup-aware); null on rows without it.
+  moving_seconds: number | null;
   calories: number | null;
   steps: number | null;
+  // How many real workouts the daily mile was stitched together from. 1 (or
+  // null, on an 'extra' entry) is an ordinary single-workout day; > 1 means the
+  // user got there in several goes and `segments` breaks it down. Additive —
+  // shipped clients ignore both and still show the correct combined total.
+  segment_count: number | null;
+  segments: FeedSegment[] | null;
   // Simplified GPS trace for the entry's workout, when synced (and, for
   // posts, when the author chose to include it).
   route: [number, number][] | null;
@@ -1155,104 +1408,50 @@ export interface FeedEntryRow {
   coauthor_first_name: string | null;
   coauthor_last_name: string | null;
   coauthor_profile_image_url: string | null;
+  // Resolved "is this collab on MY profile grid?", populated only when the
+  // viewer is the coauthor (null otherwise, and on every workout entry).
+  coauthor_on_profile?: boolean | null;
   // Microsecond-precise sort_ts (Postgres text form) for keyset pagination.
   cursor?: string;
 }
 
 /**
- * Unified, infinitely-scrollable feed: photo posts AND raw workout activity from
- * the viewer's circle, interleaved newest-first, keyset-paginated on a combined
- * timestamp (`before`). A workout that already has a feed post is omitted (the
- * post represents it), and a user's raw workouts are hidden when they've turned
- * off `share_workouts_to_feed`. No time window — paginate as far back as desired.
+ * Everything a feed ENTRY carries, projected onto a `page` CTE of
+ * (kind, id, sort_ts, owner_id, workout_id) rows. Shared verbatim by the
+ * unified feed and the single-post read so a post opened directly renders
+ * from byte-identical data to the same post scrolled to in the feed — the
+ * rollup restatement, hype/comment counts, FRESH chip and route gating all
+ * included. `$1` must be the viewer id; the projection uses no other param.
  */
-export async function getUnifiedFeed(
-  viewerId: string,
-  limit: number,
-  before?: string | null,
-): Promise<FeedEntryRow[]> {
-  // PERF: the expensive per-row columns (route JSONB, is_hyped, hype_count,
-  // story_photo_url) are computed ONLY for the page's rows, not for the whole
-  // circle's history. The old shape put them in the SELECT list of a UNION ALL
-  // that was then ORDER BY sort_ts DESC LIMIT $3 — so Postgres had to evaluate
-  // them for every post AND every workout in the viewer's circle across all
-  // time before the outer LIMIT could apply, and got linearly slower as the
-  // workouts table grew. Now `candidates` unions only the cheap keys, `page`
-  // sorts+limits them (the LIMIT is a hard barrier), and the outer SELECT
-  // projects the heavy columns onto just those <= $3 rows. Output shape and
-  // every value are identical to the old query; results are keyed by column
-  // name so column order is irrelevant. All lookups here are already indexed
-  // (idx_posts_user_created, idx_workouts_user_device_end for the candidate
-  // ordering; hype_log_context_dedupe_idx / idx_hype_log_target_context for the
-  // hype checks).
-  const rows = await db.query<FeedEntryRow>(
-    `
-		${CIRCLE_CTE},
-		candidates AS (
-			SELECT
-				'post'::text AS kind,
-				p.post_id::text AS id,
-				p.created_at AS sort_ts,
-				p.user_id AS owner_id,
-				p.workout_id AS workout_id
-			FROM posts p
-			WHERE p.share_to_feed AND p.deleted_at IS NULL
-				-- Accepted collab posts reach BOTH authors' circles (semi-join, not
-				-- a JOIN, so a post whose two authors share the viewer isn't doubled).
-				AND EXISTS (
-					SELECT 1 FROM circle c
-					WHERE c.uid = p.user_id
-						OR (p.coauthor_status = 'accepted' AND c.uid = p.coauthor_user_id)
-				)
-				AND p.user_id NOT IN (SELECT uid FROM blocked)
-				AND (p.coauthor_status IS DISTINCT FROM 'accepted'
-					OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
-				AND ${OWNER_NOT_PRIVATE_SQL("p.user_id")}
-
-			UNION ALL
-
-			SELECT
-				'workout'::text AS kind,
-				w.workout_id AS id,
-				w.device_end_date AS sort_ts,
-				w.user_id AS owner_id,
-				w.workout_id AS workout_id
-			FROM workouts w
-			JOIN circle c ON c.uid = w.user_id
-			LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
-			WHERE w.user_id NOT IN (SELECT uid FROM blocked)
-				AND COALESCE(ns.share_workouts_to_feed, true) = true
-				-- The feed is always YOUR circle, so 'public' must not pour
-				-- strangers in; only the tightening direction applies here.
-				AND ${OWNER_NOT_PRIVATE_SQL("w.user_id")}
-				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
-				AND NOT EXISTS (
-					SELECT 1 FROM posts p2
-					WHERE p2.deleted_at IS NULL AND p2.share_to_feed
-						AND (p2.workout_id = w.workout_id
-							-- A collab post only stands in for the coauthor's mile when
-							-- the viewer can actually SEE that post (primary author not
-							-- blocked or private) — otherwise they'd get neither.
-							OR (p2.coauthor_status = 'accepted'
-								AND p2.coauthor_workout_id = w.workout_id
-								AND p2.user_id NOT IN (SELECT uid FROM blocked)
-								AND ${OWNER_NOT_PRIVATE_SQL("p2.user_id")}))
-				)
-		),
-		page AS (
-			SELECT kind, id, sort_ts, owner_id, workout_id
-			FROM candidates
-			WHERE ($2::timestamptz IS NULL OR sort_ts < $2::timestamptz)
-			ORDER BY sort_ts DESC
-			LIMIT $3
-		)
+const FEED_ENTRY_PROJECTION = `
 		SELECT
 			page.kind,
 			page.id,
 			page.sort_ts,
 			page.owner_id AS user_id,
 			u.username, u.first_name, u.last_name, u.profile_image_url,
-			p.media_url, p.caption, p.stats_snapshot,
+			p.media_url, p.caption,
+			-- A photo post on the day's anchor speaks for the whole mile, so its
+			-- baked snapshot is restated in the rollup's terms. Without this a
+			-- 3 x 0.33 day whose anchor carries a post would read "0.33 mi" — the
+			-- other two segments are folded away and the day would appear to
+			-- SHRINK versus before this feature. Only when the mile actually spans
+			-- several workouts; a normal one-run day is untouched, and posts on a
+			-- non-anchor workout keep their own exact stats (the invariant in
+			-- .claude/rules/ios.md).
+			CASE
+				WHEN page.kind = 'post' AND wt.feed_role = 'daily_mile'
+					AND roll.segment_count > 1 AND p.stats_snapshot IS NOT NULL
+				THEN p.stats_snapshot || jsonb_build_object(
+					'distance', roll.distance,
+					'duration', roll.total_duration,
+					-- Same moving-time display pace as POST_COLUMNS' restating —
+					-- these two blocks must stay in lockstep (see that comment).
+					'pace', CASE WHEN roll.distance > 0
+						THEN roll.moving_duration / roll.distance END
+				)
+				ELSE p.stats_snapshot
+			END AS stats_snapshot,
 			p.local_date::text AS local_date,
 			-- Owner's decision: the 24h expiry only ends the STORY (rail/viewer).
 			-- A photo riding on the run's feed card stays permanently — only
@@ -1273,10 +1472,37 @@ export async function getUnifiedFeed(
 			page.workout_id,
 			-- Populated for posts (via their linked workout) and workouts alike.
 			wt.workout_type,
-			CASE WHEN page.kind = 'workout' THEN wt.distance::double precision END AS distance,
-			CASE WHEN page.kind = 'workout' THEN wt.total_duration::double precision END AS total_duration,
-			CASE WHEN page.kind = 'workout' THEN wt.calories::double precision END AS calories,
-			CASE WHEN page.kind = 'workout' THEN wt.steps END AS steps,
+			-- Additive, DISPLAY-ONLY: lets clients frame the entry against the
+			-- day's goal ('daily_mile' = the goal-completing entry, 'extra' =
+			-- post-goal bonus miles shown as "+0.14 mi extra" instead of a
+			-- bare number that reads like the whole day). Never used in sums.
+			wt.feed_role,
+			-- On an anchor entry these carry the DAY's rollup, not the single
+			-- workout's — which is also what makes already-shipped iOS builds
+			-- correct: they render whatever numbers arrive, so a stitched-together
+			-- mile reads 1.06 mi on an old client with no update. COALESCE because
+			-- the lateral only fires for 'daily_mile' rows; 'extra' rows keep their
+			-- own figures.
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.distance, wt.distance)::double precision END AS distance,
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.total_duration, wt.total_duration)::double precision END AS total_duration,
+			-- Additive: moving-time display-pace divisor for workout entries
+			-- (rollup-aware on anchors). Null on old rows/Watch syncs — clients
+			-- fall back to total_duration.
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.moving_duration, wt.moving_seconds)::double precision END AS moving_seconds,
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.calories, wt.calories)::double precision END AS calories,
+			CASE WHEN page.kind = 'workout'
+				THEN COALESCE(roll.steps, wt.steps) END AS steps,
+			-- Additive, so older clients simply ignore them. segment_count = 1 is
+			-- an ordinary single-workout day and clients render it exactly as
+			-- before. Explicitly NULL on non-anchor entries: the lateral still
+			-- produces a row for them and COUNT(*) over its empty result is 0, not
+			-- NULL, which would read as "a mile made of no workouts".
+			CASE WHEN wt.feed_role = 'daily_mile' THEN roll.segment_count END AS segment_count,
+			roll.segments,
 			-- Auto posts' media already IS the rendered route card, so shipping
 			-- the polyline too would only duplicate pixels and bloat the page.
 			-- Gated on the author's global "Share route maps" consent setting;
@@ -1292,7 +1518,13 @@ export async function getUnifiedFeed(
 				)
 				ELSE (
 					SELECT wr.route FROM workout_routes wr
-					WHERE (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
+					-- Withheld on a multi-segment rollup: the anchor's trace is only
+					-- the LAST leg, so drawing it under a combined "1.06 mi" stat
+					-- line labels a 0.40-mile loop as the whole mile. Clients fall
+					-- back to the branded stats face, which shipped builds already
+					-- handle.
+					WHERE COALESCE(roll.segment_count, 1) <= 1
+						AND (COALESCE(nsp.share_route_maps, true) OR page.owner_id = $1)
 						AND wr.workout_id = wt.workout_id
 				)
 			END AS route,
@@ -1363,11 +1595,259 @@ export async function getUnifiedFeed(
 		LEFT JOIN posts p ON page.kind = 'post' AND p.post_id::text = page.id
 		LEFT JOIN workouts wt ON wt.workout_id = page.workout_id
 		LEFT JOIN notification_settings nsp ON nsp.user_id = page.owner_id
-		ORDER BY page.sort_ts DESC
+		-- The day's rollup, for entries anchored on a 'daily_mile' workout: the
+		-- combined mile that the pre-mile segments add up to, plus the segment
+		-- breakdown itself. Page-bounded (<= $3 rows), one probe each on
+		-- idx_workouts_user_local_date — the same shape as every other heavy
+		-- column here, and the reason this isn't computed inside candidates.
+		LEFT JOIN LATERAL (
+			SELECT
+				-- Only real workouts are segments; sub-floor junk is summed but
+				-- never listed, so a 3-second phantom can't appear as a leg of
+				-- someone's mile.
+				COUNT(*) FILTER (WHERE m.feed_role <> 'hidden')::int AS segment_count,
+				SUM(m.distance)::double precision AS distance,
+				SUM(m.total_duration)::double precision AS total_duration,
+				-- Per-row fallback to elapsed: a day mixing in-app legs (which
+				-- carry moving time) with Watch legs (which don't) still sums.
+				SUM(COALESCE(m.moving_seconds, m.total_duration))::double precision AS moving_duration,
+				SUM(m.calories)::double precision AS calories,
+				SUM(m.steps)::int AS steps,
+				jsonb_agg(
+					jsonb_build_object(
+						'workout_id', m.workout_id,
+						'workout_type', m.workout_type,
+						'distance', m.distance,
+						'duration', m.total_duration
+					) ORDER BY m.device_end_date, m.workout_id
+				) FILTER (WHERE m.feed_role <> 'hidden') AS segments
+			FROM workouts m
+			WHERE wt.feed_role = 'daily_mile'
+				AND m.user_id = wt.user_id
+				AND m.local_date = wt.local_date
+				AND m.deleted_at IS NULL AND m.exclusion_reason IS NULL
+				-- Everything up to and including the anchor. Junk BEFORE the anchor
+				-- is counted so this card's distance equals what the profile,
+				-- leaderboard and streak all report for that stretch of the day;
+				-- junk after it belongs to the 'extra' workouts instead.
+				AND (
+					m.feed_role IN ('rolled_up', 'daily_mile')
+					OR (m.feed_role = 'hidden' AND m.device_end_date <= wt.device_end_date)
+				)
+		) roll ON TRUE
+		ORDER BY page.sort_ts DESC`;
+
+/**
+ * Unified, infinitely-scrollable feed: photo posts AND raw workout activity from
+ * the viewer's circle, interleaved newest-first, keyset-paginated on a combined
+ * timestamp (`before`). A workout that already has a feed post is omitted (the
+ * post represents it), and a user's raw workouts are hidden when they've turned
+ * off `share_workouts_to_feed`. No time window — paginate as far back as desired.
+ */
+// Hoisted to a const so the /status/schema?profile=feed probe can EXPLAIN the
+// BYTE-IDENTICAL string this function runs. A profiler that measures its own
+// copy of the SQL measures the wrong query the moment the two drift.
+//
+// PERF: the expensive per-row columns (route JSONB, is_hyped, hype_count,
+// story_photo_url) are computed ONLY for the page's rows, not for the whole
+// circle's history. The old shape put them in the SELECT list of a UNION ALL
+// that was then ORDER BY sort_ts DESC LIMIT $3 — so Postgres had to evaluate
+// them for every post AND every workout in the viewer's circle across all
+// time before the outer LIMIT could apply, and got linearly slower as the
+// workouts table grew. Now `candidates` unions only the cheap keys, `page`
+// sorts+limits them (the LIMIT is a hard barrier), and the outer SELECT
+// projects the heavy columns onto just those <= $3 rows. Output shape and
+// every value are identical to the old query; results are keyed by column
+// name so column order is irrelevant. All lookups here are already indexed
+// (idx_posts_user_created, idx_workouts_user_device_end for the candidate
+// ordering; hype_log_context_dedupe_idx / idx_hype_log_target_context for the
+// hype checks).
+export const UNIFIED_FEED_SQL = `
+		${CIRCLE_CTE},
+		candidates AS (
+			SELECT
+				'post'::text AS kind,
+				p.post_id::text AS id,
+				p.created_at AS sort_ts,
+				p.user_id AS owner_id,
+				p.workout_id AS workout_id
+			FROM posts p
+			WHERE p.share_to_feed AND p.deleted_at IS NULL
+				-- Accepted collab posts reach BOTH authors' circles (semi-join, not
+				-- a JOIN, so a post whose two authors share the viewer isn't doubled).
+				-- These are the SAME four gates getFeed applies, via the same
+				-- fragments. They drifted apart once and produced two different
+				-- answers for one post: this branch dropped a private author's post
+				-- from their OWN feed (bare OWNER_NOT_PRIVATE_SQL has no self
+				-- exception — "only me" has to still include me), and let a private
+				-- coauthor's reach through. Keep them spelled the same.
+				AND EXISTS (
+					SELECT 1 FROM circle c
+					WHERE c.uid = p.user_id
+						OR (c.uid = p.coauthor_user_id AND ${COLLAB_REACH_SQL})
+				)
+				AND ${AUTHOR_VISIBLE_TO_VIEWER}
+				AND p.user_id NOT IN (SELECT uid FROM blocked)
+				AND (NOT ${COLLAB_ACTIVE}
+					OR p.coauthor_user_id NOT IN (SELECT uid FROM blocked))
+				-- 78ed93a's "reached via coauthor, so the coauthor must not be
+				-- private" is folded into the circle semi-join above (via
+				-- COLLAB_REACH_SQL), costing no second scan of the circle CTE;
+				-- ci-smoke asserts exactly the case that commit targeted. What is
+				-- left here is the AUTHOR's side, with the exemption that keeps a
+				-- private author's post in their own and their coauthor's feed.
+				AND ${AUTHOR_VISIBLE_TO_VIEWER}
+
+			UNION ALL
+
+			SELECT
+				'workout'::text AS kind,
+				w.workout_id AS id,
+				w.device_end_date AS sort_ts,
+				w.user_id AS owner_id,
+				w.workout_id AS workout_id
+			FROM workouts w
+			JOIN circle c ON c.uid = w.user_id
+			LEFT JOIN notification_settings ns ON ns.user_id = w.user_id
+			WHERE w.user_id NOT IN (SELECT uid FROM blocked)
+				AND COALESCE(ns.share_workouts_to_feed, true) = true
+				-- The feed is always YOUR circle, so 'public' must not pour
+				-- strangers in; only the tightening direction applies here.
+				AND ${OWNER_NOT_PRIVATE_SQL("w.user_id")}
+				AND w.deleted_at IS NULL AND w.exclusion_reason IS NULL
+				-- Only two roles ever earn a card: the workout that completed the
+				-- day's mile (which stands in for every pre-mile segment — see the
+				-- rollup lateral below) and anything logged after it. 'rolled_up'
+				-- and 'hidden' are represented by the anchor or not at all, which
+				-- is what stops three 0.33 walks becoming three cards and a 3-second
+				-- phantom becoming one. A plain indexed predicate on purpose:
+				-- idx_workouts_feed_candidates matches this WHERE exactly, and the
+				-- PERF note above rules out anything heavier inside candidates.
+				AND w.feed_role IN ('daily_mile', 'extra')
+				-- These two NOT EXISTS were ONE clause with an OR between
+				-- p2.workout_id and p2.coauthor_workout_id. Splitting them is the
+				-- identity NOT EXISTS(A OR B) = NOT EXISTS(A) AND NOT EXISTS(B),
+				-- so the result is unchanged — but the OR spanned two different
+				-- columns, which left Postgres unable to use an index for either
+				-- and scanning every shared post once per candidate workout. That
+				-- cost 857 x 232 = ~198k executions of the privacy and block
+				-- subplans inside, including 195,720 seq scans of
+				-- notification_settings (its user_id IS a primary key; the planner
+				-- picks a seq scan anyway because the table is ~114 rows, which is
+				-- only a disaster at this loop count). Split, each arm matches an
+				-- index — uq_posts_workout_active and idx_posts_coauthor_workout —
+				-- so it is two probes per workout, and the privacy subplans run
+				-- only for rows that are genuinely collab posts.
+				AND NOT EXISTS (
+					SELECT 1 FROM posts p2
+					WHERE p2.deleted_at IS NULL AND p2.share_to_feed
+						AND p2.workout_id = w.workout_id
+				)
+				-- A collab post only stands in for the coauthor's mile when the
+				-- viewer can actually SEE that post (primary author not blocked or
+				-- private) — otherwise they'd get neither. The privacy arm mirrors
+				-- AUTHOR_VISIBLE_TO_VIEWER so the two stay in step: for the
+				-- coauthor themselves the collab post is visible even when the
+				-- author went private, and their own workout card must still give
+				-- way to it. A severed collab (either author blocked the other)
+				-- stands in for nothing — the ex-coauthor's own card comes back.
+				AND NOT EXISTS (
+					SELECT 1 FROM posts p2
+					WHERE p2.deleted_at IS NULL AND p2.share_to_feed
+						AND p2.coauthor_workout_id = w.workout_id
+						AND ${collabActiveSql("p2")}
+						AND p2.user_id NOT IN (SELECT uid FROM blocked)
+						AND (p2.user_id = $1 OR p2.coauthor_user_id = $1
+							OR ${OWNER_NOT_PRIVATE_SQL("p2.user_id")})
+				)
+		),
+		page AS (
+			SELECT kind, id, sort_ts, owner_id, workout_id
+			FROM candidates
+			WHERE ($2::timestamptz IS NULL OR sort_ts < $2::timestamptz)
+			ORDER BY sort_ts DESC
+			LIMIT $3
+		)
+		${FEED_ENTRY_PROJECTION}
+		`;
+
+export async function getUnifiedFeed(
+  viewerId: string,
+  limit: number,
+  before?: string | null,
+): Promise<FeedEntryRow[]> {
+  return db.query<FeedEntryRow>(UNIFIED_FEED_SQL, [
+    viewerId,
+    before ?? null,
+    limit,
+  ]);
+}
+
+/**
+ * ONE post, shaped exactly like the feed entry for it. Backs opening a post
+ * directly (a tap on the profile grid, a mention push, a shared link) instead
+ * of hunting for it in a paginated feed — which could never work for a post
+ * old enough to be several pages down, or one whose author's activity the
+ * viewer doesn't otherwise follow closely.
+ *
+ * Authorization is `visiblePostAuthor`, the same gate comments and mentions
+ * use — it mirrors the feed's circle + block rules, including accepted-coauthor
+ * reach. Null when the post is gone or the viewer may not see it; the
+ * controller maps that to 404 so post existence isn't leaked.
+ */
+export async function getFeedEntryForPost(
+  viewerId: string,
+  postId: string,
+): Promise<FeedEntryRow | null> {
+  if (!(await visiblePostAuthor(viewerId, postId))) return null;
+  const rows = await db.query<FeedEntryRow>(
+    `
+		WITH page AS (
+			SELECT
+				'post'::text AS kind,
+				p0.post_id::text AS id,
+				p0.created_at AS sort_ts,
+				p0.user_id AS owner_id,
+				p0.workout_id AS workout_id
+			FROM posts p0
+			WHERE p0.post_id = $2::uuid AND p0.deleted_at IS NULL
+		)
+		${FEED_ENTRY_PROJECTION}
 		`,
-    [viewerId, before ?? null, limit],
+    [viewerId, postId],
   );
-  return rows;
+  return rows[0] ?? null;
+}
+
+export interface PublicPostPreview {
+  post_id: string;
+  username: string | null;
+  first_name: string | null;
+}
+
+/**
+ * The unauthenticated preview behind a shared post link (mileaday.run/p/<id>).
+ *
+ * Deliberately just "who posted this" — no photo, no caption, no distance.
+ * A post is friends-only content and a share link can be forwarded anywhere,
+ * so the web page is a signpost, not a viewer: it confirms the link is real,
+ * names the author (data already public via /public/users/:username), and
+ * hands off to the app, which re-authorizes the viewer properly. Even the
+ * `public` workout visibility means "any signed-in user", not the open web.
+ *
+ * Returns null for a deleted or story-only post, so a bad link 404s.
+ */
+export async function getPublicPostPreview(
+  postId: string,
+): Promise<PublicPostPreview | null> {
+  const rows = await db.query<PublicPostPreview>(
+    `SELECT p.post_id::text AS post_id, u.username, u.first_name
+		 FROM posts p
+		 JOIN users u ON u.user_id = p.user_id
+		 WHERE p.post_id = $1::uuid AND p.deleted_at IS NULL AND p.share_to_feed`,
+    [postId],
+  );
+  return rows[0] ?? null;
 }
 
 /**
@@ -1413,7 +1893,14 @@ export async function getUserPosts(
 		FROM posts p
 		JOIN users u ON u.user_id = p.user_id
 		WHERE (p.user_id = $2
-				OR (p.coauthor_user_id = $2 AND p.coauthor_status = 'accepted'))
+				-- Tags are the Tagged tab's job, not the grid's: a collab only
+				-- joins the coauthor's Posts grid while they haven't opted out
+				-- (per-post override, else their tagged_posts_on_profile).
+				-- Hiding it here removes it from NOWHERE else — it stays in
+				-- their Tagged tab, on the author's grid, and in both circles'
+				-- feeds.
+				OR (p.coauthor_user_id = $2 AND ${COLLAB_ACTIVE}
+					AND ${coauthorOnProfileSql("p", "$2")}))
 			AND p.deleted_at IS NULL
 			AND (
 				p.share_to_feed
@@ -1436,14 +1923,15 @@ export async function getUserPosts(
 			-- Collab rows surface the PRIMARY author's content on the coauthor's
 			-- profile. Reach mirrors the unified feed: a collab deliberately
 			-- shares BOTH audiences, so the viewer needn't be the author's
-			-- friend — but a private or blocked author still disappears.
-			AND (p.user_id = $2 OR (
-				${OWNER_NOT_PRIVATE_SQL("p.user_id")}
-				AND NOT EXISTS (
-					SELECT 1 FROM user_blocks b
-					WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
-						OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
-				)
+			-- friend — but a private or blocked author still disappears. The
+			-- privacy arm alone exempts the coauthor (they co-own the post and
+			-- must keep seeing it); a block still wins, in either direction.
+			AND (p.user_id = $2 OR p.coauthor_user_id = $1
+				OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")})
+			AND (p.user_id = $2 OR NOT EXISTS (
+				SELECT 1 FROM user_blocks b
+				WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
+					OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
 			))
 			AND ($3::timestamptz IS NULL OR p.created_at < $3::timestamptz)
 		ORDER BY p.created_at DESC
@@ -1512,20 +2000,21 @@ export async function getUserTaggedPosts(
 			AND p.share_to_feed
 			AND p.user_id <> $2
 			AND (
-				(p.coauthor_user_id = $2 AND p.coauthor_status = 'accepted')
+				(p.coauthor_user_id = $2 AND ${COLLAB_ACTIVE})
 				OR ($5::text IS NOT NULL AND p.caption IS NOT NULL AND p.caption ~* $5)
 			)
 			-- Profile gate: may the viewer see the tagged user's content at all?
 			AND ${VIEWER_MAY_SEE_WORKOUT_CONTENT_SQL("$2", "$1")}
 			-- Author gate (mirrors getUserPosts' collab reach): the viewer's own
 			-- posts always show; others' need not-private + no blocks either way.
-			AND (p.user_id = $1 OR (
-				${OWNER_NOT_PRIVATE_SQL("p.user_id")}
-				AND NOT EXISTS (
-					SELECT 1 FROM user_blocks b
-					WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
-						OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
-				)
+			-- Being an author of the collab exempts the PRIVACY arm only — a
+			-- block still hides the row, in either direction.
+			AND (p.user_id = $1 OR p.coauthor_user_id = $1
+				OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")})
+			AND (p.user_id = $1 OR NOT EXISTS (
+				SELECT 1 FROM user_blocks b
+				WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
+					OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
 			))
 			-- Blocks between the tagged user and the author end the tag.
 			AND NOT EXISTS (
@@ -1680,22 +2169,22 @@ export async function notifyFriendsOfPost(input: {
   }
 }
 
+/** Both sides of a post the viewer may see. `coauthor_user_id` is the ACCEPTED
+ * coauthor only (a pending invite isn't a second author yet) and is returned
+ * regardless of that coauthor's own visibility setting — privacy withholds the
+ * public TAG, it doesn't stop the person being an author of the post. */
+export interface VisiblePostAuthors {
+  author_id: string;
+  coauthor_user_id: string | null;
+}
+
 /**
- * The post's author IF the viewer may see the post: viewer is the author or
- * an accepted friend, post is live on the feed, and no block exists in either
- * direction. Null when not visible — callers map that to 404 so post
- * existence isn't leaked. Shared by comments + mentions.
+ * Guard tail shared by visiblePostAuthors (single) and visiblePostPreviews
+ * (batch) — ONE copy so direct access and inbox previews can't drift. `$1`
+ * is the viewer; the post predicate (`p.post_id = ...`) is the caller's.
  */
-export async function visiblePostAuthor(
-  viewerId: string,
-  postId: string,
-): Promise<string | null> {
-  const rows = await db.query<{ user_id: string }>(
-    `SELECT p.user_id FROM posts p
-		 WHERE p.post_id = $2 AND p.deleted_at IS NULL AND p.share_to_feed
-			 AND (p.user_id = $1 OR p.coauthor_user_id = $1
-				 OR ${VIEWER_IS_MULTI_COAUTHOR}
-				 OR ${OWNER_NOT_PRIVATE_SQL("p.user_id")})
+const DIRECT_POST_ACCESS_SQL = `p.deleted_at IS NULL AND p.share_to_feed
+			 AND ${AUTHOR_VISIBLE_TO_VIEWER}
 			 AND (p.user_id = $1
 				 OR p.coauthor_user_id = $1
 				 OR ${VIEWER_IS_MULTI_COAUTHOR}
@@ -1703,24 +2192,92 @@ export async function visiblePostAuthor(
 					 SELECT 1 FROM friendships f
 					 WHERE f.user_id = $1 AND f.status = 'accepted'
 						 AND (f.friend_id = p.user_id
-							 OR (p.coauthor_status = 'accepted' AND f.friend_id = p.coauthor_user_id))
+							 -- Reach through the coauthor stops when they go 'private',
+							 -- exactly as it does in the feed.
+							 OR (f.friend_id = p.coauthor_user_id AND ${COLLAB_REACH_SQL}))
 				 )
 				 OR ${FRIEND_OF_MULTI_COAUTHOR})
 			 AND NOT EXISTS (
 				 SELECT 1 FROM user_blocks b
 				 WHERE (b.blocker_id = $1 AND b.blocked_id = p.user_id)
 						OR (b.blocker_id = p.user_id AND b.blocked_id = $1)
-						-- Accepted collabs are hidden from feeds when EITHER author is
+						-- Live collabs are hidden from feeds when EITHER author is
 						-- blocked; deny direct access (comments/mentions) the same way.
-						OR (p.coauthor_status = 'accepted' AND (
+						OR (${COLLAB_ACTIVE} AND (
 							(b.blocker_id = $1 AND b.blocked_id = p.coauthor_user_id)
 							OR (b.blocker_id = p.coauthor_user_id AND b.blocked_id = $1)
 						))
 			 )
-			 AND NOT ${BLOCKED_VS_MULTI_COAUTHOR}`,
+			 AND NOT ${BLOCKED_VS_MULTI_COAUTHOR}`;
+
+/**
+ * The post's authors IF the viewer may see the post: viewer is one of the two
+ * authors or an accepted friend of one of them, the post is live on the feed,
+ * and no block exists in either direction. Null when not visible — callers map
+ * that to 404 so post existence isn't leaked. Shared by comments, mentions and
+ * hypes, so all three agree on who can touch a collab post.
+ *
+ * `coauthor_user_id` stays the LEGACY scalar coauthor — multi-collab
+ * participants are read via `acceptedCoauthorIds` where a caller needs them
+ * all, so the two-author contract every existing caller depends on is intact.
+ */
+export async function visiblePostAuthors(
+  viewerId: string,
+  postId: string,
+): Promise<VisiblePostAuthors | null> {
+  const rows = await db.query<VisiblePostAuthors>(
+    `SELECT p.user_id AS author_id,
+				CASE WHEN ${COLLAB_ACTIVE} THEN p.coauthor_user_id END
+					AS coauthor_user_id
+		 FROM posts p
+		 WHERE p.post_id = $2 AND ${DIRECT_POST_ACCESS_SQL}`,
     [viewerId, postId],
   );
-  return rows[0]?.user_id ?? null;
+  return rows[0] ?? null;
+}
+
+const POST_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Batch: the subset of `postIds` the viewer may see (same guards as
+ * visiblePostAuthors) with each post's media path — feeds the notification
+ * inbox's per-row post thumbnails. Non-uuid strings are filtered out here
+ * (the ANY cast would 500 on garbage), so ids straight from untrusted push
+ * payload data are safe to pass. Sign media urls before responding.
+ */
+export interface VisiblePostPreview {
+  post_id: string;
+  media_url: string;
+  // Fields lockUnearnedPhotos needs to apply the "run to see today's
+  // photos" gate to inbox thumbnails exactly as the feed applies it.
+  user_id: string;
+  local_date: string | null;
+  is_auto: boolean;
+  photo_locked?: boolean;
+}
+
+export async function visiblePostPreviews(
+  viewerId: string,
+  postIds: string[],
+): Promise<VisiblePostPreview[]> {
+  const ids = postIds.filter((id) => POST_UUID_RE.test(id));
+  if (ids.length === 0) return [];
+  return db.query<VisiblePostPreview>(
+    `SELECT p.post_id, p.media_url, p.user_id,
+				p.local_date::text AS local_date, p.is_auto
+		 FROM posts p
+		 WHERE p.post_id = ANY($2::uuid[]) AND ${DIRECT_POST_ACCESS_SQL}`,
+    [viewerId, ids],
+  );
+}
+
+/** The post's PRIMARY author if the viewer may see it — see visiblePostAuthors. */
+export async function visiblePostAuthor(
+  viewerId: string,
+  postId: string,
+): Promise<string | null> {
+  return (await visiblePostAuthors(viewerId, postId))?.author_id ?? null;
 }
 
 /**
@@ -1756,12 +2313,14 @@ export async function visibleWorkoutAuthor(
 }
 
 /**
- * The post's accepted coauthor, if any (comment notifications + moderation).
+ * The post's LIVE coauthor, if any (comment notifications + moderation). A
+ * block between the two authors ends the collab, so it also stops the pushes
+ * that ride on it.
  */
 export async function acceptedCoauthor(postId: string): Promise<string | null> {
   const rows = await db.query<{ coauthor_user_id: string }>(
-    `SELECT coauthor_user_id FROM posts
-		 WHERE post_id = $1 AND coauthor_status = 'accepted' AND deleted_at IS NULL`,
+    `SELECT p.coauthor_user_id FROM posts p
+		 WHERE p.post_id = $1 AND ${COLLAB_ACTIVE} AND p.deleted_at IS NULL`,
     [postId],
   );
   return rows[0]?.coauthor_user_id ?? null;
@@ -1789,7 +2348,12 @@ export async function respondToCoauthorInvite(
 						ORDER BY w.distance DESC LIMIT 1
 					)
 				 WHERE post_id = $2 AND coauthor_user_id = $1
-					 AND coauthor_status = 'pending' AND deleted_at IS NULL
+					 -- Tags are accepted on creation now, so 'accepted' is the normal
+					 -- state here. Kept idempotent rather than pending-only: an older
+					 -- build still shows Accept, and that tap must succeed as a no-op
+					 -- instead of 404ing on a collab the user is already part of.
+					 AND coauthor_status IN ('pending', 'accepted')
+					 AND deleted_at IS NULL
 				 RETURNING user_id AS author_id`,
         [userId, postId],
       )
@@ -1803,7 +2367,53 @@ export async function respondToCoauthorInvite(
   return rows[0] ?? null;
 }
 
-/** Push the collab invite to the invited coauthor. Never throws. */
+/**
+ * The coauthor pins this collab on or off their own profile GRID. Distinct
+ * from respondToCoauthorInvite(accept:false), which severs the tag outright:
+ * here the tag stays live everywhere it already was — the Tagged tab, the
+ * author's grid, both circles' feeds, the card's "alice & bob" header — and
+ * only the coauthor's curated Posts grid changes.
+ *
+ * Writes an explicit override, so a later flip of `tagged_posts_on_profile`
+ * leaves this post where the user put it. Returns null when the caller isn't
+ * this post's coauthor.
+ */
+export async function setCoauthorProfileVisibility(
+  userId: string,
+  postId: string,
+  onProfile: boolean,
+): Promise<{ author_id: string } | null> {
+  const rows = await db.query<{ author_id: string }>(
+    `UPDATE posts SET coauthor_on_profile = $3
+		 WHERE post_id = $2 AND coauthor_user_id = $1 AND deleted_at IS NULL
+		 RETURNING user_id AS author_id`,
+    [userId, postId, onProfile],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Would a NEW tag on `coauthorId` land on their profile grid? Reads the
+ * setting alone — a brand-new tag has no per-post override yet. Only used to
+ * word the tag push truthfully; the grid query resolves this itself.
+ */
+async function taggedPostsLandOnProfile(coauthorId: string): Promise<boolean> {
+  const rows = await db.query<{ on_profile: boolean | null }>(
+    `SELECT tagged_posts_on_profile AS on_profile
+		 FROM notification_settings WHERE user_id = $1`,
+    [coauthorId],
+  );
+  return rows[0]?.on_profile ?? true;
+}
+
+/**
+ * Push "you've been tagged" to the coauthor. Never throws.
+ *
+ * The post is ALREADY on their profile by the time this sends — there's no
+ * invite to answer, so the push is an FYI with a way out, not a decision.
+ * Devices that registered the collab-tag capability additionally get a
+ * "Remove me" action button, so opting out never requires opening the app.
+ */
 export async function notifyCoauthorInvite(
   authorId: string,
   coauthorId: string,
@@ -1816,10 +2426,23 @@ export async function notifyCoauthorInvite(
       [authorId],
     );
     const name = rows[0]?.username ?? "A friend";
+    const canRemoveInline = await userSupports(
+      coauthorId,
+      CLIENT_FEATURES.collabTagV1,
+    );
+    // Say where it actually went. Telling someone with tags-off-my-grid that
+    // it's "on your profile now" is simply false, and it's the one line that
+    // would send them hunting for a post that isn't there.
+    const onProfile = await taggedPostsLandOnProfile(coauthorId);
     await sendPush(coauthorId, {
-      title: `${name} added you to their post 🤝`,
-      body: "Accept to share this mile on your profile too",
+      title: `${name} tagged you in their post 🤝`,
+      body: onProfile
+        ? "It's on your profile now — you can remove yourself any time."
+        : "It's in your Tagged tab — you can remove yourself any time.",
+      // Type unchanged: every shipped build routes `coauthor_invite`, and a new
+      // string would tap to nothing on all of them.
       type: "coauthor_invite",
+      ...(canRemoveInline ? { category: "COAUTHOR_TAG" } : {}),
       data: { user_id: authorId, post_id: postId },
     });
   } catch (e: any) {

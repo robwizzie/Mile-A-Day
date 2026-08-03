@@ -13,33 +13,96 @@ enum RunPostService {
     /// Build stats for the linked workout so one day's extra walks/runs don't
     /// collapse into a single all-day post. Uses the local WorkoutIndex when
     /// the HKWorkout object is still lagging, then falls back to day totals.
+    ///
+    /// One exception, and it's the common case: when the workout IS the day's
+    /// daily-mile anchor, the numbers are the DAY's rollup up to that point —
+    /// because that's what every read surface restates the card with (see
+    /// `POST_COLUMNS` in postService.ts). Baking the single leg meant a mile
+    /// walked in three goes produced a card reading "0.33 mi" sitting under a
+    /// "1.06 mi" headline. Workouts AFTER the anchor (the extra-mile posts) are
+    /// still exactly themselves — that's the whole reason the anchor check is
+    /// here rather than a blanket switch to day totals.
     @MainActor
     static func todayStats(workoutId: String) -> RunStatsInput {
         if let stats = exactStats(workoutId: workoutId) {
-            return stats
+            return dayRollupStats(anchorId: workoutId) ?? stats
         }
 
         return todayFallbackStats(workoutId: workoutId)
     }
 
+    /// The day's combined totals when `anchorId` is the workout that completed
+    /// the mile and it took more than one walk/run to get there. Nil otherwise,
+    /// so single-workout days and extra-mile posts keep their exact stats.
+    ///
+    /// Membership mirrors the server's rollup lateral: everything logged up to
+    /// and including the anchor. Pace is recomputed from the totals rather than
+    /// averaged — a 20-minute walk and a 7-minute jog don't average.
+    @MainActor
+    private static func dayRollupStats(anchorId: String) -> RunStatsInput? {
+        guard dailyMileWorkoutId() == anchorId else { return nil }
+        let hk = HealthKitManager.shared
+        guard let anchor = hk.todaysWorkouts.first(where: { $0.uuid.uuidString == anchorId })
+        else { return nil }
+
+        let segments = hk.todaysWorkouts.filter { $0.endDate <= anchor.endDate }
+        // Sub-floor phantoms are SUMMED but don't make a day "multi-segment" —
+        // the server counts legs the same way (`feed_role <> 'hidden'`), and if
+        // the two disagree the server declines to restate and the card is left
+        // showing a number nothing else reports.
+        guard segments.filter({ WorkoutFeedFloor.isSubstantive($0) }).count > 1 else { return nil }
+
+        let distance = segments.reduce(0.0) {
+            $0 + ($1.totalDistance?.doubleValue(for: .mile()) ?? 0)
+        }
+        let duration = segments.reduce(0.0) { $0 + $1.duration }
+        // Pace divides by MOVING time where legs recorded it (per-leg elapsed
+        // fallback — a day can mix in-app and Watch legs), mirroring the
+        // server's rollup restating. `duration` stays the elapsed truth.
+        let paceDivisor = segments.reduce(0.0) { $0 + paceDuration(of: $1) }
+        let calories = segments.reduce(0.0) { $0 + workoutCalories($1) }
+        guard distance > 0 else { return nil }
+
+        return RunStatsInput(
+            distance: distance,
+            paceSecondsPerMile: workoutPaceSecondsPerMile(distance: distance, duration: paceDivisor),
+            durationSeconds: duration > 0 ? duration : nil,
+            streak: postableStreak(),
+            calories: calories > 0 ? calories : nil,
+            steps: nil,
+            workoutId: anchorId,
+            dateText: dateText(for: anchor.startDate)
+        )
+    }
+
+    /// The streak to BAKE into a post. `currentUser.streak` is the live display
+    /// value, which deliberately lags a real break (UserManager quarantines a
+    /// 2+ day collapse until it's verified) — and a post keeps its number
+    /// forever, so a post made after a missed day was showing a streak the
+    /// author no longer had while every other surface showed the truth.
+    @MainActor
+    private static func postableStreak() -> Int {
+        UserManager.shared.freshBackendStreak ?? UserManager.shared.currentUser.streak
+    }
+
     @MainActor
     private static func exactStats(workoutId: String) -> RunStatsInput? {
         let hk = HealthKitManager.shared
-        let user = UserManager.shared.currentUser
 
         if let workout = hk.todaysWorkouts.first(where: { $0.uuid.uuidString == workoutId }) {
             let distance = workout.totalDistance?.doubleValue(for: .mile()) ?? 0
-            let pace = workoutPaceSecondsPerMile(distance: distance, duration: workout.duration)
+            let pace = workoutPaceSecondsPerMile(distance: distance, duration: paceDuration(of: workout))
             let calories = workoutCalories(workout)
             return RunStatsInput(
                 distance: distance,
                 paceSecondsPerMile: pace,
                 durationSeconds: workout.duration > 0 ? workout.duration : nil,
-                streak: user.streak,
+                streak: postableStreak(),
                 calories: calories > 0 ? calories : nil,
                 steps: nil,
                 workoutId: workoutId,
-                dateText: dateText(for: workout.startDate)
+                dateText: dateText(for: workout.startDate),
+                isExtra: isExtraWorkout(workoutId)
             )
         }
 
@@ -49,11 +112,12 @@ enum RunPostService {
                 distance: record.distance,
                 paceSecondsPerMile: pace,
                 durationSeconds: record.duration > 0 ? record.duration : nil,
-                streak: user.streak,
+                streak: postableStreak(),
                 calories: nil,
                 steps: nil,
                 workoutId: workoutId,
-                dateText: dateText(for: record.localDate)
+                dateText: dateText(for: record.localDate),
+                isExtra: isExtraWorkout(workoutId)
             )
         }
 
@@ -63,18 +127,44 @@ enum RunPostService {
     @MainActor
     private static func todayFallbackStats(workoutId: String) -> RunStatsInput {
         let hk = HealthKitManager.shared
-        let user = UserManager.shared.currentUser
         let paceSecPerMile = hk.todaysAveragePace.map { $0 * 60 }
         return RunStatsInput(
             distance: hk.todaysDistance,
             paceSecondsPerMile: (paceSecPerMile ?? 0) > 0 ? paceSecPerMile : nil,
             durationSeconds: hk.todaysTotalDuration > 0 ? hk.todaysTotalDuration : nil,
-            streak: user.streak,
+            streak: postableStreak(),
             calories: hk.todaysTotalCalories > 0 ? hk.todaysTotalCalories : nil,
             steps: hk.todaysSteps > 0 ? hk.todaysSteps : nil,
             workoutId: workoutId,
             dateText: todayText()
         )
+    }
+
+    /// True when this workout is a post-goal bonus: the day's goal is already
+    /// complete and this isn't the goal-completing anchor. Drives the
+    /// "+0.14 mi" sticker framing so a short extra walk bakes as ADDED miles,
+    /// never as a number that reads like the whole day. The goal check
+    /// matters: pre-goal legs must stay plain (dailyMileWorkoutId falls back
+    /// to the latest workout even before the goal is met).
+    @MainActor
+    private static func isExtraWorkout(_ workoutId: String) -> Bool {
+        let hk = HealthKitManager.shared
+        let goalDone = ProgressCalculator.isGoalCompleted(
+            current: hk.todaysDistance,
+            goal: UserManager.shared.currentUser.goalMiles
+        )
+        guard goalDone else { return false }
+        return dailyMileWorkoutId() != workoutId
+    }
+
+    /// Display-pace divisor: the tracker's recorded moving time when this
+    /// workout carries it (in-app tracked; clamped to elapsed), else elapsed.
+    private static func paceDuration(of workout: HKWorkout) -> TimeInterval {
+        if let moving = workout.metadata?[WorkoutLocationManager.movingSecondsMetadataKey] as? Double,
+           moving > 0, moving <= workout.duration {
+            return moving
+        }
+        return workout.duration
     }
 
     private static func workoutPaceSecondsPerMile(distance: Double, duration: TimeInterval) -> TimeInterval? {
@@ -104,18 +194,42 @@ enum RunPostService {
     /// workouts in start order, first to cross the goal) so a photo shared later
     /// from the feed composer carries the same workout id and upserts into the
     /// SAME feed post instead of creating a duplicate.
+    ///
+    /// Mirrors how the server picks a day's `daily_mile` anchor
+    /// (`feedRoleStatements` in workoutService.ts), because the two must agree:
+    /// the server folds the day's other workouts into whichever one it considers
+    /// the anchor, so a post attached to a different workout wouldn't be restated
+    /// with the day's combined stats.
+    ///
+    /// Two things that used to differ from the server, and why they matter:
+    ///  - Sub-floor workouts can't be the anchor. A 0.02-mile phantom at 6am
+    ///    would otherwise decide which workout "owns" the mile and headline the
+    ///    day's card with an accident.
+    ///  - Crossing is measured against the tolerance, not the raw goal. A
+    ///    0.97-mile day passes the server's posting gate but never crosses
+    ///    `goal` here, so every workout fell through to the `last` fallback.
     @MainActor
     static func dailyMileWorkoutId() -> String? {
         let workouts = HealthKitManager.shared.todaysWorkouts
             .sorted { $0.startDate < $1.startDate }
         let goal = UserManager.shared.currentUser.goalMiles
         var total = 0.0
+        var lastSubstantive: HKWorkout?
         for workout in workouts {
             total += workout.totalDistance?.doubleValue(for: HKUnit.mile()) ?? 0
-            if total >= goal { return workout.uuid.uuidString }
+            if WorkoutFeedFloor.isSubstantive(workout) { lastSubstantive = workout }
+            // The anchor is the last REAL workout at or before the crossing
+            // point — so when a phantom is what tips the day over, the run that
+            // did the work still owns the card.
+            if ProgressCalculator.isGoalCompleted(current: total, goal: goal),
+               let anchor = lastSubstantive {
+                return anchor.uuid.uuidString
+            }
         }
-        // Goal met via non-workout distance — fall back to the latest workout.
-        return workouts.last?.uuid.uuidString
+        // Goal met via non-workout distance, or only sub-floor workouts today —
+        // fall back to the latest workout so the prompt still has something to
+        // attach to.
+        return (lastSubstantive ?? workouts.last)?.uuid.uuidString
     }
 
     /// Render the auto image (route map or stats card), upload it, and create the

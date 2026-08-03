@@ -39,6 +39,9 @@ struct ProfileView: View {
     // Recent workouts for the rolling "Last 7 Days" chart on the Activity tab.
     // Same data + component the friend profile uses, so both read identically.
     @State private var ownWorkouts: [FriendWorkout] = []
+    // Server-exact per-day totals for the chart — the capped workout list
+    // undercounts heavy-logging weeks (see Last7DaysChart).
+    @State private var ownDayTotals: [FriendDayMiles]?
 
     // Section tabs — mirrors UserProfileDetailView's structure so navigating
     // between own profile and friend profile feels consistent. Own profile
@@ -51,7 +54,7 @@ struct ProfileView: View {
 
     enum ProfileSheetType: String, Identifiable {
         case totalMiles, fastestPace, mostMiles
-        case usernameSetup, privacySettings
+        case usernameSetup
         var id: String { rawValue }
     }
 
@@ -112,14 +115,24 @@ struct ProfileView: View {
             ShareProfileView()
         }
         .navigationDestination(isPresented: $showingSettings) {
+            // Confirmations for these rows are presented BY the settings page —
+            // a modal attached here never appears while that page is pushed on
+            // top, which made Sign Out look like a no-op until you hit Back.
             ProfileSettingsView(
                 userManager: userManager,
                 friendService: friendService,
-                onLogout: { showingLogoutConfirmation = true },
-                onDeleteAccount: { showingDeleteAccountConfirmation = true },
+                showingLogoutConfirmation: $showingLogoutConfirmation,
+                showingDeleteAccountConfirmation: $showingDeleteAccountConfirmation,
+                deleteAccountErrorMessage: $deleteAccountErrorMessage,
+                recalibrateResultMessage: $recalibrateResultMessage,
+                onConfirmLogout: {
+                    userManager.signOut()
+                    appStateManager.signOut()
+                },
+                onConfirmDeleteAccount: { Task { await performDeleteAccount() } },
                 onRecalibrateStreak: { Task { await recalibrateStreak() } },
                 isRecalibratingStreak: isRecalibratingStreak,
-                onPrivacySettings: { activeSheet = .privacySettings }
+                isDeletingAccount: isDeletingAccount
             )
         }
         .sheet(item: $activeSheet) { sheet in
@@ -133,8 +146,6 @@ struct ProfileView: View {
             case .usernameSetup:
                 UsernameSetupView()
                     .environmentObject(userManager)
-            case .privacySettings:
-                PrivacySettingsView()
             }
         }
         // Edit Profile is a real screen, not a form sheet.
@@ -169,45 +180,9 @@ struct ProfileView: View {
         .task {
             await userManager.refreshBadgesFromServer()
         }
-        .alert("Sign Out", isPresented: $showingLogoutConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Sign Out", role: .destructive) {
-                userManager.signOut()
-                appStateManager.signOut()
-            }
-        } message: {
-            Text("Are you sure you want to sign out?")
-        }
-        .alert("Delete Account?", isPresented: $showingDeleteAccountConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                Task { await performDeleteAccount() }
-            }
-        } message: {
-            Text("This permanently deletes your account, workouts, streak history, friendships, and competition data. This cannot be undone.")
-        }
-        .alert(
-            "Couldn't Delete Account",
-            isPresented: Binding(
-                get: { deleteAccountErrorMessage != nil },
-                set: { if !$0 { deleteAccountErrorMessage = nil } }
-            )
-        ) {
-            Button("OK") { deleteAccountErrorMessage = nil }
-        } message: {
-            Text(deleteAccountErrorMessage ?? "")
-        }
-        .alert(
-            "Streak Recalibrated",
-            isPresented: Binding(
-                get: { recalibrateResultMessage != nil },
-                set: { if !$0 { recalibrateResultMessage = nil } }
-            )
-        ) {
-            Button("OK") { recalibrateResultMessage = nil }
-        } message: {
-            Text(recalibrateResultMessage ?? "")
-        }
+        // Sign Out / Delete Account / Recalibrate confirmations live on
+        // ProfileSettingsView — every one of their buttons is over there, and a
+        // modal attached to this view can't present while that page is pushed.
     }
 
     // MARK: - Recalibrate Streak
@@ -235,6 +210,13 @@ struct ProfileView: View {
             recalibrateResultMessage =
                 "We couldn't finish recalibrating right now. Please check your connection and try again."
         }
+
+        // Steps live in a separate daily_steps table that only ever finalizes
+        // today (and yesterday once at rollover), so a day left partial by a late
+        // Watch sync is never revisited. Re-post the recent window; the backend
+        // keeps the GREATEST, so this back-corrects a stale day and never lowers a
+        // good one. Best-effort and independent of the streak result above.
+        await DailyStepsSyncService.shared.backfillRecentDays(30)
     }
 
     // MARK: - Profile Header
@@ -249,7 +231,7 @@ struct ProfileView: View {
             streakAndGoalRow
             OwnTodayChallengeCard(healthManager: healthManager, userManager: userManager)
             if !ownWorkouts.isEmpty {
-                Last7DaysChart(workouts: ownWorkouts)
+                Last7DaysChart(workouts: ownWorkouts, dayTotals: ownDayTotals)
             }
             if !receivedHypes.isEmpty {
                 recentHypesSection
@@ -420,8 +402,10 @@ struct ProfileView: View {
         }
     }
 
-    /// Pulls the user's own recent workouts to feed the rolling 7-day chart.
-    /// A limit of 20 comfortably covers the last week even for multi-run days.
+    /// Pulls the user's own recent workouts (detail rows for the chart's
+    /// tap panel) plus the server's exact per-day totals — a fixed workout
+    /// limit can't cover the week for multi-run days, so the bars must come
+    /// from `last_7_day_miles`, same as the friend profile.
     private func loadOwnWorkouts() async {
         guard let userId = userManager.currentUser.backendUserId else { return }
         do {
@@ -429,6 +413,12 @@ struct ProfileView: View {
             await MainActor.run { ownWorkouts = workouts }
         } catch {
             print("[ProfileView] loadOwnWorkouts failed: \(error)")
+        }
+        do {
+            let stats = try await friendService.fetchFriendStats(for: userId)
+            await MainActor.run { ownDayTotals = stats.last7DayMiles }
+        } catch {
+            print("[ProfileView] loadOwnDayTotals failed: \(error)")
         }
     }
 

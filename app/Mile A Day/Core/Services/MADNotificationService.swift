@@ -26,6 +26,12 @@ final class MADNotificationService: NSObject, ObservableObject {
     
     // Stores notification type from a tap when the app was not yet fully loaded
     @Published var pendingNotificationType: String?
+    /// The tapped push's `data` payload, kept alongside the type for the
+    /// cold-launch path. Without it a tap that landed while the app was dead
+    /// knew WHICH KIND of thing to open but not WHICH ONE — which is why
+    /// mention/comment taps used to dump the user in the notification inbox
+    /// instead of on the post.
+    @Published var pendingNotificationData: [String: String] = [:]
 
     // Track when we last sent a completion notification to prevent duplicates
     private var lastCompletionNotificationDate: Date?
@@ -84,6 +90,31 @@ final class MADNotificationService: NSObject, ObservableObject {
             options: []
         )
 
+        // Collab tags are applied immediately, so there's nothing to accept —
+        // both actions are ways out, softest first. Not .foreground for the
+        // same reason as the friend-request actions: curating someone else's
+        // post shouldn't require opening the app.
+        //
+        // Actions are declared entirely client-side, so adding one here is
+        // safe for shipped builds: the server names the category and nothing
+        // else, and an older install simply renders the one button it knows.
+        let hideCollabAction = UNNotificationAction(
+            identifier: "COAUTHOR_HIDE_PROFILE_ACTION",
+            title: "Keep off my profile",
+            options: []
+        )
+        let removeCollabAction = UNNotificationAction(
+            identifier: "COAUTHOR_REMOVE_ACTION",
+            title: "Remove me",
+            options: [.destructive]
+        )
+        let coauthorTag = UNNotificationCategory(
+            identifier: "COAUTHOR_TAG",
+            actions: [hideCollabAction, removeCollabAction],
+            intentIdentifiers: [],
+            options: []
+        )
+
         // Buddy Walk invite. "Join" IS .foreground, unlike the friend-request
         // actions above: joining a walk means picking up the lobby and then
         // actually moving, so the app has to come forward either way.
@@ -106,7 +137,9 @@ final class MADNotificationService: NSObject, ObservableObject {
 
         // setNotificationCategories REPLACES the whole set — FRIEND_ACTIVITY
         // must stay in this array or the Hype button silently disappears.
-        center.setNotificationCategories([friendActivity, friendRequest, buddyInvite])
+        center.setNotificationCategories([
+            friendActivity, friendRequest, coauthorTag, buddyInvite,
+        ])
     }
 
     // MARK: - Public API
@@ -496,6 +529,14 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
             await handleFriendRequestAction(userInfo: userInfo, accept: false)
             return
         }
+        if response.actionIdentifier == "COAUTHOR_REMOVE_ACTION" {
+            await handleRemoveCollabAction(userInfo: userInfo)
+            return
+        }
+        if response.actionIdentifier == "COAUTHOR_HIDE_PROFILE_ACTION" {
+            await handleHideCollabFromProfileAction(userInfo: userInfo)
+            return
+        }
         if response.actionIdentifier == "BUDDY_DECLINE_ACTION" {
             await handleBuddyDeclineAction(userInfo: userInfo)
             return
@@ -509,6 +550,7 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
 
         // Store for cold-launch case (MainTabView may not be mounted yet)
         pendingNotificationType = type
+        pendingNotificationData = data
 
         // Post a tap-specific notification so the app can navigate to the right screen
         NotificationCenter.default.post(
@@ -591,6 +633,70 @@ extension MADNotificationService: UNUserNotificationCenterDelegate {
     /// FriendService owned by MainTabView — that view may not exist. A throwaway
     /// instance is safe and cheap: its init only reads the auth token out of
     /// UserDefaults, no network.
+    @MainActor
+    /// "Remove me" on a collab-tag push: take this user off the post without
+    /// opening the app.
+    ///
+    /// Runs while the app may be suspended, so it touches nothing view-owned —
+    /// a static service call and a local toast, per the notification-action
+    /// rule in .claude/rules/ios.md.
+    private func handleRemoveCollabAction(userInfo: [AnyHashable: Any]) async {
+        let data = userInfo["data"] as? [String: String]
+        guard let postId = data?["post_id"], !postId.isEmpty else {
+            await postLocalToast(
+                title: "Couldn't remove you",
+                body: "Open the app to remove yourself from this post."
+            )
+            return
+        }
+        do {
+            try await PostService.respondToCoauthor(postId: postId, accept: false)
+            await postLocalToast(
+                title: "Removed",
+                body: "You're no longer tagged in that post."
+            )
+        } catch {
+            await postLocalToast(
+                title: "Couldn't remove you",
+                body: "Open the app to remove yourself from this post."
+            )
+        }
+    }
+
+    /// "Keep off my profile" on a collab-tag push: the tag stays — it's still
+    /// in their Tagged tab and still on the author's post — but it doesn't
+    /// join their profile grid. The soft alternative to removing themselves,
+    /// resolvable from the banner for the same reason.
+    ///
+    /// Same suspended-app constraints as `handleRemoveCollabAction`: a static
+    /// service call and a local toast, nothing view-owned.
+    @MainActor
+    private func handleHideCollabFromProfileAction(userInfo: [AnyHashable: Any]) async {
+        let data = userInfo["data"] as? [String: String]
+        guard let postId = data?["post_id"], !postId.isEmpty else {
+            await postLocalToast(
+                title: "Couldn't update that post",
+                body: "Open the app to keep it off your profile."
+            )
+            return
+        }
+        do {
+            try await PostService.setCoauthorOnProfile(postId: postId, onProfile: false)
+            await postLocalToast(
+                title: "Kept off your profile",
+                body: "You're still tagged — find it in your Tagged tab."
+            )
+        } catch {
+            await postLocalToast(
+                title: "Couldn't update that post",
+                body: "Open the app to keep it off your profile."
+            )
+        }
+    }
+
+    // @MainActor because this builds a throwaway `FriendService`, which is
+    // @MainActor-isolated. The only caller (userNotificationCenter(_:didReceive:))
+    // is already @MainActor and already awaits this, so there's no extra hop.
     @MainActor
     private func handleFriendRequestAction(
         userInfo: [AnyHashable: Any],

@@ -1,0 +1,1 @@
+ALTER TABLE "workouts" ADD COLUMN "moving_seconds" double precision;

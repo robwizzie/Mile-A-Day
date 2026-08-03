@@ -10,6 +10,9 @@ export type Workout = {
   deviceEndDate: string;
   calories: number;
   totalDuration: number;
+  // Seconds of actual movement (in-app tracker only) — display pace uses
+  // this; totalDuration stays the elapsed truth for PRs/races/recaps.
+  movingSeconds?: number;
   splits: WorkoutSplit[];
   source?: WorkoutSource;
   // Optional simplified GPS trace ([[lat, lng], ...]) for outdoor walks/runs.

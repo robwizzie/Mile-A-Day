@@ -44,6 +44,17 @@ struct PostCardView: View {
     /// Non-nil when the CURRENT user is this post's pending coauthor —
     /// shows the Accept/Decline collab banner. Called with accept/decline.
     var onRespondCoauthor: ((Bool) -> Void)? = nil
+    /// Copy/share a link to this post. Offered on every post, own or not —
+    /// the link's landing page shows nothing the recipient isn't already
+    /// entitled to (see PostShareLink).
+    var onShare: (() -> Void)? = nil
+    /// Accepted coauthor: leave this post (remove self as coauthor).
+    var onLeaveCollab: (() -> Void)? = nil
+    /// Accepted coauthor: pin this collab on/off MY profile grid, called with
+    /// the new value. The lighter sibling of `onLeaveCollab` — the tag stays,
+    /// only my grid changes. Wired alongside it; the menu still gates on the
+    /// server having sent `coauthor_on_profile`.
+    var onSetCollabOnProfile: ((Bool) -> Void)? = nil
 
     @State private var hypeBurst = 0
     /// Collapses the same physical double-tap arriving from two recognizers
@@ -52,7 +63,12 @@ struct PostCardView: View {
     @State private var lastDoubleTapAt = Date.distantPast
     /// The route slide's raw map snapshot (~400×300) — the only piece kept
     /// around; the zoom's floating composite is rendered on demand from it.
-    @State private var routeSnapshot: UIImage?
+    @State private var routeSnapshot: RouteMapSnapshot?
+
+    /// True if the current user is the post author.
+    private var isMine: Bool {
+        post.is_self
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
@@ -65,7 +81,16 @@ struct PostCardView: View {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 media
                 if let stats = post.stats_snapshot {
-                    PostStatStrip(stats: stats).padding(.horizontal, 2)
+                    PostStatStrip(stats: stats, feedRole: post.feed_role).padding(.horizontal, 2)
+                }
+                // The strip above shows the day's combined mile when this post is
+                // attached to the workout that completed one made of several
+                // walks; without the breakdown that total looks like a single run.
+                if let segments = post.segments, segments.count > 1 {
+                    MileSegmentStrip(
+                        segments: segments,
+                        accent: ActivityCardView.color(post.workout_type)
+                    )
                 }
                 if let caption = post.caption, !caption.isEmpty {
                     Text(MentionText.attributed(caption))
@@ -119,6 +144,10 @@ struct PostCardView: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
         .background(Capsule().fill(MADTheme.Colors.madRed))
+        // A collab header carries two names in the space of one. Without this
+        // the chip is as compressible as they are, and "FRESH" is the first
+        // thing to get squeezed — let the names truncate instead.
+        .fixedSize()
     }
 
     /// Buddy Walk header: a stack of avatars plus a byline that collapses past
@@ -175,12 +204,18 @@ struct PostCardView: View {
                 // Collab post: overlapping avatars + "a & b", like Instagram's
                 // collab header — and like Instagram, each avatar/name is its
                 // OWN tap target routing to that person's profile.
+                // The overlap is PADDING, not `.offset` — an offset draws
+                // outside the layout bounds, so the cluster measured 40pt tall
+                // while occupying 44, and everything else in the header (the
+                // FRESH chip especially) centered 2pt high against it.
                 ZStack(alignment: .bottomTrailing) {
                     Button { onTapAuthor?() } label: {
                         AvatarView(name: post.displayName, imageURL: post.profile_image_url, size: 40)
                     }
                     .buttonStyle(.plain)
                     .disabled(onTapAuthor == nil)
+                    .padding(.trailing, 8)
+                    .padding(.bottom, 4)
                     Button { onTapCoauthor?() } label: {
                         AvatarView(name: post.coauthorDisplayName,
                                    imageURL: post.coauthor_profile_image_url, size: 26)
@@ -188,9 +223,7 @@ struct PostCardView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(onTapCoauthor == nil)
-                    .offset(x: 8, y: 4)
                 }
-                .padding(.trailing, 8)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 0) {
                         Button { onTapAuthor?() } label: { nameText(post.displayName) }
@@ -234,6 +267,14 @@ struct PostCardView: View {
                     .background(Circle().fill(ActivityCardView.color(type).opacity(0.15)))
             }
             Menu {
+                // Sharing is not a moderation action — it sits above the
+                // divider-less group of them, and applies to any post that
+                // actually lives on the feed (a story has no permalink).
+                if let onShare, post.share_to_feed != false {
+                    Button(action: onShare) {
+                        Label("Share link", systemImage: "square.and.arrow.up")
+                    }
+                }
                 if post.is_self {
                     if let onEditCaption {
                         Button(action: onEditCaption) {
@@ -243,6 +284,26 @@ struct PostCardView: View {
                     Button(role: .destructive, action: onDelete) {
                         Label(post.share_to_feed == false ? "Delete story" : "Delete post",
                               systemImage: "trash")
+                    }
+                } else if let onLeaveCollab {
+                    // Accepted coauthor: the post is the AUTHOR's to edit or
+                    // delete, but leaving it is theirs. Reporting/blocking a
+                    // post you're an author of makes no sense, so neither shows.
+                    //
+                    // Curating comes BEFORE leaving, and isn't destructive:
+                    // most people who don't want a tag on their grid still
+                    // want the tag. `coauthor_on_profile` is nil on servers
+                    // that don't know about the grid split — no toggle then.
+                    if let onSetCollabOnProfile, let onProfile = post.coauthor_on_profile {
+                        Button {
+                            onSetCollabOnProfile(!onProfile)
+                        } label: {
+                            Label(onProfile ? "Hide from my profile" : "Show on my profile",
+                                  systemImage: onProfile ? "eye.slash" : "square.grid.2x2")
+                        }
+                    }
+                    Button(role: .destructive, action: onLeaveCollab) {
+                        Label("Remove me from this post", systemImage: "person.badge.minus")
                     }
                 } else {
                     Button(action: onReport) { Label("Report", systemImage: "flag") }
@@ -309,7 +370,7 @@ struct PostCardView: View {
     /// posts only, once — a re-double-tap replays the burst without
     /// double-counting).
     private func doubleTapHype() {
-        guard !post.is_self else { return }
+        guard !isMine else { return }
         let now = Date()
         guard now.timeIntervalSince(lastDoubleTapAt) > 0.35 else { return }
         lastDoubleTapAt = now
@@ -386,7 +447,7 @@ struct PostCardView: View {
             ZoomablePhotoSlide(
                 url: url,
                 badge: badged ? ("Stats", "chart.bar.fill") : nil,
-                onDoubleTap: post.is_self ? nil : doubleTapHype
+                onDoubleTap: isMine ? nil : doubleTapHype
             )
         case .route(let coords):
             routeSlide(coords)
@@ -418,7 +479,7 @@ struct PostCardView: View {
                 ZoomablePhotoSlide(
                     url: nil,
                     badge: nil,
-                    onDoubleTap: post.is_self ? nil : doubleTapHype
+                    onDoubleTap: isMine ? nil : doubleTapHype
                 )
             }
         }
@@ -444,7 +505,7 @@ struct PostCardView: View {
                     renderer.isOpaque = true
                     return renderer.uiImage
                 },
-                onDoubleTap: post.is_self ? nil : doubleTapHype
+                onDoubleTap: isMine ? nil : doubleTapHype
             )
     }
 
@@ -500,7 +561,7 @@ struct PostCardView: View {
         // retained snapshot — nothing big is baked per card up front.
         .instagramZoomable(
             imageProvider: { routeZoomComposite(coords) },
-            onDoubleTap: post.is_self ? nil : doubleTapHype
+            onDoubleTap: isMine ? nil : doubleTapHype
         )
     }
 
@@ -598,7 +659,7 @@ struct PostCardView: View {
             .buttonStyle(.plain)
             .disabled(onOpenComments == nil)
             Spacer()
-            if !post.is_self {
+            if !isMine {
                 HypeButton(
                     isHyped: post.is_hyped,
                     isBusy: isHyping,

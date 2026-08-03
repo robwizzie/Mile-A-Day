@@ -125,7 +125,17 @@ class UserManager: ObservableObject {
     
     // Handle Apple Sign In completion
     #if !os(watchOS)
-    func handleAppleSignIn(profile: AppleSignInManager.AppleUserProfile, backendResponse: AppleSignInManager.BackendAuthResponse) {
+    func handleAppleSignIn(profile: AppleSignInManager.AppleUserProfile, backendResponse: AppleSignInManager.BackendAuthResponse) throws {
+        // The user row and the access token arrive in the same response but are
+        // produced separately server-side. If they ever disagree, persisting
+        // them anyway bakes in a session whose cached id can never satisfy
+        // `requireSelfAccess` — a permanent 403 on friends and daily challenges
+        // with no way out. Fail the sign-in instead and keep local state clean.
+        guard let tokenSubject = TokenUtils.subject(from: backendResponse.accessToken),
+              tokenSubject == backendResponse.user.user_id else {
+            throw AppleSignInManager.AppleSignInError.inconsistentSession
+        }
+
         // Update current user with Apple data
         currentUser.appleId = profile.id
         currentUser.email = profile.email
@@ -211,6 +221,17 @@ class UserManager: ObservableObject {
         currentUser.authToken = nil
         authToken = nil
         refreshToken = nil
+
+        // The standalone "backendUserId" key is what FriendService and the
+        // competition/feed views build self-scoped URLs from. Leaving it behind
+        // outlives the session that created it, and a stale id in the path
+        // against a fresh token's `sub` is a 403 the client never recovers from.
+        userDefaults.removeObject(forKey: "backendUserId")
+
+        // Friends belong to the account we're leaving. Store an explicit empty
+        // list rather than removing the key — init() falls back to sample
+        // friends when the key is absent.
+        friends = []
 
         // Clear stored tokens (Keychain + legacy UserDefaults mirror).
         TokenStore.clear()
@@ -342,6 +363,28 @@ class UserManager: ObservableObject {
         }
         scheduleWorkoutIndexRepair()
         return displayed
+    }
+
+    /// The backend's own streak walk, when it's recent enough to trust (same
+    /// 48h freshness window `vettedHealthKitStreak` uses). Nil when we've never
+    /// heard from the backend or the answer is stale.
+    ///
+    /// The DISPLAYED streak deliberately lags a real break: `vettedHealthKitStreak`
+    /// refuses a 2+ day collapse until it's verified, and `updateStreakFromBackend`
+    /// only ever raises. That's right for a live number that self-corrects a
+    /// moment later — and wrong for anything BAKED PERMANENTLY, like the streak
+    /// stamped into a post's image and stats snapshot. A post made the morning
+    /// after a missed day would otherwise sit in the feed forever claiming a
+    /// streak the author no longer has, while every server-driven surface shows
+    /// the real one. Post-building code reads this; UI keeps reading
+    /// `currentUser.streak`.
+    var freshBackendStreak: Int? {
+        let defaults = UserDefaults.standard
+        guard let at = defaults.object(forKey: Self.backendStreakAtKey) as? Date,
+              Date().timeIntervalSince(at) < 48 * 3600,
+              defaults.object(forKey: Self.backendStreakKey) != nil
+        else { return nil }
+        return defaults.integer(forKey: Self.backendStreakKey)
     }
 
     /// Kick a full WorkoutIndex rebuild (max once per calendar day) so a held

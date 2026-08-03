@@ -17,6 +17,8 @@ struct EditWorkoutView: View {
     @State private var workoutType: String = "running"
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var showDiscardConfirmation = false
+    @FocusState private var distanceFieldFocused: Bool
 
     private var distance: Double? {
         Double(distanceString)
@@ -60,6 +62,7 @@ struct EditWorkoutView: View {
                     HStack {
                         TextField("0.00", text: $distanceString)
                             .keyboardType(.decimalPad)
+                            .focused($distanceFieldFocused)
                         Text("miles")
                             .foregroundColor(.secondary)
                     }
@@ -74,11 +77,12 @@ struct EditWorkoutView: View {
 
                 // Duration
                 Section {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 0) {
                         durationPicker(value: $hours, label: "hr", range: 0...23)
                         durationPicker(value: $minutes, label: "min", range: 0...59)
                         durationPicker(value: $seconds, label: "sec", range: 0...59)
                     }
+                    .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
                     let origMin = Int(currentDuration) / 60
                     let origSec = Int(currentDuration) % 60
                     Text("Original: \(origMin)m \(origSec)s")
@@ -109,16 +113,26 @@ struct EditWorkoutView: View {
             }
             .navigationTitle("Edit Workout")
             .navigationBarTitleDisplayMode(.inline)
+            .scrollDismissesKeyboard(.immediately)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") { cancelTapped() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        distanceFieldFocused = false
                         Task { await saveEdit() }
                     }
                     .disabled(!isValid || !hasChanges || isSaving)
                     .fontWeight(.semibold)
+                }
+                // The decimal pad has no return key — without this there is no
+                // way to put the keyboard away except dragging the form, which
+                // is the same gesture that dismisses the sheet.
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { distanceFieldFocused = false }
+                        .fontWeight(.semibold)
                 }
             }
             .onAppear {
@@ -141,17 +155,43 @@ struct EditWorkoutView: View {
                 }
             }
         }
+        // An edit sheet holds work the user can't get back. Explicit Cancel
+        // still leaves; the post-save dismiss is programmatic and unaffected.
+        .interactiveDismissDisabled(hasChanges)
+        .confirmationDialog(
+            "Discard your changes?",
+            isPresented: $showDiscardConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Discard", role: .destructive) { dismiss() }
+            Button("Keep Editing", role: .cancel) { }
+        }
     }
 
+    private func cancelTapped() {
+        distanceFieldFocused = false
+        if hasChanges {
+            showDiscardConfirmation = true
+        } else {
+            dismiss()
+        }
+    }
+
+    /// Each wheel takes an equal share of the row. The old fixed 60pt wheels
+    /// with the label beside them left wide dead gaps where a drag meant for a
+    /// wheel scrolled the form instead. Values are zero-padded to match the Add
+    /// Workout screen — "5" and "05" reading as different units was its own
+    /// small confusion.
     private func durationPicker(value: Binding<Int>, label: String, range: ClosedRange<Int>) -> some View {
-        HStack(spacing: 2) {
+        VStack(spacing: 2) {
             Picker(label, selection: value) {
                 ForEach(range, id: \.self) { n in
-                    Text("\(n)").tag(n)
+                    Text(String(format: "%02d", n)).tag(n)
                 }
             }
             .pickerStyle(.wheel)
-            .frame(width: 60, height: 100)
+            .frame(maxWidth: .infinity)
+            .frame(height: 110)
             .clipped()
 
             Text(label)

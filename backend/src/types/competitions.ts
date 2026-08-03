@@ -20,10 +20,24 @@ export type DailyActivityBreakdown = {
   };
 };
 
+export interface CompetitionTeam {
+  id: string;
+  name: string;
+  // Derived at read time for started competitions: sum of member scores.
+  score?: number;
+}
+
+// Stored in competitions.teams (jsonb). NULL column = no team play.
+export interface CompetitionTeams {
+  member_pick: boolean;
+  teams: CompetitionTeam[];
+}
+
 export interface CompetitionUser {
   competition_id: string;
   user_id: string;
   invite_status: string;
+  team_id?: string | null;
   intervals?: { [intervalKey: string]: number };
   score?: number;
   remaining_lives?: number;
@@ -42,5 +56,6 @@ export interface Competition {
   options: CompetitionOptions;
   owner: string;
   winner: string | null;
+  teams?: CompetitionTeams | null;
   users: CompetitionUser[];
 }

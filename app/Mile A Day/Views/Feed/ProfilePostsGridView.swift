@@ -45,16 +45,30 @@ struct ProfilePostsGridView: View {
             }
         }
         .task { if !loaded { await load() } }
+        // The "Tagged posts on my profile" switch lives in Settings, which is
+        // pushed FROM here — so popping back lands on a grid that's still
+        // alive and still holding the tags the user just turned off. Without
+        // this the setting reads as broken at the exact moment it's used.
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSNotification.Name("MAD_TaggedPostsOnProfileChanged")
+        )) { _ in
+            guard isSelf else { return }
+            Task { await load() }
+        }
         .sheet(item: $selectedPost) { post in
-            ProfilePostsFeedSheet(
+            PostDetailView(
                 title: isSelf ? "Your Posts" : "Posts",
                 posts: $posts,
                 initialPostId: post.post_id,
-                onNeedMore: { Task { await loadMore() } }
+                onNeedMore: { Task { await loadMore() } },
+                // This list IS a profile grid, so a collab hidden from the
+                // viewer's grid has to leave it. Only on their OWN profile —
+                // someone else's grid isn't theirs to curate.
+                dropsCollabsHiddenFromProfile: isSelf
             )
         }
         .sheet(item: $selectedStoryPost) { post in
-            ProfilePostsFeedSheet(
+            PostDetailView(
                 title: "Your Stories",
                 posts: $storyPosts,
                 initialPostId: post.post_id,
@@ -64,7 +78,7 @@ struct ProfilePostsGridView: View {
         .sheet(item: $selectedTaggedPost) { post in
             // Tagged posts belong to OTHER authors — let taps on their names
             // (and @mentions) open profiles from inside the sheet.
-            ProfilePostsFeedSheet(
+            PostDetailView(
                 title: "Tagged",
                 posts: $taggedPosts,
                 initialPostId: post.post_id,
@@ -136,8 +150,7 @@ struct ProfilePostsGridView: View {
                 if !posts.isEmpty {
                     LazyVGrid(columns: columns, spacing: 4) {
                         ForEach(posts) { post in
-                            Button { selectedPost = post } label: { thumbnail(post) }
-                                .buttonStyle(.plain)
+                            gridThumbnail(post) { selectedPost = post }
                                 .onAppear {
                                     if post.id == posts.last?.id { Task { await loadMore() } }
                                 }
@@ -166,8 +179,7 @@ struct ProfilePostsGridView: View {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
                 LazyVGrid(columns: columns, spacing: 4) {
                     ForEach(taggedPosts) { post in
-                        Button { selectedTaggedPost = post } label: { thumbnail(post) }
-                            .buttonStyle(.plain)
+                        gridThumbnail(post) { selectedTaggedPost = post }
                             .onAppear {
                                 if post.id == taggedPosts.last?.id {
                                     Task { await loadMoreTagged() }
@@ -397,6 +409,82 @@ struct ProfilePostsGridView: View {
         .padding(.horizontal, MADTheme.Spacing.lg)
     }
 
+    // MARK: - Curating tags off the grid
+
+    private var currentUserId: String? {
+        UserDefaults.standard.string(forKey: "backendUserId")
+    }
+
+    /// A grid cell, carrying the collab long-press ONLY where it applies — an
+    /// empty `contextMenu` still pops a blank panel on long-press, so the
+    /// modifier is branched rather than the menu left to build nothing. The
+    /// branch is stable per post, so it can't thrash view identity inside the
+    /// ForEach.
+    @ViewBuilder
+    private func gridThumbnail(_ post: PostItem, onTap: @escaping () -> Void) -> some View {
+        if canCurateOnProfile(post) {
+            Button(action: onTap) { thumbnail(post) }
+                .buttonStyle(.plain)
+                .contextMenu { collabProfileMenu(post) }
+        } else {
+            Button(action: onTap) { thumbnail(post) }
+                .buttonStyle(.plain)
+        }
+    }
+
+    /// Is this a collab the VIEWER is tagged in, on their own profile, from a
+    /// server that knows about the grid split?
+    private func canCurateOnProfile(_ post: PostItem) -> Bool {
+        isSelf
+            && post.hasAcceptedCoauthor
+            && post.coauthor_user_id == currentUserId
+            && post.coauthor_on_profile != nil
+    }
+
+    /// Long-press a collab you're tagged in to pin it on or off your own Posts
+    /// grid — the one-gesture version of the card's ⋯ menu, offered from both
+    /// tabs because that's where people actually go to tidy their profile.
+    /// Deliberately not destructive language: the tag survives either way and
+    /// the post never leaves the Tagged tab.
+    @ViewBuilder
+    private func collabProfileMenu(_ post: PostItem) -> some View {
+        if let onProfile = post.coauthor_on_profile {
+            Button {
+                Task { await setCollabOnProfile(post, onProfile: !onProfile) }
+            } label: {
+                Label(onProfile ? "Hide from my profile" : "Show on my profile",
+                      systemImage: onProfile ? "eye.slash" : "square.grid.2x2")
+            }
+        }
+    }
+
+    private func setCollabOnProfile(_ post: PostItem, onProfile: Bool) async {
+        await MainActor.run {
+            MADHaptics.tap()
+            // Both grids can be showing the same collab, so keep them in step
+            // or the Tagged tab offers "Hide" on something already hidden.
+            for idx in taggedPosts.indices where taggedPosts[idx].post_id == post.post_id {
+                taggedPosts[idx].coauthor_on_profile = onProfile
+            }
+            if !onProfile { posts.removeAll { $0.post_id == post.post_id } }
+        }
+        do {
+            try await PostService.setCoauthorOnProfile(
+                postId: post.post_id, onProfile: onProfile
+            )
+            // Re-pinned: it belongs back in date order, which only a reload
+            // can place correctly (this page may not even reach that far back).
+            if onProfile { await load() }
+        } catch {
+            await MainActor.run {
+                for idx in taggedPosts.indices where taggedPosts[idx].post_id == post.post_id {
+                    taggedPosts[idx].coauthor_on_profile = !onProfile
+                }
+            }
+            if !onProfile { await load() }
+        }
+    }
+
     private func load() async {
         await MainActor.run { isLoading = posts.isEmpty && storyPosts.isEmpty }
         let response = try? await PostService.fetchUserPosts(
@@ -456,270 +544,5 @@ struct ProfilePostsGridView: View {
             }
             isTaggedLoadingMore = false
         }
-    }
-}
-
-/// A user's posts as a scrollable, read-only feed — opened from the profile
-/// grid at the tapped post, so browsing someone's history feels like reading a
-/// feed instead of opening photos one at a time. Shares the grid's post array
-/// (and its pagination) via a binding; photos pinch-zoom in place like the
-/// main feed.
-struct ProfilePostsFeedSheet: View {
-    let title: String
-    @Binding var posts: [PostItem]
-    let initialPostId: String
-    let onNeedMore: () -> Void
-    /// True for surfaces showing OTHER people's posts (the Tagged tab):
-    /// author/coauthor names and caption @mentions open profiles.
-    var showsAuthorProfiles: Bool = false
-    @Environment(\.dismiss) private var dismiss
-    /// Tapped hype tally — presents the "who hyped this" sheet.
-    @State private var hypersContext: HypersListContext?
-    /// Tapped comment bubble — presents the comments sheet.
-    @State private var commentsPost: PostItem?
-    /// Own post being caption-edited / pending delete confirmation.
-    @State private var editingPost: PostItem?
-    @State private var deletingPost: PostItem?
-    @State private var reportingPost: PostItem?
-    @State private var hypingIds: Set<String> = []
-    /// Profile opened from a tapped author/coauthor name or @mention.
-    @State private var profileUser: BackendUser?
-    /// One stable service for profiles opened from this sheet (same pattern as
-    /// SocialFeedView — recreating it per presentation wipes loaded friends).
-    @StateObject private var profileFriendService = FriendService()
-    /// The list starts at the TOP and only then scrolls to the tapped post, so
-    /// the first frames show whoever is newest — reading as a flash of someone
-    /// else's card (a lock card, when today's photo is still unearned) before
-    /// settling. Stay invisible until we're parked on the right post.
-    @State private var didPosition = false
-
-    /// Tapping the newest post needs no scroll at all — show it immediately
-    /// rather than fading in after a settle delay it doesn't need.
-    private var needsScroll: Bool { posts.first?.post_id != initialPostId }
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
-
-                ScrollViewReader { proxy in
-                    ScrollView(showsIndicators: false) {
-                        LazyVStack(spacing: MADTheme.Spacing.md) {
-                            ForEach(posts) { post in
-                                card(post)
-                                    .id(post.post_id)
-                                    .onAppear {
-                                        if post.id == posts.last?.id { onNeedMore() }
-                                    }
-                            }
-                        }
-                        .padding(MADTheme.Spacing.md)
-                        .padding(.bottom, MADTheme.Spacing.xl)
-                    }
-                    // Held invisible (not unbuilt — opacity doesn't affect
-                    // layout, so the LazyVStack still lays out and scrollTo
-                    // still lands) until we're parked on the tapped post.
-                    .opacity(didPosition ? 1 : 0)
-                    .onAppear {
-                        guard needsScroll else {
-                            didPosition = true
-                            return
-                        }
-                        // LazyVStack hasn't laid out far-down cards yet when
-                        // onAppear fires, so a single scrollTo can land short
-                        // for deep taps — jump, then correct once layout has
-                        // caught up. Reveal only after the correction, which
-                        // lands while the sheet is still animating in.
-                        proxy.scrollTo(initialPostId, anchor: .top)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            proxy.scrollTo(initialPostId, anchor: .top)
-                            withAnimation(.easeOut(duration: 0.12)) { didPosition = true }
-                        }
-                    }
-                }
-            }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                        .fontWeight(.bold)
-                        .foregroundColor(.white)
-                }
-            }
-            .toolbarBackground(.black, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .sheet(item: $hypersContext) { context in
-                HypersListSheet(context: context)
-            }
-            .sheet(item: $commentsPost) { post in
-                // Coauthors moderate too: on their own profile the collab post
-                // has is_self == false but the server allows their deletes.
-                CommentsSheet(
-                    post: post,
-                    canModerate: post.is_self ||
-                        (post.coauthor_status == "accepted"
-                         && post.coauthor_user_id == UserDefaults.standard.string(forKey: "backendUserId"))
-                ) { newCount in
-                    if let index = posts.firstIndex(where: { $0.post_id == post.post_id }) {
-                        posts[index].comment_count = newCount
-                    }
-                }
-            }
-            .sheet(item: $reportingPost) { post in
-                ReportPostSheet(postId: post.post_id) {
-                    reportingPost = nil
-                }
-            }
-            .sheet(item: $editingPost) { post in
-                EditCaptionSheet(post: post) { newCaption in
-                    if let idx = posts.firstIndex(where: { $0.post_id == post.post_id }) {
-                        posts[idx].caption = newCaption
-                    }
-                }
-            }
-            .sheet(item: $profileUser) { user in
-                NavigationStack {
-                    UserProfileDetailView(user: user, friendService: profileFriendService)
-                }
-            }
-            .alert(
-                "Delete this post?",
-                isPresented: Binding(
-                    get: { deletingPost != nil },
-                    set: { if !$0 { deletingPost = nil } }
-                ),
-                presenting: deletingPost
-            ) { post in
-                Button("Delete", role: .destructive) {
-                    Task {
-                        try? await PostService.deletePost(postId: post.post_id)
-                        await MainActor.run {
-                            posts.removeAll { $0.post_id == post.post_id }
-                        }
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: { _ in
-                Text("This removes it from your feed and profile for good.")
-            }
-        }
-    }
-
-    private var currentUserId: String? {
-        UserDefaults.standard.string(forKey: "backendUserId")
-    }
-
-    private func card(_ post: PostItem) -> some View {
-        // Profile taps only on surfaces that show other people's posts.
-        let openAuthor: (() -> Void)? = (showsAuthorProfiles && !post.is_self)
-            ? {
-                profileUser = BackendUser(
-                    user_id: post.user_id, username: post.username, email: nil,
-                    first_name: post.first_name, last_name: post.last_name,
-                    bio: nil, profile_image_url: post.profile_image_url,
-                    apple_id: nil, auth_provider: nil, role: nil
-                )
-            }
-            : nil
-        let openCoauthor: (() -> Void)? =
-            (showsAuthorProfiles && post.hasAcceptedCoauthor && post.coauthor_user_id != currentUserId)
-            ? {
-                profileUser = BackendUser(
-                    user_id: post.coauthor_user_id ?? "", username: post.coauthor_username,
-                    email: nil, first_name: post.coauthor_first_name,
-                    last_name: post.coauthor_last_name, bio: nil,
-                    profile_image_url: post.coauthor_profile_image_url,
-                    apple_id: nil, auth_provider: nil, role: nil
-                )
-            }
-            : nil
-        return PostCardView(
-            post: post,
-            storyPhotoURL: post.storyPhotoURL,
-            isHyping: hypingIds.contains(post.post_id),
-            onHype: { Task { await hype(post) } },
-            onReport: { reportingPost = post },
-            onBlock: { Task { await block(post) } },
-            onDelete: { deletingPost = post },
-            onEditCaption: post.is_self ? { editingPost = post } : nil,
-            onTapAuthor: openAuthor,
-            onTapCoauthor: openCoauthor,
-            onTapMention: showsAuthorProfiles ? { username in openMentionProfile(username) } : nil,
-            onTapHypeCount: {
-                hypersContext = HypersListContext(
-                    contextType: "post",
-                    contextId: post.post_id,
-                    targetUserId: post.user_id
-                )
-            },
-            onOpenComments: { commentsPost = post }
-        )
-    }
-
-    /// A tapped caption @mention: resolve to the exact user and open their
-    /// profile (same behavior as the main feed).
-    private func openMentionProfile(_ username: String) {
-        let lowered = username.lowercased()
-        Task {
-            guard let match = try? await profileFriendService.searchUsers(byUsername: lowered)
-                .first(where: { $0.username?.lowercased() == lowered }) else { return }
-            await MainActor.run {
-                guard match.user_id != currentUserId else { return }
-                profileUser = match
-            }
-        }
-    }
-
-    private func hype(_ post: PostItem) async {
-        guard !post.is_self, !post.is_hyped, !hypingIds.contains(post.post_id) else { return }
-        await MainActor.run {
-            _ = hypingIds.insert(post.post_id)
-            updatePost(post.post_id) { item in
-                guard !item.is_hyped else { return }
-                item.is_hyped = true
-                item.hype_count = (item.hype_count ?? 0) + 1
-            }
-        }
-        defer { Task { @MainActor in hypingIds.remove(post.post_id) } }
-
-        let revert: @MainActor () -> Void = {
-            updatePost(post.post_id) { item in
-                guard item.is_hyped else { return }
-                item.is_hyped = false
-                item.hype_count = max(0, (item.hype_count ?? 1) - 1)
-            }
-        }
-
-        do {
-            _ = try await HypeService.sendHype(
-                targetUserId: post.user_id,
-                context: HypeContext(
-                    contextType: "post",
-                    contextId: post.post_id,
-                    contextLabel: post.caption ?? post.displayName
-                )
-            )
-            await MainActor.run {
-                MADHaptics.success()
-            }
-        } catch APIError.conflict {
-            // Already hyped server-side — keep the optimistic state.
-        } catch {
-            await MainActor.run { revert() }
-        }
-    }
-
-    private func block(_ post: PostItem) async {
-        do {
-            try await BlockService.block(userId: post.user_id)
-            await MainActor.run { posts.removeAll { $0.user_id == post.user_id } }
-        } catch {}
-    }
-
-    private func updatePost(_ postId: String, _ mutate: (inout PostItem) -> Void) {
-        guard let idx = posts.firstIndex(where: { $0.post_id == postId }) else { return }
-        mutate(&posts[idx])
     }
 }

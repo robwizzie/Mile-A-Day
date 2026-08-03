@@ -1,6 +1,7 @@
 import { PostgresService } from "./DbService.js";
 import { refreshCurrentStreak } from "./leaderboardService.js";
 import { revokeUnearnedBadges } from "./badgeService.js";
+import { recomputeFeedRolesForDay } from "./workoutService.js";
 
 const db = PostgresService.getInstance();
 
@@ -31,8 +32,8 @@ export async function softDeleteWorkout(
   userId: string,
   workoutId: string,
 ): Promise<WorkoutDeletionResult> {
-  const active = await db.query<{ workout_id: string }>(
-    `SELECT workout_id FROM workouts
+  const active = await db.query<{ workout_id: string; local_date: string }>(
+    `SELECT workout_id, local_date::text AS local_date FROM workouts
 		WHERE workout_id = $1 AND user_id = $2 AND deleted_at IS NULL`,
     [workoutId, userId],
   );
@@ -48,6 +49,11 @@ export async function softDeleteWorkout(
     `UPDATE workouts SET deleted_at = NOW() WHERE workout_id = $1 AND user_id = $2`,
     [workoutId, userId],
   );
+
+  // Deleting a segment can promote a later workout to the day's anchor, or drop
+  // the day back under the mile so it shows nothing at all — so the whole day is
+  // reclassified, not just this row.
+  await recomputeFeedRolesForDay(userId, active[0].local_date);
 
   // Remove any challenge completion this specific workout earned.
   await db

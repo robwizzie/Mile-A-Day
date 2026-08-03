@@ -38,6 +38,11 @@ export interface NotificationPreferences {
   // is starting within seconds), so this toggle is the ONLY thing that can
   // silence it — Guideline 4.5.4.
   buddy_invites_enabled: boolean;
+  // tagged_posts_on_profile: do collabs I'm tagged in join my profile's Posts
+  // grid? Off = Tagged tab only, Instagram-style. Not a notification pref, but
+  // this table is the de-facto per-user preferences row. Read through
+  // posts.coauthor_on_profile, which overrides it per post.
+  tagged_posts_on_profile: boolean;
   // Who may see my workout content (routes + photos): 'public' | 'friends' |
   // 'private'. Coarser than share_route_maps — that one decides WHETHER routes
   // are included, this decides WHO gets in at all. Both must pass.
@@ -66,6 +71,7 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   h2h_close_friends_only: false,
   friend_request_reminder_enabled: true,
   buddy_invites_enabled: true,
+  tagged_posts_on_profile: true,
   workout_visibility: DEFAULT_WORKOUT_VISIBILITY,
 };
 
@@ -103,6 +109,7 @@ export async function getNotificationPreferences(
     friend_request_reminder_enabled:
       row.friend_request_reminder_enabled ?? true,
     buddy_invites_enabled: row.buddy_invites_enabled ?? true,
+    tagged_posts_on_profile: row.tagged_posts_on_profile ?? true,
     // Anything unrecognised reads as the safe default rather than being
     // handed to the client as-is.
     workout_visibility: isWorkoutVisibility(row.workout_visibility)
@@ -158,6 +165,10 @@ export async function updateNotificationPreferences(
       value: prefs.friend_request_reminder_enabled,
     },
     { key: "buddy_invites_enabled", value: prefs.buddy_invites_enabled },
+    {
+      key: "tagged_posts_on_profile",
+      value: prefs.tagged_posts_on_profile,
+    },
     { key: "workout_visibility", value: prefs.workout_visibility },
   ];
 

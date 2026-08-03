@@ -17,6 +17,9 @@ const {
   getUserPosts,
   getUserTaggedPosts,
   respondToCoauthorInvite,
+  setCoauthorProfileVisibility,
+  visiblePostAuthors,
+  acceptedCoauthor,
   lockUnearnedPhotos,
 } = await import("../dist/services/postService.js");
 const { canonicalizeMileContext, logHypeIfUnderLimit, hasHypedMile } =
@@ -25,11 +28,19 @@ const { signMediaUrl, verifyPostsMediaAccess, stripMediaQuery } =
   await import("../dist/services/mediaSigningService.js");
 const { getNotificationPreferences, updateNotificationPreferences } =
   await import("../dist/services/notificationSettingsService.js");
+// Hype authorization is controller-level (it's where the friend/visibility
+// gate lives), so the collab assertions below drive the real handlers.
+const { sendHype, getContextHypersController } =
+  await import("../dist/controllers/hypeController.js");
 
 const db = PostgresService.getInstance();
 
 const ALICE = "ci-alice";
 const BOB = "ci-bob";
+// Collab-permission witnesses: each is friends with exactly ONE side of the
+// collab, so a rule that leaks or over-blocks shows up on one of them.
+const CARL = "ci-carl"; // Bob's friend only  (reach via the COAUTHOR)
+const DANA = "ci-dana"; // Alice's friend only (reach via the AUTHOR)
 const localDate = new Date().toISOString().slice(0, 10);
 const nowIso = new Date().toISOString();
 
@@ -44,6 +55,14 @@ async function cleanup() {
     `DELETE FROM workout_routes WHERE workout_id LIKE 'ci-workout-%'`,
   );
   await db.query(`DELETE FROM workouts WHERE user_id LIKE 'ci-%'`);
+  // The collab-permission assertions flip users to 'private' mid-run, and the
+  // grid-vs-tagged ones flip tags off the grid; a failed run must not leave
+  // either behind to poison the next one.
+  await db.query(
+    `UPDATE notification_settings
+		 SET workout_visibility = 'friends', tagged_posts_on_profile = TRUE
+		 WHERE user_id LIKE 'ci-%'`,
+  );
 }
 
 async function seed() {
@@ -51,6 +70,8 @@ async function seed() {
   for (const [id, name] of [
     [ALICE, "alice"],
     [BOB, "bob"],
+    [CARL, "carl"],
+    [DANA, "dana"],
   ]) {
     await db.query(
       `INSERT INTO users (user_id, email, apple_sub, username, first_name)
@@ -71,6 +92,10 @@ async function seed() {
   for (const [a, b] of [
     [ALICE, BOB],
     [BOB, ALICE],
+    [BOB, CARL],
+    [CARL, BOB],
+    [ALICE, DANA],
+    [DANA, ALICE],
   ]) {
     await db.query(
       `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1, $2, 'accepted')
@@ -190,10 +215,12 @@ const collabPost = await alicePost(
   BOB,
   true, // posted_live claim — the client-owned FRESH path
 );
+// Tagging is IMMEDIATE (Instagram-style): no pending state, no accept step.
+// The coauthor's control is removing themselves afterwards.
 assert.equal(
   collabPost.coauthor_status,
-  "pending",
-  "collab invite starts pending",
+  "accepted",
+  "a collab tags the coauthor straight away",
 );
 let tagged = await getUserTaggedPosts(ALICE, BOB, 20, null);
 assert.ok(
@@ -205,9 +232,93 @@ assert.ok(
   "@ci_bobber does NOT count as a ci_bob mention (exact token match)",
 );
 assert.ok(
-  !tagged.some((p) => p.post_id === collabPost.post_id),
-  "pending collab invite stays out of the tagged tab",
+  tagged.some(
+    (p) => p.post_id === collabPost.post_id && p.coauthor_status === "accepted",
+  ),
+  "the tag is in Bob's tagged tab with no accept step",
 );
+// …and on his own grid, which is what "you're on this post" has to mean.
+assert.ok(
+  (await getUserPosts(BOB, BOB, 24)).some(
+    (p) => p.post_id === collabPost.post_id,
+  ),
+  "a tagged collab lands on the coauthor's own profile grid",
+);
+
+// --- Tags on the grid vs the Tagged tab ---------------------------------
+// Hiding a collab from your grid must move NOTHING else: the tag stays live,
+// the Tagged tab keeps it, the author's grid keeps it, and both circles still
+// get it in the feed. That separation is the whole feature — a regression
+// here reads as "the app deleted my friend's post".
+const bobGridHas = async (postId) =>
+  (await getUserPosts(BOB, BOB, 24)).some((p) => p.post_id === postId);
+const bobTaggedHas = async (postId) =>
+  (await getUserTaggedPosts(BOB, BOB, 20, null)).some(
+    (p) => p.post_id === postId,
+  );
+
+// The setting alone, with no per-post override (every existing tag's state).
+await updateNotificationPreferences(BOB, { tagged_posts_on_profile: false });
+assert.equal(
+  await bobGridHas(collabPost.post_id),
+  false,
+  "tags-off-my-grid retroactively covers tags the user already had",
+);
+assert.ok(
+  await bobTaggedHas(collabPost.post_id),
+  "…while the Tagged tab keeps it (that's where it's supposed to live)",
+);
+assert.ok(
+  (await getUserPosts(BOB, ALICE, 24)).some(
+    (p) => p.post_id === collabPost.post_id,
+  ),
+  "…and it never leaves the AUTHOR's grid — it's their post",
+);
+assert.ok(
+  (await getUnifiedFeed(CARL, 30, null)).some(
+    (r) => r.kind === "post" && r.id === collabPost.post_id,
+  ),
+  "…and collab reach to the coauthor's circle is untouched",
+);
+// A per-post override beats the setting, in both directions.
+assert.ok(
+  await setCoauthorProfileVisibility(BOB, collabPost.post_id, true),
+  "the coauthor may pin one collab back onto their grid",
+);
+assert.ok(
+  await bobGridHas(collabPost.post_id),
+  "…and an explicit override wins over the setting being off",
+);
+await updateNotificationPreferences(BOB, { tagged_posts_on_profile: true });
+assert.ok(
+  await setCoauthorProfileVisibility(BOB, collabPost.post_id, false),
+  "…and the reverse override applies with the setting on",
+);
+assert.equal(
+  await bobGridHas(collabPost.post_id),
+  false,
+  "…hiding one collab leaves the setting alone",
+);
+assert.ok(
+  await bobTaggedHas(collabPost.post_id),
+  "…and a per-post hide still isn't an untag",
+);
+// Only the coauthor may curate their own grid.
+assert.equal(
+  await setCoauthorProfileVisibility(CARL, collabPost.post_id, false),
+  null,
+  "a third party can't touch someone else's collab visibility",
+);
+assert.equal(
+  await setCoauthorProfileVisibility(ALICE, collabPost.post_id, false),
+  null,
+  "…and neither can the post's own author",
+);
+// Restore the default state for everything downstream.
+await setCoauthorProfileVisibility(BOB, collabPost.post_id, true);
+
+// An older build still sends accept:true. That has to succeed as a no-op
+// rather than 404 on a collab the user is already part of.
 const collabAccept = await respondToCoauthorInvite(
   BOB,
   collabPost.post_id,
@@ -216,14 +327,7 @@ const collabAccept = await respondToCoauthorInvite(
 assert.equal(
   collabAccept?.author_id,
   ALICE,
-  "coauthor accept returns the author",
-);
-tagged = await getUserTaggedPosts(ALICE, BOB, 20, null);
-assert.ok(
-  tagged.some(
-    (p) => p.post_id === collabPost.post_id && p.coauthor_status === "accepted",
-  ),
-  "accepted collab shows in Bob's tagged tab",
+  "a legacy accept on an already-accepted tag is idempotent",
 );
 assert.ok(
   !(await getUserTaggedPosts(ALICE, ALICE, 20, null)).some(
@@ -249,6 +353,261 @@ assert.equal(
   mentionInFeed?.is_fresh,
   false,
   "no claim + no linked workout stays unfresh",
+);
+
+// --- Collab permissions -------------------------------------------------
+// A collab post reaches BOTH authors' circles, so every rule has to hold from
+// two sides. CARL is Bob's friend only (reach comes purely from the coauthor);
+// DANA is Alice's friend only (reach comes purely from the author).
+const collabInFeedOf = async (uid) =>
+  (await getUnifiedFeed(uid, 30, null)).find(
+    (r) => r.kind === "post" && r.id === collabPost.post_id,
+  );
+
+let carlSees = await collabInFeedOf(CARL);
+assert.ok(
+  carlSees,
+  "collab reaches the COAUTHOR's friend who isn't the author's",
+);
+assert.equal(carlSees.coauthor_user_id, BOB, "…carrying the collab tag");
+assert.ok(
+  await visiblePostAuthors(CARL, collabPost.post_id),
+  "coauthor's friend may act on the post (comments + hypes authorize on this)",
+);
+assert.equal(
+  (await visiblePostAuthors(CARL, collabPost.post_id)).coauthor_user_id,
+  BOB,
+  "…and the coauthor comes back so the hype can notify them",
+);
+
+// Coauthor goes 'private' ("Only me"): the collab TAG and the reach it carries
+// both stop, but the post is still Alice's and stays with Alice's circle.
+await updateNotificationPreferences(BOB, { workout_visibility: "private" });
+assert.equal(
+  await collabInFeedOf(CARL),
+  undefined,
+  "private coauthor no longer pulls the post into their own friends' feeds",
+);
+assert.equal(
+  await visiblePostAuthors(CARL, collabPost.post_id),
+  null,
+  "…and direct access through the private coauthor closes too",
+);
+const danaSeesPrivateCollab = await collabInFeedOf(DANA);
+assert.ok(
+  danaSeesPrivateCollab,
+  "the author's own circle keeps the post — privacy withholds the tag, not the post",
+);
+assert.equal(
+  danaSeesPrivateCollab.coauthor_user_id,
+  null,
+  "private coauthor's name/avatar is withheld from third parties",
+);
+assert.equal(
+  danaSeesPrivateCollab.coauthor_username,
+  null,
+  "…including the username",
+);
+assert.equal(
+  (await collabInFeedOf(BOB))?.coauthor_user_id,
+  BOB,
+  "both authors still see the collab on their own post",
+);
+await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
+
+// Author goes 'private': the post leaves everyone's feed EXCEPT the two
+// authors' — "nobody but you" has to still include you (and your coauthor).
+await updateNotificationPreferences(ALICE, { workout_visibility: "private" });
+assert.equal(
+  await collabInFeedOf(DANA),
+  undefined,
+  "private author's post leaves their friends' feeds",
+);
+assert.equal(
+  await collabInFeedOf(CARL),
+  undefined,
+  "…and doesn't survive via the coauthor's circle either",
+);
+assert.ok(
+  await collabInFeedOf(ALICE),
+  "a private author still sees their own post",
+);
+assert.ok(
+  await collabInFeedOf(BOB),
+  "the coauthor still sees a collab they're an author on",
+);
+assert.ok(
+  await visiblePostAuthors(BOB, collabPost.post_id),
+  "…and can still act on it",
+);
+await updateNotificationPreferences(ALICE, { workout_visibility: "friends" });
+
+// Hype authorization: the post's audience, not friendship with its author.
+const collabAuthors = await visiblePostAuthors(CARL, collabPost.post_id);
+assert.equal(
+  collabAuthors?.author_id,
+  ALICE,
+  "hypes on a collab are always filed against the PRIMARY author",
+);
+assert.equal(
+  (await visiblePostAuthors(ALICE, mentionPost.post_id)) !== null,
+  true,
+  "an author can always see their own post",
+);
+assert.equal(
+  await visiblePostAuthors(CARL, mentionPost.post_id),
+  null,
+  "a non-collab post stays inside its author's circle",
+);
+
+// …and end-to-end through the real controller, because the shipped bug was
+// exactly this: the card rendered, the hype animation played, and the request
+// came back 403 because the sender wasn't friends with the PRIMARY author.
+function fakeRes() {
+  const out = { code: null, body: null };
+  const res = {
+    status(c) {
+      out.code = c;
+      return res;
+    },
+    json(b) {
+      out.body = b;
+      return res;
+    },
+  };
+  return { res, out };
+}
+const postHypeCtx = (target) => ({
+  target_user_id: target,
+  context_type: "post",
+  context_id: collabPost.post_id,
+  context_label: "collab",
+});
+const callSendHype = async (userId, body) => {
+  const { res, out } = fakeRes();
+  await sendHype({ userId, body }, res);
+  return out;
+};
+const callHypers = async (userId) => {
+  const { res, out } = fakeRes();
+  await getContextHypersController(
+    {
+      userId,
+      query: {
+        context_type: "post",
+        context_id: collabPost.post_id,
+        target_user_id: ALICE,
+      },
+    },
+    res,
+  );
+  return out;
+};
+
+let hypeRes = await callSendHype(CARL, postHypeCtx(ALICE));
+assert.equal(
+  hypeRes.code,
+  200,
+  `the coauthor's friend can hype the collab (got ${JSON.stringify(hypeRes.body)})`,
+);
+assert.deepEqual(
+  await db.query(
+    `SELECT target_id, context_type FROM hype_log WHERE sender_id = $1`,
+    [CARL],
+  ),
+  [{ target_id: ALICE, context_type: "post" }],
+  "a collab hype is filed against the PRIMARY author (the tally reads that row)",
+);
+assert.equal(
+  (await callSendHype(CARL, postHypeCtx(ALICE))).code,
+  409,
+  "…and still dedupes",
+);
+hypeRes = await callSendHype(BOB, postHypeCtx(ALICE));
+assert.equal(hypeRes.code, 400, "an author can't hype their own collab");
+assert.match(hypeRes.body.error, /your own post/);
+assert.equal(
+  (await callSendHype(DANA, postHypeCtx(ALICE))).code,
+  200,
+  "the author's friend can hype it too",
+);
+assert.equal(
+  (await callHypers(CARL)).code,
+  200,
+  "the coauthor's friend can open the hypers list",
+);
+assert.equal(
+  (await callHypers(BOB)).code,
+  200,
+  "an author can read their own post's hypers even though they can't hype it",
+);
+assert.equal(
+  (await callSendHype("ci-stranger", postHypeCtx(ALICE))).code,
+  400,
+  "someone in neither circle can't hype the post",
+);
+
+// A block BETWEEN the two authors ends the collab — the tagged tab already
+// dropped the row, so the feed must not keep showing "alice & bob". The post
+// reverts to a solo post rather than disappearing: the media and the run are
+// the author's.
+await db.query(
+  `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)
+	 ON CONFLICT DO NOTHING`,
+  [BOB, ALICE],
+);
+assert.equal(
+  await collabInFeedOf(CARL),
+  undefined,
+  "a severed collab stops reaching the ex-coauthor's circle",
+);
+const afterBlock = await collabInFeedOf(DANA);
+assert.ok(afterBlock, "…but the author keeps their own post");
+assert.equal(afterBlock.coauthor_user_id, null, "…with the tag severed");
+assert.ok(
+  await collabInFeedOf(ALICE),
+  "the author still sees their post after being blocked by the coauthor",
+);
+assert.ok(
+  !(await getUserTaggedPosts(ALICE, BOB, 20, null)).some(
+    (p) => p.post_id === collabPost.post_id,
+  ),
+  "…and it leaves the ex-coauthor's tagged tab",
+);
+assert.equal(
+  await acceptedCoauthor(collabPost.post_id),
+  null,
+  "…so comment/hype pushes stop reaching them too",
+);
+await db.query(`DELETE FROM user_blocks WHERE blocker_id = $1`, [BOB]);
+
+// Removing yourself is the ONLY control a tagged coauthor has now that tags
+// apply immediately, so it has to work from the accepted state (the old
+// decline path only ever ran against a pending row).
+const collabRemove = await respondToCoauthorInvite(
+  BOB,
+  collabPost.post_id,
+  false,
+);
+assert.equal(
+  collabRemove?.author_id,
+  ALICE,
+  "an accepted coauthor can remove themselves",
+);
+assert.equal(
+  await acceptedCoauthor(collabPost.post_id),
+  null,
+  "…which severs the tag",
+);
+assert.ok(
+  !(await getUserPosts(BOB, BOB, 24)).some(
+    (p) => p.post_id === collabPost.post_id,
+  ),
+  "…and takes the post off their profile grid",
+);
+assert.ok(
+  await collabInFeedOf(ALICE),
+  "…while the post itself stays the author's",
 );
 
 // Heatmap endpoint query.
@@ -663,6 +1022,195 @@ assert.equal(
   "updating another preference leaves visibility alone",
 );
 await updateNotificationPreferences(BOB, { workout_visibility: "friends" });
+
+// ── feed_role: tiny/partial workouts must not spam the feed ─────────────────
+// The rule has four moving parts (a floor, a per-day rollup, an anchor, and the
+// invariant that none of it changes what COUNTS), and they're only correct
+// together — so they're asserted together, against the real upload path.
+{
+  const CARL = "ci-carl";
+  const roleDay = "2026-03-04";
+  await db.query(`DELETE FROM workouts WHERE user_id = $1`, [CARL]);
+  await db.query(
+    `INSERT INTO users (user_id, email, apple_sub, username, first_name)
+		 VALUES ($1,$2,$3,$4,$5) ON CONFLICT (user_id) DO NOTHING`,
+    [CARL, "carl@ci.local", "ci-sub-carl", "ci_carl", "carl"],
+  );
+  await db.query(
+    `INSERT INTO notification_settings (user_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+    [CARL],
+  );
+  for (const [a, b] of [
+    [CARL, BOB],
+    [BOB, CARL],
+  ]) {
+    await db.query(
+      `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1,$2,'accepted')
+			 ON CONFLICT (user_id, friend_id) DO NOTHING`,
+      [a, b],
+    );
+  }
+
+  const at = (id, distance, duration, hour) => ({
+    workoutId: id,
+    distance,
+    localDate: roleDay,
+    date: roleDay,
+    timezoneOffset: 0,
+    workoutType: "walking",
+    deviceEndDate: `${roleDay}T${String(hour).padStart(2, "0")}:00:00Z`,
+    calories: 40,
+    totalDuration: duration,
+    source: "healthkit",
+    splits: [],
+  });
+  const rolesOf = async () =>
+    Object.fromEntries(
+      (
+        await db.query(
+          `SELECT workout_id, feed_role FROM workouts WHERE user_id = $1 ORDER BY device_end_date`,
+          [CARL],
+        )
+      ).map((r) => [r.workout_id, r.feed_role]),
+    );
+  const carlEntries = async () =>
+    (await getUnifiedFeed(BOB, 50, null)).filter((e) => e.user_id === CARL);
+
+  // A 0.00-mile 3-second accident, then a mile built from three short walks.
+  await uploadWorkouts(CARL, [
+    at("ci-role-junk", 0.0, 3, 6),
+    at("ci-role-a", 0.33, 400, 8),
+    at("ci-role-b", 0.33, 400, 9),
+    at("ci-role-c", 0.4, 500, 10),
+  ]);
+  assert.deepEqual(
+    await rolesOf(),
+    {
+      "ci-role-junk": "hidden",
+      "ci-role-a": "rolled_up",
+      "ci-role-b": "rolled_up",
+      "ci-role-c": "daily_mile",
+    },
+    "a mile made of three walks rolls up behind the workout that completed it",
+  );
+
+  let entries = await carlEntries();
+  assert.equal(
+    entries.length,
+    1,
+    "three walks produce ONE feed card, not three",
+  );
+  assert.equal(
+    entries[0].workout_id,
+    "ci-role-c",
+    "card anchors on the crossing workout",
+  );
+  assert.equal(entries[0].segment_count, 3, "card reports its three segments");
+  assert.equal(
+    Number(entries[0].distance.toFixed(2)),
+    1.06,
+    "card shows the combined mile (this is what old clients render, unchanged)",
+  );
+  assert.equal(
+    entries[0].route,
+    null,
+    "no route on a stitched mile — the anchor's trace is only its last leg",
+  );
+
+  // The floor is a FEED rule. It must never change what counts.
+  const counted = await db.query(
+    `SELECT COALESCE(SUM(distance),0)::float AS t FROM workouts
+		 WHERE user_id = $1 AND local_date = $2::date
+			 AND deleted_at IS NULL AND exclusion_reason IS NULL`,
+    [CARL, roleDay],
+  );
+  assert.equal(
+    Number(counted[0].t.toFixed(2)),
+    1.06,
+    "hidden junk still counts toward the day's miles and the streak",
+  );
+
+  // Anything after the mile stands on its own, with its OWN distance.
+  await uploadWorkouts(CARL, [at("ci-role-extra", 2.0, 1800, 14)]);
+  entries = await carlEntries();
+  assert.equal(entries.length, 2, "a run after the mile gets its own card");
+  const extra = entries.find((e) => e.workout_id === "ci-role-extra");
+  assert.equal(
+    extra.distance,
+    2.0,
+    "the extra run reports itself, not the day",
+  );
+  assert.equal(extra.segment_count, null, "an extra run carries no rollup");
+
+  // A day that never reaches the mile shows nothing at all.
+  const shortDay = "2026-03-05";
+  await uploadWorkouts(CARL, [
+    {
+      ...at("ci-role-short", 0.4, 600, 8),
+      localDate: shortDay,
+      date: shortDay,
+    },
+  ]);
+  assert.equal(
+    (await carlEntries()).some((e) => e.workout_id === "ci-role-short"),
+    false,
+    "a sub-goal day produces no feed card",
+  );
+
+  // A post attached to the anchor must read the same on the profile grid as it
+  // does in the feed — POST_COLUMNS restates it via a subquery that returns no
+  // row for an unlinked post, so this also guards against nulling stats out.
+  await createPost({
+    userId: CARL,
+    mediaUrl: "/uploads/posts/ci-carl-photo.jpg",
+    caption: "three walks",
+    workoutId: "ci-role-c",
+    localDate: roleDay,
+    shareToFeed: true,
+    shareToStory: false,
+    statsSnapshot: { distance: 0.4, duration: 500, pace: 1250 },
+    isAuto: false,
+    includeRoute: false,
+  });
+  const carlGrid = await getUserPosts(CARL, CARL, 20);
+  const anchorPost = carlGrid.find((p) => p.workout_id === "ci-role-c");
+  assert.equal(
+    Number(anchorPost.stats_snapshot.distance.toFixed(2)),
+    1.06,
+    "profile grid restates an anchor post to the day's combined mile",
+  );
+  const unlinked = await createPost({
+    userId: CARL,
+    mediaUrl: "/uploads/posts/ci-carl-unlinked.jpg",
+    caption: "no workout",
+    workoutId: null,
+    localDate: roleDay,
+    shareToFeed: false,
+    shareToStory: true,
+    statsSnapshot: { distance: 3.3 },
+    isAuto: false,
+    includeRoute: false,
+  });
+  const unlinkedRow = (await getUserPosts(CARL, CARL, 20, null, true)).find(
+    (p) => p.post_id === unlinked.post_id,
+  );
+  assert.equal(
+    unlinkedRow.stats_snapshot.distance,
+    3.3,
+    "a post with no linked workout keeps its stats (not nulled by the rollup join)",
+  );
+
+  await db.query(`DELETE FROM posts WHERE user_id = $1`, [CARL]);
+  await db.query(`DELETE FROM workouts WHERE user_id = $1`, [CARL]);
+  await db.query(
+    `DELETE FROM friendships WHERE user_id = $1 OR friend_id = $1`,
+    [CARL],
+  );
+  await db.query(`DELETE FROM notification_settings WHERE user_id = $1`, [
+    CARL,
+  ]);
+  await db.query(`DELETE FROM users WHERE user_id = $1`, [CARL]);
+}
 
 console.log("ci-smoke: all assertions passed");
 process.exit(0);

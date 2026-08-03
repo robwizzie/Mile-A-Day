@@ -157,6 +157,20 @@ class APIClient {
         case 401:
             print("[APIClient] ❌ Unauthorized (401)")
             throw APIError.unauthorized
+        case 403:
+            // 403 is an AUTHORIZATION failure and must NOT blanket-trigger a
+            // sign-out — it's also how the server says "not friends with this
+            // user" or "admin only". But it is equally what `requireSelfAccess`
+            // returns when the userId in the path doesn't match the token's
+            // `sub`, and nothing else can catch that: the token verifies fine,
+            // so the 401 refresh/sign-out path never runs and the app sits
+            // "logged in" with friends and daily challenges permanently dead.
+            // Check for that one case; everything else keeps the old behaviour.
+            if await MainActor.run(body: { SessionIdentity.enforce() }) {
+                print("[APIClient] ❌ 403 from a wrong-account session — signed out")
+                throw APIError.accountMismatch
+            }
+            throw APIError.apiError(extractErrorMessage(from: data) ?? "Access denied")
         case 400:
             throw APIError.badRequest(extractErrorMessage(from: data) ?? "Bad request")
         case 404:
@@ -240,6 +254,10 @@ enum APIError: LocalizedError {
     case invalidResponse
     case notAuthenticated
     case unauthorized
+    /// The access token belongs to a different account than the one cached on
+    /// this device. Terminal — the session has already been torn down, so this
+    /// must not be retried or refreshed.
+    case accountMismatch
     case badRequest(String)
     case conflict(String)
     case rateLimited(String)
@@ -265,6 +283,8 @@ enum APIError: LocalizedError {
             return "User not authenticated"
         case .unauthorized:
             return "Unauthorized access"
+        case .accountMismatch:
+            return "You've been signed out — please sign in again."
         case .badRequest(let message):
             return "Bad request: \(message)"
         case .conflict(let message):

@@ -286,6 +286,32 @@ struct ProgressCalculator {
     }
 }
 
+/// The floor a workout must clear before it's treated as a real, shareable
+/// effort — mirroring `FEED_MIN_DISTANCE` / `FEED_MIN_DURATION` in the backend's
+/// workoutService.ts, the same way `dailyGoalTolerance` mirrors
+/// `DAILY_GOAL_TOLERANCE`. Keep the two in sync.
+///
+/// Below either bound is almost always an accident: a workout started and
+/// stopped by mistake, or a stray auto-detected sample. "0.00 mi in 3 seconds"
+/// is the canonical case. Such a workout still counts toward today's miles and
+/// the streak — it just doesn't get a feed card, a photo prompt, or a
+/// celebration of its own.
+enum WorkoutFeedFloor {
+    static let minDistance = 0.05  // miles
+    static let minDuration: TimeInterval = 30
+
+    static func isSubstantive(distance: Double, duration: TimeInterval) -> Bool {
+        distance >= minDistance && duration >= minDuration
+    }
+
+    static func isSubstantive(_ workout: HKWorkout) -> Bool {
+        isSubstantive(
+            distance: workout.totalDistance?.doubleValue(for: .mile()) ?? 0,
+            duration: workout.duration
+        )
+    }
+}
+
 // MARK: - Timezone Utilities for UI
 
 /// Helper function to get HealthKitManager instance from the environment

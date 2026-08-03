@@ -1,4 +1,5 @@
 import SwiftUI
+import HealthKit
 
 /// One-shot handoff from the notification inbox (or any other surface) to the
 /// feed: which workout's entry to reveal. Parked statically because the Feed
@@ -101,6 +102,8 @@ struct SocialFeedView: View {
     /// Tapped hype tally — presents the "who hyped this" sheet.
     @State private var hypersContext: HypersListContext?
     @State private var commentsPost: PostItem?
+    /// Post being shared as a link (system share sheet).
+    @State private var sharingURL: ShareURL?
     @State private var workoutCommentsTarget: WorkoutCommentsTarget?
     /// Profile tapped INSIDE the hypers sheet — presented after that sheet
     /// fully dismisses (sheet-over-sheet races drop the second presentation).
@@ -202,9 +205,15 @@ struct SocialFeedView: View {
     /// The workout the composer should attach to: the LATEST of today's
     /// walks/runs without a deliberate share yet. One share per walk/run is
     /// the reward — every new workout unlocks another photo.
+    ///
+    /// Sub-floor workouts are skipped. They'd otherwise be permanently
+    /// unshareable-but-unshared, so this always returned one and the compose
+    /// affordance never locked (see `alreadySharedWorkout`) — and a photo
+    /// attached to one would post against a workout the feed never shows.
     private var nextShareableWorkoutId: String? {
         let shared = mySharedWorkoutIds
         return healthManager.todaysWorkouts
+            .filter { WorkoutFeedFloor.isSubstantive($0) }
             .sorted { $0.startDate > $1.startDate }
             .first { !shared.contains($0.uuid.uuidString) }?
             .uuid.uuidString
@@ -238,7 +247,9 @@ struct SocialFeedView: View {
             return RunPostService.todayStats(workoutId: workoutId)
         }
 
-        let user = userManager.currentUser
+        // Backend streak when it's fresh: a post bakes its streak permanently,
+        // and the displayed one lags a real break by design (UserManager).
+        let streak = userManager.freshBackendStreak ?? userManager.currentUser.streak
         let duration = healthManager.todaysTotalDuration
         // todaysAveragePace is MINUTES per mile; sticker/snapshot use SECONDS.
         let paceSecPerMile = healthManager.todaysAveragePace.map { $0 * 60 }
@@ -248,7 +259,7 @@ struct SocialFeedView: View {
             distance: healthManager.todaysDistance,
             paceSecondsPerMile: (paceSecPerMile ?? 0) > 0 ? paceSecPerMile : nil,
             durationSeconds: duration > 0 ? duration : nil,
-            streak: user.streak,
+            streak: streak,
             calories: calories > 0 ? calories : nil,
             steps: steps > 0 ? steps : nil,
             // Link to the newest not-yet-shared workout so this post upserts
@@ -460,6 +471,9 @@ struct SocialFeedView: View {
                 }
             }
         }
+        .sheet(item: $sharingURL) { share in
+            ShareLinkSheet(url: share.url)
+        }
         .sheet(item: $workoutCommentsTarget) { target in
             CommentsSheet(
                 target: .workout(target.entry.entryId),
@@ -622,6 +636,10 @@ struct SocialFeedView: View {
         if entry.isPost, let post = entry.asPostItem() {
             let isMyPendingInvite = post.coauthor_status == "pending"
                 && post.coauthor_user_id == currentUserId
+            // Accepted coauthor: the post is theirs too, so the card must not
+            // offer them Hype/Report/Block on it — only a way out of it.
+            let isMyAcceptedCollab = post.hasAcceptedCoauthor
+                && post.coauthor_user_id == currentUserId
             // The collab coauthor's name/avatar routes to THEIR profile (nil
             // when it's the viewer, or while the invite is still pending).
             let openCoauthorProfile: (() -> Void)? =
@@ -664,6 +682,13 @@ struct SocialFeedView: View {
                 onOpenComments: { commentsPost = post },
                 onRespondCoauthor: isMyPendingInvite
                     ? { accept in Task { await respondToCoauthor(post, accept: accept) } }
+                    : nil,
+                onShare: { sharingURL = ShareURL(url: PostShareLink.url(for: post.post_id)) },
+                onLeaveCollab: isMyAcceptedCollab
+                    ? { Task { await respondToCoauthor(post, accept: false) } }
+                    : nil,
+                onSetCollabOnProfile: isMyAcceptedCollab
+                    ? { onProfile in Task { await setCollabOnProfile(entry, onProfile: onProfile) } }
                     : nil
             )
         } else {
@@ -731,7 +756,7 @@ struct SocialFeedView: View {
     /// Resolves against loaded entries, refreshing once and then paging a
     /// few times if needed (an inbox tapped a day later usually points past
     /// page 1). Double scrollTo — a LazyVStack lands short on deep targets
-    /// (see ProfilePostsFeedSheet).
+    /// (see PostDetailView).
     private func revealDeepLink(using proxy: ScrollViewProxy) {
         guard let target = FeedDeepLink.pending else { return }
 
@@ -899,7 +924,14 @@ struct SocialFeedView: View {
         // the rail + own-stories round trips (three serial fetches), which was
         // the bulk of the "feed takes forever to load" wait.
         async let railFetch = PostService.fetchStoriesRail()
+        // Timing is measured around the feed request ALONE. Measuring the whole
+        // of refresh() reports the same number for every request, because the
+        // concurrent calls share one HTTP/2 connection and a slow feed response
+        // head-of-line blocks the rest — which reads as "stories are slow too"
+        // when only the feed is.
+        let feedStart = Date()
         let feedResponse = try? await PostService.fetchUnifiedFeed(before: nil)
+        print("[Feed] unified feed: \(Int(Date().timeIntervalSince(feedStart) * 1000))ms")
         await MainActor.run {
             if let feedResponse {
                 feed = feedResponse.items
@@ -995,6 +1027,10 @@ struct SocialFeedView: View {
 
     private func hype(_ entry: FeedEntry) async {
         guard !entry.is_self, !entry.is_hyped, !hypingIds.contains(entry.id) else { return }
+        // A collab you're an author on is your own post — the server rejects
+        // the hype, so don't play the burst and then silently walk it back.
+        guard !(entry.coauthor_status == "accepted"
+            && entry.coauthor_user_id == currentUserId) else { return }
         // Optimistic, Instagram-style: the card flips to "Hyped" and the tally
         // bumps the instant the user acts — the network round-trip happens
         // behind it and only a rejection walks it back.
@@ -1100,6 +1136,26 @@ struct SocialFeedView: View {
             try await PostService.respondToCoauthor(postId: post.post_id, accept: accept)
             await refresh()
         } catch {}
+    }
+
+    /// Pin a collab I'm tagged in on/off MY profile grid. Nothing about the
+    /// feed changes — the post keeps its place here and in everyone else's
+    /// feed — so this updates the card's state in place rather than refreshing
+    /// and yanking the reader's scroll position for a change they can't see.
+    private func setCollabOnProfile(_ entry: FeedEntry, onProfile: Bool) async {
+        await MainActor.run {
+            MADHaptics.tap()
+            updateEntry(entry.id) { $0.coauthor_on_profile = onProfile }
+        }
+        do {
+            try await PostService.setCoauthorOnProfile(
+                postId: entry.entryId, onProfile: onProfile
+            )
+        } catch {
+            await MainActor.run {
+                updateEntry(entry.id) { $0.coauthor_on_profile = !onProfile }
+            }
+        }
     }
 
     private func updateEntry(_ id: String, _ mutate: (inout FeedEntry) -> Void) {

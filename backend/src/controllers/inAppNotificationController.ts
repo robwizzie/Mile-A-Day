@@ -1,7 +1,54 @@
 import { Request, Response } from "express";
 import { PostgresService } from "../services/DbService.js";
+import {
+  visiblePostPreviews,
+  lockUnearnedPhotos,
+  ViewerGoalGate,
+} from "../services/postService.js";
+import { getDailyGoalStatus } from "../services/workoutService.js";
+import { signMediaUrlsDeep } from "../services/mediaSigningService.js";
 
 const db = PostgresService.getInstance();
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The OTHER person a notification is about, when there is one. Push payloads
+ * consistently carry them under one of three keys: `user_id` (friend/social
+ * types), `sender_id` (badge/PR/challenge types), `rival_id` (head-to-head).
+ * Types with no actor (daily_reminder, competition lifecycle, streak tokens)
+ * fall through to null and the client keeps its type-icon rendering.
+ */
+function actorIdFor(data: Record<string, any>): string | null {
+  for (const key of ["user_id", "sender_id", "rival_id"]) {
+    const v = data[key];
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  return null;
+}
+
+/**
+ * The post a notification row is about, when it's about one. `post_id` rides
+ * in post/comment/mention/coauthor payloads (and merged mile+photo
+ * friend_activity pushes); post-context hypes carry the post uuid as
+ * `context_id`. Story rows are excluded — an inbox thumbnail would outlive
+ * the story's 24h window, and their tap target is the story viewer anyway.
+ */
+function postIdFor(row: {
+  type: string;
+  data: Record<string, any>;
+}): string | null {
+  const { type, data } = row;
+  if (data.kind === "story" || type === "story_reaction") return null;
+  let candidate: unknown = data.post_id;
+  if (!candidate && type === "hype_received" && data.context_type === "post") {
+    candidate = data.context_id;
+  }
+  return typeof candidate === "string" && UUID_RE.test(candidate)
+    ? candidate
+    : null;
+}
 
 interface HypeDerivation {
   hype_target_user_id: string | null;
@@ -120,6 +167,25 @@ export async function getInAppNotifications(req: Request, res: Response) {
     // Pass 1: derive hype context for each row.
     const derived = rows.map((r) => ({ row: r, hype: deriveHypeContext(r) }));
 
+    // Actor avatars + post thumbnails (Instagram-style rows): resolve who each
+    // notification is about and, when it's about a post, that post's media.
+    // Both are batched across the page. Self rows keep actor null — the inbox
+    // never needs to show the recipient their own avatar.
+    const actorIds = [
+      ...new Set(
+        rows
+          .map((r) => actorIdFor(r.data ?? {}))
+          .filter((id): id is string => id !== null && id !== userId),
+      ),
+    ];
+    const previewPostIds = [
+      ...new Set(
+        rows
+          .map((r) => postIdFor({ type: r.type, data: r.data ?? {} }))
+          .filter((id): id is string => id !== null),
+      ),
+    ];
+
     // Pass 2: batch-query is_hyped for rows that have a context.
     const ctxKeys = derived
       .filter(
@@ -166,63 +232,104 @@ export async function getInAppNotifications(req: Request, res: Response) {
 					AND (w.user_id || ':' || w.local_date::text) = t.context_id
 			))`;
 
-    const [hypedOther, countsOther, mileStats, unreadCount] = await Promise.all(
-      [
-        otherKeys.length > 0
-          ? db.query<{
-              target_id: string;
-              context_type: string;
-              context_id: string;
-            }>(
-              `SELECT target_id, context_type, context_id
+    const [
+      hypedOther,
+      countsOther,
+      mileStats,
+      unreadCount,
+      actorRows,
+      previewRows,
+    ] = await Promise.all([
+      otherKeys.length > 0
+        ? db.query<{
+            target_id: string;
+            context_type: string;
+            context_id: string;
+          }>(
+            `SELECT target_id, context_type, context_id
 					FROM hype_log
 					WHERE sender_id = $1
 						AND (target_id, context_type, context_id) IN (
 							SELECT * FROM UNNEST($2::text[], $3::text[], $4::text[])
 						)`,
-              [userId, otherTargetIds, otherTypes, otherIds],
-            )
-          : Promise.resolve([]),
-        otherKeys.length > 0
-          ? db.query<{
-              target_id: string;
-              context_type: string;
-              context_id: string;
-              cnt: number;
-            }>(
-              `SELECT target_id, context_type, context_id,
+            [userId, otherTargetIds, otherTypes, otherIds],
+          )
+        : Promise.resolve([]),
+      otherKeys.length > 0
+        ? db.query<{
+            target_id: string;
+            context_type: string;
+            context_id: string;
+            cnt: number;
+          }>(
+            `SELECT target_id, context_type, context_id,
 						COUNT(DISTINCT sender_id)::int AS cnt
 					FROM hype_log
 					WHERE (target_id, context_type, context_id) IN (
 							SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[])
 						)
 					GROUP BY target_id, context_type, context_id`,
-              [otherTargetIds, otherTypes, otherIds],
-            )
-          : Promise.resolve([]),
-        mileKeys.length > 0
-          ? db.query<{
-              target_id: string;
-              context_id: string;
-              cnt: number;
-              viewer_hyped: boolean;
-            }>(
-              `SELECT t.target_id, t.context_id,
+            [otherTargetIds, otherTypes, otherIds],
+          )
+        : Promise.resolve([]),
+      mileKeys.length > 0
+        ? db.query<{
+            target_id: string;
+            context_id: string;
+            cnt: number;
+            viewer_hyped: boolean;
+          }>(
+            `SELECT t.target_id, t.context_id,
 						COUNT(DISTINCT h.sender_id)::int AS cnt,
 						BOOL_OR(h.sender_id = $3) AS viewer_hyped
 					FROM UNNEST($1::text[], $2::text[]) AS t(target_id, context_id)
 					JOIN hype_log h ON h.target_id = t.target_id AND (${MILE_RUN_MATCH})
 					GROUP BY t.target_id, t.context_id`,
-              [mileTargetIds, mileIds, userId],
-            )
-          : Promise.resolve([]),
-        db.query(
-          `SELECT COUNT(*) as count FROM in_app_notifications
+            [mileTargetIds, mileIds, userId],
+          )
+        : Promise.resolve([]),
+      db.query(
+        `SELECT COUNT(*) as count FROM in_app_notifications
 			WHERE user_id = $1 AND is_read = FALSE`,
-          [userId],
-        ),
-      ],
-    );
+        [userId],
+      ),
+      actorIds.length > 0
+        ? db.query<{
+            user_id: string;
+            username: string | null;
+            first_name: string | null;
+            last_name: string | null;
+            profile_image_url: string | null;
+          }>(
+            `SELECT user_id, username, first_name, last_name, profile_image_url
+					FROM users WHERE user_id = ANY($1::text[])`,
+            [actorIds],
+          )
+        : Promise.resolve([]),
+      visiblePostPreviews(userId, previewPostIds),
+    ]);
+
+    // Same "run to see today's photos" gate the feed applies — an inbox
+    // thumbnail must not leak a photo the feed would still have locked.
+    // Fail-OPEN like the feed's viewerPhotoGate: a stats hiccup should
+    // never blank thumbnails wholesale.
+    if (previewRows.length > 0) {
+      let gate: ViewerGoalGate;
+      try {
+        const goal = await getDailyGoalStatus(userId);
+        gate = { completed: goal.completed, localDate: goal.localDate };
+      } catch (e: any) {
+        console.error(
+          "[inbox] viewer photo gate failed, failing open:",
+          e?.message ?? e,
+        );
+        gate = { completed: true, localDate: "" };
+      }
+      lockUnearnedPhotos(previewRows, userId, gate);
+    }
+
+    const actorById = new Map(actorRows.map((a) => [a.user_id, a]));
+    const previewByPostId = new Map(previewRows.map((p) => [p.post_id, p]));
 
     const hypedSet = new Set<string>();
     for (const h of hypedOther) {
@@ -249,6 +356,13 @@ export async function getInAppNotifications(req: Request, res: Response) {
           ? `${hype.hype_target_user_id}|${hype.hype_context_type}|${hype.hype_context_id}`
           : null;
       const isHyped = key !== null && hypedSet.has(key);
+      const actorId = actorIdFor(row.data ?? {});
+      const actor = actorId !== null ? (actorById.get(actorId) ?? null) : null;
+      const previewPostId = postIdFor({ type: row.type, data: row.data ?? {} });
+      const preview =
+        previewPostId !== null
+          ? (previewByPostId.get(previewPostId) ?? null)
+          : null;
       return {
         id: row.id,
         title: row.title,
@@ -263,13 +377,31 @@ export async function getInAppNotifications(req: Request, res: Response) {
         hype_context_label: hype.hype_context_label,
         is_hyped: isHyped,
         hype_count: key !== null ? (countByKey.get(key) ?? 0) : null,
+        // Instagram-style row furniture: who the row is about (avatar +
+        // bold name client-side) and, when it's about a post the viewer may
+        // still see, that post's media for the trailing thumbnail. Absent on
+        // rows with no actor/post — clients keep the type-icon fallback.
+        actor,
+        post_preview: preview
+          ? {
+              post_id: preview.post_id,
+              // Blanked to "" by the gate when locked — same shape the feed
+              // sends; photo_locked tells new clients to draw the lock tile.
+              media_url: preview.media_url,
+              photo_locked: preview.photo_locked === true,
+            }
+          : null,
       };
     });
 
-    res.json({
-      notifications,
-      unread_count: parseInt(unreadCount[0]?.count ?? "0"),
-    });
+    // signMediaUrlsDeep stamps the post_preview media paths (profile images
+    // are public and pass through untouched).
+    res.json(
+      signMediaUrlsDeep({
+        notifications,
+        unread_count: parseInt(unreadCount[0]?.count ?? "0"),
+      }),
+    );
   } catch (error: any) {
     console.error("Error getting in-app notifications:", error.message);
     res.status(500).json({ error: "Failed to get notifications" });

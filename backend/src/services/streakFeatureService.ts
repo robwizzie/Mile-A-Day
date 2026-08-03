@@ -3,6 +3,7 @@ import {
   streakFeaturesGloballyEnabled,
   getStreakFeatureRow,
   dateStrMinus,
+  dateStrPlus,
   streakEndingAt,
   StreakFeatureUserRow,
 } from "./streakFeatureCore.js";
@@ -534,9 +535,16 @@ export async function giveStreakAssist(
   const friendToday = await getUserLocalToday(friendId);
   const events = await db.query<{ local_date: string; prior_streak: number }>(
     `SELECT to_char(local_date, 'YYYY-MM-DD') AS local_date, prior_streak
-     FROM streak_events
-     WHERE user_id = $1 AND kind = 'break' AND local_date >= $2::date
-     ORDER BY local_date DESC LIMIT 1`,
+     FROM streak_events e
+     WHERE e.user_id = $1 AND e.kind = 'break' AND e.local_date >= $2::date
+       -- An already-covered break is settled; without this filter a stale row
+       -- shadows the live break and the caller gets 'already_saved' for a day
+       -- nobody is trying to save.
+       AND NOT EXISTS (
+         SELECT 1 FROM streak_coverage sc
+         WHERE sc.user_id = e.user_id AND sc.local_date = e.local_date
+       )
+     ORDER BY e.local_date DESC LIMIT 1`,
     [friendId, dateStrMinus(friendToday, ASSIST_RESCUE_WINDOW_DAYS + 1)],
   );
   const liveBreak =
@@ -683,6 +691,13 @@ export async function getStreakFeaturesPayload(
   };
 }
 
+/**
+ * Why the broken user could still fix this themselves. Purely informational —
+ * it never blocks the Assist, it just lets the giver's confirmation sheet say
+ * "they can still earn this back today" before a token is spent.
+ */
+export type SelfRecovery = "double_down" | "streak_save" | null;
+
 export interface AssistableFriend {
   user_id: string;
   username: string | null;
@@ -691,6 +706,9 @@ export interface AssistableFriend {
   profile_image_url: string | null;
   broke_date: string;
   prior_streak: number;
+  /** The streak the friend ENDS UP with once this day is covered. */
+  restored_streak: number;
+  self_recovery: SelfRecovery;
 }
 
 /**
@@ -701,7 +719,9 @@ export interface AssistableFriend {
 export async function getAssistableFriends(
   userId: string,
 ): Promise<AssistableFriend[]> {
-  const eventRows = await db.query<AssistableFriend>(
+  const eventRows = await db.query<
+    Omit<AssistableFriend, "restored_streak" | "self_recovery">
+  >(
     `SELECT e.user_id, u.username, u.first_name, u.last_name,
             u.profile_image_url,
             to_char(e.local_date, 'YYYY-MM-DD') AS broke_date,
@@ -729,6 +749,25 @@ export async function getAssistableFriends(
      LIMIT 20`,
     [userId],
   );
+
+  // A stamped break says nothing about where the friend has got to since —
+  // project each one so the CTA can promise the streak they'd actually land on.
+  const stampedRows: AssistableFriend[] = [];
+  for (const row of eventRows) {
+    const detail = await stampedBreakDetail(row.user_id, row.broke_date);
+    // Don't advertise a rescue the give call would refuse.
+    if (!detail.bridged || !detail.inWindow) continue;
+    stampedRows.push({
+      ...row,
+      // Live value, not the stamped snapshot — see stampedBreakDetail. Also
+      // what the client falls back to when it can't read restored_streak.
+      prior_streak: detail.prior,
+      restored_streak: detail.restored,
+      // The sweep only stamps a break once no token of the friend's own could
+      // cover it, so there is nothing left for them to self-recover with.
+      self_recovery: null,
+    });
+  }
 
   const seen = new Set(eventRows.map((row) => row.user_id));
   const friendRows = await db.query<{
@@ -768,17 +807,242 @@ export async function getAssistableFriends(
       ...friend,
       broke_date: liveBreak.local_date,
       prior_streak: liveBreak.prior_streak,
+      restored_streak: liveBreak.restored_streak,
+      self_recovery: liveBreak.self_recovery,
     });
   }
 
-  return [...eventRows, ...liveRows].slice(0, 20);
+  return [...stampedRows, ...liveRows].slice(0, 20);
 }
 
+export interface FriendRescueStatus {
+  /** A break exists that spending an Assist right now would repair. */
+  available: boolean;
+  /** Present whenever `available` — the day that would be covered. */
+  missed_date?: string;
+  /** The run that ended at the miss (what broke). */
+  prior_streak?: number;
+  /** What the friend's streak becomes once it's covered. */
+  restored_streak?: number;
+  /** The friend's own token that could still fix this. Informational only. */
+  self_recovery?: SelfRecovery;
+  /** Whether the CALLER can actually spend an Assist right now. */
+  viewer_holds_assist: boolean;
+  /** The caller's Assist meter, so a locked CTA can show how far off it is. */
+  viewer_meter: { progress: number; target: number };
+  /**
+   * Why nothing is offered, when `available` is false.
+   *
+   * `gap_too_wide` / `window_passed` mean a break EXISTS but no single
+   * coverage row can bring it back — distinct from `no_recent_break`, which
+   * means there's nothing wrong with them at all. The client renders those two
+   * as an explanation rather than as silence: "no rescue possible" and "this
+   * feature is broken" looked identical before, which is how a friend three
+   * days into a gap read as a bug.
+   */
+  reason?:
+    | "disabled"
+    | "not_enrolled"
+    | "friend_not_enrolled"
+    | "forbidden"
+    | "no_recent_break"
+    | "gap_too_wide"
+    | "window_passed"
+    | "self";
+}
+
+const NO_RESCUE = (
+  reason: FriendRescueStatus["reason"],
+): FriendRescueStatus => ({
+  available: false,
+  viewer_holds_assist: false,
+  viewer_meter: { progress: 0, target: STREAK_ASSIST_TARGET_MILES },
+  reason,
+});
+
+/**
+ * Everything one friend's profile needs to render (or explain the absence of)
+ * the Save Streak CTA. Deliberately a per-friend read rather than a field on
+ * the status payload: the profile needs it for a friend the caller might not
+ * be able to rescue YET, and `getAssistableFriends` is an N+1 walk that only
+ * pays for itself when the caller is already holding a token.
+ */
+export async function getFriendRescueStatus(
+  viewerId: string,
+  friendId: string,
+): Promise<FriendRescueStatus> {
+  if (!streakFeaturesGloballyEnabled()) return NO_RESCUE("disabled");
+  if (viewerId === friendId) return NO_RESCUE("self");
+
+  const [viewerRow, friendRow] = await Promise.all([
+    getStreakFeatureRow(viewerId),
+    getStreakFeatureRow(friendId),
+  ]);
+  if (!viewerRow?.streak_features_at) return NO_RESCUE("not_enrolled");
+
+  const viewerToday = await getUserLocalToday(viewerId);
+  const viewerMeters = await getMeters(viewerId, viewerRow, viewerToday);
+  const base = {
+    viewer_holds_assist: viewerMeters.streak_assist.held,
+    viewer_meter: {
+      progress: viewerMeters.streak_assist.progress,
+      target: viewerMeters.streak_assist.target,
+    },
+  };
+
+  // How far gone is this friend's streak? Computed once and reused for every
+  // "no, and here's why" answer below. The profile renders NOTHING when a
+  // rescue isn't possible, so a vague reason is indistinguishable from the
+  // feature being broken — which is exactly how it read in practice.
+  const friendToday = await getUserLocalToday(friendId);
+  const facts = await recentDayFacts(friendId, dateStrMinus(friendToday, 4));
+  const dayOk = (d: string) => facts.qualified.has(d) || facts.covered.has(d);
+  const d1 = dateStrMinus(friendToday, 1);
+  const d2 = dateStrMinus(friendToday, 2);
+  const d3 = dateStrMinus(friendToday, 3);
+  // The only two shapes a single missed day can take (yesterday, or the day
+  // before with yesterday made up). Anything else is a multi-day hole that no
+  // single coverage row can bridge.
+  const singleDayMiss =
+    (!dayOk(d1) && dayOk(d2)) || (dayOk(d1) && !dayOk(d2) && dayOk(d3));
+  const multiDayGap = !dayOk(d1) && !dayOk(d2);
+
+  // An un-enrolled friend can't be covered (their streak walk is the legacy
+  // one and would never see the coverage row). Report that only when they
+  // ACTUALLY have a break, so the profile can say "they need the update" at the
+  // one moment it matters instead of on every friend who hasn't updated.
+  if (!friendRow?.streak_features_at) {
+    return {
+      ...base,
+      available: false,
+      reason: singleDayMiss
+        ? "friend_not_enrolled"
+        : multiDayGap
+          ? "gap_too_wide"
+          : "no_recent_break",
+    };
+  }
+
+  const allowed = await db.query(
+    `SELECT 1 FROM friendships f
+     WHERE f.user_id = $1 AND f.friend_id = $2 AND f.status = 'accepted'
+       AND NOT EXISTS (
+         SELECT 1 FROM user_blocks b
+         WHERE (b.blocker_id = $1 AND b.blocked_id = $2)
+            OR (b.blocker_id = $2 AND b.blocked_id = $1)
+       )`,
+    [viewerId, friendId],
+  );
+  if (allowed.length === 0)
+    return { ...base, available: false, reason: "forbidden" };
+
+  // `prior_streak` deliberately not selected: stampedBreakDetail re-derives it.
+  const stamped = await db.query<{ local_date: string }>(
+    `SELECT to_char(e.local_date, 'YYYY-MM-DD') AS local_date
+     FROM streak_events e
+     WHERE e.user_id = $1 AND e.kind = 'break'
+       AND e.local_date >= $2::date
+       AND NOT EXISTS (
+         SELECT 1 FROM streak_coverage sc
+         WHERE sc.user_id = e.user_id AND sc.local_date = e.local_date
+       )
+     ORDER BY e.local_date DESC LIMIT 1`,
+    [friendId, dateStrMinus(friendToday, ASSIST_RESCUE_WINDOW_DAYS)],
+  );
+
+  let breakInfo: LiveBreak | null = null;
+  // Set when a break EXISTS but can't be rescued — the difference between
+  // "nothing to do here" and "too late", which the user has to be told.
+  let blocked: FriendRescueStatus["reason"] = undefined;
+  if (stamped[0]) {
+    const detail = await stampedBreakDetail(friendId, stamped[0].local_date);
+    if (!detail.bridged) {
+      // Checked before the window: a second missed day is the more
+      // fundamental reason, and the more useful thing to say.
+      blocked = "gap_too_wide";
+    } else if (!detail.inWindow) {
+      blocked = "window_passed";
+    } else {
+      breakInfo = {
+        local_date: stamped[0].local_date,
+        prior_streak: detail.prior,
+        restored_streak: detail.restored,
+        self_recovery: null,
+      };
+    }
+  } else {
+    breakInfo = await getLiveAssistableBreak(friendId, friendToday, friendRow);
+  }
+
+  if (
+    !breakInfo ||
+    breakInfo.local_date < dateStrMinus(friendToday, ASSIST_RESCUE_WINDOW_DAYS)
+  ) {
+    return {
+      ...base,
+      available: false,
+      // A multi-day hole with no stamped event (the sweep never reached it, or
+      // the break predates the query window) still has to explain itself —
+      // that's the JoePo case, three missed days and a silent profile.
+      reason: blocked ?? (multiDayGap ? "gap_too_wide" : "no_recent_break"),
+    };
+  }
+
+  return {
+    ...base,
+    available: true,
+    missed_date: breakInfo.local_date,
+    prior_streak: breakInfo.prior_streak,
+    restored_streak: breakInfo.restored_streak,
+    self_recovery: breakInfo.self_recovery,
+  };
+}
+
+interface LiveBreak {
+  local_date: string;
+  prior_streak: number;
+  restored_streak: number;
+  self_recovery: SelfRecovery;
+}
+
+/**
+ * The streak the user would be sitting on the moment `missedDay` gets covered:
+ * the run that ended at the miss, plus the covered day itself, plus every
+ * intact day since (today included when they've already run it). This — not
+ * `prior_streak` — is the number a giver is actually buying, and it's what the
+ * confirmation sheet shows before a token is spent.
+ */
+function projectRestoredStreak(
+  missedDay: string,
+  userToday: string,
+  priorStreak: number,
+  ok: (d: string) => boolean,
+): number {
+  let total = priorStreak + 1; // + the covered day
+  let cursor = dateStrPlus(missedDay, 1);
+  while (cursor <= userToday && ok(cursor)) {
+    total++;
+    cursor = dateStrPlus(cursor, 1);
+  }
+  return total;
+}
+
+/**
+ * A break the user hasn't recovered from, derived live (i.e. before/without a
+ * stamped `streak_events` row).
+ *
+ * Deliberately does NOT hide the rescue while the user still holds a Double
+ * Down or a Streak Save. It used to, and that left a dead zone: the sweep sees
+ * an open Double Down window, returns "waiting", and for the rest of that day
+ * the streak reads broken everywhere while no friend can do anything about it.
+ * The token they hold is reported as `self_recovery` instead, so the giver's
+ * confirmation sheet can say so and they decide.
+ */
 async function getLiveAssistableBreak(
   userId: string,
   userToday: string,
   row: StreakFeatureUserRow,
-): Promise<{ local_date: string; prior_streak: number } | null> {
+): Promise<LiveBreak | null> {
   const d1 = dateStrMinus(userToday, 1);
   const d2 = dateStrMinus(userToday, 2);
   const d3 = dateStrMinus(userToday, 3);
@@ -797,10 +1061,72 @@ async function getLiveAssistableBreak(
   }
 
   const meters = await getMeters(userId, row, userToday);
-  if (ddWindowOpen && meters.double_down.held) return null;
-  if (meters.streak_save.held) return null;
+  const selfRecovery: SelfRecovery =
+    ddWindowOpen && meters.double_down.held
+      ? "double_down"
+      : meters.streak_save.held
+        ? "streak_save"
+        : null;
 
   const prior = await streakEndingAt(userId, dateStrMinus(missedDay, 1));
   if (prior < 1) return null;
-  return { local_date: missedDay, prior_streak: prior };
+  return {
+    local_date: missedDay,
+    prior_streak: prior,
+    restored_streak: projectRestoredStreak(missedDay, userToday, prior, ok),
+    self_recovery: selfRecovery,
+  };
+}
+
+/**
+ * Restored-streak projection for a break we already have stamped, plus whether
+ * covering it actually reconnects. `bridged` mirrors the gap check
+ * `giveStreakAssist` enforces (tokens never partially bridge) — without it a
+ * stamped break with a second hole after it would advertise a Save Streak CTA
+ * that the POST then rejects with `gap_too_wide`.
+ *
+ * `prior` is RE-DERIVED here rather than read off `streak_events.prior_streak`.
+ * The stored column is a snapshot taken by `recordBreak` at stamp time, and
+ * every row written before the `streakEndingAt` island fix holds a `1` — so
+ * trusting it would keep serving "back to 2 days" to real users long after the
+ * query was corrected. Re-deriving is also just more truthful: a late-syncing
+ * Watch workout can land on a day BEFORE the miss and legitimately lengthen the
+ * run being bought. Days at or before the miss are settled history, so this is
+ * stable across reads within a day.
+ */
+async function stampedBreakDetail(
+  userId: string,
+  missedDay: string,
+): Promise<{
+  prior: number;
+  restored: number;
+  bridged: boolean;
+  inWindow: boolean;
+}> {
+  const userToday = await getUserLocalToday(userId);
+  const facts = await recentDayFacts(userId, missedDay);
+  const ok = (d: string) => facts.qualified.has(d) || facts.covered.has(d);
+
+  let bridged = true;
+  let cursor = dateStrPlus(missedDay, 1);
+  while (cursor < userToday) {
+    if (!ok(cursor)) {
+      bridged = false;
+      break;
+    }
+    cursor = dateStrPlus(cursor, 1);
+  }
+
+  const prior = await streakEndingAt(userId, dateStrMinus(missedDay, 1));
+
+  return {
+    prior,
+    restored: projectRestoredStreak(missedDay, userToday, prior, ok),
+    bridged,
+    // The list query bounds break age by the SERVER's CURRENT_DATE; the give
+    // call bounds it by the FRIEND's local today. For anyone west of UTC those
+    // are different days, so a break can pass the list and then come back
+    // `window_passed`. Re-check it against the friend's own clock.
+    inWindow: missedDay >= dateStrMinus(userToday, ASSIST_RESCUE_WINDOW_DAYS),
+  };
 }

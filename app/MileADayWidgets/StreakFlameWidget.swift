@@ -23,8 +23,11 @@ struct StreakFlameEntry: TimelineEntry {
     /// Fraction of the day left (1→0). Drives the flame's burn-down; nil when
     /// blazing (done) or coal (no streak), which render at their own size.
     let vigor: Double?
-    /// Hours/minutes left, e.g. "5h 12m" (nil when the mile is done).
-    let timeLeftValue: String?
+    /// Deadline for today's mile (next local midnight); nil when it's done.
+    /// Rendered as a live countdown, never as a string baked at build time —
+    /// entries can sit on screen for an hour, which is how this widget read
+    /// "7h 24m left" at 5:28 PM while the dashboard said "6h 30m".
+    let dayEnd: Date?
     let tokensReady: Int
     let isFun: Bool
 
@@ -34,10 +37,12 @@ struct StreakFlameEntry: TimelineEntry {
 struct StreakFlameProvider: TimelineProvider {
     private struct Snapshot {
         let streak: Int
-        let progress: Double
-        let miles: Double
+        /// `var` so the timeline can derive a fresh-day copy for the entry it
+        /// bakes at midnight (see getTimeline).
+        var progress: Double
+        var miles: Double
         let goal: Double
-        let completed: Bool
+        var completed: Bool
         let tokensReady: Int
         let isFun: Bool
     }
@@ -52,7 +57,7 @@ struct StreakFlameProvider: TimelineProvider {
             isGoalCompleted: false,
             health: .healthy,
             vigor: 0.62,
-            timeLeftValue: "5h 51m",
+            dayEnd: MADWidgetClock.endOfDay(),
             tokensReady: 3,
             isFun: true
         )
@@ -64,21 +69,25 @@ struct StreakFlameProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<StreakFlameEntry>) -> Void) {
         let snapshot = loadSnapshot()
-        let calendar = Calendar.current
-        let now = Date()
-        let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))
-            ?? now.addingTimeInterval(3600)
 
-        var entries: [StreakFlameEntry] = []
-        var cursor = now
-        while cursor < midnight {
-            entries.append(makeEntry(date: cursor, snapshot: snapshot))
-            cursor = cursor.addingTimeInterval(3600)
-        }
-        if entries.isEmpty {
-            entries.append(makeEntry(date: now, snapshot: snapshot))
-        }
-        completion(Timeline(entries: entries, policy: .after(midnight)))
+        // Entries land on real hour boundaries (not at an arbitrary offset from
+        // whenever the timeline happened to be built), so the flame's burn-down
+        // and the at-risk switch step when they actually should.
+        let dayEnd = MADWidgetClock.endOfDay()
+        var entries = MADWidgetClock.hourlyEntryDates().map { makeEntry(date: $0, snapshot: snapshot) }
+        if entries.isEmpty { entries = [makeEntry(date: Date(), snapshot: snapshot)] }
+
+        // Safety net at the day boundary: the store would read as a fresh empty
+        // day here anyway, so bake that entry now. If iOS drops the midnight
+        // reload the flame still relights for the new day instead of sitting
+        // "blazing / streak safe" on yesterday's mile all morning.
+        var freshDay = snapshot
+        freshDay.progress = 0
+        freshDay.miles = 0
+        freshDay.completed = false
+        entries.append(makeEntry(date: dayEnd, snapshot: freshDay))
+
+        completion(Timeline(entries: entries, policy: .after(dayEnd)))
     }
 
     private func loadSnapshot() -> Snapshot {
@@ -95,10 +104,9 @@ struct StreakFlameProvider: TimelineProvider {
     }
 
     private func makeEntry(date: Date, snapshot: Snapshot) -> StreakFlameEntry {
-        let calendar = Calendar.current
-        let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: date)) ?? date
+        let midnight = MADWidgetClock.endOfDay(after: date)
         let secondsToReset = max(0, midnight.timeIntervalSince(date))
-        let isAtRisk = !snapshot.completed && calendar.component(.hour, from: date) >= 18
+        let isAtRisk = MADWidgetClock.isAtRisk(at: date, isCompleted: snapshot.completed)
         let health = FlameHealth.forState(
             isCompleted: snapshot.completed,
             distanceIsFresh: true,
@@ -116,16 +124,10 @@ struct StreakFlameProvider: TimelineProvider {
             isGoalCompleted: snapshot.completed,
             health: health,
             vigor: burning ? min(max(secondsToReset / StreakFlameClock.dayLength, 0), 1) : nil,
-            timeLeftValue: snapshot.completed ? nil : Self.timeLeftValue(secondsToReset),
+            dayEnd: snapshot.completed ? nil : midnight,
             tokensReady: snapshot.tokensReady,
             isFun: snapshot.isFun
         )
-    }
-
-    private static func timeLeftValue(_ seconds: TimeInterval) -> String {
-        let hours = Int(seconds) / 3600
-        let minutes = Int(seconds) % 3600 / 60
-        return hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
     }
 }
 
@@ -170,7 +172,9 @@ private struct FlameArt: View {
 /// label. Mirrors `ModernHeroStatLine`.
 private struct FlameStat: View {
     let icon: String
-    let value: String
+    /// A `Text` rather than a `String` so the "left today" row can carry a
+    /// self-updating countdown instead of a value baked at build time.
+    let value: Text
     let unit: String
     let label: String
     let tint: Color
@@ -185,7 +189,7 @@ private struct FlameStat: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text(value)
+                    value
                         .font(.system(size: 17, weight: .black, design: .rounded))
                         .monospacedDigit()
                         .foregroundColor(.white)
@@ -281,6 +285,12 @@ private struct SmallFlameView: View {
         .widgetURL(flameDeepLink(entry))
     }
 
+    private var statusText: Text {
+        if entry.isGoalCompleted { return Text("Streak safe") }
+        guard let dayEnd = entry.dayEnd else { return Text("Keep it alive") }
+        return MADWidgetCountdown.text(to: dayEnd, suffix: " left")
+    }
+
     @ViewBuilder
     private var statusPill: some View {
         let color = flameStatusColor(entry)
@@ -289,7 +299,7 @@ private struct SmallFlameView: View {
                   ? "checkmark.seal.fill"
                   : entry.isAtRisk ? "exclamationmark.triangle.fill" : "clock.fill")
                 .font(.system(size: 8.5, weight: .semibold))
-            Text(entry.isGoalCompleted ? "Streak safe" : (entry.timeLeftValue.map { "\($0) left" } ?? "Keep it alive"))
+            statusText
                 .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -324,18 +334,18 @@ private struct MediumFlameView: View {
 
                 FlameStat(
                     icon: "figure.run",
-                    value: String(format: "%.2f", entry.miles),
+                    value: Text(String(format: "%.2f", entry.miles)),
                     unit: "mi",
                     label: "Mileage",
                     tint: MADWidgetStyle.red
                 )
 
                 if entry.isGoalCompleted {
-                    FlameStat(icon: "checkmark.seal.fill", value: "Done", unit: "", label: "Streak safe", tint: MADWidgetStyle.green)
+                    FlameStat(icon: "checkmark.seal.fill", value: Text("Done"), unit: "", label: "Streak safe", tint: MADWidgetStyle.green)
                 } else {
                     FlameStat(
                         icon: "clock.fill",
-                        value: entry.timeLeftValue ?? "--",
+                        value: entry.dayEnd.map { MADWidgetCountdown.text(to: $0) } ?? Text("--"),
                         unit: "left",
                         label: "Left today",
                         tint: flameStatusColor(entry)
@@ -382,14 +392,14 @@ struct StreakFlameWidget: Widget {
 #Preview(as: .systemSmall) {
     StreakFlameWidget()
 } timeline: {
-    StreakFlameEntry(date: .now, streak: 436, progress: 0.0, miles: 0, goal: 1, isGoalCompleted: false, health: .healthy, vigor: 0.62, timeLeftValue: "5h 51m", tokensReady: 3, isFun: true)
-    StreakFlameEntry(date: .now, streak: 436, progress: 0.4, miles: 0.4, goal: 1, isGoalCompleted: false, health: .critical, vigor: 0.2, timeLeftValue: "1h 12m", tokensReady: 0, isFun: false)
-    StreakFlameEntry(date: .now, streak: 437, progress: 1.0, miles: 1.0, goal: 1, isGoalCompleted: true, health: .blazing, vigor: nil, timeLeftValue: nil, tokensReady: 2, isFun: true)
+    StreakFlameEntry(date: .now, streak: 436, progress: 0.0, miles: 0, goal: 1, isGoalCompleted: false, health: .healthy, vigor: 0.62, dayEnd: .now.addingTimeInterval(5.85 * 3600), tokensReady: 3, isFun: true)
+    StreakFlameEntry(date: .now, streak: 436, progress: 0.4, miles: 0.4, goal: 1, isGoalCompleted: false, health: .critical, vigor: 0.2, dayEnd: .now.addingTimeInterval(1.2 * 3600), tokensReady: 0, isFun: false)
+    StreakFlameEntry(date: .now, streak: 437, progress: 1.0, miles: 1.0, goal: 1, isGoalCompleted: true, health: .blazing, vigor: nil, dayEnd: nil, tokensReady: 2, isFun: true)
 }
 
 #Preview(as: .systemMedium) {
     StreakFlameWidget()
 } timeline: {
-    StreakFlameEntry(date: .now, streak: 436, progress: 0.25, miles: 0.25, goal: 1, isGoalCompleted: false, health: .dimming, vigor: 0.45, timeLeftValue: "5h 12m", tokensReady: 3, isFun: true)
-    StreakFlameEntry(date: .now, streak: 436, progress: 0.25, miles: 0.25, goal: 1, isGoalCompleted: false, health: .critical, vigor: 0.2, timeLeftValue: "1h 30m", tokensReady: 3, isFun: false)
+    StreakFlameEntry(date: .now, streak: 436, progress: 0.25, miles: 0.25, goal: 1, isGoalCompleted: false, health: .dimming, vigor: 0.45, dayEnd: .now.addingTimeInterval(5.2 * 3600), tokensReady: 3, isFun: true)
+    StreakFlameEntry(date: .now, streak: 436, progress: 0.25, miles: 0.25, goal: 1, isGoalCompleted: false, health: .critical, vigor: 0.2, dayEnd: .now.addingTimeInterval(1.5 * 3600), tokensReady: 3, isFun: false)
 }

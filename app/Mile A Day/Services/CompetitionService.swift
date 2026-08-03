@@ -66,6 +66,8 @@ class CompetitionService: ObservableObject {
                 throw CompetitionServiceError.notAuthenticated
             case .unauthorized:
                 throw CompetitionServiceError.unauthorized
+            case .accountMismatch:
+                throw CompetitionServiceError.notAuthenticated
             case .badRequest(let message):
                 throw CompetitionServiceError.apiError(message)
             case .conflict(let message):
@@ -275,6 +277,55 @@ class CompetitionService: ObservableObject {
 
         // Remove from local cache
         competitions.removeAll { $0.competition_id == id }
+    }
+
+    // MARK: - Teams
+
+    /// Replace the team setup (list/member_pick) and/or apply membership
+    /// assignments. Owner-only, lobby/scheduled only (server-enforced).
+    func setTeams(
+        competitionId: String,
+        memberPick: Bool? = nil,
+        teams: [SetTeamsRequest.TeamDefinition]? = nil,
+        assignments: [String: String?]? = nil
+    ) async throws -> Competition {
+        let request = SetTeamsRequest(member_pick: memberPick, teams: teams, assignments: assignments)
+        let response: CompetitionResponse = try await makeRequest(
+            endpoint: "/competitions/\(competitionId)/teams",
+            method: .PUT,
+            body: try JSONEncoder().encode(request),
+            responseType: CompetitionResponse.self
+        )
+        updateCachedCompetition(response.competition)
+        return response.competition
+    }
+
+    /// Join, switch or (with nil) leave a team. Allowed for the owner always,
+    /// and for members when the comp's member_pick flag is on.
+    func pickTeam(competitionId: String, teamId: String?) async throws -> Competition {
+        let response: CompetitionResponse = try await makeRequest(
+            endpoint: "/competitions/\(competitionId)/teams/pick",
+            method: .POST,
+            body: try JSONEncoder().encode(PickTeamRequest(team_id: teamId)),
+            responseType: CompetitionResponse.self
+        )
+        updateCachedCompetition(response.competition)
+        return response.competition
+    }
+
+    /// Per-participant 14-day averages (matched to the comp's activities and
+    /// interval) for the Balance/Randomize UI.
+    func getTeamStats(competitionId: String) async throws -> TeamStatsResponse {
+        try await makeRequest(
+            endpoint: "/competitions/\(competitionId)/teams/stats",
+            responseType: TeamStatsResponse.self
+        )
+    }
+
+    private func updateCachedCompetition(_ competition: Competition) {
+        if let index = competitions.firstIndex(where: { $0.competition_id == competition.competition_id }) {
+            competitions[index] = competition
+        }
     }
 
     // MARK: - Competition Invitations

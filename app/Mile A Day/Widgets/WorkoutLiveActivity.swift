@@ -18,6 +18,12 @@ struct WorkoutActivityAttributes: ActivityAttributes {
         var timerStartDate: Date? = nil
         /// Current streak, for the goal-completed celebration copy.
         var streak: Int = 0
+        /// Seconds of witnessed movement — the display-pace divisor (elapsed
+        /// keeps ticking through stops; pace shouldn't). Optionals so an
+        /// in-flight activity from an older build still decodes.
+        var movingSeconds: TimeInterval? = nil
+        /// The tracker's movement gate is closed (standing, sitting, riding).
+        var isAutoPaused: Bool? = nil
     }
 
     var startTime: Date
@@ -36,11 +42,16 @@ private extension WorkoutActivityAttributes.ContentState {
         goalDistance > 0 && totalDailyDistance >= goalDistance
     }
 
-    /// Current pace in seconds per mile, when there's enough distance to be meaningful.
+    /// Current pace in seconds per mile, when there's enough distance to be
+    /// meaningful. Divides by MOVING time when the tracker sent it, so a
+    /// stop at a light doesn't drag the number toward absurdity.
     var paceSecondsPerMile: TimeInterval? {
         guard distance > 0.05 else { return nil }
-        return elapsedTime / distance
+        let divisor = (movingSeconds ?? 0) > 0 ? movingSeconds! : elapsedTime
+        return divisor / distance
     }
+
+    var showsAutoPaused: Bool { isAutoPaused == true }
 
     var paceText: String? {
         guard let pace = paceSecondsPerMile, pace.isFinite, pace < 3600 else { return nil }
@@ -120,7 +131,11 @@ struct WorkoutLiveActivity: Widget {
                         .foregroundColor(.white)
                         .frame(maxWidth: 70, alignment: .trailing)
 
-                        if let pace = context.state.paceText {
+                        if context.state.showsAutoPaused {
+                            Text("PAUSED")
+                                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                                .foregroundColor(.orange)
+                        } else if let pace = context.state.paceText {
                             Text(pace)
                                 .font(.system(size: 11, weight: .medium, design: .rounded))
                                 .foregroundColor(.white.opacity(0.7))
@@ -303,7 +318,15 @@ struct WorkoutLiveActivityView: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: 90, alignment: .trailing)
 
-                    if let pace = context.state.paceText {
+                    if context.state.showsAutoPaused {
+                        HStack(spacing: 4) {
+                            Image(systemName: "pause.fill")
+                                .font(.system(size: 8, weight: .bold))
+                            Text("AUTO-PAUSED")
+                                .font(.system(size: 10, weight: .heavy, design: .rounded))
+                        }
+                        .foregroundColor(.orange)
+                    } else if let pace = context.state.paceText {
                         Text(pace)
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                             .foregroundColor(.white.opacity(0.7))

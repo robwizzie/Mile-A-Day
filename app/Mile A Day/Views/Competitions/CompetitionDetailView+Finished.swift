@@ -38,7 +38,15 @@ extension CompetitionDetailView {
                         .foregroundColor(.white.opacity(0.4))
                         .tracking(3)
 
-                    if let winner = rankedUsers.first {
+                    if competition.hasTeams, let topTeam = competition.rankedTeams.first {
+                        Text("\(topTeam.name) Wins!")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+
+                        Text(competition.teamScoreLabel(topTeam))
+                            .font(MADTheme.Typography.callout)
+                            .foregroundColor(.white.opacity(0.6))
+                    } else if let winner = rankedUsers.first {
                         Text("\(winner.displayName) Wins!")
                             .font(.system(size: 28, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
@@ -60,6 +68,12 @@ extension CompetitionDetailView {
                         podiumAnimated = true
                     }
                 }
+            }
+
+            // Team results — team comps lead with the result that actually
+            // decided the competition; the individual podium follows.
+            if competition.hasTeams {
+                CompetitionTeamStandings(competition: competition, isFinished: true)
             }
 
             // Podium (top 3)

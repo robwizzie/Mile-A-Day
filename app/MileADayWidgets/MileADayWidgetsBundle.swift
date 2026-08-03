@@ -55,12 +55,13 @@ struct CompetitionProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<CompetitionEntry>) -> Void) {
         let entry = CompetitionEntry(date: Date(), summary: WidgetDataStore.loadCompetitionSummary())
 
-        // Standings only change when the app syncs, so an hourly rebuild is
-        // plenty — but never sleep past midnight so the stale-day state shows.
-        let intervalRefresh = Date().addingTimeInterval(3600)
-        let startOfToday = Calendar.current.startOfDay(for: Date())
-        let nextMidnight = Calendar.current.date(byAdding: .day, value: 1, to: startOfToday) ?? intervalRefresh
-        completion(Timeline(entries: [entry], policy: .after(min(intervalRefresh, nextMidnight))))
+        // Standings only change when the app syncs — and that sync rewrites the
+        // summary and force-reloads this kind — so the ONLY scheduled reload is
+        // the midnight one that flips the summary to its stale-day state. The
+        // hourly rebuild it replaces spent 24 reloads a day on data that cannot
+        // move in between; that budget, once gone, takes the app's own reloads
+        // down with it and freezes every MAD widget on stale data.
+        completion(Timeline(entries: [entry], policy: .after(MADWidgetClock.endOfDay())))
     }
 }
 
@@ -265,13 +266,11 @@ struct DailyLeaderboardProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<DailyLeaderboardEntry>) -> Void) {
         let entry = DailyLeaderboardEntry(date: Date(), snapshot: WidgetDataStore.loadLeaderboard())
 
-        // Standings move when the app syncs (which rewrites the snapshot and
-        // reloads us), so an hourly rebuild suffices — but never sleep past
-        // midnight, when yesterday's race must stop showing as live.
-        let intervalRefresh = Date().addingTimeInterval(3600)
-        let startOfToday = Calendar.current.startOfDay(for: Date())
-        let nextMidnight = Calendar.current.date(byAdding: .day, value: 1, to: startOfToday) ?? intervalRefresh
-        completion(Timeline(entries: [entry], policy: .after(min(intervalRefresh, nextMidnight))))
+        // Standings move when the app syncs, and that sync rewrites the snapshot
+        // and force-reloads this kind — so the only scheduled reload is at
+        // midnight, when yesterday's race must stop showing as live. See the
+        // competition provider above for why the hourly rebuild had to go.
+        completion(Timeline(entries: [entry], policy: .after(MADWidgetClock.endOfDay())))
     }
 }
 

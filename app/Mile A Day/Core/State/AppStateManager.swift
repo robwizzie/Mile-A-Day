@@ -230,7 +230,24 @@ class AppStateManager: ObservableObject {
             isFirstLaunch = false
         }
         
-        isAuthenticated = savedAuthState
+        // `MAD_IsAuthenticated` is a plain bool stamped at sign-in — it says
+        // nothing about whether we still hold credentials. Without the token
+        // check, an install whose Keychain no longer has tokens (restore from
+        // another device's backup, a wiped Keychain, a half-completed sign-in)
+        // boots straight into the main app and every request fails. Requiring
+        // real tokens sends those users to the auth screen instead.
+        //
+        // Deliberately NOT persisted: tokens are stored
+        // kSecAttrAccessibleAfterFirstUnlock, so a background launch before the
+        // first unlock reads nil even though the session is fine. Keeping this
+        // in-memory means such a false negative costs at most one auth-screen
+        // launch and heals itself, instead of permanently clearing the flag.
+        if savedAuthState && !TokenStore.hasTokens {
+            print("[AppStateManager] ⚠️ Marked authenticated but no tokens readable — routing to sign-in")
+            isAuthenticated = false
+        } else {
+            isAuthenticated = savedAuthState
+        }
     }
     
     /// Start the splash screen timer

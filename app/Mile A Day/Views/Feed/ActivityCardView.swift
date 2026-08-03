@@ -31,7 +31,7 @@ struct ActivityCardView: View {
     /// PostCardView.lastDoubleTapAt).
     @State private var lastDoubleTapAt = Date.distantPast
     /// The map snapshot (~400×300) kept for the zoom's on-demand composite.
-    @State private var routeSnapshot: UIImage?
+    @State private var routeSnapshot: RouteMapSnapshot?
 
     private var distance: Double { entry.distance ?? 0 }
     private var accent: Color { Self.color(entry.workout_type) }
@@ -52,8 +52,12 @@ struct ActivityCardView: View {
     }
 
     private var pace: Double? {
-        guard let duration = entry.total_duration, duration > 0, distance > 0 else { return nil }
-        return duration / distance
+        // Moving time when the tracker recorded it (additive server field),
+        // elapsed otherwise — the same fallback the server bakes into
+        // restated snapshots, so post and workout cards agree.
+        guard let divisor = entry.moving_seconds ?? entry.total_duration,
+              divisor > 0, distance > 0 else { return nil }
+        return divisor / distance
     }
 
     /// Stats band input for the route slide — same band the auto post bakes
@@ -91,7 +95,12 @@ struct ActivityCardView: View {
             // hype by accident.
             VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
                 media
-                PostStatStrip(stats: stats).padding(.horizontal, 2)
+                PostStatStrip(stats: stats, feedRole: entry.feed_role).padding(.horizontal, 2)
+                // Only when the mile took several goes — a normal single-workout
+                // day renders exactly as it did before.
+                if entry.isStitchedMile, let segments = entry.segments, segments.count > 1 {
+                    MileSegmentStrip(segments: segments, accent: accent)
+                }
             }
             .contentShape(Rectangle())
             .simultaneousGesture(

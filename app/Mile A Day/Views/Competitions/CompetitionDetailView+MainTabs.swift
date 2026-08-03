@@ -383,7 +383,11 @@ extension CompetitionDetailView {
     }
 
     // MARK: - Standings Tab Content
+    @ViewBuilder
     var standingsTabContent: some View {
+        if competition.hasTeams {
+            CompetitionTeamStandings(competition: competition)
+        }
         enhancedLeaderboard
     }
 }

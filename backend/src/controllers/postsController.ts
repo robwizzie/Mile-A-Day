@@ -12,6 +12,7 @@ import {
   getFeed,
   getUnifiedFeed,
   getUserPosts,
+  getFeedEntryForPost,
   getUserTaggedPosts,
   notifyFriendsOfPost,
   getPostAuthor,
@@ -25,6 +26,7 @@ import {
   reactToStory,
   getOwnPostMemories,
   getOwnedWorkoutDistance,
+  getOwnedWorkoutRollupDistance,
   lockUnearnedPhotos,
   ALLOWED_STORY_REACTIONS,
   PostStatsSnapshot,
@@ -42,8 +44,12 @@ import {
   respondToCoauthorInvite,
   respondToMultiCoauthorInvite,
   postAuthorId,
+  setCoauthorProfileVisibility,
 } from "../services/postService.js";
-import { getDailyGoalStatus } from "../services/workoutService.js";
+import {
+  getActiveStreak,
+  getDailyGoalStatus,
+} from "../services/workoutService.js";
 import { hasUnlimitedActions } from "../services/privilegedUsers.js";
 import { evaluateSocialBadgesForUser } from "../services/badgeService.js";
 import { logError } from "../services/errorLogService.js";
@@ -209,26 +215,59 @@ export async function createPostController(
       workoutId = null;
     }
 
+    const hasStats =
+      stats_snapshot != null &&
+      typeof stats_snapshot === "object" &&
+      !Array.isArray(stats_snapshot);
+
     // Defensive guard for already-shipped clients: older auto-card builders
     // baked the author's whole-day distance into a card linked to one workout.
     // Rejecting the bad auto post leaves the raw workout feed card visible
     // instead of hiding it behind a misleading generated image.
+    //
+    // The DAY'S ROLLUP is legitimate on the anchor of a multi-segment mile,
+    // though — that is exactly the number the feed restates the card with, so a
+    // card baked with the single leg reads 0.33 next to a 1.06 headline. Accept
+    // either the leg or the rollup and let the read path do the rest.
     if (
       workoutId &&
       is_auto === true &&
       linkedWorkoutDistance != null &&
-      stats_snapshot != null &&
-      typeof stats_snapshot === "object" &&
-      !Array.isArray(stats_snapshot)
+      hasStats
     ) {
       const claimedDistance = Number(
         (stats_snapshot as PostStatsSnapshot).distance,
       );
-      if (
-        Number.isFinite(claimedDistance) &&
-        Math.abs(claimedDistance - linkedWorkoutDistance) > 0.05
-      ) {
-        return res.status(400).json({ error: "auto_post_stats_mismatch" });
+      if (Number.isFinite(claimedDistance)) {
+        const rollupDistance = await getOwnedWorkoutRollupDistance(
+          userId,
+          workoutId,
+        );
+        const matches = [linkedWorkoutDistance, rollupDistance].some(
+          (candidate) =>
+            candidate != null && Math.abs(claimedDistance - candidate) <= 0.05,
+        );
+        if (!matches) {
+          return res.status(400).json({ error: "auto_post_stats_mismatch" });
+        }
+      }
+    }
+
+    // The streak baked into a post is the one number a client can get wrong and
+    // then keep wrong forever: it's a snapshot, never restated on read, and the
+    // app's local streak is quarantine-gated (it refuses to believe a big drop
+    // until the server confirms it). So a post made right after a missed day
+    // could sit in the feed claiming a streak the author no longer has. Stamp
+    // the server's value over it — only when the client sent one, so a post
+    // that deliberately carries no streak chip stays that way.
+    let statsSnapshot = (stats_snapshot ?? null) as PostStatsSnapshot | null;
+    if (hasStats && statsSnapshot?.streak != null) {
+      try {
+        const { streak } = await getActiveStreak(userId);
+        statsSnapshot = { ...statsSnapshot, streak };
+      } catch (err) {
+        // Never fail a post over a cosmetic chip — keep the client's number.
+        console.warn("[createPost] streak restatement failed:", err);
       }
     }
 
@@ -240,7 +279,7 @@ export async function createPostController(
       localDate: goal.localDate,
       shareToFeed,
       shareToStory,
-      statsSnapshot: (stats_snapshot ?? null) as PostStatsSnapshot | null,
+      statsSnapshot,
       // Absent on legacy clients — createPost keeps the old upsert behavior
       // and owns the include_route default.
       isAuto: typeof is_auto === "boolean" ? is_auto : undefined,
@@ -261,8 +300,11 @@ export async function createPostController(
       postedLive: posted_live === true,
     });
 
-    // Collab invite — fire-and-forget push to the invited coauthor.
-    if (post.coauthor_user_id && post.coauthor_status === "pending") {
+    // Collab tag — fire-and-forget push to the person just added. Gated on
+    // 'accepted', which is now what createPost writes: tagging is immediate,
+    // so there is no pending state left to wait for. (Checking for 'pending'
+    // here would silence the notification completely.)
+    if (post.coauthor_user_id && post.coauthor_status === "accepted") {
       notifyCoauthorInvite(userId, post.coauthor_user_id, post.post_id).catch(
         () => {},
       );
@@ -540,6 +582,33 @@ export async function getUnifiedFeedController(
   }
 }
 
+/**
+ * GET /posts/:postId — ONE post, shaped exactly like its feed entry.
+ *
+ * What makes opening a post directly possible: a tap on the profile grid, a
+ * mention push, a shared link. Scrolling a paginated feed to find it could
+ * never work for a post that's weeks old. 404 covers both "gone" and "not
+ * yours to see" so the two are indistinguishable.
+ */
+export async function getPostController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    const postId = req.params.postId;
+    if (!isUuid(postId)) {
+      return res.status(404).json({ error: "Post not found" });
+    }
+    const item = await getFeedEntryForPost(req.userId!, postId);
+    if (!item) return res.status(404).json({ error: "Post not found" });
+    lockUnearnedPhotos([item], req.userId!, await viewerPhotoGate(req.userId!));
+    res.status(200).json(signMediaUrlsDeep(item));
+  } catch (error: any) {
+    console.error("Error fetching post:", error.message);
+    res.status(500).json({ error: "Error fetching post" });
+  }
+}
+
 /** GET /posts/user/:userId — a user's permanent posts for the profile grid. */
 export async function getUserPostsController(
   req: AuthenticatedRequest,
@@ -791,6 +860,39 @@ export async function respondToCoauthorController(
   } catch (error: any) {
     console.error("Error responding to coauthor invite:", error.message);
     res.status(500).json({ error: "Error responding to coauthor invite" });
+  }
+}
+
+/**
+ * POST /posts/:postId/coauthor/profile — { on_profile: boolean }. The tagged
+ * coauthor pins this collab on or off their own profile grid. The tag itself
+ * is untouched: it stays in their Tagged tab and on every feed it already
+ * reached. Separate route rather than an extra field on /coauthor so the
+ * destructive "remove me" and this reversible one can never be confused.
+ */
+export async function setCoauthorProfileVisibilityController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    if (!isUuid(req.params.postId)) {
+      return res.status(404).json({ error: "post_not_found" });
+    }
+    if (typeof req.body?.on_profile !== "boolean") {
+      return res.status(400).json({ error: "on_profile must be a boolean" });
+    }
+    const result = await setCoauthorProfileVisibility(
+      req.userId!,
+      req.params.postId,
+      req.body.on_profile,
+    );
+    if (!result) {
+      return res.status(404).json({ error: "collab_not_found" });
+    }
+    res.json({ ok: true, on_profile: req.body.on_profile });
+  } catch (error: any) {
+    console.error("Error setting collab profile visibility:", error.message);
+    res.status(500).json({ error: "Error setting collab profile visibility" });
   }
 }
 
