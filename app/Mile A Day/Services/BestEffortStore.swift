@@ -41,29 +41,145 @@ enum BestEffortStore {
         }
     }
 
-    /// The ghost to race this session, or nil when there's nothing honest to
-    /// race. Runs with no recorded best fall back to a constant-pace ghost
-    /// synthesized from the backend fastest-mile PR (elapsed-based, so a
-    /// slightly forgiving target — beating it means truly faster). Walks
-    /// never race a run PR: without a recorded walk mile the caller gets nil
-    /// and offers the set-your-baseline flow instead.
-    static func ghost(
+    // MARK: - Targets
+
+    /// What the user chose to race. There is ALWAYS at least one option
+    /// (`.custom`), so no activity can end up with the race unavailable —
+    /// a walk with no history used to have nothing to race at all.
+    enum GhostTarget: Equatable {
+        /// Their own fastest recorded in-app mile for this activity type.
+        case recordedBest
+        /// The backend fastest-mile PR, flattened to a constant pace.
+        case personalRecord
+        /// A time the user typed in. Constant pace, same as the PR ghost.
+        case custom(seconds: Double)
+
+        /// Compact form for @AppStorage — the enum has an associated value, so
+        /// it can't be RawRepresentable in the way AppStorage wants.
+        var storage: String {
+            switch self {
+            case .recordedBest: return "best"
+            case .personalRecord: return "pr"
+            case .custom(let seconds): return "custom:\(Int(seconds.rounded()))"
+            }
+        }
+
+        init?(storage: String) {
+            switch storage {
+            case "best": self = .recordedBest
+            case "pr": self = .personalRecord
+            default:
+                guard storage.hasPrefix("custom:"),
+                    let seconds = Double(storage.dropFirst("custom:".count)),
+                    Self.isPlausible(seconds)
+                else { return nil }
+                self = .custom(seconds: seconds)
+            }
+        }
+
+        /// A mile between 2 and 40 minutes. The floor is the same one
+        /// `recordFinish` uses to reject broken data; the ceiling keeps a
+        /// fat-fingered target from being unbeatable-by-standing-still.
+        static func isPlausible(_ seconds: Double) -> Bool {
+            seconds.isFinite && seconds >= 120 && seconds <= 2400
+        }
+    }
+
+    /// A resolved target: the effort to race plus how to talk about it.
+    struct ResolvedGhost: Equatable {
+        var target: GhostTarget
+        var effort: BestMileEffort
+        /// Short label used in the live chip, the card subtitle and the
+        /// celebration. Kept terse — it sits inside an 11pt chip.
+        var shortName: String
+    }
+
+    /// Every target the user can pick right now, best-first. `.custom` is
+    /// always last and always present.
+    static func availableTargets(
         for activityKey: String,
         seedPaceSecondsPerMile: Double?
-    ) -> (effort: BestMileEffort, isSeeded: Bool)? {
-        if let stored = best(for: activityKey) {
-            return (stored, false)
+    ) -> [GhostTarget] {
+        var targets: [GhostTarget] = []
+        if best(for: activityKey) != nil { targets.append(.recordedBest) }
+        if seededPace(activityKey: activityKey, pace: seedPaceSecondsPerMile) != nil {
+            targets.append(.personalRecord)
         }
-        guard activityKey == "running",
-            let pace = seedPaceSecondsPerMile,
-            pace.isFinite, pace >= 180, pace <= 1800
+        targets.append(.custom(seconds: customSeconds(for: activityKey)))
+        return targets
+    }
+
+    /// Resolve a target into something raceable, or nil if it no longer exists
+    /// (a stored `.recordedBest` after a reinstall, say).
+    static func resolve(
+        _ target: GhostTarget,
+        activityKey: String,
+        seedPaceSecondsPerMile: Double?
+    ) -> ResolvedGhost? {
+        switch target {
+        case .recordedBest:
+            guard let stored = best(for: activityKey) else { return nil }
+            return ResolvedGhost(target: target, effort: stored, shortName: "your best")
+        case .personalRecord:
+            guard let pace = seededPace(activityKey: activityKey, pace: seedPaceSecondsPerMile)
+            else { return nil }
+            return ResolvedGhost(
+                target: target, effort: constantPace(pace), shortName: "your PR")
+        case .custom(let seconds):
+            guard GhostTarget.isPlausible(seconds) else { return nil }
+            return ResolvedGhost(
+                target: target, effort: constantPace(seconds), shortName: "your target")
+        }
+    }
+
+    /// The target to offer when the user hasn't chosen one yet: their own
+    /// recorded best if they have one, else their PR, else a custom time.
+    static func defaultTarget(
+        for activityKey: String,
+        seedPaceSecondsPerMile: Double?
+    ) -> GhostTarget {
+        availableTargets(for: activityKey, seedPaceSecondsPerMile: seedPaceSecondsPerMile)
+            .first ?? .custom(seconds: customSeconds(for: activityKey))
+    }
+
+    /// Walks never inherit a RUN PR — a run PR is not a walk target, and
+    /// offering it would be an unbeatable ghost dressed up as a fair one.
+    private static func seededPace(activityKey: String, pace: Double?) -> Double? {
+        guard activityKey == "running", let pace, pace.isFinite, pace >= 180, pace <= 1800
         else { return nil }
-        let effort = BestMileEffort(
+        return pace
+    }
+
+    /// A ghost that holds one exact pace for the whole mile.
+    private static func constantPace(_ seconds: Double) -> BestMileEffort {
+        BestMileEffort(
             dateISO: "",
-            seconds: pace,
-            curve: [CurvePoint(t: 0, d: 0), CurvePoint(t: pace, d: 1.0)]
+            seconds: seconds,
+            curve: [CurvePoint(t: 0, d: 0), CurvePoint(t: seconds, d: 1.0)]
         )
-        return (effort, true)
+    }
+
+    // MARK: - Custom target persistence
+
+    private static func customKey(_ activityKey: String) -> String {
+        "ghostCustomTargetV1.\(activityKey)"
+    }
+
+    /// The user's last custom time for this activity, or a sensible starting
+    /// point: a shade under their best/PR if they have one (a target you have
+    /// to reach for), else a round 12:00 walk / 9:00 run.
+    static func customSeconds(for activityKey: String) -> Double {
+        let stored = UserDefaults.standard.double(forKey: customKey(activityKey))
+        if GhostTarget.isPlausible(stored) { return stored }
+        if let recorded = best(for: activityKey)?.seconds {
+            return max(120, (recorded - 15).rounded())
+        }
+        return activityKey == "running" ? 540 : 720
+    }
+
+    static func saveCustomSeconds(_ seconds: Double, for activityKey: String) {
+        guard GhostTarget.isPlausible(seconds) else { return }
+        UserDefaults.standard.set(seconds.rounded(), forKey: customKey(activityKey))
     }
 
     /// The ghost's race-clock time at cumulative distance `d` (miles), by
