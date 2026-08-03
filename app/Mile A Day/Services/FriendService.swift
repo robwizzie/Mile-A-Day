@@ -937,6 +937,10 @@ struct FriendStats: Codable {
     /// to Monday). Optional: nil until the server ships the field.
     let last7DayMiles: [FriendDayMiles]?
     let goalMiles: Double?
+    /// Days in the week window that a streak token carried. Absent for anyone
+    /// who has never used one, and on older servers — so the chart's saved-day
+    /// styling simply doesn't appear rather than breaking.
+    let coveredDays: [CoveredDay]?
     /// True when this user's current streak is 100% natural. Read from the
     /// gated `streak_features` payload — absent for un-enrolled users, so it
     /// safely defaults to false and the Pure Flame badge simply doesn't show.
@@ -952,6 +956,7 @@ struct FriendStats: Codable {
         case todayMiles = "today_miles"
         case last7DayMiles = "last_7_day_miles"
         case goalMiles = "goal_miles"
+        case coveredDays = "covered_days"
     }
 
     /// Separate key enum for the gated payload so `streak_features` stays out
@@ -988,6 +993,7 @@ struct FriendStats: Codable {
         todayMiles = try? container.decode(Double.self, forKey: .todayMiles)
         last7DayMiles = try? container.decode([FriendDayMiles].self, forKey: .last7DayMiles)
         goalMiles = try? container.decode(Double.self, forKey: .goalMiles)
+        coveredDays = try? container.decode([CoveredDay].self, forKey: .coveredDays)
         if let gated = try? decoder.container(keyedBy: GatedKeys.self),
            let features = try? gated.decode(GatedStreakFeatures.self, forKey: .streakFeatures) {
             naturalStreak = features.natural_streak ?? false

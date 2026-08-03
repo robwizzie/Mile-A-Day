@@ -78,6 +78,54 @@ export async function fetchCoverageDates(userId: string): Promise<string[]> {
   return rows.map((r) => r.d);
 }
 
+/**
+ * One day a token carried, with enough detail for a client to SAY so.
+ *
+ * Every per-day surface in the app paints from raw mileage, so a token-covered
+ * day renders identically to a plain miss — 0.57 mi in orange — while the
+ * streak walks quietly count it. That mismatch is not cosmetic: it makes a
+ * correct Save Streak offer look like it is inventing a day the user can see
+ * they missed. Anything that draws a day needs this list.
+ */
+export interface CoveredDay {
+  local_date: string;
+  /** 'streak_save' | 'double_down_recover' | 'streak_assist' */
+  kind: string;
+  /** Assist only: who rescued them, for "Saved by alex". */
+  source_username: string | null;
+}
+
+/**
+ * Covered days for a user, newest first, optionally from `sinceDate` on.
+ *
+ * Returns [] whenever coverage is not ACTIVE for this user (env off, or not
+ * enrolled) — those users' streaks are computed by the byte-identical legacy
+ * loop that ignores coverage entirely, so reporting covered days would explain
+ * a save that never happened.
+ */
+export async function fetchCoveredDays(
+  userId: string,
+  sinceDate?: string,
+): Promise<CoveredDay[]> {
+  if (!(await coverageActiveFor(userId))) return [];
+  const params: string[] = [userId];
+  let where = `sc.user_id = $1`;
+  if (sinceDate) {
+    params.push(sinceDate);
+    where += ` AND sc.local_date >= $2::date`;
+  }
+  return db.query<CoveredDay>(
+    `SELECT to_char(sc.local_date, 'YYYY-MM-DD') AS local_date,
+            sc.kind,
+            su.username AS source_username
+       FROM streak_coverage sc
+       LEFT JOIN users su ON su.user_id = sc.source_user
+      WHERE ${where}
+      ORDER BY sc.local_date DESC`,
+    params,
+  );
+}
+
 /** Shared YYYY-MM-DD date arithmetic (UTC-safe, mirrors the legacy walks'). */
 export function dateStrMinus(dateStr: string, days: number): string {
   const [y, m, d] = dateStr.split("-").map(Number);

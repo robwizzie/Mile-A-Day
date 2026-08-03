@@ -51,6 +51,10 @@ import {
   reconcileStreakFeaturesOnUpload,
   getStreakFeaturesPayload,
 } from "../services/streakFeatureService.js";
+import {
+  fetchCoveredDays,
+  dateStrMinus,
+} from "../services/streakFeatureCore.js";
 import { notifyH2hLeadChanges } from "../services/h2hMatchupService.js";
 
 export async function uploadWorkouts(req: Request, res: Response) {
@@ -399,7 +403,13 @@ export async function getStreakEras(req: AuthenticatedRequest, res: Response) {
       return res.status(400).send({ error: `No user found with ID ${userId}` });
     }
 
-    const { eras, longest } = await getStreakErasForUser(userId);
+    const [{ eras, longest }, covered_days] = await Promise.all([
+      getStreakErasForUser(userId),
+      // Whole history: coverage rows are rare, and the Hall marks which runs
+      // leaned on a token so a 10-day streak containing a 0.57 mi day reads as
+      // saved rather than as a contradiction.
+      fetchCoveredDays(userId),
+    ]);
 
     // Never report lower than the ratcheted column: a deleted workout can
     // shrink the recomputed history, but the record the user earned stands.
@@ -417,7 +427,14 @@ export async function getStreakEras(req: AuthenticatedRequest, res: Response) {
       eras[0].is_current === true &&
       eras[0].length >= longest_streak;
 
-    return res.status(200).json({ eras, longest_streak, current_is_longest });
+    return res.status(200).json({
+      eras,
+      longest_streak,
+      current_is_longest,
+      // Additive; omitted when empty so the payload is unchanged for users who
+      // have never used a token.
+      ...(covered_days.length > 0 ? { covered_days } : {}),
+    });
   } catch (error: any) {
     console.error("Error getting streak eras:", error.message);
     res
@@ -612,6 +629,7 @@ export async function getUserStats(req: AuthenticatedRequest, res: Response) {
     }
 
     const { streak, start } = await getActiveStreak(userId);
+    const statsToday = await getUserLocalToday(userId);
 
     const startDateParam = currentStreak ? start : undefined;
     const [
@@ -621,6 +639,7 @@ export async function getUserStats(req: AuthenticatedRequest, res: Response) {
       recent_workouts,
       today_miles,
       last_7_day_miles,
+      covered_days,
     ] = await Promise.all([
       getTotalMiles(userId, startDateParam),
       getBestMilesDay(userId, startDateParam),
@@ -633,6 +652,9 @@ export async function getUserStats(req: AuthenticatedRequest, res: Response) {
       // Exact per-day series for profile week charts — recent_workouts is
       // capped, so heavy loggers' older days would otherwise read as zero.
       getLast7DayMiles(userId),
+      // Which of those days a token carried. Without it the week chart paints
+      // a saved day exactly like a missed one (see CoveredDay).
+      fetchCoveredDays(userId, dateStrMinus(statsToday, 6)),
     ]);
 
     // Default goal miles is 1.0 (can be updated when user preferences are stored)
@@ -659,6 +681,9 @@ export async function getUserStats(req: AuthenticatedRequest, res: Response) {
       // Additive. Ratcheted column, floored at the live streak so a fresh
       // record never reads stale; pre-backfill rows (0) degrade to the streak.
       longest_streak: Math.max(Number(user.longest_streak ?? 0), streak),
+      // Omitted entirely when empty, so the payload stays byte-identical for
+      // the overwhelming majority who have never used a token.
+      ...(covered_days.length > 0 ? { covered_days } : {}),
       ...(streak_features ? { streak_features } : {}),
     });
   } catch (error: any) {

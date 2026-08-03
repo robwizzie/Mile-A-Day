@@ -450,7 +450,9 @@ struct UserProfileDetailView: View {
                 Last7DaysChart(
                     workouts: friendWorkouts,
                     dayTotals: last7DayMiles,
-                    goalMiles: userStats?.goalMiles ?? 1.0
+                    goalMiles: userStats?.goalMiles ?? 1.0,
+                    coveredDays: userStats?.coveredDays,
+                    isSelf: false
                 )
             }
             if let today = friendTodayChallenge {
@@ -1600,6 +1602,14 @@ struct Last7DaysChart: View {
     /// to a mile so a caller without stats loaded still renders sanely — but
     /// a 2-mile-goal friend must not go green at 1.0.
     var goalMiles: Double = 1.0
+    /// Days a streak token carried. Without this the chart paints a saved day
+    /// exactly like a missed one — the 0.57 mi bar that made a correct Save
+    /// Streak offer look like a lie.
+    var coveredDays: [CoveredDay]? = nil
+    /// Whose chart this is, so the saved-day copy uses the right voice.
+    var isSelf: Bool = false
+
+    private var covered: CoveredDayIndex { CoveredDayIndex(coveredDays) }
 
     private let calendar = Calendar.current
 
@@ -1669,7 +1679,7 @@ struct Last7DaysChart: View {
                     barColumn(for: day)
                 }
             }
-            .frame(height: 92)
+            .frame(height: 108)
 
             if let selected = selectedDay {
                 dayDetailPanel(for: selected)
@@ -1697,9 +1707,14 @@ struct Last7DaysChart: View {
         let isToday = calendar.isDateInToday(day)
         let didHit = ProgressCalculator.isGoalCompleted(current: miles, goal: goal)
         let isSelected = selectedDay.map { calendar.isDate($0, inSameDayAs: day) } ?? false
-        let color: Color = miles == 0
-            ? Color.white.opacity(0.12)
-            : (didHit ? .green : .orange)
+        let savedBy = covered.day(for: day)
+        // A saved day is NOT a miss and must never wear the miss colour, no
+        // matter how few miles it holds — that equivalence is the whole bug.
+        let color: Color = savedBy != nil
+            ? SavedDayStyle.tint
+            : (miles == 0
+                ? Color.white.opacity(0.12)
+                : (didHit ? .green : .orange))
 
         return Button {
             MADHaptics.tap()
@@ -1711,6 +1726,15 @@ struct Last7DaysChart: View {
             }
         } label: {
             VStack(spacing: 6) {
+                // Token marker, so a saved day is legible without tapping it.
+                // Always occupies its slot (hidden when absent) so bars keep a
+                // common baseline.
+                Image(systemName: SavedDayStyle.icon(for: savedBy?.kind ?? "streak_save"))
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(SavedDayStyle.tint)
+                    .opacity(savedBy != nil ? 1 : 0)
+                    .frame(height: 10)
+
                 // Bar
                 GeometryReader { geo in
                     VStack {
@@ -1793,14 +1817,29 @@ struct Last7DaysChart: View {
                 Text(String(format: "%.2f mi", total))
                     .font(.system(size: 12, weight: .heavy, design: .rounded))
                     .foregroundColor(
-                        ProgressCalculator.isGoalCompleted(current: total, goal: goal)
-                            ? .green
-                            : (total > 0 ? .orange : .white.opacity(0.4))
+                        covered.contains(day)
+                            ? SavedDayStyle.tint
+                            : (ProgressCalculator.isGoalCompleted(current: total, goal: goal)
+                                ? .green
+                                : (total > 0 ? .orange : .white.opacity(0.4)))
                     )
             }
 
+            if let savedBy = covered.day(for: day) {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: SavedDayStyle.icon(for: savedBy.kind))
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(SavedDayStyle.tint)
+                    Text(SavedDayStyle.explanation(for: savedBy, isSelf: isSelf))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundColor(SavedDayStyle.tint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 2)
+            }
+
             if dayWorkouts.isEmpty && total == 0 {
-                Text("No miles logged")
+                Text(covered.contains(day) ? "No miles logged — the streak held anyway" : "No miles logged")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.4))
             } else if dayWorkouts.isEmpty {

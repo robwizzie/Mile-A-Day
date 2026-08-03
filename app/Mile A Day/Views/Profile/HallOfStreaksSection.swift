@@ -145,7 +145,10 @@ struct HallOfStreaksSection: View {
 
             VStack(spacing: 6) {
                 ForEach(shown) { item in
-                    streakRow(item, recordLength: response.longest_streak)
+                    streakRow(
+                        item,
+                        recordLength: response.longest_streak,
+                        covered: CoveredDayIndex(response.covered_days))
                 }
             }
 
@@ -269,9 +272,15 @@ struct HallOfStreaksSection: View {
 
     // MARK: - Rows
 
-    private func streakRow(_ item: RankedStreak, recordLength: Int) -> some View {
+    private func streakRow(_ item: RankedStreak, recordLength: Int, covered: CoveredDayIndex)
+        -> some View
+    {
         let era = item.era
         let isRecord = era.length >= recordLength && recordLength > 0
+        // How many days inside this run a token carried. Naming it is what
+        // stops a 10-day streak that contains an obvious 0.57 mi day from
+        // reading as an arithmetic error.
+        let savedCount = covered.countInRange(start: era.start_date, end: era.end_date)
         let accent: Color = era.is_current ? MADTheme.Colors.madRed : (isRecord ? gold : .secondary)
 
         return HStack(spacing: MADTheme.Spacing.sm) {
@@ -302,6 +311,11 @@ struct HallOfStreaksSection: View {
 
             Spacer(minLength: 4)
 
+            if savedCount > 0 {
+                tag(
+                    savedCount == 1 ? "1 SAVED" : "\(savedCount) SAVED",
+                    color: SavedDayStyle.tint)
+            }
             if era.is_current {
                 tag("NOW", color: MADTheme.Colors.madRed)
             } else if isRecord {

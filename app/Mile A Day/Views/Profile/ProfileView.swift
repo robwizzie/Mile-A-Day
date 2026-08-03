@@ -42,6 +42,8 @@ struct ProfileView: View {
     // Server-exact per-day totals for the chart — the capped workout list
     // undercounts heavy-logging weeks (see Last7DaysChart).
     @State private var ownDayTotals: [FriendDayMiles]?
+    /// Days a token carried, so the chart can show them as saved not missed.
+    @State private var ownCoveredDays: [CoveredDay]?
 
     // Section tabs — mirrors UserProfileDetailView's structure so navigating
     // between own profile and friend profile feels consistent. Own profile
@@ -235,7 +237,12 @@ struct ProfileView: View {
                 isSelf: true
             )
             if !ownWorkouts.isEmpty {
-                Last7DaysChart(workouts: ownWorkouts, dayTotals: ownDayTotals)
+                Last7DaysChart(
+                    workouts: ownWorkouts,
+                    dayTotals: ownDayTotals,
+                    coveredDays: ownCoveredDays,
+                    isSelf: true
+                )
             }
             if !receivedHypes.isEmpty {
                 recentHypesSection
@@ -420,7 +427,10 @@ struct ProfileView: View {
         }
         do {
             let stats = try await friendService.fetchFriendStats(for: userId)
-            await MainActor.run { ownDayTotals = stats.last7DayMiles }
+            await MainActor.run {
+                ownDayTotals = stats.last7DayMiles
+                ownCoveredDays = stats.coveredDays
+            }
         } catch {
             print("[ProfileView] loadOwnDayTotals failed: \(error)")
         }
