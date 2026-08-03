@@ -130,6 +130,10 @@ struct WorkoutTrackingView: View {
     @AppStorage("ghostTargetV1.walking") private var walkTargetStorage = ""
     /// Drops the NEW pill on the arming card until the race is first set up.
     @AppStorage("hasArmedGhostRaceOnce") private var hasArmedGhostRaceOnce = false
+    /// Set in `BuddyLobbyView` — the only screen a buddy session passes
+    /// through, since the hand-off below skips the location picker where the
+    /// solo arming card lives. Read once on the buddy hand-off.
+    @AppStorage("buddyGhostArmedV1") private var buddyGhostArmed = false
 
     private var raceActivityKey: String {
         selectedActivityType == .running ? "running" : "walking"
@@ -1578,6 +1582,13 @@ struct WorkoutTrackingView: View {
                 showActivitySelection = false
                 showLocationTypeSelection = false
                 showCountdown = false
+                // Ghost race, armed from the lobby. This branch skips the
+                // location screen, which is the only place `ghostRaceCard`
+                // lives — so without this a buddy walk could never race,
+                // even though it already feeds BestEffortStore on finish.
+                // Everything downstream (resolvedGhost, the delta chip, the
+                // 1-mile freeze, the celebration) only ever needed raceArmed.
+                raceArmed = buddyGhostArmed
                 isTracking = true
                 startWorkout()
                 return

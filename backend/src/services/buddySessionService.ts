@@ -15,6 +15,7 @@ import {
   type BuddyActivityType,
   type BuddyEventKind,
   type BuddyMode,
+  type BuddyOrigin,
   type BuddyParticipantView,
   type BuddySessionRow,
   type BuddySessionState,
@@ -198,6 +199,7 @@ function toState(
     activity_type: session.activity_type,
     status: session.status,
     host_user_id: session.host_user_id,
+    scheduled_start_at: session.scheduled_start_at,
     started_at: session.started_at,
     ends_at: session.ends_at,
     ended_at: session.ended_at,
@@ -226,6 +228,9 @@ export async function getSessionState(
     throw new BadRequestError("not_a_participant");
   }
 
+  // A scheduled session starts on time for whoever is looking, without
+  // waiting for the cron tick — same lazy shape as finalizeIfDue below.
+  await promoteScheduledIfDue(sessionId);
   await finalizeIfDue(sessionId);
 
   const session = await getSessionRow(sessionId);
@@ -250,7 +255,13 @@ export interface CreateSessionInput {
   goalValue?: number | null;
   activityType: BuddyActivityType;
   inviteUserIds?: string[];
-  origin?: "invite" | "code" | "join_active" | "nearby";
+  origin?: BuddyOrigin;
+  /**
+   * ISO timestamp for a scheduled walk. The session sits in `lobby` with
+   * `started_at` NULL until this moment, then is promoted exactly like a manual
+   * start. Null/absent = start whenever the host says.
+   */
+  scheduledStartAt?: string | null;
 }
 
 export async function createSession(
@@ -310,8 +321,8 @@ export async function createSession(
       const inserted = await db.query<{ id: string }>(
         `INSERT INTO buddy_sessions
            (join_code, host_user_id, mode, goal_value, activity_type, status,
-            origin, local_date)
-         VALUES ($1, $2, $3, $4, $5, 'lobby', $6,
+            origin, scheduled_start_at, local_date)
+         VALUES ($1, $2, $3, $4, $5, 'lobby', $6, $7::timestamptz,
                  ((NOW() AT TIME ZONE 'America/New_York')::date))
          RETURNING id`,
         [
@@ -321,6 +332,7 @@ export async function createSession(
           goalValue,
           activityType,
           input.origin ?? "invite",
+          input.scheduledStartAt ?? null,
         ],
       );
       sessionId = inserted[0]?.id ?? null;
@@ -567,7 +579,27 @@ export async function startSession(
   if (!session) throw new BadRequestError("session_not_found");
   if (session.host_user_id !== userId) throw new BadRequestError("not_host");
 
-  const started = await db.query<{ id: string; started_at: string }>(
+  await activateSession(sessionId, userId);
+
+  const fresh = await getSessionRow(sessionId);
+  if (!fresh) throw new BadRequestError("session_not_found");
+  return toState(fresh, await loadParticipants(sessionId, fresh.host_user_id));
+}
+
+/**
+ * Flip a lobby to active. The single place a session ever starts — a manual
+ * host start and a scheduled promotion are the same operation with different
+ * triggers, and having two copies of this UPDATE is how they drift apart.
+ *
+ * The `WHERE status = 'lobby'` guard makes it naturally idempotent: a promotion
+ * racing a manual start (or two cron ticks racing each other) means whichever
+ * loses updates nothing and sends nothing. Returns whether THIS call started it.
+ */
+async function activateSession(
+  sessionId: string,
+  actorUserId: string | null,
+): Promise<boolean> {
+  const started = await db.query<{ id: string }>(
     `UPDATE buddy_sessions
         SET status = 'active',
             started_at = NOW() + ($2 || ' seconds')::interval,
@@ -579,36 +611,127 @@ export async function startSession(
             END,
             state_version = state_version + 1
       WHERE id = $1 AND status = 'lobby'
-      RETURNING id, started_at`,
+      RETURNING id`,
     [sessionId, String(BUDDY_START_COUNTDOWN_SECONDS)],
   );
+  if (started.length === 0) return false;
 
-  if (started.length > 0) {
-    // Everyone still in the lobby becomes active. Invitees who never responded
-    // are left behind rather than dragged in.
-    await db.query(
-      `UPDATE buddy_session_participants
-          SET status = 'active'
-        WHERE session_id = $1 AND status IN ('joined', 'ready')`,
-      [sessionId],
-    );
-    await recordEvent(sessionId, userId, "started");
-    void notifySessionStarted(sessionId, userId);
+  // Everyone still in the lobby becomes active. Invitees who never responded
+  // are left behind rather than dragged in.
+  await db.query(
+    `UPDATE buddy_session_participants
+        SET status = 'active'
+      WHERE session_id = $1 AND status IN ('joined', 'ready')`,
+    [sessionId],
+  );
+  await recordEvent(sessionId, actorUserId, "started");
+  void notifySessionStarted(sessionId, actorUserId);
+  return true;
+}
+
+/**
+ * Start a scheduled session whose time has arrived.
+ *
+ * Called BOTH lazily (from every state read) and from the cron, the same shape
+ * `finalizeIfDue` uses. The lazy path makes a session start the instant someone
+ * is looking at the lobby; the cron makes it start on time when nobody is.
+ */
+export async function promoteScheduledIfDue(sessionId: string): Promise<void> {
+  const due = await db.query<{ id: string }>(
+    `SELECT id FROM buddy_sessions
+      WHERE id = $1 AND status = 'lobby'
+        AND scheduled_start_at IS NOT NULL
+        AND scheduled_start_at <= NOW()`,
+    [sessionId],
+  );
+  if (due.length === 0) return;
+  await activateSession(sessionId, null);
+}
+
+/**
+ * Cron sweep: promote every scheduled session that's due, and send the
+ * heads-up push for ones starting soon.
+ *
+ * The reminder is claim-then-send against `scheduled_reminder_sent_at` — the
+ * same pattern h2h_matchups.notified_at uses — so overlapping containers during
+ * a deploy can't double-push. Claiming BEFORE sending is deliberate: a missed
+ * reminder is a small disappointment, a duplicate one is spam.
+ */
+export async function promoteDueScheduledSessions(): Promise<number> {
+  const due = await db.query<{ id: string }>(
+    `SELECT id FROM buddy_sessions
+      WHERE status = 'lobby'
+        AND scheduled_start_at IS NOT NULL
+        AND scheduled_start_at <= NOW()
+        -- A session whose time passed hours ago was abandoned, not delayed;
+        -- the lobby sweep below cancels those rather than starting a walk
+        -- nobody is standing by for.
+        AND scheduled_start_at > NOW() - INTERVAL '30 minutes'`,
+  );
+  for (const row of due) {
+    try {
+      await activateSession(row.id, null);
+    } catch (err) {
+      void logError("buddy", "failed to promote scheduled buddy session", {
+        context: { sessionId: row.id, error: String(err) },
+      });
+    }
   }
 
-  const fresh = await getSessionRow(sessionId);
-  if (!fresh) throw new BadRequestError("session_not_found");
-  return toState(fresh, await loadParticipants(sessionId, fresh.host_user_id));
+  await sendScheduledReminders();
+  return due.length;
+}
+
+/** "Your buddy walk starts in 15 minutes", exactly once per session. */
+async function sendScheduledReminders(): Promise<void> {
+  const claimed = await db.query<{ id: string; scheduled_start_at: string }>(
+    `UPDATE buddy_sessions
+        SET scheduled_reminder_sent_at = NOW()
+      WHERE status = 'lobby'
+        AND scheduled_start_at IS NOT NULL
+        AND scheduled_reminder_sent_at IS NULL
+        AND scheduled_start_at <= NOW() + INTERVAL '15 minutes'
+        AND scheduled_start_at > NOW()
+      RETURNING id, scheduled_start_at`,
+  );
+
+  for (const session of claimed) {
+    try {
+      const participants = await db.query<{ user_id: string }>(
+        `SELECT user_id FROM buddy_session_participants
+          WHERE session_id = $1 AND status IN ('invited', 'joined', 'ready')`,
+        [session.id],
+      );
+      for (const p of participants) {
+        if (!(await shouldSendNotification(p.user_id, null, "buddy"))) continue;
+        await sendPush(p.user_id, {
+          title: "Buddy Walk soon",
+          body: "Your walk starts in about 15 minutes",
+          type: "buddy_invite",
+          category: "BUDDY_INVITE",
+          data: { session_id: session.id },
+        });
+      }
+    } catch (err) {
+      void logError("buddy", "failed to send scheduled buddy reminder", {
+        context: { sessionId: session.id, error: String(err) },
+      });
+    }
+  }
 }
 
 async function notifySessionStarted(
   sessionId: string,
-  hostUserId: string,
+  hostUserId: string | null,
 ): Promise<void> {
   try {
     const rows = await db.query<{ user_id: string }>(
+      // $2 IS NULL on a scheduled promotion (no human actor). Without the
+      // guard, `user_id <> NULL` is NULL for every row and nobody is told
+      // their walk just started.
       `SELECT user_id FROM buddy_session_participants
-        WHERE session_id = $1 AND status = 'active' AND user_id <> $2`,
+        WHERE session_id = $1 AND status = 'active'
+          AND ($2::text IS NULL OR user_id <> $2)`,
       [sessionId, hostUserId],
     );
     for (const row of rows) {

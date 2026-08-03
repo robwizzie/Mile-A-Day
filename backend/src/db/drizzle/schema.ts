@@ -1812,6 +1812,16 @@ export const buddySessions = pgTable(
       withTimezone: true,
       mode: "string",
     }),
+    // Claim column for the "starts in 15 minutes" push — claimed BEFORE the
+    // send so overlapping containers on a deploy can't double-notify. Nullable
+    // with NO default on purpose: a default of now() would be stored as a
+    // missing-value and make every pre-existing row read as already-reminded
+    // (PG 11+ ADD COLUMN behaviour), which here would be harmless but is the
+    // trap documented in the backend rules and not worth rehearsing.
+    scheduledReminderSentAt: timestamp("scheduled_reminder_sent_at", {
+      withTimezone: true,
+      mode: "string",
+    }),
     // Set a few seconds in the FUTURE at start, so every client counts down to
     // the same wall-clock instant instead of each starting when its own request
     // happens to return.

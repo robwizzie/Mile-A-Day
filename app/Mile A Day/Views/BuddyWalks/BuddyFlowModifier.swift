@@ -90,8 +90,10 @@ struct BuddyFlowModifier: ViewModifier {
                 await BuddySessionService.shared.enrollIfNeeded()
                 await BuddySessionService.shared.refreshMySessions()
                 // "Alex is walking right now" — pulled, never pushed, so this
-                // is the only thing that surfaces the offer.
-                await BuddySessionService.shared.refreshJoinableFriendSessions()
+                // is the only thing that surfaces the offer. Reads live
+                // presence, so a friend out on their OWN shows up too, not
+                // just friends already inside a buddy room.
+                await BuddySessionService.shared.refreshFriendsOutNow()
 
                 // The `.onReceive` pair above only fires for values published
                 // AFTER this mounts. On a cold launch the link is already

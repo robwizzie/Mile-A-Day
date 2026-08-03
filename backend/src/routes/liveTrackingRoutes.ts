@@ -3,6 +3,7 @@ import {
   startLiveTracking,
   liveTrackingHeartbeat,
   endLiveTracking,
+  liveFriendsOut,
 } from "../controllers/liveTrackingController.js";
 
 const router = Router();
@@ -14,5 +15,8 @@ const router = Router();
 router.post("/start", startLiveTracking);
 router.post("/heartbeat", liveTrackingHeartbeat);
 router.post("/end", endLiveTracking);
+// Dashboard-callable: who's out right now, WITHOUT an active session of your
+// own. The heartbeat only answers this once you're already walking.
+router.get("/friends-out", liveFriendsOut);
 
 export default router;

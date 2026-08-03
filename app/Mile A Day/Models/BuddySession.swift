@@ -97,6 +97,23 @@ enum BuddyMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// How a session came to exist. Sent at create time purely so we can measure
+/// which door people actually use before investing in another one — the
+/// proximity/tap handshake is a large piece of work and this is the evidence
+/// that would justify it.
+///
+/// Not decoded from the server (nothing renders it); it only ever travels out.
+enum BuddyOrigin: String {
+    /// Host picked friends and invited them.
+    case invite
+    /// Host created a room to share a code, with nobody invited up front.
+    case code
+    /// Created in response to seeing a friend already out.
+    case joinActive = "join_active"
+    /// Formed by a proximity handshake. Unreachable until that ships.
+    case nearby
+}
+
 enum BuddySessionStatus: String, Codable {
     case lobby, active, completed, cancelled
 
@@ -184,6 +201,7 @@ struct BuddySessionState: Codable, Identifiable, Equatable {
     let hostUserId: String?
     /// Raw ISO strings — see `BuddyDate` for why these aren't `Date`.
     /// Use `startedAtDate` / `endsAtDate` instead of parsing at call sites.
+    let scheduledStartAtRaw: String?
     let startedAtRaw: String?
     let endsAtRaw: String?
     let endedAtRaw: String?
@@ -200,6 +218,7 @@ struct BuddySessionState: Codable, Identifiable, Equatable {
         case activityType = "activity_type"
         case status
         case hostUserId = "host_user_id"
+        case scheduledStartAtRaw = "scheduled_start_at"
         case startedAtRaw = "started_at"
         case endsAtRaw = "ends_at"
         case endedAtRaw = "ended_at"
@@ -214,6 +233,15 @@ struct BuddySessionState: Codable, Identifiable, Equatable {
     /// The synced start instant. Set a few seconds in the FUTURE at start so
     /// every client counts down to the same wall-clock moment.
     var startedAtDate: Date? { BuddyDate.parse(startedAtRaw) }
+    /// When a walk booked ahead of time is due to begin. The lobby counts down
+    /// to this instead of showing the host's start button.
+    var scheduledStartAtDate: Date? { BuddyDate.parse(scheduledStartAtRaw) }
+
+    /// A booked walk that hasn't been promoted yet.
+    var isScheduledPending: Bool {
+        guard status == .lobby, let when = scheduledStartAtDate else { return false }
+        return when > Date()
+    }
     var endsAtDate: Date? { BuddyDate.parse(endsAtRaw) }
     var endedAtDate: Date? { BuddyDate.parse(endedAtRaw) }
 
@@ -381,4 +409,59 @@ struct JoinableFriendSession: Codable, Identifiable, Equatable {
 
 struct JoinableFriendSessionsResponse: Codable {
     let sessions: [JoinableFriendSession]
+}
+
+/// A friend who is out walking or running RIGHT NOW, seen from the dashboard.
+///
+/// Supersedes `JoinableFriendSession` for the dashboard card: that one could
+/// only ever see friends already inside a buddy room, which meant a friend
+/// walking solo — the single best person to start a walk with — was invisible.
+/// This comes from live presence, so it sees both, and the buddy fields are
+/// simply nil for a solo walker.
+struct FriendOutNow: Codable, Identifiable, Equatable {
+    let userId: String
+    let username: String?
+    let firstName: String?
+    let lastName: String?
+    let profileImageUrl: String?
+    let workoutType: String
+    /// Non-nil only when they're in a buddy room that has space left.
+    let buddySessionId: String?
+    let buddyJoinCode: String?
+    let buddyMode: BuddyMode?
+    let buddyParticipantCount: Int?
+
+    var id: String { userId }
+
+    var displayName: String {
+        if let firstName, !firstName.isEmpty { return firstName }
+        if let username, !username.isEmpty { return username }
+        return "A friend"
+    }
+
+    var isRunning: Bool { workoutType == "running" }
+    var accentColor: Color {
+        MADTheme.workoutColor(isRunning ? "running" : "walking")
+    }
+
+    /// True when there's a room to join. False means they're out on their own —
+    /// which is an invitation opportunity, not a dead end.
+    var hasJoinableRoom: Bool { buddySessionId != nil }
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case username
+        case firstName = "first_name"
+        case lastName = "last_name"
+        case profileImageUrl = "profile_image_url"
+        case workoutType = "workout_type"
+        case buddySessionId = "buddy_session_id"
+        case buddyJoinCode = "buddy_join_code"
+        case buddyMode = "buddy_mode"
+        case buddyParticipantCount = "buddy_participant_count"
+    }
+}
+
+struct FriendsOutNowResponse: Codable {
+    let friends: [FriendOutNow]
 }

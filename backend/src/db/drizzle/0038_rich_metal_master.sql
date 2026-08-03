@@ -1,0 +1,1 @@
+ALTER TABLE "buddy_sessions" ADD COLUMN "scheduled_reminder_sent_at" timestamp with time zone;

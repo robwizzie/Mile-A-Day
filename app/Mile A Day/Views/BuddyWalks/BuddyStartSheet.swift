@@ -40,6 +40,10 @@ struct BuddyStartSheet: View {
     /// view updates is not allowed". Local state has no such problem, and the
     /// mirror below runs after the update, not during it.
     @State private var errorText: String?
+    /// Book the walk for later instead of starting it from the lobby. Off by
+    /// default — starting now is overwhelmingly the common case.
+    @State private var isScheduled = false
+    @State private var scheduledDate = Date().addingTimeInterval(60 * 60)
 
     private var activityType: String { isRun ? "running" : "walking" }
     private var accent: Color { MADTheme.workoutColor(activityType) }
@@ -130,6 +134,7 @@ struct BuddyStartSheet: View {
         activityToggle
         modeSection
         if mode.needsGoal { goalSection }
+        scheduleSection
         friendSection
     }
 
@@ -433,6 +438,67 @@ struct BuddyStartSheet: View {
         .buttonStyle(.plain)
     }
 
+    // MARK: - Schedule
+
+    /// "Now" vs "Later" for the walk's start.
+    ///
+    /// Off by default and collapsed to a single row, because the overwhelmingly
+    /// common case is starting immediately and a date picker sitting open in
+    /// that path is pure noise. When it's on, the server owns the start — it
+    /// promotes the session on time whether or not anyone has the app open,
+    /// which is the whole point of booking one.
+    private var scheduleSection: some View {
+        VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+            Button {
+                MADHaptics.tap()
+                isScheduled.toggle()
+                if isScheduled {
+                    // Round up to the next 5 minutes so the default reads as a
+                    // plan ("6:15") rather than a timestamp ("6:12").
+                    let soon = Date().addingTimeInterval(60 * 60)
+                    let step: TimeInterval = 300
+                    scheduledDate = Date(
+                        timeIntervalSince1970:
+                            (soon.timeIntervalSince1970 / step).rounded(.up) * step)
+                }
+            } label: {
+                HStack(spacing: MADTheme.Spacing.sm) {
+                    Image(systemName: isScheduled ? "calendar.badge.clock" : "bolt.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(isScheduled ? accent : MADTheme.Colors.madWhite.opacity(0.7))
+                    Text(isScheduled ? "Starting later" : "Starting now")
+                        .font(MADTheme.Typography.smallBold)
+                        .foregroundStyle(MADTheme.Colors.madWhite)
+                    Spacer(minLength: 0)
+                    Text(isScheduled ? "Change" : "Schedule it")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(accent)
+                }
+                .padding(.horizontal, 14)
+                .frame(height: Self.chipHeight)
+                .frame(maxWidth: .infinity)
+                .background(plainCard(MADTheme.CornerRadius.medium))
+            }
+            .buttonStyle(.plain)
+
+            if isScheduled {
+                DatePicker(
+                    "Starts at",
+                    selection: $scheduledDate,
+                    in: Date().addingTimeInterval(120)...Date().addingTimeInterval(60 * 60 * 24 * 14),
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                .datePickerStyle(.compact)
+                .tint(accent)
+                .padding(.horizontal, 14)
+                .frame(height: Self.chipHeight)
+                .frame(maxWidth: .infinity)
+                .background(plainCard(MADTheme.CornerRadius.medium))
+                .foregroundStyle(MADTheme.Colors.madWhite)
+            }
+        }
+    }
+
     // MARK: - Friends
 
     private var friendSection: some View {
@@ -605,7 +671,12 @@ struct BuddyStartSheet: View {
                 mode: mode,
                 goalValue: mode.needsGoal ? goal : nil,
                 activityType: activityType,
-                inviteUserIds: Array(selected)
+                inviteUserIds: Array(selected),
+                // Nobody picked = a room made to share a code. That's a
+                // genuinely different intent from inviting named friends, and
+                // telling them apart is the whole point of tracking origin.
+                origin: selected.isEmpty ? .code : .invite,
+                scheduledStartAt: isScheduled ? scheduledDate : nil
             )
             MADHaptics.success()
             onCreated(state)

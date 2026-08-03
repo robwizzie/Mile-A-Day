@@ -1,6 +1,9 @@
 import cron from "node-cron";
 import { buddySessionsEnabled } from "../services/buddyFeatures.js";
-import { sweepAbandonedSessions } from "../services/buddySessionService.js";
+import {
+  promoteDueScheduledSessions,
+  sweepAbandonedSessions,
+} from "../services/buddySessionService.js";
 
 /**
  * Buddy session backstop sweep.
@@ -15,15 +18,29 @@ import { sweepAbandonedSessions } from "../services/buddySessionService.js";
  * app died, nobody is polling, and the session would otherwise sit 'active'
  * forever. It also cancels lobbies nobody ever started.
  *
- * :05 keeps it clear of the taken hourly slots (:00 daily reminders, :10 streak
- * features, :20 H2H, :35 friend-request reminders, :50 weekly recap).
+ * It ALSO promotes scheduled walks, which is why the cadence is every 5
+ * minutes rather than hourly: "start at 6:00" cannot be honoured by a job that
+ * runs on the hour. The sweep is a single indexed query that returns nothing
+ * almost always, so 12x the frequency costs essentially nothing. Promotion is
+ * additionally lazy on every state read, so a session whose lobby someone is
+ * watching starts the instant it is due rather than at the next tick.
  *
  * Registered unconditionally but no-ops while the feature flag is off, matching
  * how friendRequestReminderService's cron is wired.
  */
 export function startBuddySessionCron(): void {
-  cron.schedule("5 * * * *", async () => {
+  cron.schedule("*/5 * * * *", async () => {
     if (!buddySessionsEnabled()) return;
+    try {
+      // Scheduled walks first: starting one late is worse than reaping an
+      // abandoned one late.
+      await promoteDueScheduledSessions();
+    } catch (error: any) {
+      console.error(
+        "[CRON] Error promoting scheduled buddy sessions:",
+        error.message,
+      );
+    }
     try {
       const swept = await sweepAbandonedSessions();
       if (swept > 0) {
@@ -37,5 +54,7 @@ export function startBuddySessionCron(): void {
     }
   });
 
-  console.log("Buddy session cron scheduled (hourly abandoned-session sweep).");
+  console.log(
+    "Buddy session cron scheduled (5-min scheduled-start promotion + sweep).",
+  );
 }

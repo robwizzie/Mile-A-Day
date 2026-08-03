@@ -607,9 +607,14 @@ async function main() {
     [createdId],
   );
   const mirrorRow = legacyMirror.rows[0] ?? {};
+  // Tagging is IMMEDIATE now (migration 0032): a collab lands on the coauthor's
+  // profile at post time and their exit is to remove themselves. This assertion
+  // used to expect 'pending', which was correct under the older accept-first
+  // model and silently wrong after it changed.
   check(
     "legacy scalar columns mirror the first coauthor (old-client view)",
-    mirrorRow.coauthor_user_id != null && mirrorRow.coauthor_status === "pending",
+    mirrorRow.coauthor_user_id != null &&
+      mirrorRow.coauthor_status === "accepted",
     JSON.stringify(mirrorRow),
   );
 
@@ -681,6 +686,213 @@ async function main() {
     !(afterJoin.body?.sessions ?? []).some(
       (s) => s.session_id === live.body.id,
     ),
+  );
+
+  console.log("\n── origin tracking ──");
+  const originSession = await api(host, "POST", "/buddy/sessions", {
+    mode: "together",
+    activityType: "walking",
+    inviteUserIds: [],
+    origin: "code",
+  });
+  check("session created with an explicit origin", originSession.status === 201);
+  const originRow = await pool.query(
+    `SELECT origin FROM buddy_sessions WHERE id = $1`,
+    [originSession.body?.id],
+  );
+  check(
+    "origin is persisted, not silently defaulted",
+    originRow.rows[0]?.origin === "code",
+    JSON.stringify(originRow.rows[0]),
+  );
+  const badOrigin = await api(host, "POST", "/buddy/sessions", {
+    mode: "together",
+    activityType: "walking",
+    inviteUserIds: [],
+    origin: "teleportation",
+  });
+  check(
+    "a bad origin is a 400, not a 500 off the DB CHECK",
+    badOrigin.status === 400,
+    `${badOrigin.status} ${JSON.stringify(badOrigin.body)}`,
+  );
+  const defaultOrigin = await api(host, "POST", "/buddy/sessions", {
+    mode: "together",
+    activityType: "walking",
+    inviteUserIds: [],
+  });
+  const defRow = await pool.query(
+    `SELECT origin FROM buddy_sessions WHERE id = $1`,
+    [defaultOrigin.body?.id],
+  );
+  check(
+    "an absent origin still defaults to invite (old clients)",
+    defRow.rows[0]?.origin === "invite",
+  );
+
+  console.log("\n── friends out right now ──");
+  // Live presence is its own table; seed it directly the way the tracker would.
+  await pool.query(
+    `INSERT INTO live_tracking_sessions
+       (user_id, session_id, workout_type, started_at, last_seen_at, ended_at)
+     VALUES ('u_pal', gen_random_uuid(), 'walking', NOW(), NOW(), NULL)
+     ON CONFLICT (user_id) DO UPDATE SET last_seen_at = NOW(), ended_at = NULL`,
+  );
+  let out = await api(host, "GET", "/live/friends-out");
+  let outIds = (out.body?.friends ?? []).map((f) => f.user_id);
+  check("a friend out SOLO is visible", outIds.includes("u_pal"), outIds.join(","));
+  const solo = (out.body?.friends ?? []).find((f) => f.user_id === "u_pal");
+  check(
+    "a solo walker carries no buddy room",
+    solo && solo.buddy_session_id === null,
+    JSON.stringify(solo),
+  );
+  check("you are never in your own friends-out list", !outIds.includes("u_host"));
+
+  // Opting out of being seen must hide them.
+  await pool.query(
+    `INSERT INTO notification_settings (user_id, share_live_presence)
+     VALUES ('u_pal', FALSE)
+     ON CONFLICT (user_id) DO UPDATE SET share_live_presence = FALSE`,
+  );
+  out = await api(host, "GET", "/live/friends-out");
+  check(
+    "share_live_presence = false hides them",
+    !(out.body?.friends ?? []).some((f) => f.user_id === "u_pal"),
+  );
+  await pool.query(
+    `UPDATE notification_settings SET share_live_presence = TRUE WHERE user_id = 'u_pal'`,
+  );
+
+  // A block hides them in BOTH directions even if the friendship survived.
+  await pool.query(
+    `INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ('u_pal','u_host')
+     ON CONFLICT DO NOTHING`,
+  );
+  out = await api(host, "GET", "/live/friends-out");
+  check(
+    "a block hides them even with the friendship intact",
+    !(out.body?.friends ?? []).some((f) => f.user_id === "u_pal"),
+  );
+  await pool.query(
+    `DELETE FROM user_blocks WHERE blocker_id = 'u_pal' AND blocked_id = 'u_host'`,
+  );
+
+  // Now put them in a joinable room and confirm the decoration appears.
+  const room = await api(pal, "POST", "/buddy/sessions", {
+    mode: "together",
+    activityType: "walking",
+    inviteUserIds: [],
+  });
+  out = await api(host, "GET", "/live/friends-out");
+  const withRoom = (out.body?.friends ?? []).find((f) => f.user_id === "u_pal");
+  check(
+    "a friend in a room carries the room to join",
+    withRoom?.buddy_session_id === room.body?.id,
+    JSON.stringify(withRoom),
+  );
+
+  console.log("\n── scheduled walks ──");
+  const soon = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+  const booked = await api(host, "POST", "/buddy/sessions", {
+    mode: "together",
+    activityType: "walking",
+    inviteUserIds: ["u_third"],
+    scheduledStartAt: soon,
+  });
+  check("a walk can be booked for later", booked.status === 201);
+  const bookedId = booked.body?.id;
+  check(
+    "a booked walk waits in the lobby",
+    booked.body?.status === "lobby" && booked.body?.started_at === null,
+    JSON.stringify({ s: booked.body?.status, at: booked.body?.started_at }),
+  );
+  check(
+    "the scheduled time is returned to the client",
+    booked.body?.scheduled_start_at !== null &&
+      booked.body?.scheduled_start_at !== undefined,
+  );
+
+  // Reading it must NOT start it early.
+  const early = await api(host, "GET", `/buddy/sessions/${bookedId}/state`);
+  check("reading a booked walk early does not start it", early.body?.status === "lobby");
+
+  check(
+    "a start time in the past is rejected",
+    (
+      await api(host, "POST", "/buddy/sessions", {
+        mode: "together",
+        activityType: "walking",
+        inviteUserIds: [],
+        scheduledStartAt: new Date(Date.now() - 60_000).toISOString(),
+      })
+    ).status === 400,
+  );
+  check(
+    "an absurdly distant start time is rejected",
+    (
+      await api(host, "POST", "/buddy/sessions", {
+        mode: "together",
+        activityType: "walking",
+        inviteUserIds: [],
+        scheduledStartAt: new Date(Date.now() + 365 * 86400_000).toISOString(),
+      })
+    ).status === 400,
+  );
+
+  // Make it due, then confirm a plain read promotes it.
+  await pool.query(
+    `UPDATE buddy_sessions SET scheduled_start_at = NOW() - INTERVAL '10 seconds'
+      WHERE id = $1`,
+    [bookedId],
+  );
+  const promoted = await api(host, "GET", `/buddy/sessions/${bookedId}/state`);
+  check(
+    "a due booked walk is promoted on read",
+    promoted.body?.status === "active",
+    JSON.stringify(promoted.body?.status),
+  );
+  check(
+    "promotion sets a future started_at, like a manual start",
+    new Date(promoted.body?.started_at).getTime() > Date.now(),
+  );
+  const hostRow = promoted.body?.participants?.find((p) => p.user_id === "u_host");
+  check("the host is active after promotion", hostRow?.status === "active");
+
+  // Promoting twice must be a no-op, and a manual start must not double it.
+  const startedAtOnce = promoted.body?.started_at;
+  const again = await api(host, "GET", `/buddy/sessions/${bookedId}/state`);
+  check(
+    "a second read does not re-promote",
+    again.body?.started_at === startedAtOnce,
+  );
+  const manual = await api(host, "POST", `/buddy/sessions/${bookedId}/start`);
+  check(
+    "a manual start after promotion changes nothing",
+    manual.body?.started_at === startedAtOnce,
+    `${startedAtOnce} vs ${manual.body?.started_at}`,
+  );
+
+  // The reminder claim fires once.
+  const remindId = (
+    await api(host, "POST", "/buddy/sessions", {
+      mode: "together",
+      activityType: "walking",
+      inviteUserIds: ["u_third"],
+      scheduledStartAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    })
+  ).body?.id;
+  await pool.query(
+    `UPDATE buddy_sessions SET scheduled_reminder_sent_at = NOW() WHERE id = $1`,
+    [remindId],
+  );
+  const claimed = await pool.query(
+    `SELECT scheduled_reminder_sent_at FROM buddy_sessions WHERE id = $1`,
+    [remindId],
+  );
+  check(
+    "the reminder claim column is writable and sticks",
+    claimed.rows[0]?.scheduled_reminder_sent_at !== null,
   );
 
   console.log(

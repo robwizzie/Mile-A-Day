@@ -4,6 +4,7 @@ import {
   startSession,
   heartbeat,
   endSession,
+  friendsOutNow,
 } from "../services/liveTrackingService.js";
 
 /**
@@ -48,6 +49,19 @@ export async function liveTrackingHeartbeat(
   } catch (error: any) {
     console.error("Error on live tracking heartbeat:", error.message);
     res.status(500).json({ error: "Error on live tracking heartbeat" });
+  }
+}
+
+/**
+ * Friends out right now, for a caller who isn't tracking. Unlike the heartbeat
+ * this needs no session — it's read from the dashboard, before you start.
+ */
+export async function liveFriendsOut(req: AuthenticatedRequest, res: Response) {
+  try {
+    return res.status(200).json({ friends: await friendsOutNow(req.userId!) });
+  } catch (error: any) {
+    console.error("Error loading friends out:", error.message);
+    res.status(500).json({ error: "Error loading friends out" });
   }
 }
 
