@@ -395,10 +395,20 @@ final class BuddySessionService: ObservableObject {
         (error as? LocalizedError)?.errorDescription ?? "Something went wrong."
     }
 
-    private func request<T: Codable & SendableMetatype>(
+    /// `nonisolated` for the same reason `makeRequest` below is, and it has to
+    /// be: an @MainActor generic function lets its caller supply a MainActor-
+    /// ISOLATED `Codable` conformance for `T`, which then can't be forwarded
+    /// into nonisolated `makeRequest`. Being nonisolated makes the conformance
+    /// requirement nonisolated too, so the hand-off is legal. It touches no
+    /// actor state — serialize, forward, return.
+    ///
+    /// `json` is `sending` because `[String: Any]` isn't Sendable (`Any`
+    /// isn't). Every caller passes a dictionary literal or a local it doesn't
+    /// touch again, so the value is always in a disconnected region.
+    private nonisolated func request<T: Codable & SendableMetatype>(
         _ endpoint: String,
         method: HTTPMethod = .GET,
-        json: [String: Any]? = nil,
+        json: sending [String: Any]? = nil,
         responseType: T.Type
     ) async throws -> T {
         var body: Data?
@@ -426,7 +436,11 @@ final class BuddySessionService: ObservableObject {
             )
         } catch let error as APIError {
             switch error {
-            case .notAuthenticated, .unauthorized, .tokenRefreshFailed:
+            // accountMismatch is the cached-id-vs-token drift SessionIdentity
+            // catches — same handling as every other service: it's an auth
+            // problem, not a buddy problem.
+            case .notAuthenticated, .unauthorized, .tokenRefreshFailed,
+                .accountMismatch:
                 throw BuddyServiceError.notAuthenticated
             case .badRequest(let message),
                 .conflict(let message),
