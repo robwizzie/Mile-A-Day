@@ -16,10 +16,14 @@ struct StreakTokenMeter: Codable {
     }
 }
 
-/// A day the server says still counts (token-covered), with which token did it.
-struct CoveredDate: Codable {
+/// A day the server says still counts (token-covered), with which token did it
+/// and — for an assist — who. Optional/Equatable/Hashable because every
+/// per-day surface indexes these (see SavedDayStyle); `source_username` is
+/// absent on older servers and for non-assist kinds.
+struct CoveredDate: Codable, Equatable, Hashable {
     let local_date: String
     let kind: String
+    let source_username: String?
 }
 
 /// The gated `streak_features` object on getUserStats. Absent entirely until

@@ -534,7 +534,7 @@ struct StreakErasResponse: Decodable, Equatable {
     let current_is_longest: Bool
     /// Every day across the whole history that a token carried. Optional: it's
     /// omitted for users who never used one and by older servers.
-    let covered_days: [CoveredDay]?
+    let covered_days: [CoveredDate]?
 }
 
 // MARK: - Stats API Models

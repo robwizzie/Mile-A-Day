@@ -622,7 +622,14 @@ export interface StreakFeaturesPayload {
   double_down: MeterState & { recover_miles: number };
   streak_save: MeterState;
   streak_assist: MeterState;
-  frozen_dates: { local_date: string; kind: string }[];
+  // `source_username` is the assist GIVER, so a client can say "alex saved
+  // this day" rather than a bare "covered". Additive to the object; shipped
+  // clients ignore the extra key.
+  frozen_dates: {
+    local_date: string;
+    kind: string;
+    source_username: string | null;
+  }[];
   natural_streak: boolean;
   streak_at_risk: boolean;
 }
@@ -649,11 +656,17 @@ export async function getStreakFeaturesPayload(
   const userToday = await getUserLocalToday(userId);
   const meters = await getMeters(userId, row, userToday);
 
-  const coverage = await db.query<{ local_date: string; kind: string }>(
-    `SELECT to_char(local_date, 'YYYY-MM-DD') AS local_date, kind
-     FROM streak_coverage
-     WHERE user_id = $1 AND local_date >= $2::date
-     ORDER BY local_date DESC`,
+  const coverage = await db.query<{
+    local_date: string;
+    kind: string;
+    source_username: string | null;
+  }>(
+    `SELECT to_char(sc.local_date, 'YYYY-MM-DD') AS local_date, sc.kind,
+            su.username AS source_username
+     FROM streak_coverage sc
+     LEFT JOIN users su ON su.user_id = sc.source_user
+     WHERE sc.user_id = $1 AND sc.local_date >= $2::date
+     ORDER BY sc.local_date DESC`,
     [userId, dateStrMinus(userToday, METER_WINDOW_DAYS)],
   );
 

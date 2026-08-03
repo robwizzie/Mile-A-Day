@@ -937,10 +937,11 @@ struct FriendStats: Codable {
     /// to Monday). Optional: nil until the server ships the field.
     let last7DayMiles: [FriendDayMiles]?
     let goalMiles: Double?
-    /// Days in the week window that a streak token carried. Absent for anyone
-    /// who has never used one, and on older servers — so the chart's saved-day
-    /// styling simply doesn't appear rather than breaking.
-    let coveredDays: [CoveredDay]?
+    /// Days a streak token carried. Read from the SAME gated `streak_features`
+    /// payload as `naturalStreak` — the server has always sent it (as
+    /// `frozen_dates`) for friend fetches too, so this needed no new field on
+    /// the wire. Empty for anyone who has never used a token.
+    let coveredDays: [CoveredDate]
     /// True when this user's current streak is 100% natural. Read from the
     /// gated `streak_features` payload — absent for un-enrolled users, so it
     /// safely defaults to false and the Pure Flame badge simply doesn't show.
@@ -956,7 +957,6 @@ struct FriendStats: Codable {
         case todayMiles = "today_miles"
         case last7DayMiles = "last_7_day_miles"
         case goalMiles = "goal_miles"
-        case coveredDays = "covered_days"
     }
 
     /// Separate key enum for the gated payload so `streak_features` stays out
@@ -966,9 +966,10 @@ struct FriendStats: Codable {
         case streakFeatures = "streak_features"
     }
 
-    /// Only the one field friend surfaces need from the gated payload.
+    /// The fields friend surfaces need from the gated payload.
     private struct GatedStreakFeatures: Decodable {
         let natural_streak: Bool?
+        let frozen_dates: [CoveredDate]?
     }
     
     init(from decoder: Decoder) throws {
@@ -993,12 +994,13 @@ struct FriendStats: Codable {
         todayMiles = try? container.decode(Double.self, forKey: .todayMiles)
         last7DayMiles = try? container.decode([FriendDayMiles].self, forKey: .last7DayMiles)
         goalMiles = try? container.decode(Double.self, forKey: .goalMiles)
-        coveredDays = try? container.decode([CoveredDay].self, forKey: .coveredDays)
         if let gated = try? decoder.container(keyedBy: GatedKeys.self),
            let features = try? gated.decode(GatedStreakFeatures.self, forKey: .streakFeatures) {
             naturalStreak = features.natural_streak ?? false
+            coveredDays = features.frozen_dates ?? []
         } else {
             naturalStreak = false
+            coveredDays = []
         }
     }
 }
