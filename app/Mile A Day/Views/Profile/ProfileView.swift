@@ -230,6 +230,10 @@ struct ProfileView: View {
         VStack(spacing: MADTheme.Spacing.lg) {
             streakAndGoalRow
             OwnTodayChallengeCard(healthManager: healthManager, userManager: userManager)
+            HallOfStreaksSection(
+                userId: userManager.currentUser.backendUserId,
+                isSelf: true
+            )
             if !ownWorkouts.isEmpty {
                 Last7DaysChart(workouts: ownWorkouts, dayTotals: ownDayTotals)
             }

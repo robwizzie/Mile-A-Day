@@ -11,6 +11,12 @@ struct User: Identifiable, Codable {
     var profileImageUrl: String? = nil
     var role: String? = nil
     var streak: Int = 0
+    // All-time longest streak, from the backend's ratcheted users.longest_streak.
+    // MUST stay Optional: this struct is decoded from persisted UserDefaults
+    // blobs, and synthesized Decodable ignores property defaults — a new
+    // non-optional field would throw on every existing install (reads as a
+    // sign-out). Same trap class as the FeedEntry CodingKeys bug (build 413).
+    var longestStreak: Int? = nil
     var totalMiles: Double = 0.0
     var fastestMilePace: TimeInterval = 0.0  // Minutes per mile (fastest pace)
     var mostMilesInOneDay: Double = 0.0      // Most miles run in a single day

@@ -139,6 +139,16 @@ export type NotificationType =
   | "coauthor_invite"
   | "coauthor_accepted"
   | "daily_reminder"
+  // The runner's OWN "mile complete" — sent from the same atomic once-per-day
+  // claim that triggers friend_activity, so it fires no matter which device
+  // synced the mile (Watch, locked phone, third-party app).
+  | "goal_reached"
+  // The runner's OWN "streak ended" — the midnight sweep told FRIENDS
+  // ("send encouragement!") while the owner found out from a zeroed flame.
+  // Deliberately NOT high-priority: the sweep runs near midnight, and quiet
+  // hours defer this to the morning flush, when "one mile starts the next
+  // one" is actionable.
+  | "streak_lost"
   | "weekly_recap"
   // Streak tokens (gated by per-user enrollment + the STREAK_FEATURES_DISABLED
   // kill switch; none are high-priority, so quiet hours apply automatically).
@@ -324,6 +334,11 @@ const HIGH_PRIORITY_TYPES: NotificationType[] = [
   // next morning without rechecking — reintroducing the exact stale-text race
   // the server-side path was built to eliminate.
   "daily_reminder",
+  // The user's own goal celebration: they JUST finished a mile, so they're
+  // awake and active by definition — quiet-hours queueing a late-night
+  // mile's "you did it" to tomorrow's flush is exactly the flakiness this
+  // push exists to fix.
+  "goal_reached",
 ];
 
 async function getDailyNotificationCount(userId: string): Promise<number> {

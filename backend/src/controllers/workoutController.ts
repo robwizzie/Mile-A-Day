@@ -24,6 +24,7 @@ import {
   getUserLocalToday,
   getUserRoutes,
   getWorkoutRoute as getWorkoutRouteDb,
+  getStreakErasForUser,
 } from "../services/workoutService.js";
 import { checkRaceCompletions } from "../services/competitionService.js";
 import { softDeleteWorkout } from "../services/workoutDeletionService.js";
@@ -42,7 +43,10 @@ import {
   fanOutFriendPersonalBestPush,
   fanOutFriendRacePrPush,
 } from "../services/pushNotificationService.js";
-import { refreshCurrentStreak } from "../services/leaderboardService.js";
+import {
+  refreshCurrentStreak,
+  ratchetLongestStreak,
+} from "../services/leaderboardService.js";
 import {
   reconcileStreakFeaturesOnUpload,
   getStreakFeaturesPayload,
@@ -379,6 +383,50 @@ export async function getStreak(req: Request, res: Response) {
 }
 
 /**
+ * Every streak run ("era") in the user's history, newest first, plus their
+ * longest-ever streak. Readable by any authenticated user, like /stats —
+ * friend profiles show the Hall of Streaks. Covered (token-saved) days count
+ * exactly as the live streak walk counts them.
+ */
+export async function getStreakEras(req: AuthenticatedRequest, res: Response) {
+  if (!hasRequiredKeys(["userId"], req, res)) return;
+
+  try {
+    const userId = req.params.userId;
+
+    const user = await getUser({ userId });
+    if (!user) {
+      return res.status(400).send({ error: `No user found with ID ${userId}` });
+    }
+
+    const { eras, longest } = await getStreakErasForUser(userId);
+
+    // Never report lower than the ratcheted column: a deleted workout can
+    // shrink the recomputed history, but the record the user earned stands.
+    // Pre-backfill rows read 0 → this degrades to the computed value.
+    const longest_streak = Math.max(longest, Number(user.longest_streak ?? 0));
+
+    // Keep the stored record fresh without blocking the response (a brand-new
+    // record is visible here before any refreshCurrentStreak write lands).
+    ratchetLongestStreak(userId, longest).catch((err: any) =>
+      console.error("Error ratcheting longest streak:", err?.message),
+    );
+
+    const current_is_longest =
+      eras.length > 0 &&
+      eras[0].is_current === true &&
+      eras[0].length >= longest_streak;
+
+    return res.status(200).json({ eras, longest_streak, current_is_longest });
+  } catch (error: any) {
+    console.error("Error getting streak eras:", error.message);
+    res
+      .status(500)
+      .json({ error: "Error getting streak eras: " + error.message });
+  }
+}
+
+/**
  * Best time per race distance (1mi, 5K, 10K, half, marathon, ...), derived live
  * from the user's workouts. Readable by any authenticated user, like /stats —
  * friend profiles show PRs. Distances with no qualifying workout are absent.
@@ -608,6 +656,9 @@ export async function getUserStats(req: AuthenticatedRequest, res: Response) {
       today_miles,
       last_7_day_miles,
       goal_miles,
+      // Additive. Ratcheted column, floored at the live streak so a fresh
+      // record never reads stale; pre-backfill rows (0) degrade to the streak.
+      longest_streak: Math.max(Number(user.longest_streak ?? 0), streak),
       ...(streak_features ? { streak_features } : {}),
     });
   } catch (error: any) {

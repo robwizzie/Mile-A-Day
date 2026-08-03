@@ -1,0 +1,16 @@
+ALTER TABLE "users" ADD COLUMN "longest_streak" integer DEFAULT 0 NOT NULL;
+--
+-- Metadata-only and instant regardless of the users table's size: on PG 11+ a
+-- constant DEFAULT is stored as a missing-value, not a table rewrite. Every
+-- existing row reads 0 until db/backfillLongestStreaks.ts fills its real
+-- history — API surfaces degrade 0 to max(0, current_streak), i.e. exactly the
+-- information the app had before this column existed.
+--
+-- The index `idx_users_longest_streak_desc` is deliberately NOT in this file,
+-- even though drizzle generated it here (it IS declared in schema.ts, so the
+-- snapshot knows it). Migrations run at server BOOT over the shared pool with
+-- 30s statement/query timeouts, one transaction each — and the backfill wants
+-- to build the index AFTER filling values, CONCURRENTLY, which can't run in a
+-- transaction at all. db/backfillLongestStreaks.ts builds it post-listen and
+-- uses its (valid) existence as the "backfill finished" marker. Same split as
+-- migration 0029 / backfillFeedRoles.

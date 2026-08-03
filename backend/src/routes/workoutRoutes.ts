@@ -12,6 +12,7 @@ import {
   getWorkoutRouteController,
   getRaceRecords,
   getRaceHistoryController,
+  getStreakEras,
 } from "../controllers/workoutController.js";
 import { requireSelfAccess } from "../middleware/auth.js";
 
@@ -45,6 +46,9 @@ router.get(
 // gates it, and it can never become the full-history dump above.
 router.get("/:userId/workout/:workoutId/route", getWorkoutRouteController);
 router.get("/:userId/streak", getStreak);
+// Streak history ("eras") + longest-ever, readable by any authenticated user
+// (like /stats) so friend profiles can show the Hall of Streaks.
+router.get("/:userId/streak-eras", getStreakEras);
 router.get("/:userId/range", getWorkoutRange);
 router.get("/:userId/recent", getRecentWorkouts);
 router.get("/:userId/stats", getUserStats);
