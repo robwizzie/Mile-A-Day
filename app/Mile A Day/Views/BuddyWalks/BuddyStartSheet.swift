@@ -1,15 +1,17 @@
 import SwiftUI
 
-/// Create a buddy walk: pick a mode, a goal, and who's coming.
+/// Start a buddy walk, or join one someone else started.
 ///
-/// Deliberately opens on "Just Together" with no goal to set, so the common
-/// case — two friends about to walk — is pick-a-friend-and-go. The competitive
-/// modes are one tap away rather than in the way.
+/// Start-vs-join is the FIRST thing the screen asks, as a segmented control at
+/// the top. Earlier passes buried joining behind a "#" toolbar glyph (nobody
+/// knew what it meant), then added a second join button in the footer — which
+/// left the sheet with two ways in and, worse, a primary button reading "Start
+/// with a share code" sitting directly above "Join with their code". Two
+/// code-flavoured buttons, opposite meanings. One switch at the top removes the
+/// ambiguity: pick a lane, then the rest of the screen is only about that lane.
 ///
-/// The layout answers "what am I about to start?" before it asks anything: the
-/// header restates the current choices as a sentence that updates live, so the
-/// mode tiles and goal chips below read as adjustments to a real thing rather
-/// than as a form to fill in.
+/// Within the Start lane it opens on "Just Together" with no goal to set, so
+/// the common case — two friends about to walk — is pick-a-friend-and-go.
 struct BuddyStartSheet: View {
     /// Handed back so the caller can push straight into the lobby.
     let onCreated: (BuddySessionState) -> Void
@@ -17,12 +19,21 @@ struct BuddyStartSheet: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var buddy = BuddySessionService.shared
 
+    private enum Lane: String, CaseIterable {
+        case start, join
+        var title: String { self == .start ? "Start one" : "Join one" }
+        var icon: String { self == .start ? "plus.circle.fill" : "arrow.right.circle.fill" }
+    }
+
+    @State private var lane: Lane = .start
     @State private var mode: BuddyMode = .together
     @State private var goal: Double = BuddyMode.together.defaultGoal
     @State private var isRun = false
     @State private var selected: Set<String> = []
     @State private var isCreating = false
-    @State private var showJoinByCode = false
+    @State private var joinCode = ""
+    @State private var isJoining = false
+    @FocusState private var codeFocused: Bool
     /// Errors are mirrored into LOCAL state. Driving `.alert(isPresented:)`
     /// straight off `buddy.errorMessage` meant the binding's setter wrote to an
     /// @Published from inside a view update — "Publishing changes from within
@@ -42,13 +53,10 @@ struct BuddyStartSheet: View {
 
                 ScrollView {
                     VStack(spacing: MADTheme.Spacing.lg) {
-                        summaryHeader
-                        activityToggle
-                        modeSection
-                        if mode.needsGoal { goalSection }
-                        friendSection
+                        lanePicker
+                        if lane == .start { startLane } else { joinLane }
                         // Clears the sticky footer.
-                        Color.clear.frame(height: 150)
+                        Color.clear.frame(height: 120)
                     }
                     .padding(.horizontal, MADTheme.Spacing.md)
                     .padding(.top, MADTheme.Spacing.sm)
@@ -58,14 +66,9 @@ struct BuddyStartSheet: View {
             }
             .navigationTitle(isRun ? "Buddy Run" : "Buddy Walk")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { toolbarContent }
-            .sheet(isPresented: $showJoinByCode) {
-                BuddyJoinSheet { state in
-                    showJoinByCode = false
-                    onCreated(state)
-                    // Joining by code replaces creating one — close this sheet
-                    // too so the user lands straight in the lobby.
-                    dismiss()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
                 }
             }
             .task { await buddy.loadCandidates() }
@@ -88,20 +91,84 @@ struct BuddyStartSheet: View {
         }
     }
 
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .cancellationAction) {
-            Button("Cancel") { dismiss() }
-        }
-        ToolbarItem(placement: .primaryAction) {
-            // Spelled out, not a "#" glyph. The icon-only version tested as
-            // undiscoverable — you had to tap it to learn what it did, which
-            // is the opposite of what a toolbar affordance is for.
-            Button("Join") {
-                MADHaptics.tap()
-                showJoinByCode = true
+    @ViewBuilder
+    private var startLane: some View {
+        summaryHeader
+        activityToggle
+        modeSection
+        if mode.needsGoal { goalSection }
+        friendSection
+    }
+
+    // MARK: - Lane picker
+
+    private var lanePicker: some View {
+        HStack(spacing: 4) {
+            ForEach(Lane.allCases, id: \.self) { option in
+                laneChip(option)
             }
-            .font(MADTheme.Typography.smallBold)
+        }
+        .padding(4)
+        .background(Capsule().fill(MADTheme.Colors.madWhite.opacity(0.10)))
+    }
+
+    private func laneChip(_ option: Lane) -> some View {
+        let isOn = lane == option
+        return Button {
+            MADHaptics.tap()
+            withAnimation(MADTheme.Animation.quick) { lane = option }
+            codeFocused = option == .join
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: option.icon).font(.system(size: 13, weight: .semibold))
+                Text(option.title).font(MADTheme.Typography.bodyBold)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(Capsule().fill(isOn ? accent : .clear))
+            .foregroundStyle(
+                isOn ? MADTheme.Colors.madWhite : MADTheme.Colors.madWhite.opacity(0.6))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Join lane
+
+    private var joinLane: some View {
+        VStack(spacing: MADTheme.Spacing.lg) {
+            VStack(spacing: MADTheme.Spacing.sm) {
+                ZStack {
+                    Circle().fill(accent.opacity(0.18)).frame(width: 72, height: 72)
+                    Image(systemName: "number")
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(accent)
+                }
+                Text("Enter their code")
+                    .font(MADTheme.Typography.title3)
+                    .foregroundStyle(MADTheme.Colors.madWhite)
+                Text("Six characters, shown on the host's screen while they wait.")
+                    .font(MADTheme.Typography.subheadline)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.65))
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, MADTheme.Spacing.lg)
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.extraLarge)
+
+            TextField("ABC123", text: $joinCode)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .multilineTextAlignment(.center)
+                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .tracking(8)
+                .foregroundStyle(MADTheme.Colors.madWhite)
+                .focused($codeFocused)
+                .padding(MADTheme.Spacing.md)
+                .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.large)
+                .onChange(of: joinCode) { _, newValue in
+                    joinCode = String(newValue.uppercased().prefix(6))
+                }
         }
     }
 
@@ -115,16 +182,15 @@ struct BuddyStartSheet: View {
             ZStack {
                 Circle()
                     .fill(accent.opacity(0.18))
-                    .frame(width: 76, height: 76)
+                    .frame(width: 72, height: 72)
                 Circle()
                     .strokeBorder(accent.opacity(0.5), lineWidth: 1.5)
-                    .frame(width: 76, height: 76)
+                    .frame(width: 72, height: 72)
                 Image(systemName: mode.icon)
-                    .font(.system(size: 30, weight: .semibold))
+                    .font(.system(size: 28, weight: .semibold))
                     .foregroundStyle(accent)
             }
             .animation(MADTheme.Animation.quick, value: mode)
-            .animation(MADTheme.Animation.quick, value: isRun)
 
             Text(summaryTitle)
                 .font(MADTheme.Typography.title2)
@@ -139,7 +205,7 @@ struct BuddyStartSheet: View {
             if !selectedCandidates.isEmpty { selectedAvatars }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, MADTheme.Spacing.lg)
+        .padding(.vertical, MADTheme.Spacing.md)
         .padding(.horizontal, MADTheme.Spacing.md)
         .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.extraLarge)
     }
@@ -158,8 +224,8 @@ struct BuddyStartSheet: View {
         buddy.candidates.filter { selected.contains($0.userId) }
     }
 
-    /// Faces, not just a count — the header is meant to feel like the walk is
-    /// already half real. Overlap is built with negative-space PADDING rather
+    /// Faces, not just a count — the header should feel like the walk is
+    /// already half real. Overlap is built with negative HStack spacing rather
     /// than `.offset`, which draws outside layout bounds and would measure the
     /// stack wrong (ios.md).
     private var selectedAvatars: some View {
@@ -258,29 +324,30 @@ struct BuddyStartSheet: View {
                 goal = option.defaultGoal
             }
         } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 0) {
                     Image(systemName: option.icon)
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(isOn ? accent : MADTheme.Colors.madWhite.opacity(0.55))
-                    Spacer()
-                    if isOn {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(accent)
-                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .opacity(isOn ? 1 : 0)
                 }
                 Text(option.title)
                     .font(MADTheme.Typography.smallBold)
                     .foregroundStyle(MADTheme.Colors.madWhite)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
                 Text(option.subtitle)
                     .font(MADTheme.Typography.caption)
                     .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
-            .padding(MADTheme.Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(12)
             .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.large)
             .overlay(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
@@ -369,7 +436,8 @@ struct BuddyStartSheet: View {
             Text("No friends set up for buddy walks yet")
                 .font(MADTheme.Typography.smallBold)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.85))
-            Text("They'll appear here once they update. You can still start one and share the code.")
+                .multilineTextAlignment(.center)
+            Text("They'll appear once they update. You can still start one and share the code.")
                 .font(MADTheme.Typography.caption)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
                 .multilineTextAlignment(.center)
@@ -410,38 +478,37 @@ struct BuddyStartSheet: View {
 
     // MARK: - Footer
 
+    /// ONE action, whichever lane you're in. The scrim is opaque enough that
+    /// the list underneath reads as "behind" rather than as clipped content.
     private var footer: some View {
         VStack(spacing: 0) {
             LinearGradient(
-                colors: [.clear, MADTheme.Colors.madBlack.opacity(0.85)],
+                colors: [MADTheme.Colors.madBlack.opacity(0), MADTheme.Colors.madBlack],
                 startPoint: .top, endPoint: .bottom
             )
-            .frame(height: 24)
+            .frame(height: 28)
             .allowsHitTesting(false)
 
-            VStack(spacing: MADTheme.Spacing.sm) {
-                startButton
-                joinButton
-            }
-            .padding(.horizontal, MADTheme.Spacing.md)
-            .padding(.bottom, MADTheme.Spacing.sm)
-            .background(MADTheme.Colors.madBlack.opacity(0.85))
+            primaryButton
+                .padding(.horizontal, MADTheme.Spacing.md)
+                .padding(.bottom, MADTheme.Spacing.sm)
+                .background(MADTheme.Colors.madBlack)
         }
     }
 
-    private var startButton: some View {
+    private var primaryButton: some View {
         Button {
             MADHaptics.action()
-            Task { await create() }
+            Task { lane == .start ? await create() : await join() }
         } label: {
             HStack(spacing: 8) {
-                if isCreating {
+                if isCreating || isJoining {
                     ProgressView().tint(MADTheme.Colors.madWhite)
                 } else {
-                    Image(systemName: selected.isEmpty ? "number" : "figure.2")
+                    Image(systemName: lane == .start ? "figure.2" : "arrow.right.circle.fill")
                         .font(.system(size: 16, weight: .semibold))
                 }
-                Text(startButtonTitle)
+                Text(primaryTitle)
             }
             .font(MADTheme.Typography.bodyBold)
             .frame(maxWidth: .infinity)
@@ -450,45 +517,25 @@ struct BuddyStartSheet: View {
             .foregroundStyle(MADTheme.Colors.madWhite)
         }
         .buttonStyle(.plain)
-        .disabled(isCreating)
-        .opacity(isCreating ? 0.7 : 1)
+        .disabled(primaryDisabled)
+        .opacity(primaryDisabled ? 0.5 : 1)
     }
 
-    /// Joining is a genuinely different intent from creating, and it was
-    /// hidden behind a "#" glyph in the toolbar — the one control on the
-    /// screen you had to tap to discover. It belongs in the footer next to
-    /// the other decision, spelled out.
-    private var joinButton: some View {
-        Button {
-            MADHaptics.tap()
-            showJoinByCode = true
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.right.circle")
-                    .font(.system(size: 14, weight: .semibold))
-                Text("A friend already started one? Join with their code")
-                    .font(MADTheme.Typography.small)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.75))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .background(
-                Capsule()
-                    .fill(MADTheme.Colors.madWhite.opacity(0.08))
-                    .overlay(
-                        Capsule().strokeBorder(
-                            MADTheme.Colors.madWhite.opacity(0.15), lineWidth: 1))
-            )
-        }
-        .buttonStyle(.plain)
+    private var primaryDisabled: Bool {
+        if lane == .join { return joinCode.count < 6 || isJoining }
+        return isCreating
     }
 
-    private var startButtonTitle: String {
+    /// Never mentions the share code. The old label — "Start with a share
+    /// code" — read as an INPUT ("start by entering a code") and sat directly
+    /// above the join button, which genuinely does take a code. The code is a
+    /// consequence of starting, and the header sentence already says so.
+    private var primaryTitle: String {
+        if lane == .join { return isJoining ? "Joining…" : "Join walk" }
         if isCreating { return "Starting…" }
-        if selected.isEmpty { return "Start with a share code" }
-        return selected.count == 1 ? "Invite 1 friend" : "Invite \(selected.count) friends"
+        let noun = isRun ? "run" : "walk"
+        if selected.isEmpty { return "Start \(noun)" }
+        return selected.count == 1 ? "Invite 1 & start" : "Invite \(selected.count) & start"
     }
 
     // MARK: - Helpers
@@ -531,106 +578,21 @@ struct BuddyStartSheet: View {
                 (error as? LocalizedError)?.errorDescription ?? "Couldn't create the buddy walk."
         }
     }
-}
-
-/// Join an existing walk with the 6-character code the host is reading aloud.
-struct BuddyJoinSheet: View {
-    let onJoined: (BuddySessionState) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var buddy = BuddySessionService.shared
-    @State private var code = ""
-    @State private var isJoining = false
-    @State private var error: String?
-    @FocusState private var codeFocused: Bool
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                MADTheme.Colors.appBackgroundGradient.ignoresSafeArea()
-
-                VStack(spacing: MADTheme.Spacing.lg) {
-                    VStack(spacing: MADTheme.Spacing.xs) {
-                        Image(systemName: "number.circle.fill")
-                            .font(.system(size: 40, weight: .semibold))
-                            .foregroundStyle(MADTheme.Colors.madRed)
-                        Text("Enter the host's code")
-                            .font(MADTheme.Typography.title3)
-                            .foregroundStyle(MADTheme.Colors.madWhite)
-                        Text("Six characters, shown on their screen")
-                            .font(MADTheme.Typography.footnote)
-                            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.6))
-                    }
-                    .padding(.top, MADTheme.Spacing.lg)
-
-                    TextField("ABC123", text: $code)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                        .multilineTextAlignment(.center)
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                        .tracking(6)
-                        .foregroundStyle(MADTheme.Colors.madWhite)
-                        .focused($codeFocused)
-                        .padding(MADTheme.Spacing.md)
-                        .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.large)
-                        .onChange(of: code) { _, newValue in
-                            code = String(newValue.uppercased().prefix(6))
-                        }
-
-                    if let error {
-                        Text(error)
-                            .font(MADTheme.Typography.footnote)
-                            .foregroundStyle(MADTheme.Colors.error)
-                            .multilineTextAlignment(.center)
-                    }
-
-                    Button {
-                        Task { await join() }
-                    } label: {
-                        HStack {
-                            if isJoining { ProgressView().tint(MADTheme.Colors.madWhite) }
-                            Text("Join")
-                        }
-                        .font(MADTheme.Typography.bodyBold)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, MADTheme.Spacing.md)
-                        .background(Capsule().fill(MADTheme.Colors.madRed))
-                        .foregroundStyle(MADTheme.Colors.madWhite)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(code.count < 6 || isJoining)
-                    .opacity(code.count < 6 ? 0.5 : 1)
-
-                    Spacer()
-                }
-                .padding(MADTheme.Spacing.md)
-            }
-            .navigationTitle("Join a walk")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-            .onAppear { codeFocused = true }
-        }
-    }
 
     private func join() async {
         guard !isJoining else { return }
         isJoining = true
         defer { isJoining = false }
-        error = nil
         do {
-            try await buddy.join(code: code)
+            try await buddy.join(code: joinCode)
             if let session = buddy.session {
                 MADHaptics.success()
-                onJoined(session)
+                onCreated(session)
                 dismiss()
             }
         } catch {
             MADHaptics.error()
-            self.error =
+            errorText =
                 (error as? LocalizedError)?.errorDescription ?? "Couldn't join that walk."
         }
     }

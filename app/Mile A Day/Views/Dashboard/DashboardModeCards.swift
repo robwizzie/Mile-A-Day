@@ -571,9 +571,16 @@ private struct ModernHeroCard: View {
 
 /// The longest-ever streak, rendered under the hero flame in one of two moods:
 /// a faint "ghost" target while the current run chases the record, or a gold
-/// LONGEST EVER chip while the user is living it (streak >= 7 so brand-new
-/// accounts don't get a record chip on day 1). Renders nothing when there's
-/// no meaningful record yet — both heroes share this row.
+/// record chip while the user is living it (streak >= 7 so brand-new accounts
+/// don't get a record chip on day 1). Renders nothing when there's no
+/// meaningful record yet — both heroes share this row.
+///
+/// It lives in the hero's NARROW right-hand column, roughly 150pt wide. That
+/// is the whole design constraint: the old version put "LONGEST EVER" and
+/// "447 days and counting" in one capsule and both ends truncated, so it read
+/// "LONGE… 447 days an…". The record chip therefore carries ONE short label
+/// and no number — the streak count is already the biggest thing on the card,
+/// directly above it, and repeating it is what cost the space.
 private struct RecordGhostRow: View {
     let streak: Int
     let longest: Int
@@ -584,48 +591,38 @@ private struct RecordGhostRow: View {
 
     var body: some View {
         if atRecord {
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 Image(systemName: "crown.fill")
-                    .font(.system(size: 11, weight: .black))
-                    .foregroundColor(gold)
-                Text("LONGEST EVER")
+                    .font(.system(size: 10, weight: .black))
+                Text("ALL-TIME BEST")
                     .font(.system(size: 10, weight: .black, design: .rounded))
-                    .tracking(1.4)
-                    .foregroundColor(gold)
-                Text("\(streak) days and counting")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.72))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Spacer(minLength: 0)
+                    .tracking(0.8)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .foregroundColor(gold)
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             .background(
                 Capsule()
-                    .fill(gold.opacity(0.12))
-                    .overlay(Capsule().strokeBorder(gold.opacity(0.35), lineWidth: 1))
+                    .fill(gold.opacity(0.14))
+                    .overlay(Capsule().strokeBorder(gold.opacity(0.38), lineWidth: 1))
             )
         } else if chasing {
-            HStack(spacing: 6) {
+            // One Text, not two competing ones: in a narrow column a pair of
+            // labels with a Spacer between them both truncate rather than one
+            // of them winning.
+            HStack(spacing: 5) {
                 Image(systemName: "flame")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.white.opacity(0.38))
-                Text("Best \(longest)")
-                    .font(.system(size: 11, weight: .heavy, design: .rounded))
-                    .foregroundColor(.white.opacity(0.45))
+                    .font(.system(size: 9, weight: .bold))
+                Text("BEST \(longest) · \(longest - streak) TO GO")
+                    .font(.system(size: 10, weight: .heavy, design: .rounded))
+                    .tracking(0.4)
                     .monospacedDigit()
-                Spacer(minLength: 0)
-                Text("\(longest - streak) to your record")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.34))
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            .foregroundColor(.white.opacity(0.45))
+            .fixedSize()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
             .background(
                 Capsule()
                     .fill(Color.white.opacity(0.05))
