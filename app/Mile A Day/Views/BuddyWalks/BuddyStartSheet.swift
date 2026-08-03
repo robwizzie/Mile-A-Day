@@ -44,6 +44,34 @@ struct BuddyStartSheet: View {
     private var activityType: String { isRun ? "running" : "walking" }
     private var accent: Color { MADTheme.workoutColor(activityType) }
 
+    /// Every pill control on this screen resolves to the same outer height.
+    /// A segmented capsule pads its chips by 4 on each side, so the chip is
+    /// `controlHeight - 8` and the capsule around it lands back on
+    /// `controlHeight` — that's what makes the two segmented rows and the
+    /// footer button read as one family instead of three near-misses.
+    private static let controlHeight: CGFloat = 52
+    private static let chipHeight: CGFloat = controlHeight - 8
+    /// Fixed so BOTH grid rows are equal — otherwise each row sizes to its
+    /// tallest subtitle and the 2x2 comes out lopsided.
+    private static let modeTileHeight: CGFloat = 108
+
+    /// The plain card behind repeated elements.
+    ///
+    /// `madLiquidGlass` is a REAL blur (`glassEffect`, or `.ultraThinMaterial`
+    /// pre-iOS 26). Four mode tiles plus the friend list meant 5+ blurred
+    /// surfaces recompositing on every selection tap, animated — which is what
+    /// made this screen feel sluggish. The hero card keeps its glass; the
+    /// things you tap repeatedly get a flat fill that is visually
+    /// indistinguishable on this background and costs nothing.
+    private func plainCard(_ radius: CGFloat = MADTheme.CornerRadius.large) -> some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(MADTheme.Colors.madWhite.opacity(0.06))
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(MADTheme.Colors.madWhite.opacity(0.10), lineWidth: 1)
+            )
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -71,7 +99,12 @@ struct BuddyStartSheet: View {
                     Button("Cancel") { dismiss() }
                 }
             }
-            .task { await buddy.loadCandidates() }
+            .task {
+                // This screen is several taps in a row; warm the Taptic Engine
+                // so the FIRST one lands as fast as the rest.
+                MADHaptics.warmUp()
+                await buddy.loadCandidates()
+            }
             .onChange(of: buddy.errorMessage) { _, newValue in
                 guard let newValue else { return }
                 errorText = newValue
@@ -124,7 +157,7 @@ struct BuddyStartSheet: View {
                 Text(option.title).font(MADTheme.Typography.bodyBold)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+            .frame(height: Self.chipHeight)
             .background(Capsule().fill(isOn ? accent : .clear))
             .foregroundStyle(
                 isOn ? MADTheme.Colors.madWhite : MADTheme.Colors.madWhite.opacity(0.6))
@@ -287,7 +320,7 @@ struct BuddyStartSheet: View {
                 Text(label).font(MADTheme.Typography.bodyBold)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+            .frame(height: Self.chipHeight)
             .background(
                 Capsule().fill(
                     isOn ? MADTheme.workoutColor(run ? "running" : "walking") : .clear)
@@ -348,7 +381,8 @@ struct BuddyStartSheet: View {
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .padding(12)
-            .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.large)
+            .frame(height: Self.modeTileHeight, alignment: .topLeading)
+            .background(plainCard())
             .overlay(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.large)
                     .stroke(isOn ? accent : Color.clear, lineWidth: 2)
@@ -384,7 +418,7 @@ struct BuddyStartSheet: View {
                     .opacity(0.7)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+            .frame(height: Self.controlHeight)
             .background(
                 RoundedRectangle(cornerRadius: MADTheme.CornerRadius.medium)
                     .fill(isOn ? accent : MADTheme.Colors.madWhite.opacity(0.10))
@@ -420,7 +454,7 @@ struct BuddyStartSheet: View {
                         friendRow(candidate)
                     }
                 }
-                .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.large)
+                .background(plainCard())
             }
         }
     }
@@ -444,7 +478,7 @@ struct BuddyStartSheet: View {
         }
         .frame(maxWidth: .infinity)
         .padding(MADTheme.Spacing.lg)
-        .madLiquidGlass(cornerRadius: MADTheme.CornerRadius.large)
+        .background(plainCard())
     }
 
     private func friendRow(_ candidate: BuddyCandidate) -> some View {
@@ -512,7 +546,7 @@ struct BuddyStartSheet: View {
             }
             .font(MADTheme.Typography.bodyBold)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, MADTheme.Spacing.md)
+            .frame(height: Self.controlHeight)
             .background(Capsule().fill(accent))
             .foregroundStyle(MADTheme.Colors.madWhite)
         }
