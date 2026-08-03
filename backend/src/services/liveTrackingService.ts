@@ -1,6 +1,8 @@
 import { PostgresService } from "./DbService.js";
 import { mileHypeKeyMatchSql } from "./hypeService.js";
 import { getUserLocalToday } from "./workoutService.js";
+import { buddySessionsEnabled } from "./buddyFeatures.js";
+import { BUDDY_MAX_PARTICIPANTS } from "../types/buddy.js";
 
 const db = PostgresService.getInstance();
 
@@ -27,6 +29,34 @@ export interface LiveFriend {
   /** The friend's CURRENT local date — the composite key half a viewer needs
    *  to send them a mile hype with zero hype-side changes. */
   local_date: string;
+}
+
+/**
+ * A friend who is out right now, as seen from the DASHBOARD.
+ *
+ * Same presence source as `LiveFriend`, plus the buddy-room fields, because the
+ * two questions are asked at different moments and only one of them was
+ * answerable before. `heartbeat` tells you who else is out while YOU are
+ * already walking; this tells you before you've started — which is the moment
+ * the answer can actually change what you do.
+ *
+ * The buddy fields are null for a friend walking solo, and a solo walker is the
+ * single best person to start a buddy walk with, so the client renders both:
+ * "Join" for a room, "Ask to walk" for a solo walker.
+ */
+export interface FriendOutNow {
+  user_id: string;
+  username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  profile_image_url: string | null;
+  workout_type: string;
+  started_at: string;
+  /** Non-null only when they're in a buddy room with space left. */
+  buddy_session_id: string | null;
+  buddy_join_code: string | null;
+  buddy_mode: string | null;
+  buddy_participant_count: number | null;
 }
 
 export interface LiveHype {
@@ -150,6 +180,86 @@ export async function heartbeat(
   );
 
   return { friends_out: friendsOut, hypes };
+}
+
+/**
+ * Friends out right now, for a caller who is NOT tracking.
+ *
+ * A deliberate SIBLING of `heartbeat`'s friends-out query rather than a
+ * refactor of it. The heartbeat runs every 45s for everyone mid-walk; a bug
+ * introduced while generalising it would take presence down during the exact
+ * moment it matters. Duplicating ~15 lines of SELECT is the cheaper trade.
+ *
+ * Privacy is unchanged from the heartbeat's: `share_live_presence` gates being
+ * SEEN (default true, opt-out), and only accepted friends are ever returned.
+ * The block check is belt-and-braces — `blockUser` tears the friendship down
+ * too, but that teardown is best-effort inside a try/catch, and every other
+ * social query in the codebase filters blocks in both directions regardless.
+ *
+ * `buddySessionsEnabled` gates only the buddy DECORATION. Presence itself
+ * shipped unflagged, so a caller with buddy off still gets their friends.
+ */
+export async function friendsOutNow(userId: string): Promise<FriendOutNow[]> {
+  const buddyDecoration = buddySessionsEnabled()
+    ? `LEFT JOIN LATERAL (
+         SELECT bs.id, bs.join_code, bs.mode,
+                (SELECT COUNT(*)::int FROM buddy_session_participants c
+                   WHERE c.session_id = bs.id
+                     AND c.status NOT IN ('left', 'declined')) AS participant_count
+           FROM buddy_sessions bs
+           JOIN buddy_session_participants theirs
+             ON theirs.session_id = bs.id
+            AND theirs.user_id = f.friend_id
+            AND theirs.status NOT IN ('left', 'declined')
+          WHERE bs.status IN ('lobby', 'active')
+            -- Same "just started" bound getJoinableFriendSessions uses:
+            -- joining an hour-deep walk means arriving with no chance of
+            -- keeping up.
+            AND COALESCE(bs.started_at, bs.created_at) > NOW() - INTERVAL '20 minutes'
+            -- Already in it? Then it isn't an offer.
+            AND NOT EXISTS (
+              SELECT 1 FROM buddy_session_participants mine
+               WHERE mine.session_id = bs.id AND mine.user_id = $1
+                 AND mine.status NOT IN ('left', 'declined')
+            )
+            AND (SELECT COUNT(*) FROM buddy_session_participants c
+                  WHERE c.session_id = bs.id
+                    AND c.status NOT IN ('left', 'declined')) < ${BUDDY_MAX_PARTICIPANTS}
+          ORDER BY COALESCE(bs.started_at, bs.created_at) DESC
+          LIMIT 1
+       ) room ON TRUE`
+    : `LEFT JOIN LATERAL (SELECT NULL::varchar AS id, NULL::varchar AS join_code,
+                                 NULL::text AS mode, NULL::int AS participant_count
+       ) room ON TRUE`;
+
+  return db.query<FriendOutNow>(
+    `SELECT u.user_id, u.username, u.first_name, u.last_name,
+            u.profile_image_url, s.workout_type,
+            to_char(s.started_at AT TIME ZONE 'UTC', ${ISO_TS}) AS started_at,
+            room.id AS buddy_session_id,
+            room.join_code AS buddy_join_code,
+            room.mode AS buddy_mode,
+            room.participant_count AS buddy_participant_count
+       FROM friendships f
+       JOIN live_tracking_sessions s
+         ON s.user_id = f.friend_id
+        AND s.ended_at IS NULL
+        AND s.last_seen_at > NOW() - INTERVAL '${LIVE_PRESENCE_WINDOW_SECONDS} seconds'
+       JOIN users u ON u.user_id = f.friend_id
+       LEFT JOIN notification_settings ns ON ns.user_id = f.friend_id
+       ${buddyDecoration}
+      WHERE f.user_id = $1
+        AND f.status = 'accepted'
+        AND COALESCE(ns.share_live_presence, TRUE) = TRUE
+        AND NOT EXISTS (
+          SELECT 1 FROM user_blocks b
+           WHERE (b.blocker_id = $1 AND b.blocked_id = f.friend_id)
+              OR (b.blocker_id = f.friend_id AND b.blocked_id = $1)
+        )
+      ORDER BY s.started_at DESC
+      LIMIT 10`,
+    [userId],
+  );
 }
 
 /** End the session. Idempotent — 0 rows (already ended / never started) is fine. */

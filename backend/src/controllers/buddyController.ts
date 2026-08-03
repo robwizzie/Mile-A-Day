@@ -5,8 +5,10 @@ import { buddySessionsEnabled } from "../services/buddyFeatures.js";
 import {
   BUDDY_ACTIVITY_TYPES,
   BUDDY_MODES,
+  BUDDY_ORIGINS,
   type BuddyActivityType,
   type BuddyMode,
+  type BuddyOrigin,
 } from "../types/buddy.js";
 import {
   createSession,
@@ -100,6 +102,7 @@ export async function createSessionController(
   try {
     const { mode, goalValue, activityType, inviteUserIds, origin } =
       req.body ?? {};
+    const scheduledStartAt = req.body?.scheduledStartAt;
 
     if (!BUDDY_MODES.includes(mode as BuddyMode)) {
       return res.status(400).json({ error: "invalid_mode" });
@@ -110,13 +113,39 @@ export async function createSessionController(
     if (inviteUserIds !== undefined && !Array.isArray(inviteUserIds)) {
       return res.status(400).json({ error: "invalid_invite_list" });
     }
+    // Absent is fine (the service defaults to 'invite'), but a PRESENT value
+    // has to be one we know — otherwise it reaches the table's CHECK and
+    // surfaces as a 500 instead of a 400.
+    if (
+      origin !== undefined &&
+      !BUDDY_ORIGINS.includes(origin as BuddyOrigin)
+    ) {
+      return res.status(400).json({ error: "invalid_origin" });
+    }
+
+    // A scheduled walk has to be far enough out to be worth scheduling and
+    // near enough to still be real. Rejecting here keeps a typo'd year from
+    // parking a lobby in the table forever.
+    let scheduled: string | null = null;
+    if (scheduledStartAt !== undefined && scheduledStartAt !== null) {
+      const when = new Date(String(scheduledStartAt));
+      if (Number.isNaN(when.getTime())) {
+        return res.status(400).json({ error: "invalid_scheduled_start" });
+      }
+      const minutesOut = (when.getTime() - Date.now()) / 60000;
+      if (minutesOut < 2 || minutesOut > 60 * 24 * 14) {
+        return res.status(400).json({ error: "invalid_scheduled_start" });
+      }
+      scheduled = when.toISOString();
+    }
 
     const state = await createSession(req.userId!, {
       mode: mode as BuddyMode,
       goalValue: goalValue === undefined ? null : Number(goalValue),
       activityType: activityType as BuddyActivityType,
       inviteUserIds: inviteUserIds as string[] | undefined,
-      origin,
+      origin: origin as BuddyOrigin | undefined,
+      scheduledStartAt: scheduled,
     });
     res.status(201).json(state);
   } catch (error) {

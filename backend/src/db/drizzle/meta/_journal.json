@@ -267,6 +267,13 @@
       "when": 1785784550674,
       "tag": "0037_bizarre_ultron",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1785797553210,
+      "tag": "0038_rich_metal_master",
+      "breakpoints": true
     }
   ]
 }

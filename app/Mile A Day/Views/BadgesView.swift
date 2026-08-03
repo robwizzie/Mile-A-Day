@@ -234,11 +234,23 @@ struct BadgesView: View {
             return allBadges
                 .filter { b in BadgeFilter.socialPrefixes.contains { b.id.hasPrefix($0) } }
                 .sorted { Self.socialSortKey($0.id) < Self.socialSortKey($1.id) }
+        case .buddy:
+            return allBadges
+                .filter { b in BadgeFilter.buddyPrefixes.contains { b.id.hasPrefix($0) } }
+                .sorted { Self.buddySortKey($0.id) < Self.buddySortKey($1.id) }
         case .new:
             // Use the on-open snapshot so the list survives mark-as-viewed.
             let snapshot = newBadgeIdsAtOpen
             return allBadges.filter { ($0.isNew || snapshot.contains($0.id)) && !$0.isLocked }
         }
+    }
+
+    /// Orders a buddy medal by family (walks → crew → races won), then tier.
+    private static func buddySortKey(_ id: String) -> (Int, Int) {
+        let family = BadgeFilter.buddyPrefixes.firstIndex { id.hasPrefix($0) }
+            ?? BadgeFilter.buddyPrefixes.count
+        let tier = Int(id.split(separator: "_").last ?? "") ?? 0
+        return (family, tier)
     }
 
     /// Orders a social badge by family (story → hype → nudge → competitions),
@@ -483,7 +495,7 @@ struct FilterChip: View {
 // MARK: - Badge Filter
 
 enum BadgeFilter: CaseIterable {
-    case all, streak, miles, speed, distance, challenges, social, new
+    case all, streak, miles, speed, distance, challenges, social, buddy, new
 
     var title: String {
         switch self {
@@ -494,6 +506,7 @@ enum BadgeFilter: CaseIterable {
         case .distance: return "Distance"
         case .challenges: return "Challenges"
         case .social: return "Social"
+        case .buddy: return "Buddy"
         case .new: return "New"
         }
     }
@@ -507,6 +520,7 @@ enum BadgeFilter: CaseIterable {
         case .distance: return "road.lanes"
         case .challenges: return "trophy.fill"
         case .social: return "person.2.fill"
+        case .buddy: return "figure.2"
         case .new: return "sparkles"
         }
     }
@@ -517,6 +531,12 @@ enum BadgeFilter: CaseIterable {
         "story_", "hype_", "nudge_",
         "comp_started_", "comp_entered_", "comp_won_", "comp_",
     ]
+
+    /// Buddy Walk medal families, in progression order. Deliberately NOT folded
+    /// into `socialPrefixes`: buddy medals are earned by doing a walk with
+    /// someone, not by app-function activity, and burying seven of them at the
+    /// end of the Social list is how a whole category goes unnoticed.
+    static let buddyPrefixes = ["buddy_done_", "buddy_crew_", "buddy_won_"]
 }
 
 // MARK: - Badge Card Button Style

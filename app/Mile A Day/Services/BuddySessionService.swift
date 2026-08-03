@@ -67,6 +67,9 @@ final class BuddySessionService: ObservableObject {
     @Published private(set) var candidates: [BuddyCandidate] = []
     /// Friends walking right now that the user could join.
     @Published private(set) var joinableFriendSessions: [JoinableFriendSession] = []
+    /// Everyone out right now — buddy room or solo. Superset of the above, and
+    /// what the dashboard card actually renders.
+    @Published private(set) var friendsOutNow: [FriendOutNow] = []
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
 
@@ -156,6 +159,38 @@ final class BuddySessionService: ObservableObject {
         }
     }
 
+    /// Everyone who is out right now — in a buddy room or walking on their own.
+    ///
+    /// Reads live presence rather than buddy rooms, which is what makes solo
+    /// walkers visible at all. Silent on failure and cleared on error: this
+    /// drives an optional dashboard card, and a stale offer to join a walk that
+    /// already ended is worse than no card.
+    func refreshFriendsOutNow() async {
+        guard currentUserId != nil else { return }
+        do {
+            friendsOutNow = try await request(
+                "/live/friends-out", responseType: FriendsOutNowResponse.self
+            ).friends
+        } catch {
+            friendsOutNow = []
+        }
+    }
+
+    /// Start a walk *because* a friend is already out, and invite them into it.
+    ///
+    /// Mirrors their activity so you're doing the same thing they are, and
+    /// stamps `origin = .joinActive` — this is exactly the door that origin
+    /// tracking exists to measure.
+    func askFriendToWalk(_ friend: FriendOutNow) async throws {
+        _ = try await createSession(
+            mode: .together,
+            goalValue: nil,
+            activityType: friend.isRunning ? "running" : "walking",
+            inviteUserIds: [friend.userId],
+            origin: .joinActive
+        )
+    }
+
     /// Silent on failure, for the same reason refreshJoinableFriendSessions is:
     /// nobody ASKED for this list, it loads itself when the sheet appears. It
     /// used to publish `errorMessage`, which meant an alert slid over the sheet
@@ -180,14 +215,27 @@ final class BuddySessionService: ObservableObject {
         mode: BuddyMode,
         goalValue: Double?,
         activityType: String,
-        inviteUserIds: [String]
+        inviteUserIds: [String],
+        origin: BuddyOrigin = .invite,
+        /// Book the walk for later. The session waits in the lobby until then,
+        /// and the server promotes it — so it starts on time whether or not
+        /// anyone has the app open.
+        scheduledStartAt: Date? = nil
     ) async throws -> BuddySessionState {
         var payload: [String: Any] = [
             "mode": mode.rawValue,
             "activityType": activityType,
             "inviteUserIds": inviteUserIds,
+            // Which door this session came through. Until now the client never
+            // sent it, so every session on record reads 'invite' and the
+            // measurement it exists for wasn't running.
+            "origin": origin.rawValue,
         ]
         if mode.needsGoal, let goalValue { payload["goalValue"] = goalValue }
+        if let scheduledStartAt {
+            payload["scheduledStartAt"] = ISO8601DateFormatter().string(
+                from: scheduledStartAt)
+        }
 
         let state = try await request(
             "/buddy/sessions",

@@ -22,6 +22,20 @@ export type BuddySessionStatus = "lobby" | "active" | "completed" | "cancelled";
 /** Which door the group came through. Measured so we know what to invest in. */
 export type BuddyOrigin = "invite" | "code" | "join_active" | "nearby";
 
+/**
+ * Whitelist for the create endpoint.
+ *
+ * `origin` is the only enum on the create payload that reached the DB
+ * unvalidated, so a typo from a client surfaced as a 500 off the table's CHECK
+ * constraint rather than a 400. Mirrors BUDDY_MODES / BUDDY_ACTIVITY_TYPES.
+ */
+export const BUDDY_ORIGINS: BuddyOrigin[] = [
+  "invite",
+  "code",
+  "join_active",
+  "nearby",
+];
+
 export type BuddyParticipantStatus =
   | "invited"
   | "joined"
@@ -144,6 +158,8 @@ export interface BuddySessionState {
   activity_type: string;
   status: BuddySessionStatus;
   host_user_id: string | null;
+  /** Set for a walk booked ahead of time; the lobby counts down to it. */
+  scheduled_start_at: string | null;
   started_at: string | null;
   ends_at: string | null;
   ended_at: string | null;

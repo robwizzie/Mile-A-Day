@@ -442,6 +442,34 @@ struct User: Identifiable, Codable {
             }
         }
         
+        // Buddy Walk medals. Names and descriptions mirror EXTRA_BADGES in the
+        // backend's badgeService — the server is the source of truth for what's
+        // awarded; these exist only so the seven medals have a locked preview
+        // and are discoverable before you've done a buddy walk. An earned one
+        // arrives from the server and replaces its locked twin by id.
+        let buddyBadges: [(String, String, String)] = [
+            ("buddy_done_1", "Better Together", "Finished your first buddy walk"),
+            ("buddy_done_10", "Walking Partner", "Finished 10 buddy walks"),
+            ("buddy_done_50", "Inseparable", "Finished 50 buddy walks"),
+            ("buddy_crew_3", "Small Crew", "Walked with 3 different friends"),
+            ("buddy_crew_10", "Whole Crew", "Walked with 10 different friends"),
+            ("buddy_won_1", "Photo Finish", "Won your first buddy race"),
+            ("buddy_won_10", "Pace Setter", "Won 10 buddy races")
+        ]
+
+        for (badgeId, name, description) in buddyBadges {
+            if !hasBadge(id: badgeId) {
+                lockedBadges.append(Badge(
+                    id: badgeId,
+                    name: name,
+                    description: description,
+                    dateAwarded: Date.distantFuture,
+                    isNew: false,
+                    isLocked: true
+                ))
+            }
+        }
+
         // Special badges (visible)
         let specialBadges: [(String, String, String)] = [
             ("special_first_mile", "First Mile", "Completed your first mile!"),
