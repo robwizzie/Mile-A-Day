@@ -24,7 +24,22 @@ final class DeepLinkRouter: ObservableObject {
     /// mounted), which covers either ordering.
     @Published var pendingOpenFriendRequests = false
 
+    /// A Buddy Walk to open — either a shared join code or a session id from a
+    /// push. Parked here for the same reason the fields above are: a buddy push
+    /// tapped on a cold launch fires before `DashboardView` exists, so a plain
+    /// NotificationCenter post would be dropped. DashboardView consumes this in
+    /// both `.task` and `.onReceive`, which covers either ordering.
+    @Published var pendingBuddyCode: String?
+    @Published var pendingBuddySessionId: String?
+
     private init() {}
+
+    /// Asks the Dashboard to open a Buddy Walk once it's alive. Callers should
+    /// also switch to the Dashboard tab (`MAD_SwitchTab`, tab 0).
+    func requestOpenBuddySession(code: String? = nil, sessionId: String? = nil) {
+        if let code { pendingBuddyCode = code }
+        if let sessionId { pendingBuddySessionId = sessionId }
+    }
 
     /// Asks the Friends tab to present the friend-requests sheet. Callers should
     /// also switch to the Friends tab (`MAD_SwitchTab`, tab 3) — this only parks

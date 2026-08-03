@@ -32,6 +32,28 @@ struct PostStats: Codable, Equatable {
     var steps: Int?
 }
 
+/// One credited participant on a multi-person collab post (Buddy Walks).
+///
+/// snake_case to decode the backend's jsonb aggregate directly, like the rest
+/// of the feed models.
+struct PostCoauthorItem: Codable, Identifiable, Equatable {
+    let user_id: String
+    let username: String?
+    let first_name: String?
+    let last_name: String?
+    let profile_image_url: String?
+    /// "pending" | "accepted" | "declined"
+    let status: String
+
+    var id: String { user_id }
+
+    var displayName: String {
+        if let username, !username.isEmpty { return username }
+        if let first_name, !first_name.isEmpty { return first_name }
+        return "a friend"
+    }
+}
+
 /// A social post — a photo (run-stats overlay already baked in) plus optional
 /// caption and stats. Surfaces in the Feed and/or as a Story. Field names are
 /// snake_case to decode the backend JSON directly, matching FeedWorkoutItem.
@@ -86,6 +108,12 @@ struct PostItem: Codable, Identifiable {
     var coauthor_first_name: String?
     var coauthor_last_name: String?
     var coauthor_profile_image_url: String?
+    /// Multi-person collab (Buddy Walks). Absent on every post that predates
+    /// the feature, and absent from every response an older server sends, so
+    /// the two-person fields above stay the source of truth whenever this is
+    /// nil. Includes the participant mirrored into `coauthor_user_id`, so this
+    /// is the COMPLETE list — never union it with the scalar fields.
+    var coauthors: [PostCoauthorItem]?
     /// Collab only, and only when I'M the tagged coauthor: is this post on my
     /// own profile grid? nil for everyone else (it's my curation, not theirs)
     /// and on older servers. Hiding it is grid-only — the tag, the Tagged tab
@@ -108,6 +136,33 @@ struct PostItem: Codable, Identifiable {
         if let coauthor_username, !coauthor_username.isEmpty { return coauthor_username }
         if let coauthor_first_name, !coauthor_first_name.isEmpty { return coauthor_first_name }
         return "a friend"
+    }
+
+    /// Credited participants who actually accepted. Pending invites are shown
+    /// only to the people involved, and the server already applies that rule.
+    var acceptedCoauthors: [PostCoauthorItem] {
+        (coauthors ?? []).filter { $0.status == "accepted" }
+    }
+
+    /// Three or more people on the post (author + 2+ coauthors), i.e. more than
+    /// the legacy two-person collab header can express. Below this threshold
+    /// the existing `hasAcceptedCoauthor` rendering stays in charge, so nothing
+    /// about a normal collab changes.
+    var isMultiCollab: Bool { acceptedCoauthors.count >= 2 }
+
+    /// "Rob, Alex & Sam" up to three people, "Rob, Alex & 2 others" beyond —
+    /// a byline that grows to eight names would push the timestamp off screen.
+    var multiCollabByline: String {
+        var names = [displayName]
+        names.append(contentsOf: acceptedCoauthors.map(\.displayName))
+        switch names.count {
+        case 0, 1: return displayName
+        case 2: return "\(names[0]) & \(names[1])"
+        case 3: return "\(names[0]), \(names[1]) & \(names[2])"
+        default:
+            let remaining = names.count - 2
+            return "\(names[0]), \(names[1]) & \(remaining) others"
+        }
     }
 
     /// Decoded route polyline (nil when absent or degenerate).
@@ -494,6 +549,11 @@ enum PostService {
         isAuto: Bool = false,
         includeRoute: Bool = true,
         coauthorUserId: String? = nil,
+        // Buddy Walks: credit every participant. The backend writes both the
+        // post_coauthors rows and the legacy scalar columns, so a shipped
+        // client still renders a coherent two-person collab.
+        coauthorUserIds: [String]? = nil,
+        buddySessionId: String? = nil,
         postedLive: Bool = false
     ) async throws -> PostItem {
         struct Body: Encodable {
@@ -506,6 +566,8 @@ enum PostService {
             let is_auto: Bool
             let include_route: Bool
             let coauthor_user_id: String?
+            let coauthor_user_ids: [String]?
+            let buddy_session_id: String?
             let posted_live: Bool
         }
         let bodyData = try JSONEncoder().encode(
@@ -519,6 +581,8 @@ enum PostService {
                 is_auto: isAuto,
                 include_route: includeRoute,
                 coauthor_user_id: coauthorUserId,
+                coauthor_user_ids: coauthorUserIds,
+                buddy_session_id: buddySessionId,
                 posted_live: postedLive
             )
         )

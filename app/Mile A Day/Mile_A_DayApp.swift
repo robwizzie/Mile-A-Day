@@ -85,6 +85,21 @@ struct Mile_A_DayApp: App {
                             name: NSNotification.Name("MAD_OpenWorkoutFromLiveActivity"),
                             object: nil
                         )
+                    case "buddy":
+                        // mileaday://buddy/<CODE> — a shared join code. Switch to
+                        // the dashboard first, since that's where the buddy flow
+                        // is hosted, then hand the code over.
+                        let code = url.pathComponents
+                            .first { $0 != "/" }?
+                            .uppercased()
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("MAD_SwitchTab"),
+                            object: nil,
+                            userInfo: ["tab": 0]
+                        )
+                        if let code, !code.isEmpty {
+                            DeepLinkRouter.shared.requestOpenBuddySession(code: code)
+                        }
                     case "compete":
                         NotificationCenter.default.post(
                             name: NSNotification.Name("MAD_SwitchTab"),

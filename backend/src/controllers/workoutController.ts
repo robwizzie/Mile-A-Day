@@ -51,6 +51,7 @@ import {
   reconcileStreakFeaturesOnUpload,
   getStreakFeaturesPayload,
 } from "../services/streakFeatureService.js";
+import { reconcileBuddySessions } from "../services/buddySessionService.js";
 import { fetchCoveredDays } from "../services/streakFeatureCore.js";
 import { notifyH2hLeadChanges } from "../services/h2hMatchupService.js";
 
@@ -120,6 +121,14 @@ export async function uploadWorkouts(req: Request, res: Response) {
       console.error("Error reconciling streak features:", err.message),
     );
 
+    // Buddy sessions: stamp the AUTHORITATIVE result now that the real workout
+    // has landed. The live distance a session showed was accumulated from
+    // 5-second reports and is display-only; this replaces it with the synced
+    // HKWorkout and re-ranks placements. Fire-and-forget, and a no-op for the
+    // overwhelming majority of uploads that aren't tied to a session.
+    reconcileBuddySessions(userId, uploadedWorkoutIds).catch((err) =>
+      console.error("Error reconciling buddy sessions:", err.message),
+    );
     // Head-to-Head standings: tell whoever this upload just overtook (and the
     // syncer, when they took the lead) while there's still a day left to
     // answer. Skipped on the account-setup backfill and on pure history

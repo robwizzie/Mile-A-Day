@@ -155,7 +155,15 @@ export type NotificationType =
   | "streak_double_down"
   | "streak_saved"
   | "streak_assist_opportunity"
-  | "streak_assisted";
+  | "streak_assisted"
+  // Buddy Walks & Runs (gated by BUDDY_SESSIONS + per-user buddy_enrolled_at).
+  // Only buddy_invite is high-priority — the rest are follow-ups about a
+  // session the user is already in, so quiet hours and the daily cap apply.
+  | "buddy_invite"
+  | "buddy_joined"
+  | "buddy_started"
+  | "buddy_finished"
+  | "buddy_friend_active";
 
 interface PushPayload {
   title: string;
@@ -334,6 +342,13 @@ const HIGH_PRIORITY_TYPES: NotificationType[] = [
   // next morning without rechecking — reintroducing the exact stale-text race
   // the server-side path was built to eliminate.
   "daily_reminder",
+  // A buddy invite is an offer to walk RIGHT NOW — the session is starting
+  // within seconds. Queueing it past quiet hours would deliver an invitation to
+  // a walk that ended hours ago. Because this bypasses both quiet hours and the
+  // daily cap, the notification_settings.buddy_invites_enabled toggle is the
+  // only thing that can stop it, which is why that toggle ships WITH the
+  // feature rather than after it (Guideline 4.5.4).
+  "buddy_invite",
   // The user's own goal celebration: they JUST finished a mile, so they're
   // awake and active by definition — quiet-hours queueing a late-night
   // mile's "you did it" to tomorrow's flush is exactly the flakiness this

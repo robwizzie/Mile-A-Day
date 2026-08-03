@@ -10,6 +10,7 @@ export type ErrorCategory =
   | "cron" // scheduled job failures
   | "api" // unhandled request errors (Express error handler)
   | "db" // database errors worth surfacing
+  | "buddy" // buddy session lifecycle / reconciliation failures
   | "other";
 
 interface LogErrorOptions {

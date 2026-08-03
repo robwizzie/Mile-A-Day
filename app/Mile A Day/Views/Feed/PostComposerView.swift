@@ -151,6 +151,14 @@ final class PostComposerViewModel: ObservableObject {
     /// Collab post: the friend this mile was run with. They get an invite and,
     /// once accepted, the post shows both names and lands on both profiles.
     @Published var coauthor: BackendUser?
+    /// Buddy Walk context, set when the composer is opened from a session
+    /// recap. Everyone who finished the walk is credited automatically — the
+    /// point of a buddy recap is that you didn't do it alone, so making the
+    /// poster re-pick their walking partners by hand would be busywork.
+    /// `buddyCoauthorIds` is authoritative when non-empty; `coauthor` (the
+    /// manual picker) is left alone so a normal post is unaffected.
+    @Published var buddyCoauthorIds: [String] = []
+    @Published var buddySessionId: String?
     /// Publish was rejected server-side for unaccepted guidelines — the view
     /// re-presents the gate when this flips true.
     @Published var needsTermsGate = false
@@ -303,6 +311,9 @@ final class PostComposerViewModel: ObservableObject {
                 includeRoute: includeRoute,
                 // Feed posts only — the server ignores it otherwise anyway.
                 coauthorUserId: destination.toFeed ? coauthor?.user_id : nil,
+                coauthorUserIds: destination.toFeed && !buddyCoauthorIds.isEmpty
+                    ? buddyCoauthorIds : nil,
+                buddySessionId: destination.toFeed ? buddySessionId : nil,
                 // Server-side FRESH: the claim rides with the post so EVERY
                 // viewer sees the badge, not just this device.
                 postedLive: FreshPostWindowManager.shared.isOpen
@@ -686,10 +697,15 @@ struct PostComposerView: View {
         autoOpenCamera: Bool = false,
         initialImage: UIImage? = nil,
         backNavigation: Bool = false,
+        // Buddy Walk recap: credit everyone who finished the session.
+        buddyCoauthorIds: [String] = [],
+        buddySessionId: String? = nil,
         onFinished: @escaping (PostComposeOutcome) -> Void
     ) {
-        _vm = StateObject(wrappedValue: PostComposerViewModel(
-            stats: stats, initialImage: initialImage))
+        let model = PostComposerViewModel(stats: stats, initialImage: initialImage)
+        model.buddyCoauthorIds = buddyCoauthorIds
+        model.buddySessionId = buddySessionId
+        _vm = StateObject(wrappedValue: model)
         self.autoOpenCamera = autoOpenCamera
         self.backNavigation = backNavigation
         self.onFinished = onFinished
