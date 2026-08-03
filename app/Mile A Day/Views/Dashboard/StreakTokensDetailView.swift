@@ -457,6 +457,71 @@ struct StreakTokensDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showPureFlameInfo = false
 
+    /// The receipts: every day a token actually carried.
+    ///
+    /// The tokens sheet explained how tokens are EARNED but never showed what
+    /// they had DONE, so a user who knew a day was covered had nowhere to
+    /// confirm it — and a short day on the week chart looked like a plain
+    /// miss. Sourced from the era history the dashboard already warms, so this
+    /// costs no extra request.
+    @ViewBuilder
+    private var savedDaysCard: some View {
+        let saved = StreakErasStore.shared.response?.covered_days ?? []
+        if !saved.isEmpty {
+            VStack(alignment: .leading, spacing: MADTheme.Spacing.sm) {
+                HStack(spacing: 8) {
+                    Image(systemName: "shield.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(SavedDayStyle.tint)
+                    Text("Days your tokens saved")
+                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .foregroundColor(.white)
+                    Spacer()
+                    Text("\(saved.count)")
+                        .font(.system(size: 15, weight: .heavy, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(SavedDayStyle.tint)
+                }
+
+                ForEach(saved.prefix(12), id: \.self) { day in
+                    HStack(spacing: 10) {
+                        Image(systemName: SavedDayStyle.icon(for: day.kind))
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(SavedDayStyle.tint)
+                            .frame(width: 22, height: 22)
+                            .background(Circle().fill(SavedDayStyle.tint.opacity(0.15)))
+                        Text(SavedDayStyle.formatDate(day.local_date))
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.85))
+                        Spacer(minLength: 6)
+                        SavedDayStyle.chip(for: day.kind)
+                    }
+                }
+
+                if saved.count > 12 {
+                    Text("+ \(saved.count - 12) more")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.45))
+                }
+
+                Text("These days count toward your streak. They show in blue on your week chart instead of as a missed day.")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(MADTheme.Spacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(SavedDayStyle.tint.opacity(0.22), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -482,6 +547,7 @@ struct StreakTokensDetailView: View {
                             tokenCard(kind: .assist, meter: payload.streak_assist, unit: "mi over goal")
 
                             naturalCard(payload.natural_streak)
+                            savedDaysCard
                         } else {
                             ProgressView().tint(.white)
                                 .padding(.top, MADTheme.Spacing.xl)
