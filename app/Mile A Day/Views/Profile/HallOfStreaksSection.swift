@@ -2,7 +2,7 @@
 //  HallOfStreaksSection.swift
 //  Mile A Day
 //
-//  A user's streak history: their record, then their best runs ranked. Reframes
+//  Hall of Streaks: a user's record, then their best runs ranked. Reframes
 //  a broken streak from "lost everything" into "here's where this one sits".
 //  Self-contained — owns its fetch, parents drop it in with a user id (works
 //  for self AND friend profiles; the endpoint authorizes like /stats).
@@ -124,7 +124,7 @@ struct HallOfStreaksSection: View {
             Image(systemName: "flame.fill")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(MADTheme.Colors.redGradient)
-            Text("Streak History")
+            Text("Hall of Streaks")
                 .font(MADTheme.Typography.headline)
                 .foregroundColor(.primary)
             Spacer()
