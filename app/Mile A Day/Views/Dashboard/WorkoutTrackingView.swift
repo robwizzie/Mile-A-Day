@@ -99,27 +99,63 @@ struct WorkoutTrackingView: View {
     // racing. The verdict freezes at the 1.0-mile crossing. Session-local by
     // design: recovery relaunches skip the pre-start flow, so a recovered
     // workout never races (its effort curve starts mid-distance anyway).
+    //
+    // WHAT is raced is the user's choice — recorded best, PR pace, or a time
+    // they typed — held in `raceTarget` and set in GhostRaceSetupSheet. It
+    // persists across sessions per activity, so a walker who races 12:00 gets
+    // 12:00 offered again next time rather than re-deciding every walk.
     @State private var raceArmed = false
     @State private var raceGhost: BestEffortStore.BestMileEffort?
-    @State private var raceGhostIsSeeded = false
+    /// How to name the ghost in copy ("your best mile", "your target").
+    @State private var raceGhostName = "your best mile"
     @State private var raceFinalDelta: TimeInterval?
-    /// Drops the NEW pill on the arming card after the first ever arm.
+    @State private var showGhostSetup = false
+    /// Chosen target, per activity, remembered between sessions.
+    @AppStorage("ghostTargetV1.running") private var runTargetStorage = ""
+    @AppStorage("ghostTargetV1.walking") private var walkTargetStorage = ""
+    /// Drops the NEW pill on the arming card until the race is first set up.
     @AppStorage("hasArmedGhostRaceOnce") private var hasArmedGhostRaceOnce = false
 
     private var raceActivityKey: String {
         selectedActivityType == .running ? "running" : "walking"
     }
 
-    /// Seed pace for a run ghost when no recorded best exists — the backend
-    /// fastest-mile PR (minutes/mile on the user model → seconds/mile).
+    /// Seed pace for a run ghost — the backend fastest-mile PR (minutes/mile
+    /// on the user model → seconds/mile).
     private var raceSeedPaceSeconds: Double? {
         let pace = userManager.currentUser.fastestMilePace
         guard pace > 0 else { return nil }
         return pace * 60
     }
 
-    private var availableGhost: (effort: BestEffortStore.BestMileEffort, isSeeded: Bool)? {
-        BestEffortStore.ghost(for: raceActivityKey, seedPaceSecondsPerMile: raceSeedPaceSeconds)
+    /// The stored target for the CURRENT activity, or the best default. Never
+    /// nil: a custom time is always available, so every session can race.
+    private var raceTarget: BestEffortStore.GhostTarget {
+        let stored = raceActivityKey == "running" ? runTargetStorage : walkTargetStorage
+        if let target = BestEffortStore.GhostTarget(storage: stored),
+            BestEffortStore.resolve(
+                target, activityKey: raceActivityKey,
+                seedPaceSecondsPerMile: raceSeedPaceSeconds) != nil
+        {
+            return target
+        }
+        return BestEffortStore.defaultTarget(
+            for: raceActivityKey, seedPaceSecondsPerMile: raceSeedPaceSeconds)
+    }
+
+    private func storeRaceTarget(_ target: BestEffortStore.GhostTarget) {
+        if raceActivityKey == "running" {
+            runTargetStorage = target.storage
+        } else {
+            walkTargetStorage = target.storage
+        }
+    }
+
+    /// The armed target, resolved into something raceable.
+    private var resolvedGhost: BestEffortStore.ResolvedGhost? {
+        BestEffortStore.resolve(
+            raceTarget, activityKey: raceActivityKey,
+            seedPaceSecondsPerMile: raceSeedPaceSeconds)
     }
 
     /// Live ahead(+)/behind(−) seconds vs the ghost at the current distance,
@@ -315,108 +351,163 @@ struct WorkoutTrackingView: View {
                 Spacer()
             }
         }
+        .sheet(isPresented: $showGhostSetup) {
+            GhostRaceSetupSheet(
+                activityKey: raceActivityKey,
+                seedPaceSeconds: raceSeedPaceSeconds,
+                current: raceArmed ? raceTarget : nil
+            ) { chosen in
+                withAnimation(.spring(response: 0.3)) {
+                    if let chosen {
+                        storeRaceTarget(chosen)
+                        raceArmed = true
+                        hasArmedGhostRaceOnce = true
+                    } else {
+                        raceArmed = false
+                    }
+                }
+            }
+        }
     }
 
-    /// Ghost-race arming card: lives on the pre-start path every session so
-    /// it can't be missed, but never arms itself. Runs always have a ghost
-    /// (recorded best, else PR-seeded); walks without a recorded mile get the
-    /// set-your-baseline framing instead of racing an unbeatable run PR.
-    @ViewBuilder
+    /// Ghost-race entry point on the pre-start path. Always present, always
+    /// showing the exact time it would race, and never arming itself.
+    ///
+    /// It used to be a toggle over whatever single ghost the store happened to
+    /// have — which meant a walker with no history had nothing to race and got
+    /// an explanation instead of a feature. Now it opens a picker, and a
+    /// custom time is always one of the choices, so the answer to "can I race
+    /// this?" is yes on the very first walk.
     private var ghostRaceCard: some View {
-        if let ghost = availableGhost {
-            Button {
-                MADHaptics.action()
-                withAnimation(.spring(response: 0.3)) {
-                    raceArmed.toggle()
-                }
-                if raceArmed { hasArmedGhostRaceOnce = true }
-            } label: {
-                HStack(spacing: 14) {
+        Button {
+            MADHaptics.action()
+            showGhostSetup = true
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(raceArmed ? Color.white.opacity(0.2) : MADTheme.Colors.madRed.opacity(0.18))
+                        .frame(width: 40, height: 40)
                     Image(systemName: "flag.checkered")
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(.system(size: 19, weight: .semibold))
                         .foregroundColor(raceArmed ? .white : MADTheme.Colors.madRed)
-                        .frame(width: 34)
+                }
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Text("Race your best mile — \(BestEffortStore.formatSeconds(ghost.effort.seconds))")
-                                .font(.system(size: 16, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                            if !hasArmedGhostRaceOnce {
-                                Text("NEW")
-                                    .font(.system(size: 9, weight: .black, design: .rounded))
-                                    .tracking(0.8)
-                                    .foregroundColor(.black.opacity(0.8))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 3)
-                                    .background(Capsule().fill(Color.yellow))
-                            }
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text("Ghost Race")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                        if !hasArmedGhostRaceOnce {
+                            Text("NEW")
+                                .font(.system(size: 9, weight: .black, design: .rounded))
+                                .tracking(0.8)
+                                .foregroundColor(.black.opacity(0.8))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(Color.yellow))
                         }
-                        Text(
-                            raceArmed
-                                ? "Racing your ghost — live ahead/behind on screen and Live Activity"
-                                : (ghost.isSeeded
-                                    ? "Your fastest-mile PR, live against you. Tap to race."
-                                    : "Tap to race it this session")
-                        )
+                    }
+                    Text(ghostRaceSubtitle)
                         .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.75))
+                        .foregroundColor(.white.opacity(0.78))
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
+                }
+
+                Spacer(minLength: 8)
+
+                if raceArmed, let ghost = resolvedGhost {
+                    VStack(spacing: 0) {
+                        Text(BestEffortStore.formatSeconds(ghost.effort.seconds))
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundColor(.white)
+                            .monospacedDigit()
+                        Text("TO BEAT")
+                            .font(.system(size: 8, weight: .black, design: .rounded))
+                            .tracking(0.6)
+                            .foregroundColor(.white.opacity(0.65))
                     }
-
-                    Spacer(minLength: 8)
-
-                    Image(systemName: raceArmed ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 24, weight: .semibold))
-                        .foregroundColor(raceArmed ? .white : .white.opacity(0.35))
+                } else {
+                    Text("Set up")
+                        .font(.system(size: 13, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(0.9))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color.white.opacity(0.15)))
                 }
-                .padding(16)
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(raceArmed ? MADTheme.Colors.madRed.opacity(0.85) : Color.white.opacity(0.10))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .strokeBorder(
-                                    raceArmed ? Color.white.opacity(0.35) : Color.white.opacity(0.15),
-                                    lineWidth: 1
-                                )
-                        )
-                )
-            }
-            .buttonStyle(.plain)
-        } else {
-            // Walk with no recorded mile yet: explain how the ghost is born.
-            // Informational — the baseline records automatically once this
-            // session finishes a fresh mile.
-            HStack(spacing: 14) {
-                Image(systemName: "stopwatch")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.7))
-                    .frame(width: 34)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("First mile sets your ghost")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                        .foregroundColor(.white)
-                    Text("Finish a mile this session and it becomes the walk time you race next time.")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .foregroundColor(.white.opacity(0.7))
-                        .multilineTextAlignment(.leading)
-                }
-                Spacer(minLength: 0)
             }
             .padding(16)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.white.opacity(0.07))
+                    .fill(raceArmed ? MADTheme.Colors.madRed.opacity(0.85) : Color.white.opacity(0.10))
                     .overlay(
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                            .strokeBorder(
+                                raceArmed ? Color.white.opacity(0.35) : Color.white.opacity(0.15),
+                                lineWidth: 1
+                            )
                     )
             )
         }
+        .buttonStyle(.plain)
+    }
+
+    /// What to say about the finished mile.
+    ///
+    /// The win condition is BEATING THE GHOST YOU CHOSE, which is deliberately
+    /// not the same thing as setting a record: someone chasing a 12:00 target
+    /// who runs 11:20 has won their race even though their all-time best is
+    /// 9:40. Keying the celebration off `.newBest` alone (as this did) left
+    /// exactly that person with silence. A new record on top is extra credit,
+    /// mentioned in the same breath.
+    private func celebrateRaceOutcome(_ outcome: BestEffortStore.FinishOutcome) {
+        let recordSeconds: Double? = {
+            switch outcome {
+            case .newBest(let seconds, _): return seconds
+            case .baselineSet(let seconds): return seconds
+            case .slower, .notAMile: return nil
+            }
+        }()
+
+        // Raced and won: `raceFinalDelta` is the frozen verdict at the 1.0-mile
+        // crossing — the same number the chip showed, so the popup can't
+        // contradict what the user watched.
+        if raceGhost != nil, let delta = raceFinalDelta, delta > 0 {
+            let margin = max(1, Int(delta.rounded()))
+            var description = "You beat \(raceGhostName) by \(margin)s."
+            if case .newBest(let seconds, _) = outcome {
+                description += " \(BestEffortStore.formatSeconds(seconds)) is your new mile to beat."
+            } else if case .baselineSet(let seconds) = outcome {
+                description += " \(BestEffortStore.formatSeconds(seconds)) is now your mile to beat."
+            }
+            CelebrationManager.shared.addCelebration(
+                .milestone(
+                    title: "Ghost Beaten!", description: description, icon: "flag.checkered"))
+            return
+        }
+
+        // Didn't race, or lost. A LOSS stays silent — the frozen chip already
+        // told that story mid-workout and the ghost lives another day — but a
+        // first-ever recorded mile is still worth naming, because it's what
+        // makes the race available next time.
+        guard raceGhost == nil, case .baselineSet = outcome, let seconds = recordSeconds else {
+            return
+        }
+        CelebrationManager.shared.addCelebration(
+            .milestone(
+                title: "Baseline Mile Set",
+                description:
+                    "\(BestEffortStore.formatSeconds(seconds)) is your mile to beat. Race it from your next session.",
+                icon: "stopwatch"
+            ))
+    }
+
+    private var ghostRaceSubtitle: String {
+        guard raceArmed, let ghost = resolvedGhost else {
+            return "Chase your best mile, your PR, or a time you pick."
+        }
+        return "Racing \(ghost.shortName) — live ahead/behind on screen."
     }
 
     // MARK: - Countdown
@@ -1070,13 +1161,16 @@ struct WorkoutTrackingView: View {
     private func raceDeltaChip(delta: TimeInterval, frozen: Bool) -> some View {
         let ahead = delta >= 0
         let magnitude = Int(abs(delta).rounded())
+        // Names the ghost the user actually chose. Hardcoding "your best" here
+        // was a lie the moment a PR or a custom time could be raced.
+        let name = raceGhostName
         let text: String
         if frozen {
-            text = ahead ? "Beat your best by \(magnitude)s" : "\(magnitude)s off your best"
+            text = ahead ? "Beat \(name) by \(magnitude)s" : "\(magnitude)s off \(name)"
         } else if magnitude < 2 {
-            text = "Even with your best"
+            text = "Even with \(name)"
         } else {
-            text = ahead ? "\(magnitude)s ahead of your best" : "\(magnitude)s behind your best"
+            text = ahead ? "\(magnitude)s ahead of \(name)" : "\(magnitude)s behind \(name)"
         }
         return HStack(spacing: 5) {
             Image(
@@ -1089,6 +1183,8 @@ struct WorkoutTrackingView: View {
                 .font(.system(size: 11, weight: .heavy, design: .rounded))
                 .tracking(0.4)
                 .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
         .foregroundColor(ahead ? .green : .orange)
         .padding(.horizontal, 10)
@@ -1638,12 +1734,12 @@ struct WorkoutTrackingView: View {
         // Resolve the ghost the user armed on the location step (resolved
         // once, so a best set MID-session doesn't morph the target).
         raceFinalDelta = nil
-        if raceArmed, let ghost = availableGhost {
+        if raceArmed, let ghost = resolvedGhost {
             raceGhost = ghost.effort
-            raceGhostIsSeeded = ghost.isSeeded
+            raceGhostName = ghost.shortName
         } else {
             raceGhost = nil
-            raceGhostIsSeeded = false
+            raceGhostName = "your best mile"
         }
 
         // Live presence session (fire-and-forget; the share pref only gates
@@ -1756,42 +1852,7 @@ struct WorkoutTrackingView: View {
             distanceScale: curveDistance > 0 ? finalDistance / curveDistance : 1.0,
             workoutId: nil
         )
-        if raceGhost != nil {
-            switch raceOutcome {
-            case .newBest(let seconds, let improvedBy):
-                CelebrationManager.shared.addCelebration(
-                    .milestone(
-                        title: "New Best Mile!",
-                        description:
-                            "You beat your ghost by \(max(1, Int(improvedBy.rounded())))s — \(BestEffortStore.formatSeconds(seconds)) is the new time to beat.",
-                        icon: "flag.checkered"
-                    ))
-            case .baselineSet(let seconds):
-                if raceGhostIsSeeded, let ghost = raceGhost, seconds < ghost.seconds {
-                    // Raced the PR-seeded ghost and won — this recorded effort
-                    // is the first REAL curve, but the story is the win.
-                    CelebrationManager.shared.addCelebration(
-                        .milestone(
-                            title: "New Best Mile!",
-                            description:
-                                "You beat your ghost by \(max(1, Int((ghost.seconds - seconds).rounded())))s — \(BestEffortStore.formatSeconds(seconds)) is the new time to beat.",
-                            icon: "flag.checkered"
-                        ))
-                } else if !raceGhostIsSeeded {
-                    CelebrationManager.shared.addCelebration(
-                        .milestone(
-                            title: "Baseline Mile Set",
-                            description:
-                                "\(BestEffortStore.formatSeconds(seconds)) is your mile to beat. The ghost race is on from your next session.",
-                            icon: "stopwatch"
-                        ))
-                }
-            case .slower, .notAMile:
-                // The frozen chip already told the story mid-workout; no popup
-                // for a miss — the ghost lives another day.
-                break
-            }
-        }
+        celebrateRaceOutcome(raceOutcome)
 
         // Freeze the recap stats now, before anything refreshes underneath us
         recapDistance = finalDistance
@@ -1960,10 +2021,12 @@ struct WorkoutTrackingView: View {
         isTracking = false
 
         // Ghost race is opt-in PER SESSION: disarm so the next workout starts
-        // clean (this view instance survives across sessions).
+        // clean (this view instance survives across sessions). The CHOSEN
+        // target survives in @AppStorage — re-arming is one tap, and the
+        // picker opens on what they raced last time.
         raceArmed = false
         raceGhost = nil
-        raceGhostIsSeeded = false
+        raceGhostName = "your best mile"
         raceFinalDelta = nil
 
         // Show result to user. The mile counts via GPS/pedometer sync whether
