@@ -12,70 +12,55 @@ import UIKit
 /// the goal celebration) keep their own instances; everything else goes
 /// through here.
 ///
-/// Generators are CACHED AND KEPT WARM. Building a fresh
-/// `UIImpactFeedbackGenerator` per call and firing it immediately — which this
-/// used to do — means the Taptic Engine is cold every single time, and iOS
-/// spins it up before the tap is felt. That lag reads as the whole UI being
-/// slow to respond, most visibly on screens with several taps in a row like the
-/// buddy-walk setup. `prepare()` after each fire leaves the engine warm for the
-/// next one (iOS keeps it ready for a few seconds, then powers down on its own).
+/// Generators are CACHED. Building a fresh `UIImpactFeedbackGenerator` per call
+/// and firing it immediately — which this used to do — means the Taptic Engine
+/// is cold every single time, and iOS spins it up before the tap is felt. That
+/// lag reads as the whole UI being slow, most visibly on screens with several
+/// taps in a row like the buddy-walk setup.
+///
+/// They are NOT held permanently warm. Calling `prepare()` after every fire
+/// (which an earlier pass did) forces the engine to stay spun up, which Apple
+/// warns costs battery — and when the system tears it down anyway, the pending
+/// player logs `CoreHaptics -4805 "Player was not running"`. Instead:
+/// `warmUp()` prepares once when a tap-heavy screen appears, and each
+/// `impactOccurred()` naturally keeps the engine ready for the next tap that
+/// follows within a second or two. First tap fast, subsequent taps fast, engine
+/// free to idle down when the user stops.
 enum MADHaptics {
-    // UIFeedbackGenerator is documented as main-thread-only and every caller
-    // here is a UI action, so `nonisolated(unsafe)` is accurate rather than a
-    // shortcut: it keeps this callable from existing call sites without forcing
-    // an isolation change through the whole app.
-    nonisolated(unsafe) private static let lightImpact: UIImpactFeedbackGenerator = {
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.prepare()
-        return generator
-    }()
-
-    nonisolated(unsafe) private static let mediumImpact: UIImpactFeedbackGenerator = {
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.prepare()
-        return generator
-    }()
-
-    nonisolated(unsafe) private static let heavyImpact: UIImpactFeedbackGenerator = {
-        let generator = UIImpactFeedbackGenerator(style: .heavy)
-        generator.prepare()
-        return generator
-    }()
-
-    nonisolated(unsafe) private static let notification = UINotificationFeedbackGenerator()
+    // No `nonisolated(unsafe)`: UIFeedbackGenerator subclasses are Sendable, so
+    // a plain `static let` is already concurrency-safe.
+    private static let lightImpact = UIImpactFeedbackGenerator(style: .light)
+    private static let mediumImpact = UIImpactFeedbackGenerator(style: .medium)
+    private static let heavyImpact = UIImpactFeedbackGenerator(style: .heavy)
+    private static let notification = UINotificationFeedbackGenerator()
 
     static func tap() {
         lightImpact.impactOccurred()
-        lightImpact.prepare()
     }
 
     static func action() {
         mediumImpact.impactOccurred()
-        mediumImpact.prepare()
     }
 
     static func emphasis() {
         heavyImpact.impactOccurred()
-        heavyImpact.prepare()
     }
 
     static func success() {
         notification.notificationOccurred(.success)
-        notification.prepare()
     }
 
     static func warning() {
         notification.notificationOccurred(.warning)
-        notification.prepare()
     }
 
     static func error() {
         notification.notificationOccurred(.error)
-        notification.prepare()
     }
 
     /// Warm the engine ahead of a screen the user is about to tap through, so
-    /// even the FIRST tap is instant. Cheap and idempotent.
+    /// even the FIRST tap is instant. Cheap, idempotent, and short-lived — iOS
+    /// idles the engine back down on its own.
     static func warmUp() {
         lightImpact.prepare()
         mediumImpact.prepare()
