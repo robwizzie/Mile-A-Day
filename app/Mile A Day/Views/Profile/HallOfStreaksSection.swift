@@ -28,10 +28,25 @@ struct HallOfStreaksSection: View {
     private let gold = Color(red: 1.0, green: 0.78, blue: 0.25)
     /// Rows shown before "Show all".
     private let collapsedCount = 4
+    /// Hard ceiling on the expanded list. Someone with 140 streaks does not
+    /// want 140 rows, and no amount of scrolling makes the 90th one matter.
+    private let maxRows = 10
+    /// Minimum-length rungs, tried in order. The FIRST rung that brings the
+    /// list under `maxRows` wins.
+    ///
+    /// A fixed threshold can't work for both ends of the population: "5+ days"
+    /// buries a light user's entire history (they may have nothing longer),
+    /// while for the user with 140 streaks — most of them 2-day — even 5+ is
+    /// still a wall of noise. Letting the bar rise with the size of the
+    /// history means a sparse user keeps their 2-day runs and a prolific one
+    /// only ever sees runs that were actually an achievement FOR THEM. The
+    /// bar is relative to the person, which is the only way it reads as
+    /// meaningful rather than arbitrary.
+    private let lengthRungs = [2, 3, 5, 7, 10, 14, 21, 30, 50, 100]
 
     var body: some View {
         Group {
-            if let response, !ranked(response).isEmpty {
+            if let response, !shortlist(response).rows.isEmpty {
                 content(response)
             } else {
                 // Real (zero-size) view, NOT EmptyView: a body that renders
@@ -59,34 +74,73 @@ struct HallOfStreaksSection: View {
 
     // MARK: - Data
 
-    /// Streaks worth a row, longest first. The CURRENT run always earns one
-    /// even if it's short — "where does today's run stand" is the whole reason
-    /// someone opens this — and it keeps its true rank rather than being
-    /// pinned to the top, because being 9th is the honest, motivating answer.
-    private func ranked(_ response: StreakErasResponse) -> [RankedStreak] {
-        let sorted = response.eras.sorted { a, b in
-            if a.length != b.length { return a.length > b.length }
-            return a.end_date > b.end_date
-        }
-        let ranks = sorted.enumerated().map { RankedStreak(rank: $0.offset + 1, era: $0.element) }
-        return ranks.filter { $0.era.length >= 2 || $0.era.is_current }
-    }
-
     private struct RankedStreak: Identifiable {
         let rank: Int
         let era: StreakEraAPI
         var id: String { era.id }
     }
 
+    private struct Shortlist {
+        var rows: [RankedStreak]
+        /// Minimum length that actually got applied, for the header chip.
+        var minLength: Int
+        var totalStreaks: Int
+        var totalDays: Int
+        /// True when anything was held back, so the UI can say so.
+        var isTrimmed: Bool { totalStreaks > rows.count }
+    }
+
+    /// What to show, and how hard we had to filter to get there.
+    ///
+    /// Ranks are computed over the FULL history before any filtering, so #1 is
+    /// always the real record and a rank is never a position in a filtered
+    /// list. Because the sort is by length descending, taking everything at or
+    /// above a threshold yields exactly the top K — so visible ranks stay
+    /// contiguous, and the only non-contiguous row is the current streak when
+    /// it's too short to have qualified on merit.
+    private func shortlist(_ response: StreakErasResponse) -> Shortlist {
+        let sorted = response.eras.sorted { a, b in
+            if a.length != b.length { return a.length > b.length }
+            return a.end_date > b.end_date
+        }
+        let ranks = sorted.enumerated().map { RankedStreak(rank: $0.offset + 1, era: $0.element) }
+
+        // Climb the rungs until the list fits. `last` is the fallback for the
+        // (unlikely) history that still overflows at 100+ days; prefix trims it.
+        var minLength = lengthRungs.last ?? 2
+        for rung in lengthRungs where ranks.filter({ $0.era.length >= rung }).count <= maxRows {
+            minLength = rung
+            break
+        }
+
+        var rows = Array(ranks.filter { $0.era.length >= minLength }.prefix(maxRows))
+
+        // The current run always earns a place, however short and however
+        // crowded the history — "where does today's run stand" is the whole
+        // reason someone opens this. It keeps its true rank rather than being
+        // pinned to the top: being 87th is the honest, motivating answer.
+        if let current = ranks.first(where: { $0.era.is_current }),
+            !rows.contains(where: { $0.id == current.id })
+        {
+            rows.append(current)
+        }
+
+        return Shortlist(
+            rows: rows,
+            minLength: minLength,
+            totalStreaks: response.eras.count,
+            totalDays: response.eras.reduce(0) { $0 + $1.length }
+        )
+    }
+
     // MARK: - Content
 
     private func content(_ response: StreakErasResponse) -> some View {
-        let all = ranked(response)
-        let shown = showAll ? all : Array(all.prefix(collapsedCount))
-        let totalDays = response.eras.reduce(0) { $0 + $1.length }
+        let list = shortlist(response)
+        let shown = showAll ? list.rows : Array(list.rows.prefix(collapsedCount))
 
         return VStack(spacing: MADTheme.Spacing.md) {
-            header
+            header(list)
             recordBanner(response)
 
             VStack(spacing: 6) {
@@ -95,12 +149,12 @@ struct HallOfStreaksSection: View {
                 }
             }
 
-            if all.count > collapsedCount {
+            if list.rows.count > collapsedCount {
                 Button {
                     MADHaptics.tap()
                     withAnimation(MADTheme.Animation.quick) { showAll.toggle() }
                 } label: {
-                    Text(showAll ? "Show less" : "Show all \(all.count)")
+                    Text(showAll ? "Show less" : "Show all \(list.rows.count)")
                         .font(MADTheme.Typography.smallBold)
                         .foregroundColor(MADTheme.Colors.madRed)
                 }
@@ -109,8 +163,10 @@ struct HallOfStreaksSection: View {
 
             // Replaces the old "+25 short runs" tile, which sat at the end of
             // the row looking like a card you could tap and told the user
-            // nothing they wanted to know. A total is a fact worth having.
-            Text(summaryLine(streaks: response.eras.count, totalDays: totalDays))
+            // nothing they wanted to know. A total is a fact worth having —
+            // and once we start hiding rows it's also what keeps the section
+            // honest about the history it isn't showing.
+            Text(summaryLine(list))
                 .font(MADTheme.Typography.caption)
                 .foregroundColor(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -119,7 +175,7 @@ struct HallOfStreaksSection: View {
         .madLiquidGlass()
     }
 
-    private var header: some View {
+    private func header(_ list: Shortlist) -> some View {
         HStack(spacing: MADTheme.Spacing.sm) {
             Image(systemName: "flame.fill")
                 .font(.system(size: 14, weight: .semibold))
@@ -128,13 +184,31 @@ struct HallOfStreaksSection: View {
                 .font(MADTheme.Typography.headline)
                 .foregroundColor(.primary)
             Spacer()
+            // Says WHY short runs are missing, in three characters. Without it
+            // a user who knows they have a dozen 2-day streaks just sees them
+            // gone and assumes the section is broken.
+            if list.minLength > 2, list.isTrimmed {
+                Text("\(list.minLength)+ days")
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundColor(.secondary)
+                    .fixedSize()
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(Color.secondary.opacity(0.12)))
+            }
         }
     }
 
-    private func summaryLine(streaks: Int, totalDays: Int) -> String {
-        let streakWord = streaks == 1 ? "streak" : "streaks"
-        let dayWord = totalDays == 1 ? "day" : "days"
-        return "\(streaks) \(streakWord) · \(totalDays) \(dayWord) with a mile in the bank"
+    private func summaryLine(_ list: Shortlist) -> String {
+        let streakWord = list.totalStreaks == 1 ? "streak" : "streaks"
+        let dayWord = list.totalDays == 1 ? "day" : "days"
+        let totals =
+            "\(list.totalStreaks) \(streakWord) · \(list.totalDays) \(dayWord) with a mile in the bank"
+        // When rows were held back, lead with the fact that they exist. The
+        // totals then read as the full picture rather than as a contradiction
+        // of a list that shows ten.
+        guard list.isTrimmed else { return totals }
+        return "Showing your longest \(list.rows.count) · \(totals) all time"
     }
 
     // MARK: - Record banner
