@@ -64,7 +64,7 @@ struct GhostRaceSetupSheet: View {
                         targetList
                         if isCustomSelected { customPicker }
                         howItWorks
-                        Color.clear.frame(height: 120)
+                        Color.clear.frame(height: 180)
                     }
                     .padding(.horizontal, MADTheme.Spacing.md)
                     .padding(.top, MADTheme.Spacing.sm)
@@ -153,6 +153,18 @@ struct GhostRaceSetupSheet: View {
             ForEach(Array(targets.enumerated()), id: \.offset) { _, target in
                 targetRow(target)
             }
+
+            if let targetFootnote {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(targetFootnote)
+                        .font(MADTheme.Typography.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+                .padding(.top, 2)
+            }
         }
     }
 
@@ -214,16 +226,16 @@ struct GhostRaceSetupSheet: View {
         case .recordedBest:
             let seconds = BestEffortStore.best(for: activityKey)?.seconds ?? 0
             return (
-                "trophy.fill",
-                "Your best mile",
-                "The real thing — paced exactly the way you actually ran it.",
+                "figure.run.circle.fill",
+                "Best tracked in-app",
+                "Your fastest mile tracked with Start Mile, replayed at the real pace you ran it — surges and all.",
                 BestEffortStore.formatSeconds(seconds)
             )
         case .personalRecord:
             return (
                 "bolt.fill",
-                "Your PR pace",
-                "Your fastest recorded mile, held at an even pace the whole way.",
+                "All-time PR",
+                "Your fastest mile from ANY workout, Apple Watch included. Held at one even pace.",
                 BestEffortStore.formatSeconds(seedPaceSeconds ?? 0)
             )
         case .custom:
@@ -231,11 +243,25 @@ struct GhostRaceSetupSheet: View {
                 "slider.horizontal.3",
                 "A time you set",
                 isRun
-                    ? "Pick any target — a goal pace, or a rival's time."
-                    : "Pick any target. Works from your very first walk.",
+                    ? "Any target you like — a goal pace, or a friend's time."
+                    : "Any target you like. Works from your very first walk.",
                 BestEffortStore.formatSeconds(customTotalSeconds)
             )
         }
+    }
+
+    /// The two "bests" routinely disagree — badly enough that the screen has to
+    /// say why. The in-app best comes from this app's tracker only; the PR is
+    /// the fastest mile SPLIT across every synced workout, so a quick mile
+    /// inside a long Apple Watch run sets it. Someone whose fast running
+    /// happens on the Watch sees 9:47 next to 6:41 and, without this line, has
+    /// no way to know which number means what.
+    private var targetFootnote: String? {
+        guard targets.contains(where: { if case .recordedBest = $0 { return true }; return false }),
+            targets.contains(where: { if case .personalRecord = $0 { return true }; return false })
+        else { return nil }
+        return
+            "Your PR can be faster than your best tracked mile — it counts miles from Apple Watch and other apps, which this app's tracker never saw."
     }
 
     // MARK: - Custom picker
@@ -312,7 +338,9 @@ struct GhostRaceSetupSheet: View {
             )
             explainerRow(
                 "flag.checkered",
-                "It locks in the moment you hit 1.00 mi — the rest of the walk is yours."
+                isRun
+                    ? "It locks in the moment you hit 1.00 mi — the rest of the run is yours."
+                    : "It locks in the moment you hit 1.00 mi — the rest of the walk is yours."
             )
             explainerRow(
                 "stopwatch",
