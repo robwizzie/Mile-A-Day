@@ -48,7 +48,7 @@ struct BuddyStartSheet: View {
                         if mode.needsGoal { goalSection }
                         friendSection
                         // Clears the sticky footer.
-                        Color.clear.frame(height: 96)
+                        Color.clear.frame(height: 150)
                     }
                     .padding(.horizontal, MADTheme.Spacing.md)
                     .padding(.top, MADTheme.Spacing.sm)
@@ -56,7 +56,7 @@ struct BuddyStartSheet: View {
 
                 footer
             }
-            .navigationTitle("Buddy Walk")
+            .navigationTitle(isRun ? "Buddy Run" : "Buddy Walk")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .sheet(isPresented: $showJoinByCode) {
@@ -94,13 +94,14 @@ struct BuddyStartSheet: View {
             Button("Cancel") { dismiss() }
         }
         ToolbarItem(placement: .primaryAction) {
-            Button {
+            // Spelled out, not a "#" glyph. The icon-only version tested as
+            // undiscoverable — you had to tap it to learn what it did, which
+            // is the opposite of what a toolbar affordance is for.
+            Button("Join") {
                 MADHaptics.tap()
                 showJoinByCode = true
-            } label: {
-                Label("Join code", systemImage: "number")
-                    .font(MADTheme.Typography.smallBold)
             }
+            .font(MADTheme.Typography.smallBold)
         }
     }
 
@@ -134,6 +135,8 @@ struct BuddyStartSheet: View {
                 .font(MADTheme.Typography.subheadline)
                 .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.65))
                 .multilineTextAlignment(.center)
+
+            if !selectedCandidates.isEmpty { selectedAvatars }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, MADTheme.Spacing.lg)
@@ -151,13 +154,43 @@ struct BuddyStartSheet: View {
         }
     }
 
+    private var selectedCandidates: [BuddyCandidate] {
+        buddy.candidates.filter { selected.contains($0.userId) }
+    }
+
+    /// Faces, not just a count — the header is meant to feel like the walk is
+    /// already half real. Overlap is built with negative-space PADDING rather
+    /// than `.offset`, which draws outside layout bounds and would measure the
+    /// stack wrong (ios.md).
+    private var selectedAvatars: some View {
+        HStack(spacing: -10) {
+            ForEach(selectedCandidates.prefix(5)) { candidate in
+                AvatarView(
+                    name: candidate.displayName,
+                    imageURL: candidate.profileImageUrl,
+                    size: 30
+                )
+                .overlay(
+                    Circle().strokeBorder(MADTheme.Colors.madBlack.opacity(0.85), lineWidth: 2)
+                )
+            }
+            if selectedCandidates.count > 5 {
+                Text("+\(selectedCandidates.count - 5)")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.8))
+                    .frame(width: 30, height: 30)
+                    .background(Circle().fill(MADTheme.Colors.madWhite.opacity(0.15)))
+                    .padding(.leading, 10)
+            }
+        }
+        .padding(.top, 2)
+    }
+
     private var summarySubtitle: String {
         guard !selected.isEmpty else {
             return "Nobody invited yet — you'll get a code to share"
         }
-        let names = buddy.candidates
-            .filter { selected.contains($0.userId) }
-            .map(\.displayName)
+        let names = selectedCandidates.map(\.displayName)
         switch names.count {
         case 0: return "with \(selected.count) friends"
         case 1: return "with \(names[0])"
@@ -386,10 +419,13 @@ struct BuddyStartSheet: View {
             .frame(height: 24)
             .allowsHitTesting(false)
 
-            startButton
-                .padding(.horizontal, MADTheme.Spacing.md)
-                .padding(.bottom, MADTheme.Spacing.sm)
-                .background(MADTheme.Colors.madBlack.opacity(0.85))
+            VStack(spacing: MADTheme.Spacing.sm) {
+                startButton
+                joinButton
+            }
+            .padding(.horizontal, MADTheme.Spacing.md)
+            .padding(.bottom, MADTheme.Spacing.sm)
+            .background(MADTheme.Colors.madBlack.opacity(0.85))
         }
     }
 
@@ -416,6 +452,37 @@ struct BuddyStartSheet: View {
         .buttonStyle(.plain)
         .disabled(isCreating)
         .opacity(isCreating ? 0.7 : 1)
+    }
+
+    /// Joining is a genuinely different intent from creating, and it was
+    /// hidden behind a "#" glyph in the toolbar — the one control on the
+    /// screen you had to tap to discover. It belongs in the footer next to
+    /// the other decision, spelled out.
+    private var joinButton: some View {
+        Button {
+            MADHaptics.tap()
+            showJoinByCode = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.right.circle")
+                    .font(.system(size: 14, weight: .semibold))
+                Text("A friend already started one? Join with their code")
+                    .font(MADTheme.Typography.small)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.75))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(MADTheme.Colors.madWhite.opacity(0.08))
+                    .overlay(
+                        Capsule().strokeBorder(
+                            MADTheme.Colors.madWhite.opacity(0.15), lineWidth: 1))
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private var startButtonTitle: String {
