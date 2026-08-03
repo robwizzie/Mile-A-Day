@@ -754,15 +754,14 @@ export async function getAssistableFriends(
   // project each one so the CTA can promise the streak they'd actually land on.
   const stampedRows: AssistableFriend[] = [];
   for (const row of eventRows) {
-    const detail = await stampedBreakDetail(
-      row.user_id,
-      row.broke_date,
-      Number(row.prior_streak),
-    );
+    const detail = await stampedBreakDetail(row.user_id, row.broke_date);
     // Don't advertise a rescue the give call would refuse.
     if (!detail.bridged || !detail.inWindow) continue;
     stampedRows.push({
       ...row,
+      // Live value, not the stamped snapshot — see stampedBreakDetail. Also
+      // what the client falls back to when it can't read restored_streak.
+      prior_streak: detail.prior,
       restored_streak: detail.restored,
       // The sweep only stamps a break once no token of the friend's own could
       // cover it, so there is nothing left for them to self-recover with.
@@ -937,8 +936,9 @@ export async function getFriendRescueStatus(
   if (allowed.length === 0)
     return { ...base, available: false, reason: "forbidden" };
 
-  const stamped = await db.query<{ local_date: string; prior_streak: number }>(
-    `SELECT to_char(e.local_date, 'YYYY-MM-DD') AS local_date, e.prior_streak
+  // `prior_streak` deliberately not selected: stampedBreakDetail re-derives it.
+  const stamped = await db.query<{ local_date: string }>(
+    `SELECT to_char(e.local_date, 'YYYY-MM-DD') AS local_date
      FROM streak_events e
      WHERE e.user_id = $1 AND e.kind = 'break'
        AND e.local_date >= $2::date
@@ -955,12 +955,7 @@ export async function getFriendRescueStatus(
   // "nothing to do here" and "too late", which the user has to be told.
   let blocked: FriendRescueStatus["reason"] = undefined;
   if (stamped[0]) {
-    const prior = Number(stamped[0].prior_streak);
-    const detail = await stampedBreakDetail(
-      friendId,
-      stamped[0].local_date,
-      prior,
-    );
+    const detail = await stampedBreakDetail(friendId, stamped[0].local_date);
     if (!detail.bridged) {
       // Checked before the window: a second missed day is the more
       // fundamental reason, and the more useful thing to say.
@@ -970,7 +965,7 @@ export async function getFriendRescueStatus(
     } else {
       breakInfo = {
         local_date: stamped[0].local_date,
-        prior_streak: prior,
+        prior_streak: detail.prior,
         restored_streak: detail.restored,
         self_recovery: null,
       };
@@ -1089,12 +1084,25 @@ async function getLiveAssistableBreak(
  * `giveStreakAssist` enforces (tokens never partially bridge) — without it a
  * stamped break with a second hole after it would advertise a Save Streak CTA
  * that the POST then rejects with `gap_too_wide`.
+ *
+ * `prior` is RE-DERIVED here rather than read off `streak_events.prior_streak`.
+ * The stored column is a snapshot taken by `recordBreak` at stamp time, and
+ * every row written before the `streakEndingAt` island fix holds a `1` — so
+ * trusting it would keep serving "back to 2 days" to real users long after the
+ * query was corrected. Re-deriving is also just more truthful: a late-syncing
+ * Watch workout can land on a day BEFORE the miss and legitimately lengthen the
+ * run being bought. Days at or before the miss are settled history, so this is
+ * stable across reads within a day.
  */
 async function stampedBreakDetail(
   userId: string,
   missedDay: string,
-  priorStreak: number,
-): Promise<{ restored: number; bridged: boolean; inWindow: boolean }> {
+): Promise<{
+  prior: number;
+  restored: number;
+  bridged: boolean;
+  inWindow: boolean;
+}> {
   const userToday = await getUserLocalToday(userId);
   const facts = await recentDayFacts(userId, missedDay);
   const ok = (d: string) => facts.qualified.has(d) || facts.covered.has(d);
@@ -1109,8 +1117,11 @@ async function stampedBreakDetail(
     cursor = dateStrPlus(cursor, 1);
   }
 
+  const prior = await streakEndingAt(userId, dateStrMinus(missedDay, 1));
+
   return {
-    restored: projectRestoredStreak(missedDay, userToday, priorStreak, ok),
+    prior,
+    restored: projectRestoredStreak(missedDay, userToday, prior, ok),
     bridged,
     // The list query bounds break age by the SERVER's CURRENT_DATE; the give
     // call bounds it by the FRIEND's local today. For anyone west of UTC those
