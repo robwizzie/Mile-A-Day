@@ -619,86 +619,19 @@ struct DashboardView: View {
                 )
             }
             // Buddy Walks flow: pill → start sheet → lobby (synced countdown) →
-            // the normal tracker → recap.
-            //
-            // Each presentation hangs off its OWN invisible node. This node
-            // already carries a .sheet (manual entry) and a .fullScreenCover
-            // (the tracker); stacking more of either on the same node makes
-            // SwiftUI silently drop one.
-            .background(
-                Color.clear
-                    .sheet(isPresented: $showBuddyStartSheet) {
-                        BuddyStartSheet { _ in
-                            showBuddyStartSheet = false
-                            showBuddyLobby = true
-                        }
-                    }
+            // the normal tracker → recap. All of it lives in one ViewModifier —
+            // see BuddyFlowModifier for why it isn't inline.
+            .modifier(
+                BuddyFlowModifier(
+                    showStartSheet: $showBuddyStartSheet,
+                    showLobby: $showBuddyLobby,
+                    activeSessionId: $activeBuddySessionId,
+                    recapSessionId: $buddyRecapSessionId,
+                    showWorkoutView: $showWorkoutView,
+                    deepLinkRouter: deepLinkRouter,
+                    onPendingLink: consumePendingBuddyLink
+                )
             )
-            .background(
-                Color.clear
-                    .fullScreenCover(isPresented: $showBuddyLobby) {
-                        BuddyLobbyView { session in
-                            // Hand the session to the ordinary tracker. This is
-                            // the whole integration: one flag, same tracker.
-                            activeBuddySessionId = session.id
-                            showBuddyLobby = false
-                            showWorkoutView = true
-                        }
-                    }
-            )
-            .background(
-                Color.clear
-                    .sheet(
-                        isPresented: Binding(
-                            get: { buddyRecapSessionId != nil },
-                            set: { if !$0 { buddyRecapSessionId = nil } }
-                        )
-                    ) {
-                        if let id = buddyRecapSessionId {
-                            BuddyRecapView(sessionId: id)
-                        }
-                    }
-            )
-            .onReceive(NotificationCenter.default.publisher(for: .madOpenBuddyLobby)) { _ in
-                showBuddyLobby = true
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .madStartBuddyWalk)) { _ in
-                // An invite already waiting goes straight to the lobby; there is
-                // nothing left to configure.
-                if BuddySessionService.shared.hasLiveSession {
-                    showBuddyLobby = true
-                } else {
-                    showBuddyStartSheet = true
-                }
-            }
-            // A buddy deep link or push can land before this view exists (cold
-            // launch), so the intent is parked on DeepLinkRouter and consumed
-            // BOTH here and in .task below — whichever runs first wins.
-            .onReceive(deepLinkRouter.$pendingBuddyCode.compactMap { $0 }) { code in
-                consumePendingBuddyLink(code: code, sessionId: nil)
-            }
-            .onReceive(deepLinkRouter.$pendingBuddySessionId.compactMap { $0 }) { sessionId in
-                consumePendingBuddyLink(code: nil, sessionId: sessionId)
-            }
-            .task {
-                // Enrollment stamp: tells the backend this install has the Buddy
-                // Walks UI, which is what makes the user eligible to be invited
-                // at all. Idempotent, so it's safe on every appearance.
-                await buddyService.enrollIfNeeded()
-                await buddyService.refreshMySessions()
-                // "Alex is walking right now" — pulled, never pushed, so this
-                // is the only thing that surfaces the offer.
-                await buddyService.refreshJoinableFriendSessions()
-
-                // The `.onReceive` above only fires for values published AFTER
-                // this view mounts. On a cold launch the link is already parked,
-                // so it has to be drained here too.
-                if let code = deepLinkRouter.pendingBuddyCode {
-                    consumePendingBuddyLink(code: code, sessionId: nil)
-                } else if let sessionId = deepLinkRouter.pendingBuddySessionId {
-                    consumePendingBuddyLink(code: nil, sessionId: sessionId)
-                }
-            }
             .onAppear {
                 refreshData()
                 refreshMidRunPhotoWaiting()
