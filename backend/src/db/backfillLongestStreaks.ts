@@ -5,7 +5,7 @@ import { streakFeaturesGloballyEnabled } from "../services/streakFeatureCore.js"
  * One-time fill of `users.longest_streak` from each user's full workout
  * history, plus the index the streak-record surfaces can read through.
  *
- * Why this isn't in migration 0034
+ * Why this isn't in migration 0035
  * --------------------------------
  * Same reasoning as backfillFeedRoles (see its header): migrations run at
  * BOOT over the shared pool with 30s timeouts, one transaction each — a

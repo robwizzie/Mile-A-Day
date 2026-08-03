@@ -86,6 +86,11 @@ struct PostItem: Codable, Identifiable {
     var coauthor_first_name: String?
     var coauthor_last_name: String?
     var coauthor_profile_image_url: String?
+    /// Collab only, and only when I'M the tagged coauthor: is this post on my
+    /// own profile grid? nil for everyone else (it's my curation, not theirs)
+    /// and on older servers. Hiding it is grid-only — the tag, the Tagged tab
+    /// and both circles' feeds are untouched.
+    var coauthor_on_profile: Bool? = nil
     /// Set when this post is attached to the workout that completed a mile made
     /// of several walks/runs — its stats are the day's combined figures and this
     /// is the per-leg breakdown behind them. nil/1 = an ordinary single run.
@@ -236,6 +241,8 @@ struct FeedEntry: Codable, Identifiable {
     var coauthor_first_name: String?
     var coauthor_last_name: String?
     var coauthor_profile_image_url: String?
+    /// Only populated when the viewer IS the coauthor — see PostItem.
+    var coauthor_on_profile: Bool?
 
     enum CodingKeys: String, CodingKey {
         case kind
@@ -251,6 +258,7 @@ struct FeedEntry: Codable, Identifiable {
         case is_self, is_hyped, hype_count, comment_count, photo_locked, is_fresh
         case coauthor_user_id, coauthor_status, coauthor_username
         case coauthor_first_name, coauthor_last_name, coauthor_profile_image_url
+        case coauthor_on_profile
     }
 
     var id: String { "\(kind)-\(entryId)" }
@@ -297,6 +305,7 @@ struct FeedEntry: Codable, Identifiable {
             coauthor_first_name: coauthor_first_name,
             coauthor_last_name: coauthor_last_name,
             coauthor_profile_image_url: coauthor_profile_image_url,
+            coauthor_on_profile: coauthor_on_profile,
             segment_count: segment_count,
             segments: segments
         )
@@ -630,6 +639,21 @@ enum PostService {
         let bodyData = try JSONEncoder().encode(Body(accept: accept))
         _ = try await APIClient.fancyFetch(
             endpoint: "/posts/\(postId)/coauthor",
+            method: .POST,
+            body: bodyData,
+            responseType: OKResponse.self
+        )
+    }
+
+    /// Pin a collab I'm tagged in on or off MY profile grid. Nothing else
+    /// moves: the tag stays live, the post stays in my Tagged tab, on the
+    /// author's grid, and in every feed it already reached. Distinct from
+    /// `respondToCoauthor(accept: false)`, which severs the tag outright.
+    static func setCoauthorOnProfile(postId: String, onProfile: Bool) async throws {
+        struct Body: Encodable { let on_profile: Bool }
+        let bodyData = try JSONEncoder().encode(Body(on_profile: onProfile))
+        _ = try await APIClient.fancyFetch(
+            endpoint: "/posts/\(postId)/coauthor/profile",
             method: .POST,
             body: bodyData,
             responseType: OKResponse.self

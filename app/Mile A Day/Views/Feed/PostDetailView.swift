@@ -23,6 +23,12 @@ struct PostDetailView: View {
     /// True for surfaces showing OTHER people's posts (the Tagged tab):
     /// author/coauthor names and caption @mentions open profiles.
     var showsAuthorProfiles: Bool = false
+    /// True only when `posts` IS the viewer's own profile GRID. Hiding a collab
+    /// from your grid then has to drop it from this list too, or the user taps
+    /// "Hide from my profile" and watches the post sit exactly where it was.
+    /// Every other surface (Tagged tab, feed, deep link) keeps showing it —
+    /// that's the entire point of the setting.
+    var dropsCollabsHiddenFromProfile: Bool = false
     @Environment(\.dismiss) private var dismiss
     /// Tapped hype tally — presents the "who hyped this" sheet.
     @State private var hypersContext: HypersListContext?
@@ -200,6 +206,9 @@ struct PostDetailView: View {
             // they co-own. Leaving is the one action that IS theirs.
             onLeaveCollab: (post.hasAcceptedCoauthor && post.coauthor_user_id == currentUserId)
                 ? { Task { await leaveCollab(post) } }
+                : nil,
+            onSetCollabOnProfile: (post.hasAcceptedCoauthor && post.coauthor_user_id == currentUserId)
+                ? { onProfile in Task { await setCollabOnProfile(post, onProfile: onProfile) } }
                 : nil
         )
     }
@@ -210,6 +219,43 @@ struct PostDetailView: View {
     private func leaveCollab(_ post: PostItem) async {
         try? await PostService.respondToCoauthor(postId: post.post_id, accept: false)
         await MainActor.run { posts.removeAll { $0.post_id == post.post_id } }
+    }
+
+    /// Accepted coauthor pins this collab on/off their own profile grid. The
+    /// tag itself is untouched — this is the reversible sibling of
+    /// `leaveCollab`, and the post stays wherever else it already was.
+    private func setCollabOnProfile(_ post: PostItem, onProfile: Bool) async {
+        await MainActor.run {
+            MADHaptics.tap()
+            updatePost(post.post_id) { $0.coauthor_on_profile = onProfile }
+        }
+        do {
+            try await PostService.setCoauthorOnProfile(
+                postId: post.post_id, onProfile: onProfile
+            )
+            // Only the grid itself loses the card; every other host keeps it.
+            if dropsCollabsHiddenFromProfile && !onProfile {
+                await MainActor.run {
+                    posts.removeAll { $0.post_id == post.post_id }
+                    // `visiblePosts` slices from `initialPostId`, so removing
+                    // the post the sheet OPENED at falls back to the whole
+                    // array and silently rewinds the reader to the newest
+                    // post. Close instead — landing back on a grid the post
+                    // has just left is the clearest confirmation anyway.
+                    if post.post_id == initialPostId { dismiss() }
+                }
+            }
+        } catch {
+            await MainActor.run {
+                updatePost(post.post_id) { $0.coauthor_on_profile = !onProfile }
+            }
+        }
+    }
+
+    @MainActor
+    private func updatePost(_ id: String, _ mutate: (inout PostItem) -> Void) {
+        guard let idx = posts.firstIndex(where: { $0.post_id == id }) else { return }
+        mutate(&posts[idx])
     }
 
     /// A tapped caption @mention: resolve to the exact user and open their

@@ -12,6 +12,7 @@ import {
   getBestMilesDay,
   getBestSplit,
   getTodayMiles,
+  getLast7DayMiles,
   DAILY_GOAL_TOLERANCE,
   isFeedWorthyWorkout,
   updateWorkout as updateWorkoutDb,
@@ -619,6 +620,7 @@ export async function getUserStats(req: AuthenticatedRequest, res: Response) {
       best_split_time,
       recent_workouts,
       today_miles,
+      last_7_day_miles,
     ] = await Promise.all([
       getTotalMiles(userId, startDateParam),
       getBestMilesDay(userId, startDateParam),
@@ -628,6 +630,9 @@ export async function getUserStats(req: AuthenticatedRequest, res: Response) {
       // including the owner looking at their own stats.
       getRecentWorkoutsDb(userId, 10, req.userId),
       getTodayMiles(userId),
+      // Exact per-day series for profile week charts — recent_workouts is
+      // capped, so heavy loggers' older days would otherwise read as zero.
+      getLast7DayMiles(userId),
     ]);
 
     // Default goal miles is 1.0 (can be updated when user preferences are stored)
@@ -649,6 +654,7 @@ export async function getUserStats(req: AuthenticatedRequest, res: Response) {
       best_split_time,
       recent_workouts,
       today_miles,
+      last_7_day_miles,
       goal_miles,
       // Additive. Ratcheted column, floored at the live streak so a fresh
       // record never reads stale; pre-backfill rows (0) degrade to the streak.

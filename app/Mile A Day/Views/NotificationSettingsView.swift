@@ -200,6 +200,9 @@ struct NotificationSettingsView: View {
                         settingsToggle("New posts from friends", isOn: $prefs.friendPostsEnabled,
                             description: "Get notified when a friend shares a photo")
                         settingsDivider
+                        settingsToggle("Tagged posts on my profile", isOn: $prefs.taggedPostsOnProfile,
+                            description: "Add collabs friends tag you in to your profile grid — turn off and they stay in your Tagged tab only")
+                        settingsDivider
                         settingsToggle("Weekly recap", isOn: $prefs.weeklyRecapEnabled,
                             description: "A Sunday summary of your week's miles, ready to share")
                     }
@@ -547,12 +550,25 @@ struct NotificationSettingsView: View {
                     "share_route_maps": prefs.shareRouteMaps,
                     "share_live_presence": prefs.shareLivePresence,
                     "weekly_recap_enabled": prefs.weeklyRecapEnabled,
+                    // Must reach the server: the profile grid is built by a SQL
+                    // query, so a local-only flag would change nothing at all.
+                    "tagged_posts_on_profile": prefs.taggedPostsOnProfile,
                     // Must reach the server: the reminder is sent by a cron, so
                     // a local-only flag could never actually silence it.
                     "friend_request_reminder_enabled": prefs.friendRequestReminderEnabled,
                     "workout_visibility": prefs.workoutVisibility.rawValue,
                 ]
                 _ = try await friendService.updateNotificationSettings(backendSettings)
+                // The profile grid is server-built, so it can't notice this on
+                // its own — and it's usually still alive right behind this
+                // screen. Told only after the server has actually taken the
+                // change, or the reload would re-fetch the old grid.
+                await MainActor.run {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("MAD_TaggedPostsOnProfileChanged"),
+                        object: nil
+                    )
+                }
             } catch {
                 print("[NotifSettings] ❌ Failed to sync preferences to backend: \(error)")
             }
@@ -565,23 +581,32 @@ struct NotificationSettingsView: View {
         }
     }
 
-    /// Pull the visibility the SERVER actually enforces.
+    /// Pull the settings the SERVER actually enforces.
     ///
-    /// Every other setting on this screen is local-first, which is fine for a
-    /// notification preference — but this one is a privacy control, and showing
-    /// "Friends only" to someone the server has as "Everyone" would be a lie
-    /// about who can see their photos. The server is the authority here.
+    /// Most of this screen is local-first, which is fine for a notification
+    /// preference — but visibility is a privacy control, and showing "Friends
+    /// only" to someone the server has as "Everyone" would be a lie about who
+    /// can see their photos. Tagged-posts-on-profile is here for the same
+    /// reason from the other direction: the profile grid is built by a SQL
+    /// query, so the server's value is the one that decides what's on it.
     private func loadVisibilityFromServer() async {
-        guard let settings = try? await friendService.getNotificationSettings(),
-              let raw = settings.workout_visibility,
-              let visibility = WorkoutVisibility(rawValue: raw)
+        guard let settings = try? await friendService.getNotificationSettings()
         else { return }
+        let visibility = settings.workout_visibility.flatMap(WorkoutVisibility.init(rawValue:))
+        let taggedOnProfile = settings.tagged_posts_on_profile
         await MainActor.run {
-            guard prefs.workoutVisibility != visibility else { return }
-            prefs.workoutVisibility = visibility
+            var changed = false
+            if let visibility, prefs.workoutVisibility != visibility {
+                prefs.workoutVisibility = visibility
+                changed = true
+            }
+            if let taggedOnProfile, prefs.taggedPostsOnProfile != taggedOnProfile {
+                prefs.taggedPostsOnProfile = taggedOnProfile
+                changed = true
+            }
             // Keep the local copy honest too, so a later Save of some unrelated
             // toggle can't push the stale value back over the server's.
-            prefs.save()
+            if changed { prefs.save() }
         }
     }
 

@@ -39,6 +39,9 @@ struct ProfileView: View {
     // Recent workouts for the rolling "Last 7 Days" chart on the Activity tab.
     // Same data + component the friend profile uses, so both read identically.
     @State private var ownWorkouts: [FriendWorkout] = []
+    // Server-exact per-day totals for the chart — the capped workout list
+    // undercounts heavy-logging weeks (see Last7DaysChart).
+    @State private var ownDayTotals: [FriendDayMiles]?
 
     // Section tabs — mirrors UserProfileDetailView's structure so navigating
     // between own profile and friend profile feels consistent. Own profile
@@ -232,7 +235,7 @@ struct ProfileView: View {
                 isSelf: true
             )
             if !ownWorkouts.isEmpty {
-                Last7DaysChart(workouts: ownWorkouts)
+                Last7DaysChart(workouts: ownWorkouts, dayTotals: ownDayTotals)
             }
             if !receivedHypes.isEmpty {
                 recentHypesSection
@@ -403,8 +406,10 @@ struct ProfileView: View {
         }
     }
 
-    /// Pulls the user's own recent workouts to feed the rolling 7-day chart.
-    /// A limit of 20 comfortably covers the last week even for multi-run days.
+    /// Pulls the user's own recent workouts (detail rows for the chart's
+    /// tap panel) plus the server's exact per-day totals — a fixed workout
+    /// limit can't cover the week for multi-run days, so the bars must come
+    /// from `last_7_day_miles`, same as the friend profile.
     private func loadOwnWorkouts() async {
         guard let userId = userManager.currentUser.backendUserId else { return }
         do {
@@ -412,6 +417,12 @@ struct ProfileView: View {
             await MainActor.run { ownWorkouts = workouts }
         } catch {
             print("[ProfileView] loadOwnWorkouts failed: \(error)")
+        }
+        do {
+            let stats = try await friendService.fetchFriendStats(for: userId)
+            await MainActor.run { ownDayTotals = stats.last7DayMiles }
+        } catch {
+            print("[ProfileView] loadOwnDayTotals failed: \(error)")
         }
     }
 

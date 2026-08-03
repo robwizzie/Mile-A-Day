@@ -278,6 +278,12 @@ struct MainTabView: View {
                 // Refresh health data and re-evaluate the daily reminder
                 // so "Mile still waiting" is cancelled if the user completed their mile
                 healthManager.fetchTodaysDistance()
+                // Re-mirror the streak/miles/style into the App Group on every
+                // foreground, not just at launch. A warm return used to write
+                // nothing unless some value happened to change, so a widget
+                // that had drifted (missed reload, background sync that never
+                // ran) stayed wrong until the app was cold-launched.
+                syncWidgetData()
                 scheduleReviewEvaluation()
             }
         }
@@ -499,6 +505,10 @@ struct MainTabView: View {
         // Backfill the flame widget's style for users who chose it before the
         // widget existed (the setter mirrors it going forward).
         WidgetDataStore.save(dashboardStyle: DashboardStylePreference.current.rawValue)
+        // Those saves are no-ops when nothing changed, so they can't fix a
+        // widget that's rendering an old timeline over correct stored values.
+        // Throttled to 15 minutes, so repeated foregrounding stays cheap.
+        WidgetDataStore.requestFullReload()
     }
 
     /// Mirror the most urgent active competition into the App Group for the

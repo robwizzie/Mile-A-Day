@@ -1,4 +1,6 @@
 import SwiftUI
+import CoreLocation
+import HealthKit
 
 /// Run stats handed to the composer to seed the overlay sticker. Carries every
 /// stat we can show; `datum(for:)` formats one and returns nil when there's no
@@ -133,6 +135,19 @@ final class PostComposerViewModel: ObservableObject {
     @Published var hasRoute = false
     /// User choice: show the route map with this post (carousel slide 2).
     @Published var includeRoute = true
+    /// The run's actual GPS trace, so the share step can show the map that's
+    /// about to be posted rather than asking people to take the toggle on
+    /// faith. Read from HealthKit — the same samples the sync ships to the
+    /// server, so the preview and the published slide draw the same path.
+    @Published var routePreview: [CLLocationCoordinate2D]?
+    @Published var isLoadingRoutePreview = false
+    /// One-shot guard: a run whose route enumerates to nothing must not
+    /// re-query on every re-render (`routePreview == nil` can't tell "not
+    /// loaded yet" from "loaded, and there's nothing to draw").
+    private var hasLoadedRoutePreview = false
+    /// Workout type behind the route ("running"/"walking"/…), so the preview
+    /// uses the same accent colour the feed card will.
+    @Published var routeWorkoutType = "running"
     /// Collab post: the friend this mile was run with. They get an invite and,
     /// once accepted, the post shows both names and lands on both profiles.
     @Published var coauthor: BackendUser?
@@ -203,7 +218,41 @@ final class PostComposerViewModel: ObservableObject {
         let workout = HealthKitManager.shared.todaysWorkouts
             .first { $0.uuid.uuidString == workoutId }
         guard let workout else { return }
+        routeWorkoutType = Self.workoutTypeString(workout.workoutActivityType)
         hasRoute = await HealthKitManager.shared.hasRouteData(for: workout)
+    }
+
+    /// Load the route's coordinates for the share step's preview.
+    ///
+    /// Deliberately NOT part of `checkRouteAvailability` — that one is a
+    /// limit-1 existence probe that runs while the user is still picking a
+    /// photo, and this enumerates every GPS sample of the run. It's cheap
+    /// enough once, on the screen that actually draws the map, and never
+    /// twice: an empty result parks `hasLoadedRoutePreview` so a route-less
+    /// workout doesn't re-query on every re-render.
+    func loadRoutePreview() async {
+        guard hasRoute, !hasLoadedRoutePreview, !isLoadingRoutePreview,
+              let workoutId = stats.workoutId else { return }
+        let workout = HealthKitManager.shared.todaysWorkouts
+            .first { $0.uuid.uuidString == workoutId }
+        guard let workout else { return }
+        isLoadingRoutePreview = true
+        let locations = await HealthKitManager.shared.fetchAllRouteLocations(for: workout)
+        // A single point can't draw a path — treat it as no preview rather
+        // than rendering a lone dot the post won't have.
+        routePreview = locations.count >= 2 ? locations.map(\.coordinate) : nil
+        hasLoadedRoutePreview = true
+        isLoadingRoutePreview = false
+    }
+
+    private static func workoutTypeString(_ type: HKWorkoutActivityType) -> String {
+        switch type {
+        case .running: return "running"
+        case .walking: return "walking"
+        case .cycling: return "cycling"
+        case .hiking: return "hiking"
+        default: return "other"
+        }
     }
 
     /// Render the on-screen canvas (photo + sticker) to a flat JPEG-ready image
@@ -284,7 +333,21 @@ final class PostComposerViewModel: ObservableObject {
             }
             return true
         } catch let APIError.apiError(message) where message == "mile_not_completed" {
-            errorMessage = "Finish today's mile before you post."
+            // The server recomputes this gate from ITS workouts table, so this
+            // 403 while local HealthKit already shows the mile done means the
+            // workout just hasn't reached the backend (sync failed or hasn't
+            // fired) — tell the user that instead of "finish your mile", and
+            // kick a sync so an immediate retry can succeed.
+            let localDone = ProgressCalculator.isGoalCompleted(
+                current: HealthKitManager.shared.todaysDistance,
+                goal: UserManager.shared.currentUser.goalMiles
+            )
+            if localDone {
+                errorMessage = "Your mile is still syncing — give it a few seconds and try again."
+                Task { try? await WorkoutSyncService.shared.syncNewWorkouts() }
+            } else {
+                errorMessage = "Finish today's mile before you post."
+            }
             return false
         } catch let APIError.apiError(message) where message == "terms_not_accepted" {
             // Stale local acceptance — clear the memo and re-gate.

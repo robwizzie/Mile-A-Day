@@ -43,6 +43,67 @@ enum MADWidgetStyle {
     }
 }
 
+// MARK: - Shared widget clock
+//
+// Every MAD widget is driven by data the APP writes into the App Group (which
+// force-reloads the affected kinds). The only thing that moves on its own is
+// the clock, so no widget may spend reload budget polling for it: WidgetKit
+// rations reloads (~40-70/day) and once a kind is over budget iOS silently
+// drops ALL of its reloads — including the app's post-run writes — which
+// freezes the widget on stale data while the app itself is correct.
+//
+// The two clock-driven things (the day rollover and the countdown to it) are
+// therefore handled without reloads: pre-baked hour-boundary entries, and
+// `MADWidgetCountdown`, which the system re-renders itself.
+
+enum MADWidgetClock {
+    /// The deadline for today's mile: the next local midnight.
+    static func endOfDay(after date: Date = Date()) -> Date {
+        let calendar = Calendar.current
+        return calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: date))
+            ?? date.addingTimeInterval(3600)
+    }
+
+    /// `date`, then every top-of-hour up to (not including) the day's end.
+    ///
+    /// Aligning to real hour boundaries is what makes time-gated states — the
+    /// 6 PM at-risk switch, the flame's burn-down — flip when they actually
+    /// should instead of at an arbitrary offset from whenever the timeline
+    /// happened to be built. Pre-baked entries cost NO reload budget.
+    static func hourlyEntryDates(from date: Date = Date()) -> [Date] {
+        let calendar = Calendar.current
+        let dayEnd = endOfDay(after: date)
+        let topOfHour = calendar.date(from: calendar.dateComponents([.year, .month, .day, .hour], from: date)) ?? date
+
+        var dates: [Date] = [date]
+        var cursor = calendar.date(byAdding: .hour, value: 1, to: topOfHour) ?? dayEnd
+        while cursor < dayEnd {
+            if cursor > date { dates.append(cursor) }
+            guard let next = calendar.date(byAdding: .hour, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+        return dates
+    }
+
+    /// True once the day is late enough that an unfinished mile is at risk.
+    static func isAtRisk(at date: Date, isCompleted: Bool) -> Bool {
+        !isCompleted && Calendar.current.component(.hour, from: date) >= 18
+    }
+}
+
+/// Live "6 hr, 30 min" countdown to the day's end.
+///
+/// WidgetKit re-renders `Text(_:style:)` itself, so this stays exact between
+/// timeline reloads. A string baked into the entry does not: entries are built
+/// at arbitrary offsets and can sit on screen for an hour, which is how the
+/// widget came to read "7h 24m left" at 5:28 PM while the app said "6h 30m".
+enum MADWidgetCountdown {
+    static func text(to dayEnd: Date, suffix: String = "") -> Text {
+        let countdown = Text(dayEnd, style: .relative)
+        return suffix.isEmpty ? countdown : countdown + Text(suffix)
+    }
+}
+
 /// Small-caps section label shared by all MAD widgets.
 struct MADWidgetLabel: View {
     let icon: String
@@ -127,35 +188,41 @@ struct TodayProgressProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<TodayProgressEntry>) -> Void) {
         let data = WidgetDataStore.load()
-        
-        print("[Widget] Timeline - Miles: \(data.miles), Goal: \(data.goal), Progress: \(data.progress * 100)%")
-        
-        let entry = TodayProgressEntry(
+        let streak = WidgetDataStore.loadStreak()
+        let dayEnd = MADWidgetClock.endOfDay()
+
+        let today = TodayProgressEntry(
             date: Date(),
             milesCompleted: data.miles,
             goal: data.goal,
             streakCompleted: data.streakCompleted,
             progress: data.progress,
-            streak: WidgetDataStore.loadStreak()
+            streak: streak
         )
-        
-        // The timeline policy is only a FALLBACK (plus the midnight reset
-        // below) — the app force-reloads this widget on every real data write.
-        // The old 1-minute policy drained WidgetKit's daily refresh budget
-        // (~40-70 reloads) within the first hour of each day, after which iOS
-        // silently dropped ALL reloads — including the app's post-run writes —
-        // freezing the widget on stale morning zeros while the app was correct.
-        let refreshInterval: TimeInterval = data.streakCompleted ? 3600 : 1800 // 30min incomplete, 1h completed
 
-        // Never sleep past midnight: WidgetDataStore.load() zeroes out data
-        // from a previous day, so rebuilding right at the day boundary makes
-        // the widget reset to 0.00 mi without the app being opened.
-        let intervalRefresh = Date().addingTimeInterval(refreshInterval)
-        let startOfToday = Calendar.current.startOfDay(for: Date())
-        let nextMidnight = Calendar.current.date(byAdding: .day, value: 1, to: startOfToday) ?? intervalRefresh
-        let nextRefresh = min(intervalRefresh, nextMidnight)
-        let timeline = Timeline(entries: [entry], policy: .after(nextRefresh))
-        completion(timeline)
+        // Safety net at the day boundary: `WidgetDataStore.load()` would return
+        // a fresh empty day here anyway, so bake that entry now. If iOS drops
+        // the midnight reload the widget still rolls over on its own instead of
+        // showing yesterday's finished mile through the next morning.
+        let tomorrow = TodayProgressEntry(
+            date: dayEnd,
+            milesCompleted: 0,
+            goal: data.goal,
+            streakCompleted: false,
+            progress: 0,
+            streak: streak
+        )
+
+        // Nothing else this widget draws changes on its own — miles, goal and
+        // streak only move when the app writes them, and every write
+        // force-reloads this kind. So the only scheduled reload is at midnight.
+        //
+        // The previous 30-60 minute polling policy asked for up to 48 reloads a
+        // day for data that cannot change in between. Combined with the other
+        // widget kinds it blew WidgetKit's daily budget, and once a kind is
+        // over budget iOS drops ALL of its reloads — including the app's — so
+        // the widget froze on old miles/streak while the app was correct.
+        completion(Timeline(entries: [today, tomorrow], policy: .after(dayEnd)))
     }
 }
 

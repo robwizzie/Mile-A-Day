@@ -32,10 +32,26 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// car, which SPEED can't (25 mph city driving implies ~11 m/s — under
     /// the on-foot teleport cap, with perfectly valid doppler).
     private let activityClassifier = CMMotionActivityManager()
-    /// Latest classifier verdict at medium+ confidence. While true, nothing
-    /// accrues and no route points are kept. Fail-open: stays false whenever
-    /// the classifier is unavailable or silent.
-    private var isConfidentlyAutomotive = false
+    /// Latest classifier verdict at medium+ confidence, and when it landed.
+    /// Read through `isConfidentlyAutomotive`, never directly — the raw flag
+    /// LATCHES, and `startActivityUpdates` is background-batched exactly like
+    /// the pedometer, so a verdict stamped while the app was foreground
+    /// (drove to the trailhead, opened the app, locked the phone) would
+    /// otherwise suppress accrual, the route AND every movement witness for
+    /// the whole walk.
+    private var automotiveVerdict = false
+    private var automotiveVerdictAt: Date?
+    /// Fail-open TTL on the automotive latch: a verdict older than this means
+    /// the classifier has gone quiet, not that the user is still driving.
+    /// `pollMotionWitnesses` re-queries well inside this window, so a real
+    /// drive keeps the latch refreshed.
+    private static let automotiveVerdictTTL: TimeInterval = 90
+
+    /// The automotive gate, with the staleness fail-open applied.
+    private var isConfidentlyAutomotive: Bool {
+        guard automotiveVerdict, let at = automotiveVerdictAt else { return false }
+        return Date().timeIntervalSince(at) < Self.automotiveVerdictTTL
+    }
     /// Anchor fix for distance accrual. Deliberately NOT advanced on sub-noise
     /// displacements — see accrueDistance.
     private var lastLocation: CLLocation?
@@ -76,43 +92,101 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// the new position, never the jump.
     private static let maxPlausibleSpeed: Double = 12
 
-    /// OUTDOOR cross-check odometer: the phone's per-user-calibrated pedometer
-    /// distance across this tracking session (miles). The pedometer measures
-    /// the WALKER (steps × calibrated stride), not satellite geometry, so it
-    /// agrees across people walking together far better than raw GPS sums.
-    /// Read at finish via reconciledFinalDistance(); nil when unavailable.
-    private(set) var outdoorPedometerMiles: Double?
+    /// OUTDOOR pedometer odometer: the phone's per-user-calibrated pedometer
+    /// distance across this tracking session (miles) — the same estimator
+    /// Apple Fitness uses for phone-only walking/running distance, and THE
+    /// odometer behind `liveDistance` (GPS only stands in when Core Motion
+    /// can't measure). Nil until CoreMotion actually delivers. Published so
+    /// the tracking UI refreshes on step progress while a GPS anchor holds.
+    @Published private(set) var outdoorPedometerMiles: Double?
     /// When the cross-check odometer last gained ≥ ~2 m — the live "is the
     /// walker actually stepping?" witness the movement gate consults.
     private var lastPedometerProgressAt: Date?
     private var lastPedometerProgressMiles: Double = 0
+    /// When CoreMotion last ANSWERED at all (progress or not). Distinct from
+    /// `lastPedometerProgressAt`, which is "the walker stepped": a batched or
+    /// dead pedometer reports neither, and conflating the two is what let a
+    /// silent sampler read as "standing still" — the step gate must fail OPEN
+    /// on a stale sampler and stay strict on a live one that says zero.
+    private var lastPedometerSampleAt: Date?
+    /// Throttle for `pollMotionWitnesses`.
+    private var lastMotionPollAt = Date.distantPast
+    private static let motionPollInterval: TimeInterval = 10
     /// The cross-check reported an error (Motion denied mid-session, etc.).
     /// Every consumer of pedometer evidence must fail OPEN on this.
     private var pedometerErrored = false
     /// Session start — grace window for the movement gate while the first
     /// pedometer batch is still in flight.
     private var trackingStartedAt: Date?
-    /// Miles accrued from fixes whose VALID doppler said "moving". Finish-time
-    /// evidence that GPS distance was real locomotion: a phone riding a
-    /// stroller/cart covers ground with doppler speed but no steps, while a
-    /// phone sitting through a ballgame drifts with NO doppler — this is what
-    /// lets reconciliation tell those apart.
+    /// Miles accrued from fixes whose VALID doppler said "moving" — evidence
+    /// that GPS distance was real locomotion: a phone riding a stroller/cart
+    /// covers ground with doppler speed but no steps, while a phone sitting
+    /// through a ballgame drifts with NO doppler. This is what hands the
+    /// odometer to GPS (`gpsOwnsSession`) when steps can't tell the story.
     private(set) var dopplerMovingMiles: Double = 0
     /// Seconds of witnessed movement this session — the DISPLAY-pace divisor
     /// (elapsed time stays the truth for records; a race clock doesn't
     /// pause). Sum of accepted segments' dt, capped per segment so a red
     /// light waited out at a held anchor doesn't ride in on the resume fix.
     private(set) var movingSeconds: TimeInterval = 0
-    /// When distance last accrued — drives the visible auto-pause state.
+    /// When distance last accrued — one of the auto-pause evidence sources.
     private var lastAccrualAt: Date?
-    /// True while tracking outdoors with nothing accruing for 45s (standing,
-    /// sitting, riding). The longest legit gap while walking is ~21s (a 30m
-    /// bad-signal floor at 1.4 m/s), so this can't false-positive mid-walk —
-    /// and the next counted segment clears it immediately.
+    /// Last fix whose VALID doppler cleared the stationary bar while not
+    /// classified automotive — the freshest "in motion" witness there is.
+    /// Tracked apart from accrual because a held anchor stalls accrual while
+    /// the walker is plainly moving (see isAutoPaused).
+    private var lastMovingDopplerAt: Date?
+    /// Rolling anchor for the fix-to-fix movement witness, advanced roughly
+    /// every `evidenceAnchorSpan` seconds. Deliberately SEPARATE from
+    /// `lastLocation`: the accrual anchor is held through sub-floor
+    /// displacement (that's the jitter defence), so on an out-and-back
+    /// turnaround it measures ~0 displacement while the walker is plainly
+    /// covering ground. This one always advances, so "did the walker move in
+    /// the last ~10s?" stays answerable even while accrual is stalled.
+    private var evidenceAnchor: CLLocation?
+    /// When the fix-to-fix witness last saw real displacement.
+    private var lastFixMovementAt: Date?
+    /// When a fix last cleared the (loose) evidence quality bar. Being BLIND
+    /// is not the same as being stopped — see `refreshAutoPauseState`.
+    private var lastFixAcceptedAt: Date?
+    /// Spacing for the fix-to-fix witness. Fixes arrive ~1/s and a walker
+    /// covers only ~1.4 m in that time — under any sane jitter floor — so the
+    /// witness compares against a fix ~10s old, where a walker's ~14m is
+    /// comfortably clear of the floor.
+    private static let evidenceAnchorSpan: TimeInterval = 10
+    /// How long EVERY witness must be silent before the chip shows. Was 45s,
+    /// which a single mediocre-accuracy turnaround could burn through on its
+    /// own. The chip is cosmetic; a false positive mid-stride reads as
+    /// "tracking broke", so this is deliberately lenient.
+    private static let movementEvidenceWindow: TimeInterval = 120
+    /// Staleness bar for the step witness (`stepsCorroborateMovement`).
+    private static let stepWitnessWindow: TimeInterval = 90
+    /// Re-evaluates the chip (and re-polls the motion witnesses) without
+    /// waiting on a location callback — `didUpdateLocations` used to be the
+    /// ONLY caller of `refreshAutoPauseState`, so once fixes stopped clearing
+    /// the bar the chip could never come back down.
+    private var pauseHeartbeat: Timer?
+
+    /// True while tracking outdoors with no movement EVIDENCE for
+    /// `movementEvidenceWindow`: no counted segment, no moving-doppler fix,
+    /// no fix-to-fix displacement, no step progress (standing, sitting,
+    /// riding, seated multipath drift). Accrual alone was the original
+    /// trigger and it false-positives mid-walk: an out-and-back turnaround
+    /// holds the anchor while displacement shrinks and regrows, so accrual
+    /// legitimately stalls for up to ~3× the noise floor of real walking
+    /// (60-100m in mediocre accuracy ≈ 45-70s) — which flashed AUTO-PAUSED
+    /// at 0.99 mi on a user mid-stride. Adding witnesses wasn't enough on its
+    /// own, because on a locked-screen walk they ALL go quiet at once: the
+    /// pedometer and the activity classifier are batched by CoreMotion until
+    /// foreground, and the doppler witness drops out under tree cover. Hence
+    /// the background polling (`pollMotionWitnesses`), the fix-to-fix witness
+    /// that survives a held anchor, and the blind-≠-stopped rule.
+    /// Someone stepping, displacing, or carrying doppler speed is never
+    /// "paused"; fresh evidence clears the chip immediately.
     @Published private(set) var isAutoPaused = false
     /// Distance carried into this session by a recovery (miles). The pedometer
-    /// cross-check starts at resume time, so reconciliation only compares the
-    /// span BOTH instruments actually measured.
+    /// starts at resume time, so the estimator only compares the span BOTH
+    /// instruments actually measured this session.
     private var sessionStartDistance: Double = 0
 
     /// Cumulative (raceClockSeconds, miles) samples for the ghost race —
@@ -135,10 +209,15 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     }
 
     /// Append an effort-curve point when enough distance or time has passed.
-    /// Called on the main queue right after currentDistance updates.
+    /// Called on the main queue from `refreshLiveDistance` — i.e. from every
+    /// path that moves the odometer, indoor and outdoor alike.
+    ///
+    /// It samples `liveDistance`, NOT raw GPS accrual: that's the number on
+    /// the ring and the number Finish saves verbatim, so the 1.0-mile crossing
+    /// the race verdict freezes on is the same crossing the user watched.
     private func sampleEffortCurve() {
         let t = raceClockSeconds
-        let d = currentDistance
+        let d = liveDistance
         guard d > lastEffortSample.d else { return }
         guard d - lastEffortSample.d >= 0.02 || t - lastEffortSample.t >= 10 else { return }
         lastEffortSample = (t, d)
@@ -159,7 +238,32 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     private let distancePersistInterval: TimeInterval = 2.0
 
     @Published var currentDistance: Double = 0.0 // Distance in miles
+    /// THE workout distance — the one number every surface shows AND the one
+    /// the finish saves. There is no separate finish-time reconciliation:
+    /// what the user watches during the walk/run is exactly what persists.
+    /// (The old design showed raw GPS accrual live and reconciled against
+    /// the pedometer only at Finish, so a jitter-inflated walk read "100%"
+    /// and then dropped to 80% the moment it saved.)
+    ///
+    /// ONE source of truth: Core Motion's calibrated distance — the exact
+    /// pipeline behind Apple Fitness's phone-only walking/running distance
+    /// (steps × per-user stride, OS-calibrated against GPS) — is the
+    /// odometer for every outdoor session; GPS's job is the route map. So a
+    /// mile reads the same on our tracker, in the recap, in HealthKit, and
+    /// in Apple's own Fitness app, and it is immune to the additive GPS
+    /// jitter that inflated live numbers. GPS substitutes as the odometer
+    /// ONLY when Core Motion cannot measure the session (see
+    /// `refreshLiveDistance`), and the value is ratcheted monotonic — a
+    /// walked mile never ticks backwards, so a celebrated goal is final.
+    @Published private(set) var liveDistance: Double = 0.0
     @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
+
+    /// One-way handoff: GPS has taken over as the session's odometer because
+    /// Core Motion can't measure it — ground covered without steps
+    /// (stroller, cart) or a pedometer gone silent, witnessed by
+    /// doppler-verified GPS miles reaching 1.5× the step span. One-way so
+    /// the handoff can only ever step the number UP, never claw it back.
+    private var gpsOwnsSession = false
 
     private override init() {
         super.init()
@@ -188,10 +292,14 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         isTracking = true
 
         currentDistance = initialDistance
+        liveDistance = initialDistance
         sessionStartDistance = initialDistance
+        gpsOwnsSession = false
         outdoorPedometerMiles = nil
         lastPedometerProgressAt = nil
         lastPedometerProgressMiles = 0
+        lastPedometerSampleAt = nil
+        lastMotionPollAt = .distantPast
         pedometerErrored = false
         trackingStartedAt = Date()
         dopplerMovingMiles = 0
@@ -199,8 +307,13 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         effortCurve = [(0, initialDistance)]
         lastEffortSample = (0, initialDistance)
         lastAccrualAt = nil
+        lastMovingDopplerAt = nil
+        lastFixMovementAt = nil
+        lastFixAcceptedAt = nil
+        evidenceAnchor = nil
         isAutoPaused = false
-        isConfidentlyAutomotive = false
+        automotiveVerdict = false
+        automotiveVerdictAt = nil
         lastLocation = nil
         lastRoutePoint = nil
         lastFixAt = nil
@@ -215,13 +328,8 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
 
                     if let distance = data.distance {
                         let distanceInMiles = distance.doubleValue * 0.000621371
-                        let newTotal = self.pedometerOffset + distanceInMiles
                         DispatchQueue.main.async {
-                            self.currentDistance = newTotal
-                            self.sampleEffortCurve()
-                            self.persistDistanceThrottled()
-                            self.armTrackingWatchdog()
-                            LivePresenceService.shared.tick()
+                            self.ingestIndoorPedometerDistance(distanceInMiles)
                         }
                     }
                 }
@@ -231,6 +339,10 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
                 // low-accuracy location updates keeps the app alive via the
                 // `location` background mode; distance from these fixes is
                 // ignored in pedometer mode (see didUpdateLocations).
+                // The keep-alive only buys us a live PROCESS — the pedometer
+                // STREAM is still batched, so the heartbeat's
+                // `queryPedometerData` poll is what actually keeps indoor
+                // distance moving while the phone is locked.
                 locationManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
                 locationManager.startUpdatingLocation()
             } else {
@@ -242,6 +354,74 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             startOutdoorPedometerCrossCheck()
             startActivityClassifier()
         }
+
+        startPauseHeartbeat()
+    }
+
+    /// Keeps the movement witnesses fresh and the chip honest without
+    /// depending on a location callback. Fires in the background too: the
+    /// `location` background mode keeps the app (and this run loop) alive for
+    /// the whole outdoor session.
+    private func startPauseHeartbeat() {
+        pauseHeartbeat?.invalidate()
+        let timer = Timer(timeInterval: 5.0, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.pollMotionWitnesses()
+            self.refreshAutoPauseState()
+        }
+        // .common, not the default mode: a default-mode timer stalls while the
+        // tracking screen is being scrolled, which is exactly when the user is
+        // looking at the chip.
+        RunLoop.main.add(timer, forMode: .common)
+        pauseHeartbeat = timer
+    }
+
+    /// Pull CoreMotion's state instead of waiting to be pushed it.
+    ///
+    /// `CMPedometer.startUpdates` and `CMMotionActivityManager
+    /// .startActivityUpdates` are both SUSPENDED once the phone locks —
+    /// CoreMotion batches them and delivers on foreground. On a real outdoor
+    /// walk that is the entire session, so both live streams are dead exactly
+    /// when they're needed: the step witness freezes (chip sticks, and
+    /// `stepsCorroborateMovement` fails closed, killing dopplerless accrual
+    /// AND the route), and a stale automotive verdict can suppress everything.
+    /// The historical queries have no such restriction, so poll them.
+    ///
+    /// This also keeps `outdoorPedometerMiles` — the odometer behind
+    /// `liveDistance` — actually advancing in the background, which is the
+    /// part that was costing real distance.
+    private func pollMotionWitnesses() {
+        guard isTracking, let start = trackingStartedAt else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastMotionPollAt) >= Self.motionPollInterval,
+              now > start else { return }
+        lastMotionPollAt = now
+
+        // Runs in BOTH modes: indoors this IS the distance source, outdoors
+        // it's the odometer plus the step witness.
+        if CMPedometer.isDistanceAvailable(), CMPedometer.authorizationStatus() == .authorized {
+            let indoor = isUsingPedometer
+            pedometer.queryPedometerData(from: start, to: now) { [weak self] data, error in
+                guard let self, error == nil, let distance = data?.distance else { return }
+                let miles = distance.doubleValue * 0.000621371
+                DispatchQueue.main.async {
+                    if indoor {
+                        self.ingestIndoorPedometerDistance(miles)
+                    } else {
+                        self.ingestPedometerDistance(miles)
+                    }
+                }
+            }
+        }
+
+        // The classifier only gates outdoor GPS accrual/route.
+        if !isUsingPedometer, CMMotionActivityManager.isActivityAvailable() {
+            let since = now.addingTimeInterval(-Self.motionPollInterval * 3)
+            activityClassifier.queryActivityStarting(from: since, to: now, to: .main) { [weak self] activities, _ in
+                guard let self, let latest = activities?.last else { return }
+                self.ingestActivityVerdict(latest)
+            }
+        }
     }
 
     /// Movement-type second witness for outdoor sessions. Uses the same
@@ -252,8 +432,16 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         guard CMMotionActivityManager.isActivityAvailable() else { return }
         activityClassifier.startActivityUpdates(to: .main) { [weak self] activity in
             guard let self, let activity else { return }
-            self.isConfidentlyAutomotive = activity.automotive && activity.confidence != .low
+            self.ingestActivityVerdict(activity)
         }
+    }
+
+    /// Single entry point for classifier verdicts (live stream + poll), so the
+    /// latch always carries a timestamp and can therefore expire.
+    private func ingestActivityVerdict(_ activity: CMMotionActivity) {
+        automotiveVerdict = activity.automotive && activity.confidence != .low
+        automotiveVerdictAt = Date()
+        refreshAutoPauseState()
     }
 
     private func startGPSTracking() {
@@ -264,51 +452,113 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         locationManager.startUpdatingLocation()
     }
 
-    /// Run the pedometer ALONGSIDE outdoor GPS as a cross-check odometer.
-    /// Costs nothing (same motion coprocessor indoor mode uses) and gives
-    /// finish-time reconciliation a per-user-calibrated second opinion.
+    /// Run the pedometer ALONGSIDE outdoor GPS — this is the session's
+    /// odometer (see `liveDistance`); GPS draws the route. Deliberately left
+    /// nil until CoreMotion actually delivers — nil means "hasn't spoken",
+    /// so a silently-dead pedometer reads as zero span until the doppler
+    /// handoff gives GPS the odometer, rather than masquerading as a
+    /// measured zero forever.
     private func startOutdoorPedometerCrossCheck() {
         guard CMPedometer.isDistanceAvailable() else { return }
-        outdoorPedometerMiles = 0
         pedometer.startUpdates(from: Date()) { [weak self] pedometerData, error in
             guard let self else { return }
             if error != nil {
                 // Motion denied / CoreMotion failure: mark it so the movement
-                // gate and finish reconciliation both fail OPEN instead of
-                // trusting a frozen zero.
-                DispatchQueue.main.async { self.pedometerErrored = true }
+                // gate and the distance estimator both fail OPEN (back to raw
+                // GPS accrual) instead of trusting a frozen zero. The refresh
+                // re-derives liveDistance on the new fallback immediately;
+                // the ratchet keeps the handoff from ever ticking down.
+                DispatchQueue.main.async {
+                    self.pedometerErrored = true
+                    self.refreshLiveDistance()
+                }
                 return
             }
             guard let distance = pedometerData?.distance else { return }
             let miles = distance.doubleValue * 0.000621371
             DispatchQueue.main.async {
-                // ≥ ~2 m of new step distance = the walker is actually
-                // stepping right now. Feeds stepsCorroborateMovement.
-                if miles - self.lastPedometerProgressMiles >= 0.0012 {
-                    self.lastPedometerProgressMiles = miles
-                    self.lastPedometerProgressAt = Date()
-                }
-                self.outdoorPedometerMiles = miles
-                // Second liveness source: keeps the watchdog honest through
-                // GPS dead zones while the walker is still stepping.
-                self.armTrackingWatchdog()
+                self.ingestPedometerDistance(miles)
             }
         }
     }
 
+    /// Single entry point for INDOOR pedometer readings (live stream +
+    /// `pollMotionWitnesses`). Main thread only. `miles` is the pedometer's
+    /// own span since its start; the offset carries a recovered workout's
+    /// prior distance.
+    ///
+    /// Clamped monotonic — the live stream and the poll can land out of order,
+    /// and the class invariant is that the tracking system never overwrites
+    /// `currentDistance` with a smaller value.
+    private func ingestIndoorPedometerDistance(_ miles: Double) {
+        lastPedometerSampleAt = Date()
+        currentDistance = max(currentDistance, pedometerOffset + miles)
+        refreshLiveDistance()
+        persistDistanceThrottled()
+        // Liveness rides the data callbacks, not a view timer: a delivered
+        // reading proves the process is alive, so slide the dead-man watchdog
+        // forward and beat the presence heartbeat (both self-throttled).
+        armTrackingWatchdog()
+        LivePresenceService.shared.tick()
+    }
+
+    /// Single entry point for outdoor pedometer readings (live stream +
+    /// `pollMotionWitnesses`). Main thread only.
+    private func ingestPedometerDistance(_ miles: Double) {
+        // CoreMotion ANSWERED — distinct from "the walker stepped". The step
+        // gate fails open on a stale sampler, so this stamp is what keeps it
+        // strict while the sampler is genuinely alive.
+        lastPedometerSampleAt = Date()
+        // A successful reading proves the pedometer CAN measure, so a
+        // transient stream error no longer disables it for the session. Safe
+        // in both directions: `liveDistance` is ratcheted and `gpsOwnsSession`
+        // is one-way, so recovering the odometer can only hold the number, and
+        // the step gate going strict again is correct once CoreMotion answers.
+        pedometerErrored = false
+        // ≥ ~2 m of new step distance = the walker is actually
+        // stepping right now. Feeds stepsCorroborateMovement.
+        if miles - lastPedometerProgressMiles >= 0.0012 {
+            lastPedometerProgressMiles = miles
+            lastPedometerProgressAt = Date()
+        }
+        // Clamped monotonic: this span is displayed AND saved, so a
+        // revised-down batch must never tick the workout backwards.
+        outdoorPedometerMiles = max(outdoorPedometerMiles ?? 0, miles)
+        refreshLiveDistance()
+        // The poll now advances the odometer in the background, where the
+        // foreground timer is suspended — persist so a termination mid-walk
+        // recovers the distance the user actually covered.
+        persistDistanceThrottled()
+        refreshAutoPauseState()
+        // Second liveness source: keeps the watchdog honest through GPS dead
+        // zones while the walker is still stepping.
+        armTrackingWatchdog()
+    }
+
     /// True while there is positive evidence the walker is moving on foot:
-    /// step distance advanced within the last minute (with a startup grace
+    /// step distance advanced within `stepWitnessWindow` (with a startup grace
     /// window while the first pedometer batch is in flight). Fails OPEN
     /// whenever the pedometer can't testify — no hardware, no Motion
-    /// permission, errored — so the gate can never brick tracking; those
-    /// sessions just keep the doppler+floor gates alone.
+    /// permission, errored, or the sampler has gone QUIET — so the gate can
+    /// never brick tracking; those sessions just keep the doppler+floor gates
+    /// alone.
+    ///
+    /// The staleness clause is load-bearing: `startUpdates` is batched by
+    /// CoreMotion once the phone locks, so on a locked-screen walk this used
+    /// to go false 60s in and stay there, rejecting every dopplerless fix for
+    /// the rest of the session — no distance under tree cover, no route. It
+    /// stays STRICT while `pollMotionWitnesses` is getting answers, which is
+    /// what preserves the seated-multipath defence (a live sampler reporting
+    /// no steps still closes the gate — that's the 3h-ballgame case).
     private var stepsCorroborateMovement: Bool {
         guard CMPedometer.isDistanceAvailable(),
               CMPedometer.authorizationStatus() == .authorized,
               !pedometerErrored,
-              outdoorPedometerMiles != nil else { return true }
+              outdoorPedometerMiles != nil,
+              let sampledAt = lastPedometerSampleAt,
+              Date().timeIntervalSince(sampledAt) < Self.stepWitnessWindow else { return true }
         let reference = lastPedometerProgressAt ?? trackingStartedAt ?? Date()
-        return Date().timeIntervalSince(reference) < 60
+        return Date().timeIntervalSince(reference) < Self.stepWitnessWindow
     }
 
     /// (Re-)arm the dead-man notification. Called from every live data
@@ -350,62 +600,58 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // check odometer outdoors) — always stop it.
         pedometer.stopUpdates()
         activityClassifier.stopActivityUpdates()
+        pauseHeartbeat?.invalidate()
+        pauseHeartbeat = nil
         // Location runs in both modes (distance source for GPS, keep-alive
         // for pedometer) — always stop it.
         locationManager.stopUpdatingLocation()
         lastLocation = nil
         lastRoutePoint = nil
+        evidenceAnchor = nil
         isAutoPaused = false
+        automotiveVerdict = false
+        automotiveVerdictAt = nil
     }
 
-    /// The distance a finished workout should SAVE (miles). Raw GPS sums
-    /// inflate differently on every phone — jitter is additive — while each
-    /// person's pedometer is calibrated to their own stride. So for WALKS,
-    /// meaningful disagreement resolves toward the pedometer and a group
-    /// walking together converges on (nearly) the same number. RUNS keep GPS
-    /// (pace/route fidelity at speed) unless it clearly starved under cover —
-    /// lost fixes measure SHORT, never long. Falls back to the live figure
-    /// whenever the cross-check can't testify (indoor mode, no Motion
-    /// permission, errored).
+    /// Re-derive `liveDistance` after either instrument moved (main thread
+    /// only). This IS the save: the finish persists `liveDistance` verbatim,
+    /// so everything here holds for the recap and HealthKit too.
     ///
-    /// A HEALTHY pedometer near zero is itself the measurement — "you stood
-    /// still" — and must be believed: the old `span > 0.05` and
-    /// `ratio > 0.6` guards both bailed to GPS in exactly the worst cases
-    /// (3 hours seated at a ballgame = 2.28 GPS "miles", pedometer ~0), so
-    /// the sessions most in need of rescue were the ones never rescued. The
-    /// one walk shape that legitimately out-runs its steps — phone riding a
-    /// stroller/cart — shows up as doppler-verified GPS miles, which is the
-    /// evidence that now keeps GPS instead of a blind ratio clamp.
-    func reconciledFinalDistance(isWalk: Bool) -> Double {
-        guard !isUsingPedometer,
-              !pedometerErrored,
-              CMPedometer.authorizationStatus() == .authorized,
-              let pedometerSpan = outdoorPedometerMiles else {
-            return currentDistance
+    /// Core Motion's calibrated distance is the odometer; GPS's job is the
+    /// route. GPS takes the odometer over ONLY when Core Motion cannot
+    /// measure the session:
+    ///   - hard unavailability — Motion permission denied/restricted or the
+    ///     pedometer stream errored (fail OPEN, never trust a frozen zero);
+    ///   - ground covered without steps — stroller, cart, or a pedometer
+    ///     gone silent — witnessed by doppler-verified GPS miles reaching
+    ///     1.5× the step span. One-way (`gpsOwnsSession`): once GPS owns
+    ///     the session it keeps it, so the handoff steps the number UP and
+    ///     never claws it back.
+    /// GPS's absurd-overcount shapes (seated multipath drift, driving) are
+    /// killed at accrual time by the gates — doppler-stationary skip, steps
+    /// corroboration, teleport cap, automotive suspension — which is what
+    /// makes it a safe stand-in. The outer ratchet keeps the number
+    /// monotonic across the handoff edges (mid-walk Motion grant, pedometer
+    /// error): the count may briefly hold, it never ticks backwards.
+    private func refreshLiveDistance() {
+        // Every odometer move is a ghost-race sample point (both modes) — the
+        // curve tracks the displayed number, so it can't disagree with it.
+        defer { sampleEffortCurve() }
+        guard !isUsingPedometer else {
+            // Indoor: currentDistance already IS the pedometer.
+            liveDistance = max(liveDistance, currentDistance)
+            return
         }
         let gpsSpan = max(0, currentDistance - sessionStartDistance)
-        guard gpsSpan > 0 else { return sessionStartDistance + pedometerSpan }
-
-        let disagreement = abs(gpsSpan - pedometerSpan) / max(pedometerSpan, 0.01)
-        let chosenSpan: Double
-        if isWalk {
-            if disagreement <= 0.10 {
-                chosenSpan = gpsSpan
-            } else if dopplerMovingMiles >= max(0.1, pedometerSpan * 1.5) {
-                // Doppler-verified locomotion far beyond what steps account
-                // for: the phone genuinely covered ground without stepping.
-                chosenSpan = gpsSpan
-            } else {
-                chosenSpan = pedometerSpan
-            }
-        } else {
-            // Runs: rescue only clear GPS starvation.
-            chosenSpan = gpsSpan < pedometerSpan * 0.75 ? pedometerSpan : gpsSpan
+        let pedometerSpan = outdoorPedometerMiles ?? 0
+        if !gpsOwnsSession, dopplerMovingMiles >= max(0.1, pedometerSpan * 1.5) {
+            gpsOwnsSession = true
+            print("[WorkoutLocationManager] 📏 GPS took the odometer (doppler \(String(format: "%.2f", dopplerMovingMiles)) mi vs steps \(String(format: "%.2f", pedometerSpan)) mi)")
         }
-        if chosenSpan != gpsSpan {
-            print("[WorkoutLocationManager] 📏 Outdoor distance reconciled: GPS \(String(format: "%.3f", gpsSpan)) mi → pedometer \(String(format: "%.3f", pedometerSpan)) mi")
-        }
-        return sessionStartDistance + chosenSpan
+        let pedometerCanMeasure = !pedometerErrored
+            && CMPedometer.authorizationStatus() == .authorized
+        let span = (gpsOwnsSession || !pedometerCanMeasure) ? gpsSpan : pedometerSpan
+        liveDistance = max(liveDistance, sessionStartDistance + span)
     }
 
     // MARK: - CLLocationManagerDelegate
@@ -428,14 +674,23 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
         // several fixes per callback, and taking only the last one flattened
         // curves into chords whenever the app was backgrounded.
         for newLocation in locations {
-            // Quality gates shared by distance + route: plausible accuracy and
-            // FRESH (cold-start replays deliver cached fixes seconds old whose
-            // jump to the first real fix used to be counted as walked).
+            // Freshness is non-negotiable for every consumer: cold-start
+            // replays deliver cached fixes seconds old whose jump to the first
+            // real fix used to be counted as walked.
             guard newLocation.horizontalAccuracy > 0,
-                  newLocation.horizontalAccuracy < 50,
                   abs(newLocation.timestamp.timeIntervalSinceNow) < 15 else {
                 continue
             }
+
+            // Evidence runs on a LOOSER accuracy bar than accrual. A 70m fix
+            // is far too vague to add to the mile, but a walker displacing
+            // 60m across it is still unambiguously moving — and holding
+            // evidence to the accrual bar is what let a bad-signal stretch
+            // read as "stopped".
+            noteMovementEvidence(from: newLocation)
+
+            // Accrual + route keep the strict bar.
+            guard newLocation.horizontalAccuracy < 50 else { continue }
 
             accrueDistance(to: newLocation)
 
@@ -449,15 +704,72 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             }
         }
 
+        pollMotionWitnesses()
         refreshAutoPauseState()
     }
 
-    /// Visible movement-gate state — never flips mid-stride (see the
-    /// property's threshold rationale), clears on the next counted segment.
+    /// Movement witnesses that don't depend on distance ACCRUING.
+    ///
+    /// Two independent signals:
+    ///   - valid doppler above the stationary bar — the freshest "in motion"
+    ///     witness there is. Dopplerless (speed == -1) fixes deliberately
+    ///     don't count here: seated multipath drift is exactly that shape.
+    ///   - fix-to-fix displacement across ~10s, measured from `evidenceAnchor`
+    ///     rather than the accrual anchor. THIS is the turnaround fix: an
+    ///     out-and-back holds `lastLocation` while displacement round-trips
+    ///     under the noise floor, but the walker is still covering ~14m every
+    ///     10s, which no jitter floor mistakes for standing still.
+    private func noteMovementEvidence(from fix: CLLocation) {
+        guard fix.horizontalAccuracy < 120 else { return }
+        lastFixAcceptedAt = Date()
+
+        if fix.speed >= Self.stationarySpeed, !isConfidentlyAutomotive {
+            lastMovingDopplerAt = Date()
+        }
+
+        guard let anchor = evidenceAnchor else {
+            evidenceAnchor = fix
+            return
+        }
+        let dt = fix.timestamp.timeIntervalSince(anchor.timestamp)
+        guard dt >= Self.evidenceAnchorSpan else { return }
+        let displacement = fix.distance(from: anchor)
+        // Scaled to the worse endpoint so a stationary phone's jitter can't
+        // masquerade as a walk, and capped so a multipath teleport can't either.
+        let floor = max(6, max(anchor.horizontalAccuracy, fix.horizontalAccuracy) * 0.5)
+        if displacement >= floor,
+           displacement / dt <= Self.maxPlausibleSpeed,
+           !isConfidentlyAutomotive {
+            lastFixMovementAt = Date()
+        }
+        evidenceAnchor = fix
+    }
+
+    /// Visible movement-gate state — paused only when EVERY movement witness
+    /// has gone quiet (see the property's rationale). Distance accrual is NOT
+    /// consulted alone: held-anchor stalls (turnarounds) aren't stillness.
     private func refreshAutoPauseState() {
         guard isTracking, !isUsingPedometer else { return }
-        let reference = lastAccrualAt ?? trackingStartedAt ?? Date()
-        let paused = Date().timeIntervalSince(reference) > 45
+        let evidence = [
+            lastAccrualAt,
+            lastMovingDopplerAt,
+            lastFixMovementAt,
+            lastPedometerProgressAt,
+            trackingStartedAt
+        ]
+        .compactMap { $0 }
+        .max() ?? Date()
+        let quiet = Date().timeIntervalSince(evidence) > Self.movementEvidenceWindow
+        // Blind is not stopped. If no usable fix has arrived in the window we
+        // have no standing to claim the walker stopped — a tunnel, a dense
+        // canyon or a paused location stream is silence ABOUT movement, not
+        // evidence OF stillness. Erring toward "not paused" is the whole
+        // point: the chip is cosmetic, but showing it mid-stride reads as
+        // "tracking broke".
+        let blind = lastFixAcceptedAt.map {
+            Date().timeIntervalSince($0) > Self.movementEvidenceWindow
+        } ?? true
+        let paused = quiet && !blind
         if paused != isAutoPaused {
             DispatchQueue.main.async { self.isAutoPaused = paused }
         }
@@ -528,7 +840,7 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
             lastAccrualAt = Date()
             DispatchQueue.main.async {
                 self.currentDistance += distanceInMiles
-                self.sampleEffortCurve()
+                self.refreshLiveDistance()
                 self.persistDistanceThrottled()
             }
         }
@@ -565,12 +877,15 @@ class WorkoutLocationManager: NSObject, ObservableObject, CLLocationManagerDeleg
     /// Persist live distance straight to the recovery store from the background
     /// data callbacks, so distance survives app termination even when the
     /// foreground timer is suspended. Throttled; no-op when not tracking.
+    /// Persists `liveDistance` — the displayed/saved figure — so the banner,
+    /// recovery, and a post-kill resume all continue from exactly the number
+    /// the user watched.
     private func persistDistanceThrottled() {
         guard isTracking else { return }
         let now = Date()
         guard now.timeIntervalSince(lastDistancePersist) >= distancePersistInterval else { return }
         lastDistancePersist = now
-        InProgressWorkoutStore.updateDistance(currentDistance)
+        InProgressWorkoutStore.updateDistance(liveDistance)
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {

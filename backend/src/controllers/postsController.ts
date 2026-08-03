@@ -42,6 +42,7 @@ import {
   notifyCoauthorInvite,
   notifyCoauthorAccepted,
   respondToCoauthorInvite,
+  setCoauthorProfileVisibility,
 } from "../services/postService.js";
 import {
   getActiveStreak,
@@ -817,6 +818,39 @@ export async function respondToCoauthorController(
   } catch (error: any) {
     console.error("Error responding to coauthor invite:", error.message);
     res.status(500).json({ error: "Error responding to coauthor invite" });
+  }
+}
+
+/**
+ * POST /posts/:postId/coauthor/profile — { on_profile: boolean }. The tagged
+ * coauthor pins this collab on or off their own profile grid. The tag itself
+ * is untouched: it stays in their Tagged tab and on every feed it already
+ * reached. Separate route rather than an extra field on /coauthor so the
+ * destructive "remove me" and this reversible one can never be confused.
+ */
+export async function setCoauthorProfileVisibilityController(
+  req: AuthenticatedRequest,
+  res: Response,
+) {
+  try {
+    if (!isUuid(req.params.postId)) {
+      return res.status(404).json({ error: "post_not_found" });
+    }
+    if (typeof req.body?.on_profile !== "boolean") {
+      return res.status(400).json({ error: "on_profile must be a boolean" });
+    }
+    const result = await setCoauthorProfileVisibility(
+      req.userId!,
+      req.params.postId,
+      req.body.on_profile,
+    );
+    if (!result) {
+      return res.status(404).json({ error: "collab_not_found" });
+    }
+    res.json({ ok: true, on_profile: req.body.on_profile });
+  } catch (error: any) {
+    console.error("Error setting collab profile visibility:", error.message);
+    res.status(500).json({ error: "Error setting collab profile visibility" });
   }
 }
 

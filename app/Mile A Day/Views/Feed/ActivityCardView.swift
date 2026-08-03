@@ -31,7 +31,7 @@ struct ActivityCardView: View {
     /// PostCardView.lastDoubleTapAt).
     @State private var lastDoubleTapAt = Date.distantPast
     /// The map snapshot (~400×300) kept for the zoom's on-demand composite.
-    @State private var routeSnapshot: UIImage?
+    @State private var routeSnapshot: RouteMapSnapshot?
 
     private var distance: Double { entry.distance ?? 0 }
     private var accent: Color { Self.color(entry.workout_type) }

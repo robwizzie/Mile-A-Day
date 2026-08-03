@@ -1,6 +1,6 @@
 {
-  "id": "2beeafb2-02f4-4cc7-92a6-32d1765e71eb",
-  "prevId": "b9c2201f-1fb8-4d76-bd8a-260d02138204",
+  "id": "6e970270-77fb-4817-9f47-a1fd7168172f",
+  "prevId": "50d0c269-7690-4c2b-89d2-504cf19e40ad",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1839,72 +1839,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.live_tracking_sessions": {
-      "name": "live_tracking_sessions",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "workout_type": {
-          "name": "workout_type",
-          "type": "varchar(50)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "last_seen_at": {
-          "name": "last_seen_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "ended_at": {
-          "name": "ended_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "live_tracking_sessions_user_id_fkey": {
-          "name": "live_tracking_sessions_user_id_fkey",
-          "tableFrom": "live_tracking_sessions",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "user_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.milestone_notifications": {
       "name": "milestone_notifications",
       "schema": "",
@@ -2236,13 +2170,6 @@
           "notNull": false,
           "default": true
         },
-        "share_live_presence": {
-          "name": "share_live_presence",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false,
-          "default": true
-        },
         "weekly_recap_enabled": {
           "name": "weekly_recap_enabled",
           "type": "boolean",
@@ -2259,6 +2186,13 @@
         },
         "friend_request_reminder_enabled": {
           "name": "friend_request_reminder_enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": true
+        },
+        "tagged_posts_on_profile": {
+          "name": "tagged_posts_on_profile",
           "type": "boolean",
           "primaryKey": false,
           "notNull": false,
@@ -3021,6 +2955,12 @@
         "coauthor_workout_id": {
           "name": "coauthor_workout_id",
           "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "coauthor_on_profile": {
+          "name": "coauthor_on_profile",
+          "type": "boolean",
           "primaryKey": false,
           "notNull": false
         },

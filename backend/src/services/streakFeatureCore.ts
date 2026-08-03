@@ -263,6 +263,15 @@ export async function computeStreakEras(
  * Length of the consecutive qualified-or-covered run ENDING exactly at
  * `endDate` (0 when endDate itself doesn't qualify). Used for the
  * prior-streak stamped on a break event — i.e. what an assist would restore.
+ *
+ * Gaps-and-islands: the island key must move in the OPPOSITE direction to the
+ * row numbering, so a DESC walk ADDS the row number (`d + rn`) — consecutive
+ * days then share a key. Subtracting under a DESC walk (`d - rn`, which this
+ * shipped with) makes the key drift by two days per row, so every date lands
+ * in its OWN island and the answer is always exactly 1. Every Streak Assist
+ * therefore advertised "back to 2 days" no matter how long the real run was,
+ * and `recordBreak`'s `prior >= MIN_NOTIFY_PRIOR_STREAK` gate never opened, so
+ * the "their streak just broke, you can save it" push never fired at all.
  */
 export async function streakEndingAt(
   userId: string,
@@ -280,13 +289,18 @@ export async function streakEndingAt(
      ),
      numbered AS (
        SELECT local_date,
-              local_date - (ROW_NUMBER() OVER (ORDER BY local_date DESC))::int AS grp
+              local_date + (ROW_NUMBER() OVER (ORDER BY local_date DESC))::int AS grp
        FROM days
      )
      SELECT COUNT(*)::int AS len,
             to_char(MAX(local_date), 'YYYY-MM-DD') AS max_d
      FROM numbered
-     WHERE grp = (SELECT grp FROM numbered LIMIT 1)`,
+     WHERE grp = (
+       -- The island the MOST RECENT day belongs to. Explicitly ordered: a bare
+       -- LIMIT 1 leaned on the window sort leaking through, which is not a
+       -- guarantee Postgres makes.
+       SELECT grp FROM numbered ORDER BY local_date DESC LIMIT 1
+     )`,
     [userId, endDate],
   );
   const row = rows[0];

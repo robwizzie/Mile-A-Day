@@ -29,6 +29,9 @@ struct UserProfileDetailView: View {
     @State private var catalogBadges: [Badge] = []
     @State private var hasLoadedBadges = false
     @State private var friendWorkouts: [FriendWorkout] = []
+    /// Server-exact per-day totals for the week chart (see Last7DaysChart —
+    /// the capped workout list must not drive the bars).
+    @State private var last7DayMiles: [FriendDayMiles]?
     @State private var isLoadingStats = false
     @State private var isPrivate = false
     @State private var actionInProgress = false
@@ -444,7 +447,11 @@ struct UserProfileDetailView: View {
                 friendTodayProgressCard
             }
             if !isCurrentUser(), !friendWorkouts.isEmpty {
-                Last7DaysChart(workouts: friendWorkouts)
+                Last7DaysChart(
+                    workouts: friendWorkouts,
+                    dayTotals: last7DayMiles,
+                    goalMiles: userStats?.goalMiles ?? 1.0
+                )
             }
             if let today = friendTodayChallenge {
                 FriendTodayChallengeRow(
@@ -1028,6 +1035,7 @@ struct UserProfileDetailView: View {
                     hasPureFlame = stats.naturalStreak && stats.streak > 0
 
                     friendWorkouts = workouts
+                    last7DayMiles = stats.last7DayMiles
                     hasLoadedInitial = true
                     isLoadingStats = false
                 }
@@ -1159,7 +1167,7 @@ struct FriendWorkoutDetailSheet: View {
     @State private var routeCoordinates: [CLLocationCoordinate2D]?
     /// Retained map snapshot so the route map's pinch-zoom can compose its
     /// floating copy on demand (same mechanism as the feed cards).
-    @State private var routeSnapshot: UIImage?
+    @State private var routeSnapshot: RouteMapSnapshot?
     @State private var isLoadingRoute = false
 
     /// The same rule your own detail uses, sanity guard included.
@@ -1216,7 +1224,9 @@ struct FriendWorkoutDetailSheet: View {
             snapshot: snapshot,
             coordinates: coords,
             routeColor: workoutColor,
-            size: CGSize(width: 900, height: 600)
+            // Derived from the card's own aspect so the lift is a pure
+            // upscale — a fixed size that didn't match would crop the route.
+            size: WorkoutRouteMapView.zoomSize(for: snapshot, targetWidth: 900)
         ) {
             EmptyView()
         }
@@ -1566,25 +1576,55 @@ private struct FriendHeadToHeadStrip: View {
 
 // MARK: - Last 7 Days Mini Chart
 
-/// Bar chart of the friend's last 7 days of miles. Aggregates from
-/// `friendWorkouts` rather than fetching new data — instant render, no extra
-/// request. Goal-hit days are green, partial days orange, zeros muted; today
-/// is ringed so users orient themselves at a glance.
+/// Bar chart of the friend's last 7 days of miles. Totals come from the
+/// stats payload's `last_7_day_miles` — the server's exact per-day series —
+/// because the recent-workouts LIST is capped: a user logging several
+/// workouts a day pushes the week's early days out of the cap, and a
+/// 400-day streak read as an empty Fri-Sun. `workouts` stays as the
+/// per-workout breakdown for the tap-detail panel, and as the totals
+/// fallback until the server ships the field. Goal-hit days are green,
+/// partial days orange, zeros muted; today is ringed so users orient
+/// themselves at a glance.
+///
+/// "Hit" means `ProgressCalculator.isGoalCompleted` — the 0.95 tolerance the
+/// server counts streaks with — NOT a raw `>= goal`. A 0.996-mile day is a
+/// completed day everywhere else in the product, and it also RENDERS as
+/// "1.00 mi" here, so a strict compare painted a day orange while the label
+/// beside it read a full mile.
 struct Last7DaysChart: View {
     let workouts: [FriendWorkout]
+    /// Server-exact per-day totals (`FriendStats.last7DayMiles`); nil falls
+    /// back to aggregating `workouts`.
+    var dayTotals: [FriendDayMiles]? = nil
+    /// The profile owner's own daily goal (`FriendStats.goalMiles`). Defaults
+    /// to a mile so a caller without stats loaded still renders sanely — but
+    /// a 2-mile-goal friend must not go green at 1.0.
+    var goalMiles: Double = 1.0
 
-    private let goalMiles: Double = 1.0
     private let calendar = Calendar.current
+
+    /// Never let a zero/absent goal through: `isGoalCompleted(current:goal:)`
+    /// is `current >= goal * 0.95`, which a goal of 0 makes vacuously true —
+    /// that would paint an empty day green.
+    private var goal: Double { goalMiles > 0 ? goalMiles : 1.0 }
 
     /// Selected day for the inline detail panel. Tapping a bar toggles
     /// selection — second tap on the same day closes the panel.
     @State private var selectedDay: Date?
 
-    /// Map of date (start of day) → total miles for that day, drawn from
-    /// the friend's recent workouts. Only includes the last 7 days.
+    /// Map of date (start of day) → total miles for that day. Server series
+    /// when available, else summed from the (capped) recent workouts.
     private var milesByDay: [Date: Double] {
         let cutoff = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -6, to: Date()) ?? Date())
         var result: [Date: Double] = [:]
+        if let dayTotals, !dayTotals.isEmpty {
+            for entry in dayTotals {
+                guard let day = parseDay(entry.date) else { continue }
+                guard day >= cutoff else { continue }
+                result[day, default: 0] += entry.miles
+            }
+            return result
+        }
         for workout in workouts {
             guard let day = parseDay(workout.date) else { continue }
             guard day >= cutoff else { continue }
@@ -1605,10 +1645,10 @@ struct Last7DaysChart: View {
         milesByDay.values.reduce(0, +)
     }
 
-    /// Tallest bar's value — used to scale the rest. Min of 1 mile so a
+    /// Tallest bar's value — used to scale the rest. Floored at the goal so a
     /// week with one short run doesn't look like a wall.
     private var maxValue: Double {
-        max(milesByDay.values.max() ?? 0, 1.0)
+        max(milesByDay.values.max() ?? 0, goal)
     }
 
     var body: some View {
@@ -1655,7 +1695,7 @@ struct Last7DaysChart: View {
         let miles = milesByDay[day] ?? 0
         let progress = min(miles / maxValue, 1.0)
         let isToday = calendar.isDateInToday(day)
-        let didHit = miles >= goalMiles
+        let didHit = ProgressCalculator.isGoalCompleted(current: miles, goal: goal)
         let isSelected = selectedDay.map { calendar.isDate($0, inSameDayAs: day) } ?? false
         let color: Color = miles == 0
             ? Color.white.opacity(0.12)
@@ -1724,14 +1764,18 @@ struct Last7DaysChart: View {
 
     /// Per-workout breakdown of the selected day — shows date, total miles,
     /// and each individual workout (type + distance). When the day has no
-    /// activity, surfaces a friendly "no miles" message instead.
+    /// activity, surfaces a friendly "no miles" message instead. The TOTAL
+    /// comes from `milesByDay` (server-exact when available) — the workout
+    /// rows are best-effort: days older than the capped recent-workouts list
+    /// still show their true total, just without the per-workout lines.
     @ViewBuilder
     private func dayDetailPanel(for day: Date) -> some View {
         let dayWorkouts = workouts.compactMap { workout -> FriendWorkout? in
             guard let workoutDay = parseDay(workout.date) else { return nil }
             return calendar.isDate(workoutDay, inSameDayAs: day) ? workout : nil
         }
-        let total = dayWorkouts.reduce(0.0) { $0 + $1.distance }
+        let total = milesByDay[calendar.startOfDay(for: day)]
+            ?? dayWorkouts.reduce(0.0) { $0 + $1.distance }
         let dateLabel: String = {
             if calendar.isDateInToday(day) { return "Today" }
             if calendar.isDateInYesterday(day) { return "Yesterday" }
@@ -1748,11 +1792,21 @@ struct Last7DaysChart: View {
                 Spacer()
                 Text(String(format: "%.2f mi", total))
                     .font(.system(size: 12, weight: .heavy, design: .rounded))
-                    .foregroundColor(total >= goalMiles ? .green : (total > 0 ? .orange : .white.opacity(0.4)))
+                    .foregroundColor(
+                        ProgressCalculator.isGoalCompleted(current: total, goal: goal)
+                            ? .green
+                            : (total > 0 ? .orange : .white.opacity(0.4))
+                    )
             }
 
-            if dayWorkouts.isEmpty {
+            if dayWorkouts.isEmpty && total == 0 {
                 Text("No miles logged")
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.4))
+            } else if dayWorkouts.isEmpty {
+                // Day is older than the capped recent-workouts list — the
+                // total above is still exact (server series).
+                Text("Workout details unavailable for this day")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundColor(.white.opacity(0.4))
             } else {

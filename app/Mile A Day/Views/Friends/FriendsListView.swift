@@ -718,7 +718,10 @@ struct FriendsListView: View {
         let goal = max(userManager.currentUser.goalMiles, 0.01)
         let today = healthManager.todaysDistance
         let progress = min(today / goal, 1.0)
-        let isComplete = today >= goal
+        // Tolerance, not a strict compare: 0.996 mi displays as "1.00 mi" and
+        // counts server-side, so a strict check flipped the card to
+        // "not done" (and to streak-danger red after 9pm) on a completed day.
+        let isComplete = ProgressCalculator.isGoalCompleted(current: today, goal: goal)
         let streak = userManager.currentUser.streak
         // Streak-saver: active streak + not done + past 9pm = visual escalation.
         // Pulls the card toward red to signal genuine risk of losing the streak.

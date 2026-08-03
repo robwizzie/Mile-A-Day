@@ -21,6 +21,7 @@ import {
   getTermsStatusController,
   acceptTermsController,
   respondToCoauthorController,
+  setCoauthorProfileVisibilityController,
 } from "../controllers/postsController.js";
 import {
   listCommentsController,
@@ -85,6 +86,11 @@ router.post("/comments/:commentId/report", reportCommentController);
 // Per-post actions. The bare GET is LAST among the /:postId routes on purpose
 // — it's the most permissive pattern and would otherwise swallow /terms,
 // /stories, /memories, /feed and /user (all registered above).
+// More specific than /:postId/coauthor, so it must be registered first.
+router.post(
+  "/:postId/coauthor/profile",
+  setCoauthorProfileVisibilityController,
+);
 router.post("/:postId/coauthor", respondToCoauthorController);
 router.post("/:postId/report", reportPostController);
 router.patch("/:postId", updatePostController);

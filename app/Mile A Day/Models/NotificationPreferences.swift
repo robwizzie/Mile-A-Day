@@ -113,6 +113,17 @@ struct NotificationPreferences: Codable {
         set { weeklyRecapEnabledRaw = newValue }
     }
 
+    /// Do collabs friends tag me in join my profile's Posts grid? Off = they
+    /// live in the Tagged tab only, Instagram-style. Grid ONLY — the tag stays
+    /// live, the post stays in Tagged, and it still reaches my friends' feeds.
+    /// Applies to tags I already have, not just new ones. Same optional-backing
+    /// pattern so prefs saved by older app versions still decode.
+    private var taggedPostsOnProfileRaw: Bool?
+    var taggedPostsOnProfile: Bool {
+        get { taggedPostsOnProfileRaw ?? true }
+        set { taggedPostsOnProfileRaw = newValue }
+    }
+
     /// Who can see my routes and photos. Same optional-backing pattern, and an
     /// unrecognised stored value falls back to `.friends` rather than to
     /// something more exposed.

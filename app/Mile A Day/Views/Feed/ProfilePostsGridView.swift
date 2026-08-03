@@ -45,12 +45,26 @@ struct ProfilePostsGridView: View {
             }
         }
         .task { if !loaded { await load() } }
+        // The "Tagged posts on my profile" switch lives in Settings, which is
+        // pushed FROM here — so popping back lands on a grid that's still
+        // alive and still holding the tags the user just turned off. Without
+        // this the setting reads as broken at the exact moment it's used.
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSNotification.Name("MAD_TaggedPostsOnProfileChanged")
+        )) { _ in
+            guard isSelf else { return }
+            Task { await load() }
+        }
         .sheet(item: $selectedPost) { post in
             PostDetailView(
                 title: isSelf ? "Your Posts" : "Posts",
                 posts: $posts,
                 initialPostId: post.post_id,
-                onNeedMore: { Task { await loadMore() } }
+                onNeedMore: { Task { await loadMore() } },
+                // This list IS a profile grid, so a collab hidden from the
+                // viewer's grid has to leave it. Only on their OWN profile —
+                // someone else's grid isn't theirs to curate.
+                dropsCollabsHiddenFromProfile: isSelf
             )
         }
         .sheet(item: $selectedStoryPost) { post in
@@ -136,8 +150,7 @@ struct ProfilePostsGridView: View {
                 if !posts.isEmpty {
                     LazyVGrid(columns: columns, spacing: 4) {
                         ForEach(posts) { post in
-                            Button { selectedPost = post } label: { thumbnail(post) }
-                                .buttonStyle(.plain)
+                            gridThumbnail(post) { selectedPost = post }
                                 .onAppear {
                                     if post.id == posts.last?.id { Task { await loadMore() } }
                                 }
@@ -166,8 +179,7 @@ struct ProfilePostsGridView: View {
             VStack(alignment: .leading, spacing: MADTheme.Spacing.md) {
                 LazyVGrid(columns: columns, spacing: 4) {
                     ForEach(taggedPosts) { post in
-                        Button { selectedTaggedPost = post } label: { thumbnail(post) }
-                            .buttonStyle(.plain)
+                        gridThumbnail(post) { selectedTaggedPost = post }
                             .onAppear {
                                 if post.id == taggedPosts.last?.id {
                                     Task { await loadMoreTagged() }
@@ -395,6 +407,82 @@ struct ProfilePostsGridView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, MADTheme.Spacing.xl)
         .padding(.horizontal, MADTheme.Spacing.lg)
+    }
+
+    // MARK: - Curating tags off the grid
+
+    private var currentUserId: String? {
+        UserDefaults.standard.string(forKey: "backendUserId")
+    }
+
+    /// A grid cell, carrying the collab long-press ONLY where it applies — an
+    /// empty `contextMenu` still pops a blank panel on long-press, so the
+    /// modifier is branched rather than the menu left to build nothing. The
+    /// branch is stable per post, so it can't thrash view identity inside the
+    /// ForEach.
+    @ViewBuilder
+    private func gridThumbnail(_ post: PostItem, onTap: @escaping () -> Void) -> some View {
+        if canCurateOnProfile(post) {
+            Button(action: onTap) { thumbnail(post) }
+                .buttonStyle(.plain)
+                .contextMenu { collabProfileMenu(post) }
+        } else {
+            Button(action: onTap) { thumbnail(post) }
+                .buttonStyle(.plain)
+        }
+    }
+
+    /// Is this a collab the VIEWER is tagged in, on their own profile, from a
+    /// server that knows about the grid split?
+    private func canCurateOnProfile(_ post: PostItem) -> Bool {
+        isSelf
+            && post.hasAcceptedCoauthor
+            && post.coauthor_user_id == currentUserId
+            && post.coauthor_on_profile != nil
+    }
+
+    /// Long-press a collab you're tagged in to pin it on or off your own Posts
+    /// grid — the one-gesture version of the card's ⋯ menu, offered from both
+    /// tabs because that's where people actually go to tidy their profile.
+    /// Deliberately not destructive language: the tag survives either way and
+    /// the post never leaves the Tagged tab.
+    @ViewBuilder
+    private func collabProfileMenu(_ post: PostItem) -> some View {
+        if let onProfile = post.coauthor_on_profile {
+            Button {
+                Task { await setCollabOnProfile(post, onProfile: !onProfile) }
+            } label: {
+                Label(onProfile ? "Hide from my profile" : "Show on my profile",
+                      systemImage: onProfile ? "eye.slash" : "square.grid.2x2")
+            }
+        }
+    }
+
+    private func setCollabOnProfile(_ post: PostItem, onProfile: Bool) async {
+        await MainActor.run {
+            MADHaptics.tap()
+            // Both grids can be showing the same collab, so keep them in step
+            // or the Tagged tab offers "Hide" on something already hidden.
+            for idx in taggedPosts.indices where taggedPosts[idx].post_id == post.post_id {
+                taggedPosts[idx].coauthor_on_profile = onProfile
+            }
+            if !onProfile { posts.removeAll { $0.post_id == post.post_id } }
+        }
+        do {
+            try await PostService.setCoauthorOnProfile(
+                postId: post.post_id, onProfile: onProfile
+            )
+            // Re-pinned: it belongs back in date order, which only a reload
+            // can place correctly (this page may not even reach that far back).
+            if onProfile { await load() }
+        } catch {
+            await MainActor.run {
+                for idx in taggedPosts.indices where taggedPosts[idx].post_id == post.post_id {
+                    taggedPosts[idx].coauthor_on_profile = !onProfile
+                }
+            }
+            if !onProfile { await load() }
+        }
     }
 
     private func load() async {

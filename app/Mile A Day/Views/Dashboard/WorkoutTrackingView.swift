@@ -128,7 +128,10 @@ struct WorkoutTrackingView: View {
     private var raceDeltaSeconds: TimeInterval? {
         guard let ghost = raceGhost else { return nil }
         if let frozen = raceFinalDelta { return frozen }
-        let d = min(locationManager.currentDistance, 1.0)
+        // Raced against the DISPLAYED distance (`liveDistance`), the same
+        // figure the effort curve samples and Finish saves — reading raw GPS
+        // accrual here would put the chip and the ring on different miles.
+        let d = min(locationManager.liveDistance, 1.0)
         guard d > 0.02 else { return nil }
         return BestEffortStore.timeAtDistance(d, in: ghost) - locationManager.raceClockSeconds
     }
@@ -138,7 +141,7 @@ struct WorkoutTrackingView: View {
     /// when the tick that notices runs.
     private func updateRaceFreezeIfNeeded() {
         guard let ghost = raceGhost, raceFinalDelta == nil,
-            locationManager.currentDistance >= 1.0
+            locationManager.liveDistance >= 1.0
         else { return }
         let curve = locationManager.effortCurve
         guard let crossing = curve.firstIndex(where: { $0.d >= 1.0 }) else { return }
@@ -157,14 +160,19 @@ struct WorkoutTrackingView: View {
         MADHaptics.action()
     }
 
-    // Workout distance only (starts at 0)
+    // Workout distance only (starts at 0). `liveDistance` is THE number:
+    // monotonic (never ticks down) and saved verbatim at Finish, so the
+    // ring, the celebration, the recap, and HealthKit all agree by
+    // construction. Showing raw GPS accrual here is how a jitter-inflated
+    // walk read "100%" live and then dropped to 80% the moment Finish
+    // reconciled it against the pedometer.
     private var currentDistance: Double {
-        locationManager.currentDistance
+        locationManager.liveDistance
     }
 
     // Total daily distance (starting + workout)
     private var totalDailyDistance: Double {
-        startingDistance + locationManager.currentDistance
+        startingDistance + currentDistance
     }
 
     private var progress: Double {
@@ -1357,7 +1365,9 @@ struct WorkoutTrackingView: View {
                 }
             }
 
-            // Check if we've reached the goal (using total daily distance)
+            // Check if we've reached the goal (using total daily distance).
+            // `currentDistance` is monotonic and IS the saved number, so a
+            // celebration fired here can never be taken back by the finish.
             // Only show completion if:
             // 1. We haven't shown it yet
             // 2. The goal wasn't already completed when we started (startingDistance < goalDistance)
@@ -1727,25 +1737,23 @@ struct WorkoutTrackingView: View {
         guard !isStopping else { return }
         isStopping = true
 
-        // Final distance: outdoor sessions reconcile the live GPS sum against
-        // the phone's calibrated pedometer (see reconciledFinalDistance) so
-        // the SAME walk saves nearly the same number on everyone's phone.
-        // Indoor sessions already are the pedometer; failures fall back to
-        // the live figure unchanged.
-        let finalDistance = locationManager.reconciledFinalDistance(
-            isWalk: selectedActivityType != .running
-        )
+        // Final distance IS the displayed distance — no finish-time
+        // re-arbitration. `liveDistance` (ratcheted max of the jitter-gated
+        // GPS span and the calibrated pedometer span; raw accrual indoors)
+        // is the number the user watched, so it saves verbatim.
+        let finalDistance = locationManager.liveDistance
 
         // Ghost race bookkeeping — runs for EVERY session (an unraced mile
         // still quietly becomes the baseline/best, keeping future ghosts
-        // honest); racing only changes what gets celebrated. The curve is
-        // rescaled to the reconciled distance so it agrees with the number
-        // this workout actually saves.
-        let liveDistance = locationManager.currentDistance
+        // honest); racing only changes what gets celebrated. The curve already
+        // samples `liveDistance`, so the scale is 1.0 in practice — it stays
+        // as the guard for the last sample landing a hair short of the saved
+        // number (the sampler throttles at 0.02 mi).
+        let curveDistance = locationManager.effortCurve.last?.d ?? 0
         let raceOutcome = BestEffortStore.recordFinish(
             activityKey: raceActivityKey,
             rawCurve: locationManager.effortCurve,
-            distanceScale: liveDistance > 0 ? finalDistance / liveDistance : 1.0,
+            distanceScale: curveDistance > 0 ? finalDistance / curveDistance : 1.0,
             workoutId: nil
         )
         if raceGhost != nil {
@@ -1847,10 +1855,16 @@ struct WorkoutTrackingView: View {
                         }
                     }
                     // Write the tracked GPS trace as the workout's
-                    // HKWorkoutRoute BEFORE finalizing — fetchAllWorkoutData
-                    // kicks off the backend sync, which reads the route back
-                    // from HealthKit to draw feed maps. Best-effort: a failed
-                    // route write still finalizes the workout itself.
+                    // HKWorkoutRoute, then re-upload THIS workout with the
+                    // route attached. The HealthKit observer fires the moment
+                    // finishWorkout writes the workout — usually BEFORE the
+                    // route exists — so the observer-raced sync uploads it
+                    // route-less and marks it synced, and the feed map never
+                    // appears (while Apple Fitness, reading HealthKit
+                    // directly, shows the route fine). The targeted re-push
+                    // after finishRoute is what actually lands the map;
+                    // best-effort: a failed route write still finalizes the
+                    // workout itself.
                     guard let workout, saved, routeLocations.count >= 2 else {
                         finalize()
                         return
@@ -1867,6 +1881,9 @@ struct WorkoutTrackingView: View {
                         routeBuilder.finishRoute(with: workout, metadata: nil) { route, finishError in
                             if route == nil {
                                 print("[WorkoutTracking] ⚠️ Route finish failed: \(String(describing: finishError))")
+                            } else {
+                                let workoutId = workout.uuid
+                                Task { await WorkoutSyncService.shared.uploadWorkout(withId: workoutId) }
                             }
                             finalize()
                         }
@@ -2086,7 +2103,9 @@ struct WorkoutTrackingView: View {
         // this update (and the on-screen chip) carry the frozen result.
         updateRaceFreezeIfNeeded()
 
-        let freshDistance = locationManager.currentDistance
+        // The displayed figure — saved verbatim at Finish — so the lock
+        // screen / Dynamic Island never outruns what will persist.
+        let freshDistance = locationManager.liveDistance
         let freshTotalDaily = startingDistance + freshDistance
         let realTimeElapsed = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
 
@@ -2097,6 +2116,8 @@ struct WorkoutTrackingView: View {
         if let activity = workoutActivity {
             // Goal crossed during THIS workout → one celebratory alert update
             // that briefly expands the Dynamic Island / lights up the watch.
+            // freshTotalDaily rides the monotonic saved-verbatim estimator,
+            // so this "streak safe" promise can never be walked back.
             let goalJustCompleted = goalDistance > 0
                 && freshTotalDaily >= goalDistance
                 && !hasSentGoalAlert
@@ -2168,8 +2189,8 @@ struct WorkoutTrackingView: View {
         // for clearing state after confirming HealthKit save status.
         print("🔚 Ending Live Activity...")
 
-        // Use FRESH data for the final state
-        let freshDistance = locationManager.currentDistance
+        // Use FRESH data for the final state (identical to what Finish saves)
+        let freshDistance = locationManager.liveDistance
         let freshTotalDaily = startingDistance + freshDistance
         let realTimeElapsed = workoutStartDate.map { Date().timeIntervalSince($0) } ?? elapsedTime
 
