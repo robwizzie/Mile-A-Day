@@ -59,6 +59,19 @@ struct Mile_A_DayApp: App {
                     // username on DeepLinkRouter so the Friends tab can resolve
                     // it whenever it's ready — covers cold launches where the
                     // tab UI doesn't exist yet.
+                    // Buddy Walk invite links (mileaday://b/<CODE>, or the web
+                    // form). Parked like the others — a cold launch has no
+                    // Dashboard yet, and the Dashboard drains this in both
+                    // .task and .onReceive.
+                    if DeepLinkRouter.shared.handleBuddyLink(url) {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("MAD_SwitchTab"),
+                            object: nil,
+                            userInfo: ["tab": 0]
+                        )
+                        return
+                    }
+
                     if DeepLinkRouter.shared.handleProfileLink(url) {
                         NotificationCenter.default.post(
                             name: NSNotification.Name("MAD_SwitchTab"),

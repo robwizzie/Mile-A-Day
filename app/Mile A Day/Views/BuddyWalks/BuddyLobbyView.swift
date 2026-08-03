@@ -17,6 +17,8 @@ struct BuddyLobbyView: View {
 
     @State private var now = Date()
     @State private var hasHandedOff = false
+    @State private var qrImage: UIImage?
+    @State private var didCopy = false
 
     /// Drives the countdown text. Local ticking only — no network involved.
     private let tick = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
@@ -83,7 +85,7 @@ struct BuddyLobbyView: View {
             }
             .padding(.top, MADTheme.Spacing.xl)
 
-            joinCodeCard(session)
+            inviteCard(session)
 
             ScrollView {
                 VStack(spacing: MADTheme.Spacing.sm) {
@@ -101,20 +103,72 @@ struct BuddyLobbyView: View {
         }
     }
 
-    private func joinCodeCard(_ session: BuddySessionState) -> some View {
-        VStack(spacing: MADTheme.Spacing.xs) {
-            Text("JOIN CODE")
-                .font(MADTheme.Typography.caption)
-                .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
-            Text(session.joinCode)
-                .font(.system(size: 34, weight: .bold, design: .rounded))
-                .tracking(6)
-                .foregroundStyle(MADTheme.Colors.madWhite)
+    /// The invite moment — the whole reason a lobby exists.
+    ///
+    /// This used to be the code as static text: nothing to tap, nothing to
+    /// send, no way to get anyone in except reading six characters aloud. A
+    /// lobby nobody can be invited to is a lobby nobody uses. Three ways in,
+    /// covering the three real situations: standing next to them (scan), in a
+    /// chat (share), on a call (read the code).
+    private func inviteCard(_ session: BuddySessionState) -> some View {
+        VStack(spacing: MADTheme.Spacing.sm) {
+            if let qrImage {
+                Image(uiImage: qrImage)
+                    .interpolation(.none)
+                    .resizable()
+                    .frame(width: 132, height: 132)
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(.white))
+                Text("Point a camera at this")
+                    .font(MADTheme.Typography.caption)
+                    .foregroundStyle(MADTheme.Colors.madWhite.opacity(0.5))
+            }
+
+            Button {
+                UIPasteboard.general.string = session.joinCode
+                MADHaptics.success()
+                withAnimation(MADTheme.Animation.quick) { didCopy = true }
+            } label: {
+                VStack(spacing: 2) {
+                    Text(didCopy ? "COPIED" : "OR SHARE THIS CODE")
+                        .font(MADTheme.Typography.caption)
+                        .foregroundStyle(
+                            didCopy ? session.accentColor : MADTheme.Colors.madWhite.opacity(0.5))
+                    Text(session.joinCode)
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .tracking(6)
+                        .foregroundStyle(MADTheme.Colors.madWhite)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if let url = DeepLinkRouter.buddyShareURL(code: session.joinCode) {
+                ShareLink(
+                    item: url,
+                    message: Text(
+                        "Walk with me on Mile A Day — join code \(session.joinCode)")
+                ) {
+                    Label("Invite a friend", systemImage: "square.and.arrow.up")
+                        .font(MADTheme.Typography.bodyBold)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(Capsule().fill(session.accentColor))
+                        .foregroundStyle(MADTheme.Colors.madWhite)
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(MADTheme.Spacing.md)
         .frame(maxWidth: .infinity)
         .madLiquidGlassCard()
         .padding(.horizontal, MADTheme.Spacing.md)
+        .task(id: session.joinCode) {
+            qrImage = ShareProfileView.generateQRCode(
+                from: DeepLinkRouter.buddyShareURL(code: session.joinCode)?.absoluteString
+                    ?? session.joinCode
+            )
+            didCopy = false
+        }
     }
 
     private func participantRow(_ participant: BuddyParticipant, session: BuddySessionState)
@@ -179,16 +233,21 @@ struct BuddyLobbyView: View {
                         try? await buddy.start()
                     }
                 } label: {
-                    Text(readyCount(session) > 1 ? "Start together" : "Waiting for others…")
-                        .font(MADTheme.Typography.bodyBold)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, MADTheme.Spacing.md)
-                        .background(Capsule().fill(session.accentColor))
-                        .foregroundStyle(MADTheme.Colors.madWhite)
+                    VStack(spacing: 1) {
+                        Text(readyCount(session) > 1 ? "Start together" : "Start now")
+                            .font(MADTheme.Typography.bodyBold)
+                        if readyCount(session) < 2 {
+                            Text("They can join once you're moving")
+                                .font(MADTheme.Typography.caption)
+                                .opacity(0.85)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, MADTheme.Spacing.sm + 2)
+                    .background(Capsule().fill(session.accentColor))
+                    .foregroundStyle(MADTheme.Colors.madWhite)
                 }
                 .buttonStyle(.plain)
-                .disabled(readyCount(session) < 2)
-                .opacity(readyCount(session) < 2 ? 0.5 : 1)
             } else {
                 Text("Waiting for the host to start…")
                     .font(MADTheme.Typography.body)

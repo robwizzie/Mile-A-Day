@@ -77,4 +77,47 @@ final class DeepLinkRouter: ObservableObject {
         pendingProfileUsername = username
         return true
     }
+
+    /// Extracts a Buddy Walk join code from a shared link, in the same two
+    /// forms profile links use:
+    /// - in-app scheme: mileaday://b/<CODE>   (what the lobby's QR encodes)
+    /// - web link:      https://mileaday.run/b/<CODE>  (shared via text)
+    ///
+    /// Codes are the 6-character alphanumeric the host reads aloud, so this
+    /// validates shape before parking it — a malformed link must not put the
+    /// dashboard into a join it can never complete.
+    nonisolated func buddyCode(from url: URL) -> String? {
+        let raw: String?
+        if url.scheme == "mileaday", url.host == "b" {
+            let candidate = url.lastPathComponent
+            raw = candidate.isEmpty ? nil : candidate
+        } else if url.scheme == "https",
+                  let host = url.host?.lowercased(),
+                  host == "mileaday.run" || host == "www.mileaday.run" {
+            let parts = url.path.split(separator: "/").map(String.init)
+            raw = (parts.count == 2 && parts[0] == "b") ? parts[1] : nil
+        } else {
+            raw = nil
+        }
+        guard let raw else { return nil }
+        let code = raw.uppercased()
+        guard code.count == 6,
+              code.allSatisfy({ $0.isLetter || $0.isNumber })
+        else { return nil }
+        return code
+    }
+
+    /// True when the URL was a buddy link and the intent has been parked.
+    func handleBuddyLink(_ url: URL) -> Bool {
+        guard let code = buddyCode(from: url) else { return false }
+        requestOpenBuddySession(code: code)
+        return true
+    }
+
+    /// The link the lobby shares and encodes as a QR. The in-app scheme is what
+    /// the profile QR already uses, and iOS Camera opens it directly when the
+    /// app is installed.
+    nonisolated static func buddyShareURL(code: String) -> URL? {
+        URL(string: "mileaday://b/\(code.uppercased())")
+    }
 }
