@@ -321,8 +321,4 @@ struct PostDetailView: View {
         } catch {}
     }
 
-    private func updatePost(_ postId: String, _ mutate: (inout PostItem) -> Void) {
-        guard let idx = posts.firstIndex(where: { $0.post_id == postId }) else { return }
-        mutate(&posts[idx])
-    }
 }
