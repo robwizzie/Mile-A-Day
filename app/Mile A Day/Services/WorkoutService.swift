@@ -582,10 +582,13 @@ struct UserStatsAPIResponse: Decodable {
             StreakFeaturesPayload.self, forKey: .streakFeatures)
     }
 
-    /// Calculates if the user has completed their goal today
+    /// Calculates if the user has completed their goal today.
+    /// Uses the shared 0.95 tolerance (`ProgressCalculator.isGoalCompleted`),
+    /// which is what the server counts the day with — a strict `>= goal` made
+    /// a 0.996-mile day, displayed as "1.00 mi", read as incomplete.
     var hasCompletedGoalToday: Bool {
-        guard let today = todayMiles, let goal = goalMiles else { return false }
-        return today >= goal && goal > 0
+        guard let today = todayMiles, let goal = goalMiles, goal > 0 else { return false }
+        return ProgressCalculator.isGoalCompleted(current: today, goal: goal)
     }
 }
 
