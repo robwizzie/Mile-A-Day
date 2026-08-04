@@ -1084,6 +1084,103 @@ export async function getOwnedWorkoutRollupDistance(
   return Number.isFinite(distance) ? distance : null;
 }
 
+/**
+ * How long after a qualifying walk/run a photo may be posted.
+ *
+ * The client owns the same number (`FreshPostWindowManager.duration`) and runs
+ * the visible countdown off it — keep the two equal.
+ */
+export const POST_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * Slack past the visible window, server-side only and never shown to the user.
+ *
+ * The client's countdown starts when the APP first sees the finished workout;
+ * this one starts when the SERVER first does, which is necessarily the same
+ * instant or later — so our window already closes no earlier than theirs. The
+ * grace covers the round trip on top of that: someone who taps Share with five
+ * seconds left still has to upload a 1080x1350 JPEG before the create call
+ * lands. Rejecting that would be punishing a slow network, not a late post.
+ */
+export const POST_WINDOW_GRACE_MS = 2 * 60 * 1000;
+
+export interface PostWindowStatus {
+  /** May a deliberate photo post be created right now? Includes the grace. */
+  open: boolean;
+  /** The qualifying workout whose window is the most recent one today. */
+  workoutId: string | null;
+  /** When that window opened, and when it closes for DISPLAY (no grace). */
+  openedAt: string | null;
+  closesAt: string | null;
+  /** Countdown to the displayed close, floored at 0. */
+  secondsRemaining: number;
+}
+
+const CLOSED_WINDOW: PostWindowStatus = {
+  open: false,
+  workoutId: null,
+  openedAt: null,
+  closesAt: null,
+  secondsRemaining: 0,
+};
+
+/**
+ * The photo-posting window for a user's day.
+ *
+ * A photo post has to belong to a walk or run — that is the whole point of the
+ * feed, and an unbounded composer turns it into a general-purpose photo stream
+ * that happens to sit next to some mileage. So posting opens for ten minutes
+ * when a qualifying workout lands and closes with it.
+ *
+ * "Qualifying" is already computed and maintained for us: `feed_role` is
+ * `daily_mile` on the workout that reached the day's goal and `extra` on every
+ * substantive one after it, which is exactly "the goal, plus each additional
+ * goal reached". Reusing it means this can never disagree with what the feed
+ * shows, and it inherits the anchor's stickiness and sub-floor filtering for
+ * free. `rolled_up` and `hidden` deliberately don't open a window: the first is
+ * a leg folded into the anchor's card, the second is a phantom.
+ *
+ * The window is anchored to whichever came LAST, the workout ending or the
+ * server first hearing about it. A Watch run that syncs twenty minutes after it
+ * ended is not a late post — it's the first moment the user could have posted
+ * it at all, and `created_at` survives re-uploads (it isn't in the sync
+ * upsert's DO UPDATE list) so a fullSync can't reopen a window that closed.
+ */
+export async function getPostWindowStatus(
+  userId: string,
+  localDate: string,
+  now: number = Date.now(),
+): Promise<PostWindowStatus> {
+  const rows = await db.query<{
+    workout_id: string;
+    opened_at: Date | string | null;
+  }>(
+    `SELECT workout_id,
+			GREATEST(device_end_date, COALESCE(created_at, device_end_date)) AS opened_at
+		 FROM workouts
+		 WHERE user_id = $1 AND local_date = $2::date
+			 AND deleted_at IS NULL AND exclusion_reason IS NULL
+			 AND feed_role IN ('daily_mile', 'extra')
+		 ORDER BY opened_at DESC, workout_id DESC
+		 LIMIT 1`,
+    [userId, localDate],
+  );
+  const row = rows[0];
+  if (!row?.opened_at) return CLOSED_WINDOW;
+  // Raw-SQL timestamptz comes back as a Date; be tolerant of either shape.
+  const openedAt = new Date(row.opened_at);
+  if (Number.isNaN(openedAt.getTime())) return CLOSED_WINDOW;
+
+  const closesAt = openedAt.getTime() + POST_WINDOW_MS;
+  return {
+    open: now < closesAt + POST_WINDOW_GRACE_MS,
+    workoutId: row.workout_id,
+    openedAt: openedAt.toISOString(),
+    closesAt: new Date(closesAt).toISOString(),
+    secondsRemaining: Math.max(0, Math.round((closesAt - now) / 1000)),
+  };
+}
+
 /** One row in a story's "seen by" list, with any emoji reaction. */
 export interface StoryViewerRow {
   user_id: string;

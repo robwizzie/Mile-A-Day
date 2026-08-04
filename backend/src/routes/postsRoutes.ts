@@ -20,6 +20,7 @@ import {
   reportPostController,
   getTermsStatusController,
   acceptTermsController,
+  getPostWindowController,
   respondToCoauthorController,
   setCoauthorProfileVisibilityController,
 } from "../controllers/postsController.js";
@@ -50,6 +51,10 @@ const router = Router();
 // Terms / EULA gate (App Store Guideline 1.2).
 router.get("/terms", getTermsStatusController);
 router.post("/terms/accept", acceptTermsController);
+
+// How long the caller may still post a photo for (see getPostWindowController).
+// Above the `/:postId` routes so "window" isn't parsed as a post id.
+router.get("/window", getPostWindowController);
 
 // Media upload, then JSON create referencing the returned media_url.
 router.post("/media", upload.single("image"), uploadPostMedia);

@@ -312,7 +312,7 @@ final class PostComposerViewModel: ObservableObject {
 
         do {
             let mediaUrl = try await PostService.uploadMedia(flat)
-            let created = try await PostService.createPost(
+            _ = try await PostService.createPost(
                 mediaUrl: mediaUrl,
                 caption: caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : caption,
                 workoutId: stats.workoutId,
@@ -325,16 +325,7 @@ final class PostComposerViewModel: ObservableObject {
                 coauthorUserId: destination.toFeed ? coauthor?.user_id : nil,
                 coauthorUserIds: destination.toFeed && !buddyCoauthorIds.isEmpty
                     ? buddyCoauthorIds : nil,
-                buddySessionId: destination.toFeed ? buddySessionId : nil,
-                // Server-side FRESH: the claim rides with the post so EVERY
-                // viewer sees the badge, not just this device.
-                postedLive: FreshPostWindowManager.shared.isOpen
-            )
-            // Reward posts shared inside the run's 10-min fresh window with a
-            // "Fresh" badge. No-op when the window is closed.
-            FreshPostWindowManager.shared.markPostedLive(
-                postId: created.post_id,
-                workoutId: created.workout_id ?? stats.workoutId
+                buddySessionId: destination.toFeed ? buddySessionId : nil
             )
             if stickerEnabled {
                 // Remember the user's overlay style — but merge back any stats
@@ -371,6 +362,14 @@ final class PostComposerViewModel: ObservableObject {
             } else {
                 errorMessage = "Finish today's mile before you post."
             }
+            return false
+        } catch let APIError.apiError(message) where message == "post_window_closed" {
+            // The walk's 10-minute window lapsed while this composer was open —
+            // most often a long edit, or a photo picked from the library after
+            // the fact. The local window is already closed too (the server
+            // allows a grace on top of it), so there's nothing to retry: say
+            // what earns the next one.
+            errorMessage = "Photos share in the 10 minutes after a walk or run, and that window just closed. Head out again to unlock the next one."
             return false
         } catch let APIError.apiError(message) where message == "terms_not_accepted" {
             // Stale local acceptance — clear the memo and re-gate.

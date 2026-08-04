@@ -32,6 +32,9 @@ struct WorkoutDetailView: View {
     @State private var editingLinkedPost: PostItem?
     @State private var showPostDeleteConfirm = false
     @State private var isAddingToFeed = false
+    /// Observed so the "Add to feed" pill disappears when the walk's posting
+    /// window lapses while this screen is on display.
+    @ObservedObject private var freshWindow = FreshPostWindowManager.shared
     @State private var addToFeedError: String?
     @EnvironmentObject var healthManager: HealthKitManager
 
@@ -266,7 +269,10 @@ struct WorkoutDetailView: View {
                         .font(MADTheme.Typography.headline)
                         .foregroundColor(.primary)
                     Spacer()
-                    if post.share_to_feed == false {
+                    // Promoting a story puts a photo on the feed, so it answers
+                    // to the same 10-minute window as posting one — offering it
+                    // after the window has closed would only earn a 403.
+                    if post.share_to_feed == false, freshWindow.isOpen {
                         addToFeedPill
                     }
                 }
@@ -330,6 +336,10 @@ struct WorkoutDetailView: View {
             do {
                 try await PostService.addPostToFeed(postId: post.post_id)
                 await fetchLinkedPost()
+            } catch let APIError.apiError(message) where message == "post_window_closed" {
+                await MainActor.run {
+                    addToFeedError = "Photos reach the feed in the 10 minutes after a walk or run, and that window has closed."
+                }
             } catch {
                 await MainActor.run {
                     addToFeedError = "This run may already have a feed post."

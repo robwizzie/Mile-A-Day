@@ -1,14 +1,30 @@
 import Foundation
 import SwiftUI
 
-/// The 10-minute "fresh window" that opens when a workout completes with the
-/// daily goal met. It is a POSITIVE nudge to share in the moment — it drives a
-/// post-run countdown, a ring on the compose affordances, and a "Fresh" badge
-/// on posts made while it is open. It never BLOCKS posting: the daily-goal gate
-/// (`SocialFeedView.mileDone` + the server's `mile_not_completed` 403) is the
-/// only thing that gates the composer. When this window closes the user can
-/// still post the rest of the day exactly as before — they just don't earn the
-/// "Fresh" reward. Each additional qualifying walk/run opens its own window.
+/// The 10-minute window that opens when a workout completes with the daily goal
+/// met. It drives a post-run countdown and a ring on the compose affordances,
+/// and it GATES posting: when it closes, the composer locks until the next
+/// qualifying walk or run. Each additional qualifying workout opens its own
+/// window, so a second walk earns a second photo.
+///
+/// It used to also award a "FRESH" chip to posts made while it was open. That
+/// chip died with the gate: once a post can ONLY be made inside the window,
+/// every post is fresh and the badge marks nothing. The server still stores
+/// and serves `posted_fresh`/`is_fresh` for builds that predate the gate — they
+/// can still post all day, so the flag stays meaningful for them.
+///
+/// That gate is the point of the feed. A photo posted six hours after the run
+/// is a photo that has nothing to do with anyone moving, and an unbounded
+/// composer turns the feed into a general-purpose photo stream that happens to
+/// sit next to some mileage. The daily-goal gate (`SocialFeedView.mileDone` +
+/// the server's `mile_not_completed` 403) still applies on top of it.
+///
+/// This is the UX half only. The authority is the server, which recomputes the
+/// window from its own `workouts.feed_role` and rejects a late create with
+/// `post_window_closed` — so a stale or tampered local window can't buy a post.
+/// The two are kept in sync by `duration` here and `POST_WINDOW_MS` in
+/// postService.ts; the server additionally allows a private grace on top, so a
+/// client counting down to zero is never itself the reason a post is refused.
 ///
 /// Anchored to OBSERVATION time (when the app first sees the finished workout),
 /// never `HKWorkout.endDate`: a Watch run whose `endDate` is 20 min old still
@@ -38,12 +54,23 @@ final class FreshPostWindowManager: ObservableObject {
     @Published private(set) var windowOpenedAt: Date?
     @Published private(set) var windowWorkoutId: String?
 
+    /// Fires once, at the moment the window closes, purely so SwiftUI re-renders
+    /// and the compose affordances lock themselves.
+    ///
+    /// Needed because `isOpen` reads the wall clock while the publishers only
+    /// change on `open()` — nothing else would tell a view that time ran out,
+    /// so the "+" would sit there unlocked until some unrelated state moved.
+    /// The gate itself never depends on this: every caller that actually
+    /// decides something reads `isOpen`, which is correct whether or not the
+    /// timer fired. It's a re-render nudge, not a source of truth — which is
+    /// also why a timer that didn't fire while backgrounded doesn't matter, as
+    /// long as `refresh()` runs on foreground.
+    private var expiryTimer: Timer?
+
     private let defaults = UserDefaults.standard
     private let openedAtKey = "fresh_window_opened_at"
     private let workoutIdKey = "fresh_window_workout_id"
     private let dayKey = "fresh_window_day"
-    private let postedLiveKeysKey = "fresh_window_posted_live_keys"
-    private let postedLiveDayKey = "fresh_window_posted_live_day"
 
     private init() {
         // Rehydrate only if the stored window is from today; a stale day reads
@@ -52,6 +79,7 @@ final class FreshPostWindowManager: ObservableObject {
            let opened = defaults.object(forKey: openedAtKey) as? Date {
             windowOpenedAt = opened
             windowWorkoutId = defaults.string(forKey: workoutIdKey)
+            scheduleExpiryTick()
         }
     }
 
@@ -100,6 +128,61 @@ final class FreshPostWindowManager: ObservableObject {
         defaults.set(date, forKey: openedAtKey)
         defaults.set(workoutId, forKey: workoutIdKey)
         defaults.set(today, forKey: dayKey)
+        scheduleExpiryTick()
+    }
+
+    /// Adopt a window the SERVER says is open that this device doesn't have.
+    ///
+    /// The local window opens from a Dashboard observer watching HealthKit, so
+    /// it misses a workout that landed while the app was closed and the user
+    /// then opened straight to the Feed tab — the Dashboard's `.task` never
+    /// ran, no window exists, and the composer sits locked during the ten
+    /// minutes it should be the most inviting. The server computes the same
+    /// window from its own `workouts.feed_role` and has no such blind spot.
+    ///
+    /// Never SHORTENS: an already-open window is left alone unless the server's
+    /// anchor is strictly later (a newer workout this device hasn't seen).
+    /// Without that, adopting an earlier anchor — the server's is usually a
+    /// beat later, but a re-adopt or a second device can invert it — would clip
+    /// time off a countdown the user is already watching.
+    ///
+    /// It also never CLOSES: that stays the local clock's job. The server
+    /// carries a private grace, so its `open` outlives ours by design, and
+    /// adopting a close would hand users a window that keeps re-opening.
+    func adopt(workoutId: String, openedAt: Date) {
+        guard Self.dayStamp(for: openedAt) == Self.dayStamp() else { return }
+        guard openedAt.timeIntervalSinceNow > -Self.duration else { return }
+        if isOpen, let local = windowOpenedAt, openedAt <= local { return }
+        open(workoutId: workoutId, at: openedAt)
+    }
+
+    /// Re-publish so anything gated on `isOpen` re-evaluates. Call on
+    /// foreground: an app that was backgrounded across the close has a timer
+    /// that never fired, and would otherwise come back showing an unlocked
+    /// composer that the server would then refuse.
+    func refresh() {
+        scheduleExpiryTick()
+        objectWillChange.send()
+    }
+
+    private func scheduleExpiryTick() {
+        // Always on the main run loop: `scheduledTimer` installs into the
+        // CURRENT thread's run loop, and a background thread generally has none
+        // running — the timer would simply never fire. `.shared` can be touched
+        // first from anywhere, so don't assume the caller's thread.
+        let arm = { [weak self] in
+            guard let self else { return }
+            self.expiryTimer?.invalidate()
+            self.expiryTimer = nil
+            let remaining = self.secondsRemaining
+            guard remaining > 0 else { return }
+            self.expiryTimer = Timer.scheduledTimer(
+                withTimeInterval: remaining, repeats: false
+            ) { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+        }
+        if Thread.isMainThread { arm() } else { DispatchQueue.main.async(execute: arm) }
     }
 
     // MARK: - Queries
@@ -123,43 +206,11 @@ final class FreshPostWindowManager: ObservableObject {
         isOpen && windowWorkoutId == id
     }
 
-    // MARK: - "Posted live" reward (client-only for v1)
-
-    /// Keys (post ids AND workout ids) posted while the window was open today.
-    /// Day-stamped so yesterday's "Fresh" badges don't linger into a new day.
-    private var postedLiveKeys: Set<String> {
-        guard defaults.string(forKey: postedLiveDayKey) == Self.dayStamp(),
-              let arr = defaults.array(forKey: postedLiveKeysKey) as? [String] else {
-            return []
-        }
-        return Set(arr)
-    }
-
-    /// Record a just-published post as "fresh" when it went out during the
-    /// window. Stores the post id AND the linked workout id, so the feed can
-    /// match either (a raw-workout entry replaced by a post keys on workout id).
-    func markPostedLive(postId: String?, workoutId: String?) {
-        guard isOpen else { return }
-        var keys = postedLiveKeys
-        if let postId, !postId.isEmpty { keys.insert(postId) }
-        if let workoutId, !workoutId.isEmpty { keys.insert(workoutId) }
-        defaults.set(Array(keys), forKey: postedLiveKeysKey)
-        defaults.set(Self.dayStamp(), forKey: postedLiveDayKey)
-        objectWillChange.send()
-    }
-
-    /// Whether a feed entry (matched by post id or workout id) was posted live
-    /// today — drives the "Fresh" badge on the poster's own cards.
-    func wasPostedLive(postId: String?, workoutId: String?) -> Bool {
-        let keys = postedLiveKeys
-        if let postId, keys.contains(postId) { return true }
-        if let workoutId, keys.contains(workoutId) { return true }
-        return false
-    }
-
     #if DEBUG
     /// Test hook: force the window closed.
     func reset() {
+        expiryTimer?.invalidate()
+        expiryTimer = nil
         windowOpenedAt = nil
         windowWorkoutId = nil
         defaults.removeObject(forKey: openedAtKey)

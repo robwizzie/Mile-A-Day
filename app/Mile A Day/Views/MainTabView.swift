@@ -279,6 +279,11 @@ struct MainTabView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                // The posting window's expiry timer doesn't fire while
+                // backgrounded, so a return from background could otherwise
+                // show an unlocked composer for a window that has already
+                // closed — and the server would refuse the post.
+                FreshPostWindowManager.shared.refresh()
                 Task {
                     await competitionService.refreshAllData()
                     await friendService.refreshAllData()

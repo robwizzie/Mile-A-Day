@@ -33,9 +33,20 @@ enum ClientFeatures {
     /// that already sent it.
     static let ghostFriendRaceV1 = "ghost_friend_race_v1"
 
+    /// This build binds photo posting to the 10-minute window that opens when a
+    /// qualifying walk/run lands: it locks its own compose affordances when the
+    /// window closes, and it explains the server's `post_window_closed` 403
+    /// instead of surfacing it as a generic failure.
+    ///
+    /// Declaring it is what OPTS THIS DEVICE IN to the restriction — the server
+    /// leaves undeclared builds on the old all-day rule, because they'd let a
+    /// user shoot and edit a photo before failing at publish with nothing able
+    /// to say why.
+    static let postWindowV1 = "post_window_v1"
+
     /// Declared on registration. Add a string here only in the same build that
     /// actually implements the behavior.
     static let supported: [String] = [
-        friendRequestV2, collabTagV1, ghostFriendRaceV1,
+        friendRequestV2, collabTagV1, ghostFriendRaceV1, postWindowV1,
     ]
 }

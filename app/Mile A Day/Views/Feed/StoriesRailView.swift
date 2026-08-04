@@ -1,20 +1,23 @@
 import SwiftUI
 
 /// Horizontal rail of story rings at the top of the feed. The first cell is the
-/// viewer's "Your story" / add button (gated on completing the mile); the rest
-/// are friends with active stories, unviewed rings highlighted.
+/// viewer's "Your story" / add button (gated on completing the mile AND being
+/// inside a walk's 10-minute posting window); the rest are friends with active
+/// stories, unviewed rings highlighted.
 struct StoriesRailView: View {
     let groups: [StoryGroup]
     let currentUserId: String?
     let myName: String
     let myImageURL: String?
+    /// Mile done AND inside a posting window — the feed owns the rule. Drives
+    /// the "+" vs lock badge on the viewer's own cell.
     let canPost: Bool
     /// The viewer has already shared this workout — the "+" add badge hides
     /// (one post per walk/run); the ring still opens their own story.
     var hasSharedWorkout: Bool = false
-    /// Fresh-post window state (owned by the feed). When open, the "Your story"
-    /// cell wears a shrinking countdown ring — an in-the-moment nudge, never a
-    /// gate. `windowOpenedAt` anchors the self-ticking ring.
+    /// Posting-window state (owned by the feed). When open, the "Your story"
+    /// cell wears a shrinking countdown ring — a live deadline, since posting
+    /// closes with it. `windowOpenedAt` anchors the self-ticking ring.
     var windowOpen: Bool = false
     var windowOpenedAt: Date? = nil
     /// Per-group viewing gate: viewing is earned per story DAY (yesterday's
